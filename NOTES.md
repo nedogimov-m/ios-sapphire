@@ -41,6 +41,9 @@ All139 host tests pass. Changes committed as the read-only UFS/offline-log
 milestone (commit containing this entry).
 Next: obtain explicit userdata-overwrite approval under AGENTS.md; only then
 install and debug Apple launchd. Android userdata is intact.
+Before waiting for approval, returned the phone to normal Android and verified
+ro.product.device=redfin, no offline-recovery marker, sys.boot_completed=1.
+Explicit installation approval is pending; no destructive action is authorized.
 
 ## REDFIN read-only disk access and full root artifact — 2026-10-21 late
 
