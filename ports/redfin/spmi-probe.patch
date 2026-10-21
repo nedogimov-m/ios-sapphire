@@ -1,0 +1,126 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -106,3 +106,4 @@
+ bsd/dev/sweet_ufs.c			standard
++bsd/dev/redfin_spmi.c			standard
+ bsd/dev/sweet_sample.c			standard
+ bsd/dev/sweet_keys.c			standard
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_spmi.c
+@@ -0,0 +1,100 @@
++/*
++ * Redfin PM8150 PON observer reads only. No PMIC writes, IRQ acknowledge,
++ * reset, channel configuration or clock programming. Not called automatically.
++ * Source: Google kernel/msm 500b3a2059c1eec0fec08ec56add06320ea901a8,
++ * drivers/spmi/spmi-pmic-arb.c v5 mapping, offset, fmt_cmd and read_cmd.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <stddef.h>
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++
++static bool redfin_spmi_attempted;
++
++static uint32_t
++redfin_spmi_rd(vm_offset_t base, unsigned offset)
++{
++	uint32_t value = *(volatile uint32_t *)(base + offset);
++	__asm__ volatile("dmb oshld" ::: "memory");
++	return value;
++}
++
++/* This function cannot encode a PMIC write, another SID or another register. */
++static int
++redfin_spmi_read(vm_offset_t observer, unsigned apid, unsigned address, uint8_t *out)
++{
++	if (!out || apid >= 512 || (address != 0x0805 && address != 0x088f)) return EINVAL;
++	unsigned offset = apid * 0x80;
++	uint32_t command = (1u << 27) | ((address & 0xffu) << 4); /* EXT_READL, one byte. */
++	__asm__ volatile("dmb oshst" ::: "memory");
++	*(volatile uint32_t *)(observer + offset) = command;
++	__asm__ volatile("dsb osh" ::: "memory");
++	uint32_t status = 0;
++	for (unsigned i = 0; i < 1000; i++) {
++		status = redfin_spmi_rd(observer, offset + 8);
++		if (status & 1) {
++			if (status & 0x0e) {
++				printf("REDFIN SPMI: read failed addr=%#x APID=%u status=%#x\n", address, apid, status);
++				return EIO;
++			}
++			*out = (uint8_t)redfin_spmi_rd(observer, offset + 0x18);
++			return 0;
++		}
++		delay(1);
++	}
++	/* Caller stops the entire probe, so a late completion cannot race reuse. */
++	printf("REDFIN SPMI: timeout addr=%#x APID=%u status=%#x\n", address, apid, status);
++	return ETIMEDOUT;
++}
++
++int redfin_spmi_probe(void);
++int
++redfin_spmi_probe(void)
++{
++	uint32_t enable = 0;
++	(void)PE_parse_boot_argn("redfinspmi", &enable, sizeof(enable));
++	if (enable != 1 || redfin_spmi_attempted) return ENOTSUP;
++	redfin_spmi_attempted = true;
++	DTEntry node;
++	const uint64_t *reg = NULL;
++	const uint32_t *ee = NULL;
++	unsigned bytes = 0;
++	if (SecureDTLookupEntry(NULL, "/redfin-spmi", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "reg", (const void **)&reg, &bytes) != kSuccess ||
++	    bytes != 6 * sizeof(uint64_t) || reg[0] != 0x0c440000 || reg[1] != 0x1100 ||
++	    reg[2] != 0x0e600000 || reg[3] != 0x100000 || reg[4] != 0x0c40a000 || reg[5] != 0x26000 ||
++	    SecureDTGetProperty(node, "ee", (const void **)&ee, &bytes) != kSuccess ||
++	    bytes != sizeof(uint32_t) || ee[0] != 0) return ENXIO;
++	vm_offset_t core = ml_io_map(reg[0], reg[1]);
++	vm_offset_t observer = ml_io_map(reg[2], reg[3]);
++	vm_offset_t config = ml_io_map(reg[4], reg[5]);
++	if (!core || !observer || !config) return ENOMEM;
++	uint32_t version = redfin_spmi_rd(core, 0);
++	printf("REDFIN SPMI: arbiter version=%#x, observer EE0\n", version);
++	if (version < 0x50000000 || version >= 0x70000000) return ENOTSUP;
++	/* Core window [0x900,0x1100) contains exactly 512 v5 APID mappings. */
++	unsigned apid = 512, owner = 0xff;
++	for (unsigned i = 0; i < 512; i++) {
++		uint32_t mapping = redfin_spmi_rd(core, 0x900 + 4 * i);
++		if (!mapping || ((mapping >> 8) & 0xfff) != 0x008) continue;
++		unsigned candidate_owner = redfin_spmi_rd(config, 0x700 + 4 * i) & 7;
++		/* Same selection as Linux: first match, overridden by mappings for EE0. */
++		if (apid == 512 || candidate_owner == 0) { apid = i; owner = candidate_owner; }
++	}
++	if (apid == 512) { printf("REDFIN SPMI: no SID0/PON APID\n"); return ENXIO; }
++	printf("REDFIN SPMI: SID0 PON APID=%u write-owner=%u; no write channel mapped\n", apid, owner);
++	uint8_t subtype = 0, spare = 0;
++	int error = redfin_spmi_read(observer, apid, 0x0805, &subtype);
++	if (error) return error;
++	error = redfin_spmi_read(observer, apid, 0x088f, &spare);
++	if (error) return error;
++	printf("REDFIN SPMI: PON subtype=%#x SOFT_RB_SPARE=%#x\n", subtype, spare);
++	if (subtype == 4) printf("REDFIN SPMI: gen2 primary restart reason=%u (read only)\n", (spare >> 1) & 0x7f);
++	return 0;
++}
++#endif
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -775,3 +775,9 @@
+ 		redfin_ufs_probe();
+ 	}
++	uint32_t redfin_spmi = 0;
++	if (PE_parse_boot_argn("redfinspmi", &redfin_spmi, sizeof(redfin_spmi)) && redfin_spmi == 1) {
++		extern int redfin_spmi_probe(void);
++		int result = redfin_spmi_probe();
++		IOLog("REDFIN SPMI: observer probe result=%d\n", result);
++	}
+ 	uint32_t redfin_publish = 0;

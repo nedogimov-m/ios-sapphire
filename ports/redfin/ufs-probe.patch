@@ -1,0 +1,67 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -736,6 +736,48 @@
+ 	}
+ }
+ 
++/* Mode 1 only snapshots standard UFSHCI registers; it never submits I/O. */
++void redfin_ufs_probe(void);
++void
++redfin_ufs_probe(void)
++{
++	uint32_t mode = 0;
++	(void)PE_parse_boot_argn("redfinufs", &mode, sizeof(mode));
++	if (mode != 1) return;
++	DTEntry node;
++	const uint64_t *reg;
++	unsigned int size;
++	if (SecureDTLookupEntry(NULL, "/redfin-ufs", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "reg", (const void **)&reg, &size) != kSuccess ||
++	    size != 2 * sizeof(uint64_t) || reg[0] != 0x01d84000 || reg[1] != 0x3000) {
++		printf("REDFIN UFS: rejected missing or unexpected host reg\n");
++		return;
++	}
++	vm_offset_t base = ml_io_map(reg[0], reg[1]);
++	if (!base) { printf("REDFIN UFS: host mapping failed\n"); return; }
++	printf("REDFIN UFS: read-only HCI probe begin\n");
++	for (unsigned i = 0; i < 11; i++) {
++		uint32_t off;
++		switch (i) {
++		case 0: off = 0x00; break; /* CAP */
++		case 1: off = 0x08; break; /* VER */
++		case 2: off = 0x20; break; /* IS */
++		case 3: off = 0x24; break; /* IE */
++		case 4: off = 0x30; break; /* HCS */
++		case 5: off = 0x34; break; /* HCE */
++		case 6: off = 0x50; break; /* UTRLBA */
++		case 7: off = 0x54; break; /* UTRLBAU */
++		case 8: off = 0x58; break; /* UTRLDBR */
++		case 9: off = 0x60; break; /* UTRLRSR */
++		default: off = 0x90; break; /* UICCMD */
++		}
++		uint32_t value = *(volatile uint32_t *)(base + off);
++		__builtin_arm_dmb(0xd);
++		printf("REDFIN UFS: reg[%#x]=%#x\n", off, value);
++	}
++	printf("REDFIN UFS: read-only HCI probe done\n");
++}
++
+ static int
+ sweet_ufs_init(void)
+ {
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -770,6 +770,11 @@
+ //
+ //	SWEET: root on a GPT partition of the internal UFS (bsd/dev/sweet_ufs.c)
+ //
++	uint32_t redfin_ufs_mode = 0;
++	if (PE_parse_boot_argn("redfinufs", &redfin_ufs_mode, sizeof(redfin_ufs_mode)) && redfin_ufs_mode == 1) {
++		extern void redfin_ufs_probe(void);
++		redfin_ufs_probe();
++	}
+ 	if (strcmp(rdBootVar, "ufsroot0") == 0) {
+ 		extern int sweet_ufs_rootdev(dev_t *dev);
+ 		OSSafeReleaseNULL(matching);

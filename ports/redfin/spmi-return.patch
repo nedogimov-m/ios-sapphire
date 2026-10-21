@@ -1,0 +1,156 @@
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -12,9 +12,17 @@
+ #include <kern/clock.h>
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
++#include <machine/machine_routines.h>
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ 
+ static bool redfin_spmi_attempted;
++static struct {
++	bool ready;
++	vm_offset_t core, observer, config;
++	uint32_t version;
++	unsigned apid, owner;
++	uint8_t subtype;
++} redfin_spmi_proof;
+ 
+ static uint32_t
+ redfin_spmi_rd(vm_offset_t base, unsigned offset)
+@@ -95,6 +103,121 @@
+ 	if (error) return error;
+ 	printf("REDFIN SPMI: PON subtype=%#x SOFT_RB_SPARE=%#x\n", subtype, spare);
+ 	if (subtype == 4) printf("REDFIN SPMI: gen2 primary restart reason=%u (read only)\n", (spare >> 1) & 0x7f);
++	redfin_spmi_proof.ready = true;
++	redfin_spmi_proof.core = core;
++	redfin_spmi_proof.observer = observer;
++	redfin_spmi_proof.config = config;
++	redfin_spmi_proof.version = version;
++	redfin_spmi_proof.apid = apid;
++	redfin_spmi_proof.owner = owner;
++	redfin_spmi_proof.subtype = subtype;
+ 	return 0;
+ }
++
++/* REDFIN_RETURN_TEST_BEGIN: fixed-target canonical bootloader reason only. */
++struct redfin_return_plan { uint32_t channel_offset, command; uint8_t value; };
++static bool
++redfin_return_ranges(const uint64_t *reg, unsigned bytes)
++{
++	return reg && bytes == 4 * sizeof(uint64_t) &&
++	    reg[0] == 0x0c600000 && reg[1] == 0x2000000 &&
++	    reg[2] == 0x146ab65c && reg[3] == 4;
++}
++static int
++redfin_return_plan(uint32_t version, unsigned apid, unsigned owner, uint32_t mapping,
++    uint8_t subtype, uint8_t old_spare, struct redfin_return_plan *out)
++{
++	if (!out || version < 0x50000000 || version >= 0x70000000 || apid >= 512 ||
++	    owner != 0 || !mapping || ((mapping >> 8) & 0xfff) != 0x008 || subtype != 4)
++		return EINVAL;
++	out->channel_offset = 0x10000u * apid;
++	out->command = 0x8f0; /* EXT_WRITEL opcode 0, register 0x8f, byte count 0. */
++	out->value = (old_spare & 1u) | 4u; /* qpnp PON gen2: mask 0xfe, reason 2 << 1. */
++	return 0;
++}
++/* REDFIN_RETURN_TEST_END */
++
++/*
++ * Only an explicit early UP call can arm this. No reset is issued here.
++ * Sources (Google kernel/msm 500b3a2059c1eec0fec08ec56add06320ea901a8):
++ * drivers/spmi/spmi-pmic-arb.c: pmic_arb_write_cmd, offset_v5, fmt_cmd_v2;
++ * drivers/input/misc/qpnp-power-on.c: qpnp_pon_set_restart_reason;
++ * drivers/power/reset/msm-poweroff.c: bootloader command case.
++ */
++int redfin_spmi_arm_return(void);
++int
++redfin_spmi_arm_return(void)
++{
++	static bool attempted;
++	uint32_t enable = 0, cpus = 0, other = 0;
++	(void)PE_parse_boot_argn("redfinreturn", &enable, sizeof(enable));
++	if (enable != 1 || attempted) return ENOTSUP;
++	attempted = true;
++	(void)PE_parse_boot_argn("cpus", &cpus, sizeof(cpus));
++	(void)PE_parse_boot_argn("sweethw", &other, sizeof(other));
++	if (cpus != 1 || other) return ENOTSUP;
++	other = 0; (void)PE_parse_boot_argn("sweetkeys", &other, sizeof(other));
++	if (other) return ENOTSUP;
++	other = 0; (void)PE_parse_boot_argn("sweetbattery", &other, sizeof(other));
++	if (other) return ENOTSUP;
++	if (!redfin_spmi_proof.ready || redfin_spmi_proof.subtype != 4 ||
++	    redfin_spmi_proof.owner != 0 || redfin_spmi_proof.apid >= 512) return ENXIO;
++	DTEntry node;
++	const uint64_t *reg = NULL;
++	unsigned bytes = 0;
++	if (SecureDTLookupEntry(NULL, "/redfin-return", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "reg", (const void **)&reg, &bytes) != kSuccess ||
++	    !redfin_return_ranges(reg, bytes)) return ENXIO;
++	vm_offset_t channel = ml_io_map(reg[0] + redfin_spmi_proof.apid * 0x10000ULL, 0x20);
++	vm_offset_t reason = ml_io_map(reg[2], reg[3]);
++	if (!channel || !reason) return ENOMEM;
++	uint8_t subtype = 0, old_spare = 0, check = 0;
++	struct redfin_return_plan plan;
++	int error = ENXIO;
++	uint32_t version = redfin_spmi_rd(redfin_spmi_proof.core, 0);
++	uint32_t mapping = redfin_spmi_rd(redfin_spmi_proof.core, 0x900 + 4 * redfin_spmi_proof.apid);
++	unsigned owner = redfin_spmi_rd(redfin_spmi_proof.config, 0x700 + 4 * redfin_spmi_proof.apid) & 7;
++	if (version != redfin_spmi_proof.version || owner != 0 ||
++	    ((mapping >> 8) & 0xfff) != 0x008) goto out;
++	error = redfin_spmi_read(redfin_spmi_proof.observer, redfin_spmi_proof.apid, 0x0805, &subtype);
++	if (error) goto out;
++	error = redfin_spmi_read(redfin_spmi_proof.observer, redfin_spmi_proof.apid, 0x088f, &old_spare);
++	if (error) goto out;
++	error = redfin_return_plan(version, redfin_spmi_proof.apid, owner, mapping, subtype, old_spare, &plan);
++	if (error) goto out;
++	printf("REDFIN RETURN: arming PON spare %#x -> %#x, APID=%u\n", old_spare, plan.value, redfin_spmi_proof.apid);
++	/* Only the leaf write/poll excludes IRQs. Observer reads can print on
++	 * failure, so run them and all diagnostics with the caller's IRQ state.
++	 * Early UP and disabled PMIC clients gate the read-modify-write sequence.
++	 */
++	bool irq_enabled = ml_set_interrupts_enabled(false);
++	*(volatile uint32_t *)(channel + 0x10) = plan.value; /* WDATA0: one byte. */
++	__asm__ volatile("dsb oshst" ::: "memory");
++	*(volatile uint32_t *)channel = plan.command;
++	__asm__ volatile("dsb osh" ::: "memory");
++	error = ETIMEDOUT;
++	for (unsigned i = 0; i < 1000; i++) {
++		uint32_t status = redfin_spmi_rd(channel, 8);
++		if (status & 1) { error = (status & 0x0e) ? EIO : 0; break; }
++		delay(1);
++	}
++	(void)ml_set_interrupts_enabled(irq_enabled);
++	if (error) { printf("REDFIN RETURN: PMIC write completion failed=%d; not retrying\n", error); goto out; }
++	error = redfin_spmi_read(redfin_spmi_proof.observer, redfin_spmi_proof.apid, 0x088f, &check);
++	if (error || check != plan.value) {
++		if (!error) error = EIO;
++		printf("REDFIN RETURN: PMIC readback failed=%d value=%#x; not retrying\n", error, check);
++		goto out;
++	}
++	*(volatile uint32_t *)reason = 0x77665500;
++	__asm__ volatile("dsb sy" ::: "memory");
++	if (redfin_spmi_rd(reason, 0) != 0x77665500) {
++		error = EIO;
++		printf("REDFIN RETURN: IMEM readback failed; PMIC reason already armed\n");
++		goto out;
++	}
++	printf("REDFIN RETURN: PMIC+IMEM bootloader reason verified; reset not issued\n");
++ out:
++	return error;
++}
+ #endif
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -781,3 +781,9 @@
+ 		IOLog("REDFIN SPMI: observer probe result=%d\n", result);
+ 	}
++	uint32_t redfin_return = 0;
++	if (PE_parse_boot_argn("redfinreturn", &redfin_return, sizeof(redfin_return)) && redfin_return == 1) {
++		extern int redfin_spmi_arm_return(void);
++		int result = redfin_spmi_arm_return();
++		IOLog("REDFIN RETURN: arm result=%d\n", result);
++	}
+ 	uint32_t redfin_publish = 0;

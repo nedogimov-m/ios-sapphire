@@ -51,13 +51,29 @@ def main():
     p.add_argument('--seconds', type=int, default=30, help='time before PSCI system reset')
     p.add_argument('--kernel', type=Path, help='kernel built with ports/redfin/redfin.patch')
     p.add_argument('--dtb', type=Path, help='validated live Redfin DTB, required with --kernel')
+    p.add_argument('--apple-adt', type=Path, help='D22AP product identity and development policy for Apple userspace')
     p.add_argument('--memory-base', type=lambda x: int(x, 0))
     p.add_argument('--memory-size', type=lambda x: int(x, 0))
     p.add_argument('--boot-mpidr', type=lambda x: int(x, 0), default=0)
     p.add_argument('--trace', action='store_true', help='enable verbose kernel kprintf tracing')
+    p.add_argument('--spmi-probe', action='store_true', help='read PM8150 subtype and reboot-reason spare through the SPMI observer')
+    p.add_argument('--return-bootloader', action='store_true', help='arm verified PMIC/IMEM bootloader return before the watchdog reset')
+    ufs = p.add_mutually_exclusive_group()
+    ufs.add_argument('--ufs-probe', action='store_true', help='read UFS host registers; keep storage initialization disabled')
+    ufs.add_argument('--ufs-read-probe', action='store_true', help='test UFS capacity and GPT reads; leave filesystem drivers disabled')
+    ufs.add_argument('--ufs-wake-probe', action='store_true', help='activate UFS Device WLUN before read probes; no media writes')
+    ufs.add_argument('--ufs-root-probe', action='store_true', help='expose userdata read-only and test a raw device read from PID1')
+    ufs.add_argument('--ufs-root', action='store_true', help='boot the prepared HFS userdata root read-only; requires --apple-adt')
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.return_bootloader:
+        a.spmi_probe = True
+    ufs_mode = 3 if a.ufs_wake_probe or a.ufs_root_probe or a.ufs_root else 2 if a.ufs_read_probe else int(a.ufs_probe)
+    if (a.apple_adt or ufs_mode or a.spmi_probe) and not a.kernel:
+        p.error('Apple identity and UFS probes require --kernel')
+    if a.ufs_root and not a.apple_adt:
+        p.error('--ufs-root requires --apple-adt')
     if not 4320 <= a.stride <= 16384 or a.stride % 4:
         p.error('--stride must be a multiple of 4 in [4320, 16384]')
     if not 5 <= a.seconds <= 300:
@@ -83,6 +99,10 @@ def main():
     out = a.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     init_source = (ROOT / 'tools/sweet-init.S').read_text().replace('SWEET', 'REDFIN')
+    if a.ufs_root_probe:
+        if init_source.count('\ntick:\n') != 1:
+            p.error('unexpected static PID1 heartbeat entry')
+        init_source = init_source.replace('\ntick:\n', '\n' + (HERE / 'ufs-init.inc.S').read_text() + '\ntick:\n')
     (out / 'init.S').write_text(init_source)
     run([clang, '-target', 'arm64-apple-ios16.0', '-c', out / 'init.S', '-o', out / 'init.o'])
     run([sys.executable, ROOT / 'tools/mkinit.py', out / 'init.o', out / 'init'])
@@ -96,8 +116,43 @@ def main():
         from tools import adt
         validate_window(a.dtb.read_bytes(), a.memory_base, a.memory_size)
         tree = mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr)
+        if a.apple_adt:
+            mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes())
         from memory import _tree
         nodes, _ = _tree(a.dtb.read_bytes())
+        if a.spmi_probe:
+            spmi = nodes.get('/soc/qcom,spmi@c440000', {})
+            names = spmi.get('reg-names', b'').rstrip(b'\0').split(b'\0')
+            ranges = []
+            try:
+                for name in (b'core', b'obsrvr', b'cnfg'):
+                    ranges.extend(struct.unpack_from('>II', spmi.get('reg', b''), names.index(name) * 8))
+            except (ValueError, struct.error):
+                p.error('live FDT has no valid SPMI observer ranges')
+            if ranges != [0xc440000, 0x1100, 0xe600000, 0x100000, 0xc40a000, 0x26000] or spmi.get('qcom,ee') != struct.pack('>I', 0):
+                p.error('live SPMI controller does not match Redfin EE0')
+            tree.children.append(mkadt.node('redfin-spmi', [('reg', mkadt.u64(*ranges)), ('ee', mkadt.u32(0))]))
+            if a.return_bootloader:
+                try:
+                    channel = struct.unpack_from('>II', spmi.get('reg', b''), names.index(b'chnls') * 8)
+                    imem = nodes['/soc/qcom,msm-imem@146ab000']
+                    reason = nodes['/soc/qcom,msm-imem@146ab000/restart_reason@65c']
+                except (ValueError, KeyError, struct.error):
+                    p.error('live FDT has no verified bootloader return registers')
+                if channel != (0xc600000, 0x2000000) or imem.get('reg') != struct.pack('>II', 0x146ab000, 0x1000) or reason.get('reg') != struct.pack('>II', 0x65c, 4):
+                    p.error('live bootloader return registers do not match Redfin')
+                tree.children.append(mkadt.node('redfin-return', [('reg', mkadt.u64(*channel, 0x146ab65c, 4))]))
+        if ufs_mode:
+            ufs = nodes.get('/soc/ufshc@1d84000', {})
+            names = ufs.get('reg-names', b'').rstrip(b'\0').split(b'\0')
+            try:
+                index = names.index(b'ufs_mem')
+                base, size = struct.unpack_from('>II', ufs.get('reg', b''), index * 8)
+            except (ValueError, struct.error):
+                p.error('live FDT has no valid UFS host register range')
+            if (base, size) != (0x1d84000, 0x3000):
+                p.error('live UFS host does not match Redfin')
+            tree.children.append(mkadt.node('redfin-ufs', [('reg', mkadt.u64(base, size))]))
         # Pixel's two ramoops areas are swapped/decrypted by Android. Mirror the
         # console ABI in both; never write its encryption metadata or partitions.
         consoles = []
@@ -135,8 +190,18 @@ def main():
         (out / 'redfin.adt').write_bytes(adt.serialize(tree))
         command_line = ('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
             'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0')
+        if a.ufs_root:
+            command_line = command_line.replace('rd=md0', 'rd=ufsroot0')
         if a.trace:
             command_line += ' -enable_kprintf_spam'
+        if ufs_mode:
+            command_line += f' redfinufs={ufs_mode}'
+        if a.spmi_probe:
+            command_line += ' redfinspmi=1'
+        if a.return_bootloader:
+            command_line += ' redfinreturn=1'
+        if a.ufs_root_probe or a.ufs_root:
+            command_line += ' redfinroot=1 ufsroot=userdata ufsrw=0 rootrw=0 sweetlog=0'
         run([sys.executable, ROOT / 'tools/mkpayload.py', a.kernel, out / 'redfin.adt',
             out / 'payload.bin', '--ramdisk', out / 'init', '--cmdline',
             command_line])
@@ -184,6 +249,10 @@ def main():
         linux_text_offset='0x80000', kernel_encoding='LZ4 frame + LE32 size',
         upstream=subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip(),
         sha256={name: hashlib.sha256((out / name).read_bytes()).hexdigest() for name in artifacts})
+    if a.kernel:
+        manifest.update(boot_args=command_line, root_device='ufsroot0' if a.ufs_root else 'md0',
+                        kernel={'path': str(a.kernel.resolve()),
+                                'sha256': hashlib.sha256(a.kernel.read_bytes()).hexdigest()})
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')
     print(f'{out}/init: static arm64 Darwin PID1')

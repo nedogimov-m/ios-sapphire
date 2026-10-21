@@ -159,7 +159,9 @@ def main(argv=None):
         run(['git', 'apply', battery_overlay], tree)
         extra_overlays = [ROOT / 'ports/redfin' / name for name in
             ('pid1-trace.patch', 'watchdog-progress.patch', 'panic-log.patch',
-             'console-open-trace.patch', 'namei-trace.patch', 'pan.patch')]
+             'console-open-trace.patch', 'namei-trace.patch', 'pan.patch',
+             'ufs-probe.patch', 'ufs-read-probe.patch', 'ufs-sense.patch', 'ufs-root.patch',
+             'ufs-raw-read.patch', 'spmi-probe.patch', 'spmi-return.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

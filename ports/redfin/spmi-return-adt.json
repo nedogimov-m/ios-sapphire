@@ -1,0 +1,22 @@
+{
+  "node": "/redfin-return",
+  "reg_encoding": "four little-endian uint64 values: write-channel base/size, restart-reason base/size",
+  "reg": [
+    "0x0c600000",
+    "0x2000000",
+    "0x146ab65c",
+    "0x4"
+  ],
+  "boot_argument": "redfinreturn=1",
+  "entry_point": "int redfin_spmi_arm_return(void)",
+  "requires": "Successful redfin_spmi_probe() in this boot, PON subtype4, APIDownerEE0, cpus=1 and other PMIC clients disabled. No automatic call is installed.",
+  "effects": "One masked SID0/PON0x088f byte update, verified through observer readback; then IMEM bootloader magic with readback. Does not issue reset.",
+  "source_commit": "500b3a2059c1eec0fec08ec56add06320ea901a8",
+  "source_url_prefix": "https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/",
+  "kernel_sources": [
+    "drivers/spmi/spmi-pmic-arb.c",
+    "drivers/input/misc/qpnp-power-on.c",
+    "drivers/power/reset/msm-poweroff.c"
+  ],
+  "notice": "Preparation only; bootloader return after watchdog still requires the controlled hardware test. No PSHOLD, PHY, SMMU, IRQ clear, EDL or partition writes."
+}

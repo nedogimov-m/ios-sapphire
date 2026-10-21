@@ -4,11 +4,14 @@ Source base: ios-sapphire `d7858e985c4fd2fd41c2c4300c5279cbc8eee178`,
 ios-topaz `89451b811a4e6cc5cdcf734c45887163d92c599e`, XNU
 `xnu-8796.141.3`. Hardware sources and live observations: [HARDWARE.md](HARDWARE.md).
 
-Static Darwin PID1 executes from RAM through mockfs: successful exec and its
-first EL0 syscall are captured. Console startup/heartbeat remain under investigation. Full iOS
-16.7.16 userspace, storage, touch, USB and display acceleration still need board
-drivers. The redfin overlay deliberately disables the inherited Xiaomi drivers
-and fixed early framebuffer writes. It supports one CPU.
+Static Darwin PID1 executes from RAM through mockfs. Successful exec, console
+open/write, getpid=1 and eleven heartbeats were captured after restoring PAN
+for the Pixel's A55/A76 cores. PID1 also reads 4096 bytes from the read-only UFS
+device; write-open returns `EROFS`. A complete 16 GiB iOS 16.7.16 HFSX root image
+is prepared and verified locally, but has not been installed. Apple launchd and
+SpringBoard have not run on redfin. Touch, USB and display acceleration remain
+unported. The overlay disables inherited Xiaomi drivers and fixed early
+framebuffer writes. It supports one CPU.
 
 ## Reproduce
 
@@ -66,20 +69,13 @@ checks it again against the DTB supplied by ABL. This is a device-specific choic
 not a memory default for other phones. Payload, ADT, Linux Image and boot arguments
 are validated before any destination writes.
 
-For autonomous boot and log recovery:
-
-```sh
-python3 ports/redfin/boot-cycle.py ports/redfin/out/xnu/redfin-xnu.img
-# Capture existing logs without another boot:
-python3 ports/redfin/boot-cycle.py --collect-only --timeout 5
-```
-
-The shim starts the hardware watchdog immediately before entering XNU (default:
-28-second bark, 31-second reset). Android decrypts ramoops, then the host saves
-`console-ramoops-0` and a manifest under `logs/redfin/`. This has been observed
-recovering the Darwin startup/IOKit log. Log delivery happens after reset.
-Raw access to `/dev/access-ramoops` is disabled by default because opening it can
-block Android's alt-bank switch. Do not read it during automatic recovery.
+The shim starts the hardware watchdog before entering XNU (default: 28-second
+bark, 31-second reset). Console progress can pet it for up to 60 seconds; allow
+at least 120 seconds for return (collector default: 300). Logs arrive after reset.
+The [offline recovery workflow](#offline-recovery)
+captures encrypted ramoops and decrypts it on the host, without Android.
+The Android pstore path remains available before userdata replacement; opening
+`/dev/access-ramoops` during Android's decrypt service can block its bank switch.
 Add `--trace` to `build.py` for verbose DEVELOPMENT kprintf diagnostics. Default
 boot arguments disable the unported SM6225 battery and cpufreq code as well;
 the kernel overlay also disables that autostart driver.
@@ -106,6 +102,163 @@ python3 -m unittest discover -s ports/redfin -p 'test_*.py' -q
 ```
 
 Host tests cover malformed FDTs, memory reservations, ADB failures, ADT generation
-and payload relocation bounds. They cannot prove hardware execution. A visible
-`REDFIN userspace: init running as PID 1` and subsequent heartbeat are the next
-success criteria. Full iOS launchd/SpringBoard have not been demonstrated on redfin.
+and payload relocation bounds. They cannot prove hardware execution. PID1 success
+is confirmed by console output, getpid=1 and repeated heartbeats. The collector
+recognizes banners split by syscall tracing. Full iOS launchd/SpringBoard have
+not been demonstrated on redfin.
+
+## UFS diagnostics
+
+Add `--ufs-probe` to `build.py` for standard UFSHCI register reads, or
+`--ufs-read-probe` for a private DMA queue and bounded read commands. These
+continue to boot `rd=md0`; the inherited UFS filesystem driver stays disabled.
+Mode 2 permits TUR, standard INQUIRY, READ CAPACITY and one GPT-header read
+at LUN0/LBA1. That read requires a successful 4096-byte-block capacity result.
+The separate Query path only reads current power mode and the device-init flag.
+No disk writes, vendor commands, clock/PHY resets or SMMU changes are allowed.
+`--ufs-wake-probe` selects mode 3: REQUEST SENSE on Device WLUN `0xd0`, then
+the exact Linux active-power START STOP UNIT command, followed by the same read
+checks. This changes device power state and still prohibits all media writes.
+Mode 3 has read LUN0 successfully on this Pixel: 31211520 blocks of 4096 bytes
+and 19 GPT entries. `--ufs-root-probe` additionally validates GPT CRCs, capacity,
+partition bounds and overlaps, exposes `userdata` read-only, and runs a PID1 raw
+read. A 4096-byte read and `EROFS` for write-open are confirmed. The character
+device uses `uiomove`: raw `physio` buffers are user addresses, so copying them
+with plain `memcpy` faults with PAN enabled.
+
+Compare captured primary GPT metadata with:
+
+```sh
+python3 ports/redfin/gpt.py backup/redfin/sda-gpt-before.bin backup/redfin/sda-gpt-after-read.bin
+```
+
+This checks both CRCs and hashes the exact header and entry array, excluding
+bootloader padding. Device captures remain ignored by git.
+
+## Prepare Apple userspace locally
+
+The pinned official iPhone X IPSW is iOS 16.7.16 (20H392), SHA256
+`ece1194f7e233e9109c5790a8d23a4564a10a254e15ec5b09978a343265568fb`.
+
+```sh
+python3 ports/redfin/fetch-userspace.py
+python3 ports/redfin/prepare-userspace.py --mount-readonly
+```
+
+Preparation verifies the D22AP erase identity, extracts OS/SystemOS/AppOS and
+the Apple device tree, and mounts the images read-only on macOS. Its manifest
+records detach commands. Repeated preparation reuses the same image attachments.
+
+`build-root.py` builds a local HFSX image with cryptex links. Original owners
+and modes are collected before copying and restored offline by catalog ID via
+the pinned HFS library. `sweet-root-tweaks.py` supports deferred ownership for
+this staging flow. A filesystem check is required before the image is accepted.
+Preparing an image does not install it on the phone or demonstrate Apple launchd.
+For Apple userspace boot images, add
+`--apple-adt research/ipsw-redfin/extracted/d22ap.adt`. This imports public D22AP
+product properties and the upstream development boot policy, with a synthetic
+device identity; CPU, RAM and peripherals continue to use the Redfin descriptions.
+
+The prepared 16 GiB image is under ignored
+`research/ipsw-redfin/root-image-redfin-fast/`, SHA256
+`1c7ab7f21b4075d23ed70f9f2a418f7ae2993d7857c844e7854d3cc076de7478`.
+The catalog pass restored 283630 distinct CNIDs in 6 seconds and fsck passed.
+Native mounts verified owners/modes, 43 cache hardlinks, and source SHA256/size
+for launchd, dyld and every runtime shared-cache file. Future `build-root.py`
+runs use the pinned HFS library's existing catalog leaves directly; keys,
+Unicode names, file types, flags and hardlink counts remain intact.
+
+`build.py --ufs-root --apple-adt ...` prepares a read-only Apple-root boot image.
+Android's current encrypted F2FS userdata is not an HFS root. Installing the
+prepared root there destroys Android user data and requires explicit approval.
+
+## Offline recovery
+
+`build-recovery.py` builds a temporary ADB-only Linux image from the verified
+boot/vendor_boot backups. Its root ADB, recovery marker, unmounted userdata and
+read-only disk access have been verified. It disables the recovery UI and starts
+a 120-second return timer. Build the bootloader-return variant:
+
+```sh
+python3 ports/redfin/build-recovery.py \
+  --boot backup/redfin/boot_b.img --vendor-boot backup/redfin/vendor_boot_b.img \
+  --return-target bootloader --out research/redfin-recovery-adb-safe
+```
+
+Before erasing userdata, save `/data/vendor_ce/0/ramoops/priv.pem` and `pub.pem`
+from unlocked Android user 0 to the ignored host directory
+`backup/redfin/ramoops-private/` (directory `0700`, PEM files `0600`). These keys
+live in credential-encrypted userdata and disappear when it is replaced. Keep
+the matching `/vendor/bin/ramoops` executable in that directory as `ramoops`.
+The collector pins its SHA256 to
+`7d80a3a0cf6a6050beb6baa95ae5808107f2d70a8ca11d4b61d225caf930d3d2`
+([public Redfin binary](https://github.com/TheMuppets/proprietary_vendor_google_redfin/blob/30c82c83bc03b0dfc83dd6d6a041f51fc35ebfab/proprietary/vendor/bin/ramoops)).
+Never commit keys, device captures or downloaded artifacts.
+
+From hardware fastboot, first collect existing logs and prime the next boot:
+
+```sh
+python3 ports/redfin/boot-cycle.py --collect-only --from-bootloader \
+  --recovery-image research/redfin-recovery-adb-safe/recovery-adb-only.img \
+  --ramoops-key-dir backup/redfin/ramoops-private --leave-bootloader \
+  --out logs/redfin/recovery-prime
+```
+
+The collector saves the current 4 MiB raw bank and metadata before priming.
+Encrypted captures must authenticate successfully before that metadata changes.
+Decryption uses the host private key; only `pub.pem` and the verified executable
+are copied to recovery RAM. `ramoops -l -c` loads public-key metadata for the next
+boot and clears the old AES block. It does not write a storage partition.
+
+Build the XNU image with `--return-bootloader`, which enables the required SPMI
+probe and PMIC return path. An ordinary `out/xnu` image does not enable it:
+
+```sh
+python3 ports/redfin/build.py \
+  --stock-boot backup/redfin/boot_b.img \
+  --kernel research/redfin-build/dxb/fakeroot/System/Library/Kernels/kernel.development.sweet \
+  --dtb research/redfin-root/device.dtb \
+  --memory-base 0x180000000 --memory-size 0x80000000 \
+  --ufs-root-probe --apple-adt research/ipsw-redfin/extracted/d22ap.adt \
+  --return-bootloader --out ports/redfin/out/log-autonomous
+```
+
+Then run the XNU/log cycle without Android:
+
+```sh
+python3 ports/redfin/boot-cycle.py ports/redfin/out/log-autonomous/redfin-xnu.img \
+  --from-bootloader --leave-bootloader \
+  --recovery-image research/redfin-recovery-adb-safe/recovery-adb-only.img \
+  --ramoops-key-dir backup/redfin/ramoops-private
+```
+
+Starting from fastboot has no pre-boot log baseline, so `log_freshness` remains
+`unproven`: status describes saved observations, not proof of this boot's logs.
+
+Before the first XNU boot after replacing userdata, prime through this recovery
+and leave the phone in bootloader. Continue using recovery for subsequent logs;
+there must be no Android fallback after an HFS installation. The collector stops
+and verifies the recovery timer while working, then `--leave-bootloader` returns
+to verified hardware fastboot.
+
+For a saved capture, standalone host decryption uses `openssl` and `libcrypto`
+(`brew install openssl@3`), with no Python crypto packages:
+
+```sh
+python3 ports/redfin/decrypt-ramoops.py \
+  --metadata logs/redfin/recovery-prime/after/alt-ramoops.metadata \
+  --raw logs/redfin/recovery-prime/after/alt-ramoops.raw \
+  --private-key backup/redfin/ramoops-private/priv.pem \
+  --out research/redfin-ramoops-decrypted.raw
+```
+
+The helper verifies metadata CRC, RSA unwrap and AES-GCM authentication before
+creating plaintext with mode `0600`. It refuses existing output files.
+
+`install-root.py` defaults to checking the image, recovery state, both GPT headers
+and partition geometry. It records the exact proposed write. Writing requires
+the separate `--erase-userdata` flag and prior approval; it first stops and
+verifies the recovery timer, rechecks the state, then verifies the entire written
+image and unchanged GPT captures. This Pixel's secondary header references the
+primary entry array; the independent backup array has not been demonstrated.
+The checker preserves and hashes the full secondary capture without rewriting it.

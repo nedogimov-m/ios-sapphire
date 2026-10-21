@@ -1,0 +1,32 @@
+{
+  "node": "/redfin-spmi",
+  "reg_encoding": "six little-endian uint64 values, core/observer/config base-size pairs",
+  "reg": [
+    "0x0c440000",
+    "0x1100",
+    "0x0e600000",
+    "0x100000",
+    "0x0c40a000",
+    "0x26000"
+  ],
+  "ee": 0,
+  "ee_encoding": "little-endian uint32",
+  "boot_argument": "redfinspmi=1",
+  "entry_point": "int redfin_spmi_probe(void)",
+  "automatic_call_installed": false,
+  "source_fdt_path": "/soc/qcom,spmi@c440000",
+  "source_fdt_reg_names": [
+    "core",
+    "chnls",
+    "obsrvr",
+    "intr",
+    "cnfg"
+  ],
+  "only_pmic_addresses": [
+    "SID0:0x0805",
+    "SID0:0x088f"
+  ],
+  "excluded": "write channels, IRQ registers, PMIC configuration and reset registers",
+  "kernel_source": "https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/spmi/spmi-pmic-arb.c",
+  "notice": "This is an observer read probe only. Run before enabling other PMIC users; stop on unsupported version, denied status or timeout. PMIC spare register is a bus address, not CPU MMIO."
+}

@@ -1,5 +1,180 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN host-decrypted recovery logs and bootloader return — 2026-10-22
+
+Local kernel build `research/redfin-build/build-20261022-000821.log` succeeded;
+SHA256 `bcf892c272c82161ae9e103d52c16783ae305498d7425e830092ca992e89cbb0`. PMIC return is explicitly gated by
+redfinreturn=1 and same-boot SPMI/ownership/subtype verification. The masked PON
+write and IMEM readback are verified; watchdog performs the later reset.
+IRQ masking now covers only the bounded SPMI command, not diagnostic printing.
+
+Saved `logs/redfin/return-bootloader-v2/` ciphertext authenticated successfully:
+11 PID1 heartbeats, getpid=1, read4096/EROFS, and
+`REDFIN RETURN: PMIC+IMEM bootloader reason verified`.
+Google's vendor ramoops keeps its RSA private key under CE userdata. Existing
+keypair and exact vendor binary were saved privately under ignored backup/.
+`decrypt-ramoops.py` unwraps RSA PKCS#1v1.5 and authenticates AES-GCM on host.
+Recovery needs only the public key and vendor `-l -c`, with all libraries already
+in its ramdisk. Live `logs/redfin/recovery-ramoops-prime/` verifies public CRC,
+cleared AES metadata and no partition writes. Private key never leaves host.
+
+Integrated `logs/redfin/log-autonomous-v1-capture/` reports userspace-alive,
+11 heartbeats, authenticated decrypt, verified next-boot public-key priming,
+and verified final fastboot. Initial 90-second boot wait was too short because
+console progress pets the watchdog for up to60 seconds; use180 or default300.
+A start from fastboot lacks a pre-boot baseline: log_freshness is explicitly
+unproven rather than claiming saved logs establish this boot's freshness.
+
+Probe boot image SHA256 `347925703e925a8eaee7709a4b7aee3c61080f3141806cbb4dce8dc28bfaa284`.
+Exact probe args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=0 rootrw=0 sweetlog=0`.
+Prepared Apple-root boot SHA256 `d41a134ed16592b77a81e23ab965719e53626d94a11b348a97fb8b9b87a84a62`.
+Exact Apple-root args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=0 rootrw=0 sweetlog=0`.
+
+`logs/redfin/install-review-final/check.json` passed live check-only validation;
+full16-GiB HFSX image SHA256 remains
+`1c7ab7f21b4075d23ed70f9f2a418f7ae2993d7857c844e7854d3cc076de7478`.
+No userdata/metadata/GPT/boot partition writes, no Apple launchd boot yet.
+Repeat complete cycle `logs/redfin/log-autonomous-v2/` succeeded without Android:
+XNU -> fastboot -> temporary recovery -> host-authenticated log -> public prime
+-> fastboot. PID1 has11 heartbeats; read4096/EROFS and return readback repeat.
+All139 host tests pass. Changes committed as the read-only UFS/offline-log
+milestone (commit containing this entry).
+Next: obtain explicit userdata-overwrite approval under AGENTS.md; only then
+install and debug Apple launchd. Android userdata is intact.
+
+## REDFIN read-only disk access and full root artifact — 2026-10-21 late
+
+`logs/redfin/ufs-root-uio/` proves PID1 read 4096 bytes from `/dev/rufsroot0`,
+write-open rejected with EROFS, and eleven heartbeats. Boot image SHA256
+62f36aa8c46fbcfa55bd05feef07ff62c9496375390a7a6c2424590587381159.
+The initial raw read panicked in memcpy because physio/B_PHYS left a user VA;
+the new redfin raw-read path uses uiomove, retaining PAN and fault recovery.
+GPT CRC/capacity/partition and overlap checks precede BSD device publication.
+Full root init remains explicit redfinroot=1 and read-only; default md0
+boots keep the inherited UFS initialization disabled.
+
+Full official iOS 16.7.16 HFSX image now prepared:
+`research/ipsw-redfin/root-image-redfin-fast/ios16-root.img`, 17179869184 bytes,
+SHA256 1c7ab7f21b4075d23ed70f9f2a418f7ae2993d7857c844e7854d3cc076de7478.
+Fast leaf metadata pass restored 283630 distinct CNIDs in 6.03 seconds; fsck clean.
+Native verification confirmed owners/modes, 43 cache hardlinks and 45 critical
+files' decompressed-source SHA256/size. No root image has been installed.
+The original slower remove/reinsert writer also completed successfully in v2.
+
+ADB-only temporary recovery runtime v3 verified root UID 0, marker 1, unmounted
+userdata, no active DM/holders/swaps, exact sysfs/GPT geometry and header CRCs.
+Evidence: `logs/redfin/recovery-adb-runtime-v3/`. Recovery's pstore directory
+was empty; direct raw ramoops collection is being added for this environment.
+The normal Android collector must continue avoiding raw access by default.
+The safe recovery image returns to bootloader after 120 seconds, rather than
+attempting Android after an HFS installation. No partition writes occurred.
+
+This device's CRC-valid secondary GPT header declares entries_lba 2, referencing
+the primary entry array. No matching independent array was found in the tail.
+The install checker reports this explicitly and preserves exact primary/tail
+capture hashes. Do not rewrite this existing GPT layout during porting.
+
+## REDFIN offline recovery and installation tooling — 2026-10-21
+
+`build-recovery.py` prepares a temporary boot-v3 image using the backed-up
+Android kernel and matching vendor recovery resources. The generic ramdisk
+overlays both possible init roots; stock recovery UI is disabled because its
+Lineage startup mounts userdata to copy ADB keys. Root ADB uses the custom
+`ro.redfin.offline_recovery=1` marker, and an independent 120-second service
+requests a normal reboot. Current local image SHA256 is
+c44f431bf3c63ecb50f069aadaac5d3e451545650fce2e39b1ba46064482cdbe;
+runtime verification is separate and no device commands were used to build it.
+
+`install-root.py` defaults to check-only and supports offline evidence replay.
+It checks clean, exact-16-GiB HFSX against a successful build/hash, dedicated
+root recovery, pseudo-filesystems only, no swap/DM/holders, and userdata sda19
+geometry against CRC-valid primary and secondary GPT. The explicit erase path
+stops and verifies the recovery return timer, repeats checks, bounds the raw
+write by byte count with fsync, then verifies the complete image SHA256 and
+both GPT copies. Ten host-only tests pass. No installation was performed;
+Android userdata destruction still requires explicit user consent under
+`AGENTS.md`. Timer-stop failure or a changed recovery/GPT prevents streaming.
+
+## REDFIN storage and Apple image preparation — 2026-10-21
+
+Query diagnostic kernel SHA256
+81953777fdb4caf691dafd95c5bee55a96674d8c7c7da46604eb4c1062bef873
+booted successfully, with automatic logs in `logs/redfin/ufs-query/` and
+`userspace-alive`. TUR, standard INQUIRY and READ CAPACITY all returned OCS0,
+response1/status2, fixed sense `f000021000d0070a00000000000000000000`
+(NOT READY, ASC/ASCQ zero). Vendor information 0x1000d007 is not decoded.
+Read-only Query READ_ATTR IDN2 succeeded with raw value0x33; READ_FLAG IDN1
+succeeded with value0. Do not apply the SCSI active/sleep/powerdown enum to
+the Query attribute without a source. Capacity and GPT were not read by XNU.
+Primary GPT metadata before/after still matches SHA256
+6f8b9cd72c1af239162947e290bbd59b8a20d0101f5a3c788426976158e0b49d.
+
+Separate mode3 (`--ufs-wake-probe`) implements Google's REQUEST SENSE on
+Device WLUN0xd0, followed by the exact active-power CDB1b0000001000 with no
+data-out, then the existing capacity/GPT checks. Mode2 remains read-only
+without power changes. Its first kernel SHA256 is
+40ab8507fc10cd134c69b4bef5099f252a8bae682080b14143ea79bdae2aecf1.
+Boot succeeded: REQUEST SENSE returned data18
+700002000000000a00000000040200000000, START STOP ACTIVE completed with OCS0,
+the Query value changed0x33->0x11, and TUR/READ CAPACITY then succeeded.
+LUN0 has31211520 blocks of4096 bytes. XNU read GPT LBA1 successfully:
+signature valid,19 entries of128 bytes. `logs/redfin/ufs-wake/` again reports
+userspace-alive with eleven heartbeats. Host GPT CRC/hash comparison after
+this cycle is unchanged. Full UFS root initialization is still disabled;
+a separately gated read-only block-device path is being prepared.
+
+All three official Apple images are mounted read-only; prepare.json now
+reuses exact matching attachments and preserves previous success on failures.
+Original APFS ownership is scanned with owners enabled. A separate read-only
+copy view allows reading protected directories; four hidden child inode records
+were read directly with pinned apfs-fuse, and all21 protected parent records
+were cross-checked. The mode000, zero-byte root .file sentinel is explicitly
+recreated. Compression xattrs/resource forks are storage for compressed bytes;
+native reads produce decompressed content, so those compression attributes are
+not copied. No other source xattrs or BSD flags were found.
+
+The root builder copies natively, links cryptex contents, applies upstream
+root tweaks with deferred ownership, then restores final uid/gid/mode by HFS
+catalog ID. A local filesystem check is required before accepting an image.
+The first full image attempt hit a macOS hdiutil option incompatibility before
+copying; the corrected run is under `research/ipsw-redfin/root-image-redfin-v2`.
+No image has been installed on the phone and no partition writes are authorized.
+
+Optional `--apple-adt` imports D22AP product properties and development boot
+policy from the extracted ADT; Redfin CPU/memory/peripheral nodes are retained.
+Identity is synthetic and never copies the Pixel's serial or ECID.
+
+## REDFIN resumed — 2026-10-21 evening
+
+The last pre-stop PAN boot actually succeeded: `logs/redfin/pan/xnu-console.txt`
+contains successful console open/write, getpid=1 and eleven PID1 heartbeats.
+Kernel SHA256 ff99416071826215cddcb5121ad464aa8cee30bc1603478985f98b131a8b49da.
+The collector falsely reported logs-collected because syscall trace split the
+banner into multiple writes; recognition now combines banner/getpid/heartbeat
+evidence. Current probes independently report userspace-alive.
+
+Fresh root Android DTB saved at `research/redfin-resume/device.dtb`. UFS mode1
+register reads succeeded: CAP1587031f, VER300, HCS10f, HCE1, IE0, UTRLDBR0,
+UTRLRSR1. Mode2 installed a private high-PA DMA list and received device UPIUs
+with OCS0; TUR returned response1/status2 three times, so capacity/GPT reads
+were not attempted. Sense diagnostics are the next test. Probe command guard
+permits only TUR, standard INQUIRY, READ CAPACITY and one GPT header READ10;
+WRITE/SYNC/VPD/other LBAs are rejected. Filesystem/UFS root remains disabled.
+
+Exact SDA GPT header and entry-array CRCs and SHA256 match before/after:
+6f8b9cd72c1af239162947e290bbd59b8a20d0101f5a3c788426976158e0b49d.
+The broader 64KiB hash changed only outside GPT metadata; gpt.py excludes
+padding and validates both CRCs. No partitions have been flashed.
+
+Official iPhone X iOS16.7.16 IPSW downloaded, 6171035648 bytes; SHA256 matches
+ece1194f7e233e9109c5790a8d23a4564a10a254e15ec5b09978a343265568fb.
+All Apple images stay under ignored research/ipsw-redfin. Native macOS image
+preparation is in progress. Local HFS catalog editing has been demonstrated
+preserving UID0, Unicode, symlinks and hard links without host sudo.
+
+Current RAM boot args:
+`debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinufs=2`.
+
 ## REDFIN bring-up — 2026-10-21
 
 Base: ios-sapphire `d7858e985c4fd2fd41c2c4300c5279cbc8eee178`, reference

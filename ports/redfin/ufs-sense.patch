@@ -1,0 +1,57 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -147,6 +147,45 @@
+ 	clean_dcache64((addr64_t)(su.dma_pa + off), len, TRUE);
+ }
+ 
++/* UFS response UPIU: 12-byte header, residual+reserved through byte 31,
++ * BE16 sense length at 32 and sense bytes at 34 (Google drivers/scsi/ufs/ufs.h).
++ * This decoder reads response metadata only, never the command's data buffer.
++ */
++static void
++redfin_ufs_response_metadata(const uint8_t *r, unsigned capacity)
++{
++	if (capacity < 34) return;
++	unsigned data_len = (unsigned)r[10] << 8 | r[11];
++	unsigned sense_len = (unsigned)r[32] << 8 | r[33];
++	printf("REDFIN UFS: response metadata capacity=%u dataLen=%u senseLen=%u\n",
++	    capacity, data_len, sense_len);
++	for (unsigned i = 0; i < 32; i += 8) {
++		printf("REDFIN UFS: rsp[%u]=%02x%02x%02x%02x%02x%02x%02x%02x\n", i,
++		    r[i], r[i+1], r[i+2], r[i+3], r[i+4], r[i+5], r[i+6], r[i+7]);
++	}
++	if (data_len < 2 || data_len > capacity - 32 || !sense_len ||
++	    sense_len > data_len - 2 || sense_len > capacity - 34) {
++		printf("REDFIN UFS: no valid bounded sense payload\n");
++		return;
++	}
++	const uint8_t *sense = r + 34;
++	unsigned shown = MIN(sense_len, 18u), format = sense[0] & 0x7f;
++	char hex[37];
++	for (unsigned i = 0; i < shown; i++) {
++		hex[2*i] = "0123456789abcdef"[sense[i] >> 4];
++		hex[2*i+1] = "0123456789abcdef"[sense[i] & 15];
++	}
++	hex[2*shown] = 0;
++	printf("REDFIN UFS: sense first%u=%s\n", shown, hex);
++	if ((format == 0x70 || format == 0x71) && sense_len >= 14) {
++		printf("REDFIN UFS: fixed sense key=%#x ASC=%#x ASCQ=%#x\n",
++		    sense[2] & 15, sense[12], sense[13]);
++	} else if ((format == 0x72 || format == 0x73) && sense_len >= 4) {
++		printf("REDFIN UFS: descriptor sense key=%#x ASC=%#x ASCQ=%#x\n",
++		    sense[1] & 15, sense[2], sense[3]);
++	}
++}
++
+ /*
+  * One SCSI command in slot 0, data (if any) to/from the bounce buffer
+  * (to the device when write is set). Returns 0 or an errno.
+@@ -275,6 +314,7 @@
+ 	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
+ 		printf("SWEET UFS: command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
+ 		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
++		if (redfin_ufs_read_only) redfin_ufs_response_metadata(ucd->resp, sizeof(ucd->resp));
+ 		return EIO;
+ 	}
+ 	return 0;

@@ -184,8 +184,23 @@ def main(argv=None):
             shutil.copy2(namei_patch, patches / "zzzzzzzzzzz-redfin-namei-trace.patch")
             pan_patch = ROOT / "ports/redfin/pan.patch"
             shutil.copy2(pan_patch, patches / "zzzzzzzzzzzz-redfin-pan.patch")
+            ufs_probe_patch = ROOT / "ports/redfin/ufs-probe.patch"
+            shutil.copy2(ufs_probe_patch, patches / "zzzzzzzzzzzzz-redfin-ufs-probe.patch")
+            ufs_read_patch = ROOT / "ports/redfin/ufs-read-probe.patch"
+            shutil.copy2(ufs_read_patch, patches / "zzzzzzzzzzzzzz-redfin-ufs-read-probe.patch")
+            ufs_sense_patch = ROOT / "ports/redfin/ufs-sense.patch"
+            shutil.copy2(ufs_sense_patch, patches / "zzzzzzzzzzzzzzz-redfin-ufs-sense.patch")
+            ufs_root_patch = ROOT / "ports/redfin/ufs-root.patch"
+            shutil.copy2(ufs_root_patch, patches / "zzzzzzzzzzzzzzzz-redfin-ufs-root.patch")
+            ufs_raw_patch = ROOT / "ports/redfin/ufs-raw-read.patch"
+            shutil.copy2(ufs_raw_patch, patches / "zzzzzzzzzzzzzzzzz-redfin-ufs-raw-read.patch")
+            spmi_patch = ROOT / "ports/redfin/spmi-probe.patch"
+            shutil.copy2(spmi_patch, patches / "zzzzzzzzzzzzzzzzzz-redfin-spmi-probe.patch")
+            return_patch = ROOT / "ports/redfin/spmi-return.patch"
+            shutil.copy2(return_patch, patches / "zzzzzzzzzzzzzzzzzzz-redfin-spmi-return.patch")
             overlays = [overlay, logging_patch, trace_patch, cpu_trace_patch, battery_patch,
-                        watchdog_patch, pid1_patch, panic_patch, open_patch, namei_patch, pan_patch]
+                        watchdog_patch, pid1_patch, panic_patch, open_patch, namei_patch, pan_patch,
+                        ufs_probe_patch, ufs_read_patch, ufs_sense_patch, ufs_root_patch, ufs_raw_patch, spmi_patch, return_patch]
             result["patch_sha256"] = {path.name: digest(path)
                                       for path in local_patches + local_scripts + overlays}
             fingerprint_path = dxb / "xnu/.redfin-patches.json"

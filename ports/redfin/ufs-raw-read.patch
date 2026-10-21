@@ -1,0 +1,39 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -919,9 +919,35 @@
+ 	return su.ready ? (int)MIN(su.nblocks * UFS_BLOCK / su.secsize, INT_MAX) : -1;
+ }
+ 
++/* Raw physio buffers are user VAs, not kernel mappings. Use uiomove so
++ * PAN and user-fault recovery remain active across the bounce-buffer copy.
++ */
++static int
++redfin_ufs_raw_read(struct uio *uio)
++{
++	if (!su.ready || !redfin_ufs_root_read_only) return ENXIO;
++	if (uio_offset(uio) < 0 || uio_resid(uio) < 0) return EINVAL;
++	uint64_t size = su.nblocks * UFS_BLOCK;
++	int error = 0;
++	lck_mtx_lock(&sweet_ufs_lock);
++	while (uio_resid(uio) > 0 && !error) {
++		uint64_t off = (uint64_t)uio_offset(uio);
++		if (off >= size) break;
++		uint32_t skip = (uint32_t)(off % UFS_BLOCK);
++		uint32_t want = (uint32_t)MIN((uint64_t)uio_resid(uio),
++		    MIN(size - off, (uint64_t)(BOUNCE_SIZE - skip)));
++		uint32_t blocks = (skip + want + UFS_BLOCK - 1) / UFS_BLOCK;
++		error = ufs_read_blocks(su.first_block + off / UFS_BLOCK, blocks);
++		if (!error) error = uiomove((const char *)(su.dma + DMA_BOUNCE) + skip, (int)want, uio);
++	}
++	lck_mtx_unlock(&sweet_ufs_lock);
++	return error;
++}
++
+ static int
+ sweet_ufs_read(dev_t dev, struct uio *uio, __unused int ioflag)
+ {
++	if (redfin_ufs_root_read_only) return redfin_ufs_raw_read(uio);
+ 	return physio(sweet_ufs_strategy, NULL, dev, B_READ, minphys, uio, (int)su.secsize);
+ }
+ 

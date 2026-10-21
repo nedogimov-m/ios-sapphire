@@ -7,6 +7,7 @@ no framebuffer or peripheral drivers and does not add redfin kernel support:
 upstream's CPU checks and fixed early framebuffer writes still need patches.
 """
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import struct
@@ -44,6 +45,46 @@ def node(name, props=(), children=()):
     result.props.extend((key, 0, value) for key, value in props)
     result.children = list(children)
     return result
+
+
+def apple_userspace_identity(root, blob):
+    """Add D22AP product data and the upstream development boot policy.
+
+    All physical memory, CPU and peripheral descriptions remain Redfin's.
+    Identity values below are synthetic; no handset identifiers are imported.
+    """
+    if not isinstance(blob, bytes) or not 32 <= len(blob) <= 2 * 1024 * 1024:
+        raise ValueError('Apple ADT must be between 32 bytes and 2 MiB')
+    source, end = adt.parse(blob)
+    if end != len(blob) or source.prop('model') != cstr('iPhone10,3') or source.prop('target-sub-type') != cstr('D22AP'):
+        raise ValueError('expected the iPhone X D22AP device tree')
+    products = [child for child in source.children if child.name == 'product']
+    if len(products) != 1 or any(child.name == 'product' for child in root.children):
+        raise ValueError('expected exactly one new Apple product node')
+    props = [(key, cstr('sRGB') if key == 'artwork-display-gamut' else value)
+             for key, flag, value in products[0].props
+             if not flag and key not in ('name', 'AAPL,phandle')]
+    if not props:
+        raise ValueError('Apple product node has no usable properties')
+    root.children.append(node('product', [('AAPL,phandle', u32(0x100)), *props]))
+    compatible = root.prop('compatible')
+    root.props = [(key, flag, value) for key, flag, value in root.props
+                  if key not in ('compatible', 'model', 'target-type', 'target-sub-type', 'manufacturer')]
+    root.props.extend((key, 0, value) for key, value in [
+        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + compatible),
+        ('model', cstr('iPhone10,3')), ('target-type', cstr('D22')),
+        ('target-sub-type', cstr('D22AP')), ('manufacturer', cstr('Apple Inc.'))])
+    chosen = next(child for child in root.children if child.name == 'chosen')
+    chosen.props.extend((key, 0, value) for key, value in [
+        ('system-firmware-version', cstr('redfin-shim-development')),
+        ('boot-manifest-hash', hashlib.sha384(b'redfin development boot manifest').digest()),
+        ('crypto-hash-method', cstr('sha2-384')), ('display-scale', u32(3)),
+        ('unique-chip-id', u64(0x52454446494e0001)), ('chip-id', u32(0x8015)),
+        ('certificate-production-status', u32(0)), ('effective-production-status-ap', u32(0)),
+        ('certificate-security-mode', u32(1)), ('effective-security-mode-sep', u32(1))])
+    chosen.children.append(node('asmb', [
+        ('AAPL,phandle', u32(0x101)), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))]))
+    return root
 
 
 def build(memory_base, memory_size, boot_mpidr=0, seed=None):

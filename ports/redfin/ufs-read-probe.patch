@@ -1,0 +1,313 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -114,6 +114,12 @@
+ 	bool ready;
+ } su;
+ 
++/* Disk writes/sync/VPD stay fenced in modes 2 and 3. */
++static bool redfin_ufs_read_only;
++static bool redfin_ufs_capacity_valid;
++/* Scoped to the two exact Device WLUN commands in the mode-3 helper. */
++static bool redfin_ufs_wake_active;
++
+ static LCK_GRP_DECLARE(sweet_ufs_grp, "sweet_ufs");
+ static LCK_MTX_DECLARE(sweet_ufs_lock, &sweet_ufs_grp);
+ 
+@@ -148,6 +154,24 @@
+ static int
+ ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
+ {
++	if (redfin_ufs_read_only) {
++		if (write || !cdb || !cdb_len || len > (512u << 10)) return EROFS;
++		if (su.lun == 0xd0) {
++			/* Only REQUEST SENSE(18) and ACTIVE START STOP, no data-out. */
++			if (!redfin_ufs_wake_active || cdb_len != 6 || cdb[1] || cdb[2] || cdb[3] || cdb[5] ||
++			    !((cdb[0] == 0x03 && cdb[4] == 18 && len == 18) ||
++			      (cdb[0] == 0x1b && cdb[4] == 0x10 && len == 0))) return EROFS;
++		} else {
++			if (su.lun != 0 ||
++			    (cdb[0] != 0x00 && cdb[0] != 0x12 && cdb[0] != 0x25 && cdb[0] != 0x28)) return EROFS;
++			if ((cdb[0] == 0x00 && (cdb_len != 6 || len != 0)) ||
++			    (cdb[0] == 0x12 && (cdb_len != 6 || cdb[1] != 0 || cdb[2] != 0 || len != 36)) ||
++			    (cdb[0] == 0x25 && (cdb_len != 10 || len != 8)) ||
++			    (cdb[0] == 0x28 && (!redfin_ufs_capacity_valid || cdb_len != 10 || len != UFS_BLOCK ||
++			     cdb[1] != 0 || cdb[2] != 0 || cdb[3] != 0 || cdb[4] != 0 || cdb[5] != 1 ||
++			     cdb[6] != 0 || cdb[7] != 0 || cdb[8] != 1 || cdb[9] != 0))) return EROFS;
++		}
++	}
+ 	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
+ 	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
+ 	uint64_t ucd_pa = su.dma_pa + DMA_UCD, bounce_pa = su.dma_pa + DMA_BOUNCE;
+@@ -206,7 +230,7 @@
+ 
+ 	ufs_wr(REG_UTRLDBR, 1);
+ 	uint64_t deadline;
+-	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
++	nanoseconds_to_absolutetime(redfin_ufs_read_only ? 2ull * NSEC_PER_SEC : CMD_TIMEOUT_NS, &deadline);
+ 	deadline += mach_absolute_time();
+ 	bool sleepable = su.wait && su.ready && ml_get_interrupts_enabled() &&
+ 	    !ml_at_interrupt_context() && get_preemption_level() == 0;
+@@ -736,14 +760,240 @@
+ 	}
+ }
+ 
+-/* Mode 1 only snapshots standard UFSHCI registers; it never submits I/O. */
++/* Reuse the initialized ABL link; never reset clocks, PHY, ICE or SMMU. */
++static uint32_t
++redfin_ufs_be32(const uint8_t *p)
++{
++	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
++}
++
++/* No caller can construct a write Query: only these two read pairs exist. */
++static bool
++redfin_ufs_query_allowed(uint8_t opcode, uint8_t idn)
++{
++	return (opcode == 3 && idn == 2) || (opcode == 5 && idn == 1);
++}
++
++static int
++redfin_ufs_query_request(uint8_t *r, unsigned size, uint8_t opcode, uint8_t idn, uint8_t tag)
++{
++	if (!r || size < 32 || !redfin_ufs_query_allowed(opcode, idn)) return EROFS;
++	bzero(r, 32);
++	r[0] = 0x16; r[3] = tag; r[5] = 1; /* QUERY_REQ, LUN0, STANDARD_READ */
++	r[12] = opcode; r[13] = idn;        /* index/selector/length/value remain zero */
++	return 0;
++}
++
++static int
++redfin_ufs_query_response(const uint8_t *r, unsigned size, uint8_t opcode, uint8_t idn,
++    uint8_t tag, uint32_t *value)
++{
++	if (!r || !value || size < 32 || !redfin_ufs_query_allowed(opcode, idn) ||
++	    r[0] != 0x36 || r[1] || r[2] || r[3] != tag || r[6] || r[7] || r[8] ||
++	    r[10] || r[11] || r[12] != opcode || r[13] != idn || r[14] || r[15] ||
++	    r[18] || r[19]) return EIO;
++	uint32_t result = redfin_ufs_be32(r + 20);
++	if (opcode == 5 && result > 1) return EIO;
++	*value = result;
++	return 0;
++}
++
++static int
++redfin_ufs_query_read(uint8_t opcode, uint8_t idn, uint32_t *value)
++{
++	if (!redfin_ufs_read_only || !value || su.lun != 0 ||
++	    !redfin_ufs_query_allowed(opcode, idn)) return EROFS;
++	if (ufs_rd(REG_UTRLDBR) || ufs_rd(0x78)) return EBUSY;
++	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
++	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
++	bzero(utrd, sizeof(*utrd)); bzero(ucd, sizeof(*ucd));
++	uint8_t tag = ++su.tag;
++	int error = redfin_ufs_query_request(ucd->cmd, sizeof(ucd->cmd), opcode, idn, tag);
++	if (error) return error;
++	uint64_t ucd_pa = su.dma_pa + DMA_UCD;
++	utrd->dw0 = (1u << 28) | (1u << 24); /* UFS storage, no data transfer/PRDT */
++	utrd->dw2 = 0x0f;
++	utrd->ucdba = (uint32_t)ucd_pa; utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
++	utrd->resp = (512u / 4) << 16 | (512u / 4);
++	dma_sync(DMA_UTRL, sizeof(*utrd)); dma_sync(DMA_UCD, sizeof(*ucd));
++	__builtin_arm_dsb(0xf);
++	ufs_wr(REG_UTRLDBR, 1);
++	uint64_t timeout;
++	nanoseconds_to_absolutetime(2ull * NSEC_PER_SEC, &timeout);
++	uint64_t start = mach_absolute_time();
++	while (ufs_rd(REG_UTRLDBR) & 1) {
++		if (mach_absolute_time() - start > timeout) {
++			ufs_wr(REG_UTRLCLR, ~1u);
++			return ETIMEDOUT;
++		}
++		delay(1);
++	}
++	__builtin_arm_dsb(0xf);
++	ufs_wr(REG_IS, ufs_rd(REG_IS));
++	dma_sync(DMA_UTRL, sizeof(*utrd)); dma_sync(DMA_UCD, sizeof(*ucd));
++	if (utrd->dw2 & 0xff) return EIO;
++	return redfin_ufs_query_response(ucd->resp, sizeof(ucd->resp), opcode, idn, tag, value);
++}
++
++static bool
++redfin_ufs_scsi_completed(int error)
++{
++	const struct utrd *utrd = (const struct utrd *)(su.dma + DMA_UTRL);
++	const struct ucd *ucd = (const struct ucd *)(su.dma + DMA_UCD);
++	return (error == 0 || error == EIO) && !(utrd->dw2 & 0xff) &&
++	    ucd->resp[0] == 0x21 && ucd->resp[2] == su.lun && ucd->resp[3] == su.tag &&
++	    !ufs_rd(REG_UTRLDBR) && !ufs_rd(0x78);
++}
++
++static bool
++redfin_ufs_gpt_allowed(int capacity_error, uint32_t last, uint32_t block)
++{
++	return capacity_error == 0 && block == UFS_BLOCK && last != UINT32_MAX && last >= 1;
++}
++
++/* Match Google redfin ufshcd_set_dev_pwr_mode: clear Device WLUN UA,
++ * then cmd[4] = UFS_ACTIVE_PWR_MODE(1) << 4, DMA_NONE. This changes
++ * volatile device power state only; no user blocks or Query writes.
++ */
++static bool
++redfin_ufs_wake_probe(void)
++{
++	static const uint8_t sense[6] = {0x03, 0, 0, 0, 18, 0};
++	static const uint8_t active[6] = {0x1b, 0, 0, 0, 0x10, 0};
++	if (su.lun != 0 || ufs_rd(REG_UTRLDBR) || ufs_rd(0x78)) return false;
++	redfin_ufs_wake_active = true;
++	su.lun = 0xd0;
++	bzero((void *)(su.dma + DMA_BOUNCE), 18);
++	int error = ufs_scsi(sense, sizeof(sense), 18, false);
++	bool completed = redfin_ufs_scsi_completed(error);
++	printf("REDFIN UFS: wake REQUEST SENSE WLUN=0xd0 result=%d completed=%u\n", error, completed);
++	if (!error && completed) {
++		const uint8_t *data = (const uint8_t *)(su.dma + DMA_BOUNCE);
++		char hex[37];
++		for (unsigned i = 0; i < 18; i++) {
++			hex[2*i] = "0123456789abcdef"[data[i] >> 4];
++			hex[2*i+1] = "0123456789abcdef"[data[i] & 15];
++		}
++		hex[36] = 0;
++		printf("REDFIN UFS: wake REQUEST SENSE data18=%s\n", hex);
++		error = ufs_scsi(active, sizeof(active), 0, false);
++		completed = redfin_ufs_scsi_completed(error);
++		printf("REDFIN UFS: wake START STOP ACTIVE WLUN=0xd0 result=%d completed=%u\n", error, completed);
++	}
++	su.lun = 0;
++	redfin_ufs_wake_active = false;
++	return !error && completed;
++}
++
++static void
++redfin_ufs_read_probe(vm_offset_t base, bool wake)
++{
++	su.regs = base;
++	uint32_t cap = ufs_rd(REG_CAP), version = ufs_rd(0x08), hcs = ufs_rd(REG_HCS);
++	if (!cap || cap == UINT32_MAX || version < 0x100 || version > 0x400 ||
++	    ((version & 0xff) != 0 && (version & 0xff) != 0x10) || !(ufs_rd(REG_HCE) & 1) || (hcs & 0xf) != 0xf ||
++	    ufs_rd(REG_UTRLDBR) != 0 || ufs_rd(0x78) != 0) {
++		printf("REDFIN UFS: read probe rejected unready/busy/invalid host\n");
++		return;
++	}
++	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
++	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
++		printf("REDFIN UFS: read probe DMA allocation failed\n");
++		return;
++	}
++	ppnum_t page = pmap_find_phys(kernel_pmap, (addr64_t)su.dma);
++	if (!page) { printf("REDFIN UFS: read probe DMA translation failed\n"); return; }
++	su.dma_pa = ptoa_64(page);
++	if ((su.dma_pa & PAGE_MASK) || su.dma_pa >= (1ull << 36) || DMA_SIZE > (1ull << 36) - su.dma_pa ||
++	    (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(cap & CAP_64AS))) {
++		printf("REDFIN UFS: read probe unsupported DMA address\n");
++		return;
++	}
++	su.lun = 0; su.cache = false; su.wait = false; su.writable = false; su.ready = false;
++	redfin_ufs_capacity_valid = false;
++	redfin_ufs_wake_active = false;
++	redfin_ufs_read_only = true;
++	printf("REDFIN UFS: read probe DMA=%#llx UTRL=%#llx UCD=%#llx bounce=%#llx\n",
++	    su.dma_pa, su.dma_pa + DMA_UTRL, su.dma_pa + DMA_UCD, su.dma_pa + DMA_BOUNCE);
++	int error = ufs_take_over_host();
++	printf("REDFIN UFS: host takeover result=%d\n", error);
++	if (error) return;
++	static const uint8_t tur[6] = {0x00};
++	for (unsigned i = 0; i < 3; i++) {
++		error = ufs_scsi(tur, sizeof(tur), 0, false);
++		printf("REDFIN UFS: TUR result=%d\n", error);
++		if (error != EIO || ufs_rd(REG_UTRLDBR)) break;
++	}
++	/* NOT READY is a SCSI result, not a failed DMA transaction. */
++	if (!redfin_ufs_scsi_completed(error)) return;
++	static const uint8_t inquiry[6] = {0x12, 0, 0, 0, 36, 0};
++	error = ufs_scsi(inquiry, sizeof(inquiry), 36, false);
++	printf("REDFIN UFS: standard INQUIRY result=%d\n", error);
++	if (!redfin_ufs_scsi_completed(error)) return;
++	static const uint8_t capacity[10] = {0x25};
++	error = ufs_scsi(capacity, sizeof(capacity), 8, false);
++	printf("REDFIN UFS: READ CAPACITY result=%d\n", error);
++	if (!redfin_ufs_scsi_completed(error)) return;
++	const uint8_t *buffer = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	uint32_t last = 0, block = 0;
++	if (!error) {
++		last = redfin_ufs_be32(buffer); block = redfin_ufs_be32(buffer + 4);
++		printf("REDFIN UFS: LUN0 blocks=%llu blocksize=%u\n", (uint64_t)last + 1, block);
++	}
++	redfin_ufs_capacity_valid = redfin_ufs_gpt_allowed(error, last, block);
++	uint32_t value = 0;
++	error = redfin_ufs_query_read(3, 2, &value);
++	printf("REDFIN UFS: Query READ_ATTR currentPower result=%d value=%u raw=%#x\n", error, error ? 0 : value, error ? 0 : value);
++	if (error) return;
++	error = redfin_ufs_query_read(5, 1, &value);
++	printf("REDFIN UFS: Query READ_FLAG deviceInit result=%d value=%u\n", error, error ? 0 : value);
++	if (error) return;
++	if (wake) {
++		if (!redfin_ufs_wake_probe()) return;
++		error = redfin_ufs_query_read(3, 2, &value);
++		printf("REDFIN UFS: after ACTIVE Query currentPower result=%d value=%u raw=%#x\n", error, error ? 0 : value, error ? 0 : value);
++		if (error) return;
++		redfin_ufs_capacity_valid = false;
++		for (unsigned i = 0; i < 3; i++) {
++			error = ufs_scsi(tur, sizeof(tur), 0, false);
++			printf("REDFIN UFS: after ACTIVE TUR result=%d\n", error);
++			if (error != EIO || ufs_rd(REG_UTRLDBR)) break;
++		}
++		if (!redfin_ufs_scsi_completed(error)) return;
++		error = ufs_scsi(capacity, sizeof(capacity), 8, false);
++		printf("REDFIN UFS: after ACTIVE READ CAPACITY result=%d\n", error);
++		if (!redfin_ufs_scsi_completed(error)) return;
++		last = 0; block = 0;
++		if (!error) {
++			last = redfin_ufs_be32(buffer); block = redfin_ufs_be32(buffer + 4);
++			printf("REDFIN UFS: after ACTIVE LUN0 capacity blocks=%llu blocksize=%u\n", (uint64_t)last + 1, block);
++		}
++		redfin_ufs_capacity_valid = redfin_ufs_gpt_allowed(error, last, block);
++	}
++	if (!redfin_ufs_capacity_valid) {
++		printf("REDFIN UFS: GPT read skipped without valid 4096-byte capacity\n");
++		return;
++	}
++	error = ufs_read_blocks(1, 1);
++	printf("REDFIN UFS: GPT header read result=%d\n", error);
++	if (!error) {
++		uint32_t count, entry_size;
++		memcpy(&count, buffer + 80, 4); memcpy(&entry_size, buffer + 84, 4);
++		printf("REDFIN UFS: GPT signature=%u entries=%u entrysize=%u\n",
++		    memcmp(buffer, "EFI PART", 8) == 0, count, entry_size);
++	}
++	/* Keep the private DMA list installed; never restore ABL state in flight. */
++	printf("REDFIN UFS: read probe done; no disk writes issued\n");
++}
++
++/* Mode 1 snapshots; mode 2 reads; mode 3 also activates the Device WLUN. */
+ void redfin_ufs_probe(void);
+ void
+ redfin_ufs_probe(void)
+ {
+ 	uint32_t mode = 0;
+ 	(void)PE_parse_boot_argn("redfinufs", &mode, sizeof(mode));
+-	if (mode != 1) return;
++	if (mode != 1 && mode != 2 && mode != 3) return;
+ 	DTEntry node;
+ 	const uint64_t *reg;
+ 	unsigned int size;
+@@ -776,6 +1026,7 @@
+ 		printf("REDFIN UFS: reg[%#x]=%#x\n", off, value);
+ 	}
+ 	printf("REDFIN UFS: read-only HCI probe done\n");
++	if (mode == 2 || mode == 3) redfin_ufs_read_probe(base, mode == 3);
+ }
+ 
+ static int
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -771,7 +771,7 @@
+ //	SWEET: root on a GPT partition of the internal UFS (bsd/dev/sweet_ufs.c)
+ //
+ 	uint32_t redfin_ufs_mode = 0;
+-	if (PE_parse_boot_argn("redfinufs", &redfin_ufs_mode, sizeof(redfin_ufs_mode)) && redfin_ufs_mode == 1) {
++	if (PE_parse_boot_argn("redfinufs", &redfin_ufs_mode, sizeof(redfin_ufs_mode)) && (redfin_ufs_mode == 1 || redfin_ufs_mode == 2 || redfin_ufs_mode == 3)) {
+ 		extern void redfin_ufs_probe(void);
+ 		redfin_ufs_probe();
+ 	}

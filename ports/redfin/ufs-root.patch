@@ -1,0 +1,308 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -121,4 +121,33 @@
+ static bool redfin_ufs_wake_active;
++static bool redfin_ufs_root_read_only, redfin_ufs_probe_ready;
++static uint64_t redfin_ufs_root_blocks;
++static vm_offset_t redfin_ufs_probe_base;
++
++/* REDFIN_ROOT_GUARD_TEST_BEGIN: permanent read-only SCSI allowlist. */
++static bool
++redfin_root_read_allowed(const uint8_t *cdb, unsigned cdb_len, uint32_t len,
++    bool write, uint8_t lun, uint64_t blocks)
++{
++	if (!cdb || write || lun || blocks < 3 || blocks > UINT32_MAX || len > BOUNCE_SIZE)
++		return false;
++	if (cdb_len == 6 && cdb[0] == 0x00 && !len) {
++		for (unsigned i = 1; i < 6; i++) if (cdb[i]) return false;
++		return true;
++	}
++	if (cdb_len == 6 && cdb[0] == 0x12 && len == 36)
++		return !cdb[1] && !cdb[2] && !cdb[3] && cdb[4] == 36 && !cdb[5];
++	if (cdb_len == 10 && cdb[0] == 0x25 && len == 8) {
++		for (unsigned i = 1; i < 10; i++) if (cdb[i]) return false;
++		return true;
++	}
++	if (cdb_len != 10 || cdb[0] != 0x28 || cdb[1] || cdb[6] || cdb[9]) return false;
++	uint64_t lba = (uint32_t)cdb[2] << 24 | (uint32_t)cdb[3] << 16 |
++	    (uint32_t)cdb[4] << 8 | cdb[5];
++	uint32_t count = (uint32_t)cdb[7] << 8 | cdb[8];
++	return count && count <= BOUNCE_SIZE / UFS_BLOCK && len == count * UFS_BLOCK &&
++	    lba < blocks && count <= blocks - lba;
++}
++/* REDFIN_ROOT_GUARD_TEST_END */
+ 
+ static LCK_GRP_DECLARE(sweet_ufs_grp, "sweet_ufs");
+ static LCK_MTX_DECLARE(sweet_ufs_lock, &sweet_ufs_grp);
+@@ -154,5 +154,8 @@
+ ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
+ {
+-	if (redfin_ufs_read_only) {
++	if (redfin_ufs_root_read_only) {
++		if (!redfin_root_read_allowed(cdb, cdb_len, len, write, su.lun,
++		    redfin_ufs_root_blocks)) return EROFS;
++	} else if (redfin_ufs_read_only) {
+ 		if (write || !cdb || !cdb_len || len > (512u << 10)) return EROFS;
+ 		if (su.lun == 0xd0) {
+@@ -313,8 +313,171 @@
++/* REDFIN_GPT_TEST_BEGIN: pure bounds/CRC validators, no MMIO or disk writes. */
++struct redfin_gpt {
++	uint64_t blocks, alternate, first, last, entries;
++	uint32_t count, entry_size, array_bytes, header_crc, entries_crc;
++};
++
++static uint32_t
++redfin_gpt_le32(const uint8_t *p)
++{
++	return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
++	       (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
++}
++
++static uint64_t
++redfin_gpt_le64(const uint8_t *p)
++{
++	return redfin_gpt_le32(p) | (uint64_t)redfin_gpt_le32(p + 4) << 32;
++}
++
++static uint32_t
++redfin_gpt_crc(const uint8_t *p, uint32_t size, bool header)
++{
++	uint32_t crc = UINT32_MAX;
++	for (uint32_t i = 0; i < size; i++) {
++		crc ^= header && i >= 16 && i < 20 ? 0 : p[i];
++		for (unsigned bit = 0; bit < 8; bit++)
++			crc = (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1)));
++	}
++	return ~crc;
++}
++
++static int
++redfin_gpt_capacity(uint32_t last, uint32_t block, uint64_t *blocks)
++{
++	if (!blocks) return EINVAL;
++	*blocks = 0;
++	/* READ CAPACITY(10) saturation requires READ CAPACITY(16), not a guess. */
++	if (block != UFS_BLOCK || last == UINT32_MAX || last < 2) return EINVAL;
++	*blocks = (uint64_t)last + 1;
++	return 0;
++}
++
++static int
++redfin_gpt_header(const uint8_t *b, unsigned bytes, uint64_t blocks,
++    struct redfin_gpt *out)
++{
++	if (!b || !out || bytes < 92 || blocks < 3 || blocks > UINT32_MAX) return EINVAL;
++	for (unsigned i = 0; i < 8; i++)
++		if (b[i] != (uint8_t)"EFI PART"[i]) return EINVAL;
++	uint32_t size = redfin_gpt_le32(b + 12);
++	if (redfin_gpt_le32(b + 8) != 0x10000 || size < 92 || size > UFS_BLOCK ||
++	    size > bytes || redfin_gpt_le32(b + 20) || redfin_gpt_le64(b + 24) != 1)
++		return EINVAL;
++	struct redfin_gpt g;
++	g.blocks = blocks;
++	g.alternate = redfin_gpt_le64(b + 32);
++	g.first = redfin_gpt_le64(b + 40);
++	g.last = redfin_gpt_le64(b + 48);
++	g.entries = redfin_gpt_le64(b + 72);
++	g.count = redfin_gpt_le32(b + 80);
++	g.entry_size = redfin_gpt_le32(b + 84);
++	g.header_crc = redfin_gpt_le32(b + 16);
++	g.entries_crc = redfin_gpt_le32(b + 88);
++	if (g.alternate != blocks - 1 || g.first < 2 || g.first > g.last ||
++	    g.last >= g.alternate || g.entries < 2 || g.entries >= g.first ||
++	    g.entry_size < 128 || g.entry_size > UFS_BLOCK || (g.entry_size & 7) ||
++	    !g.count || g.count > BOUNCE_SIZE / g.entry_size) return EINVAL;
++	g.array_bytes = g.count * g.entry_size; /* Division bound above prevents overflow. */
++	uint64_t array_blocks = ((uint64_t)g.array_bytes + UFS_BLOCK - 1) / UFS_BLOCK;
++	if (array_blocks > g.first - g.entries ||
++	    redfin_gpt_crc(b, size, true) != g.header_crc) return EINVAL;
++	*out = g;
++	return 0;
++}
++
++static bool
++redfin_gpt_name(const uint8_t *entry, const char *want)
++{
++	for (unsigned i = 0; i < 36; i++) {
++		unsigned c = entry[56 + 2 * i] | (unsigned)entry[57 + 2 * i] << 8;
++		if (c > 127 || c != (uint8_t)want[i]) return false;
++		if (!c) return true;
++	}
++	return !want[36];
++}
++
++static int
++redfin_gpt_partition(const uint8_t *b, unsigned bytes, const struct redfin_gpt *g,
++    const char *want, uint64_t *first, uint64_t *count)
++{
++	if (!b || !g || !want || !*want || !first || !count ||
++	    g->entry_size < 128 || g->entry_size > UFS_BLOCK || (g->entry_size & 7) ||
++	    !g->count || g->count > BOUNCE_SIZE / g->entry_size ||
++	    g->array_bytes != g->count * g->entry_size || g->array_bytes > bytes ||
++	    redfin_gpt_crc(b, g->array_bytes, false) != g->entries_crc) return EINVAL;
++	bool found = false;
++	uint64_t selected_first = 0, selected_count = 0;
++	for (uint32_t i = 0; i < g->count; i++) {
++		const uint8_t *e = b + i * g->entry_size;
++		bool used = false;
++		for (unsigned j = 0; j < 16; j++) used |= e[j] != 0;
++		if (!used) continue;
++		uint64_t begin = redfin_gpt_le64(e + 32), end = redfin_gpt_le64(e + 40);
++		if (begin < g->first || end > g->last || begin > end || end >= g->blocks)
++			return EINVAL;
++		/* All used entries must be disjoint, including partitions not selected. */
++		for (uint32_t j = 0; j < i; j++) {
++			const uint8_t *other = b + j * g->entry_size;
++			bool other_used = false;
++			for (unsigned k = 0; k < 16; k++) other_used |= other[k] != 0;
++			if (other_used && begin <= redfin_gpt_le64(other + 40) &&
++			    redfin_gpt_le64(other + 32) <= end) return EINVAL;
++		}
++		if (!redfin_gpt_name(e, want)) continue;
++		if (found) return EINVAL;
++		found = true;
++		selected_first = begin;
++		selected_count = end - begin + 1;
++	}
++	if (!found) return ENOENT;
++	*first = selected_first;
++	*count = selected_count;
++	return 0;
++}
++/* REDFIN_GPT_TEST_END */
++
++/* Selected only by redfinroot=1; redfin.patch still disables full init. */
++static int
++redfin_ufs_find_partition(const char *want)
++{
++	uint32_t rw = 0, rootrw = 0;
++	(void)PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
++	(void)PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw));
++	if (rw || rootrw || su.writable || su.lun != 0) return EROFS;
++	static const uint8_t capacity[10] = {0x25};
++	int error = ufs_scsi(capacity, sizeof(capacity), 8, false);
++	if (error) return error;
++	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	uint64_t blocks;
++	uint32_t last = (uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3];
++	uint32_t block = (uint32_t)b[4] << 24 | (uint32_t)b[5] << 16 | (uint32_t)b[6] << 8 | b[7];
++	if ((error = redfin_gpt_capacity(last, block, &blocks))) return error;
++	if (redfin_ufs_root_read_only && blocks != redfin_ufs_root_blocks) return EIO;
++	if ((error = ufs_read_blocks(1, 1))) return error;
++	struct redfin_gpt g;
++	if ((error = redfin_gpt_header(b, UFS_BLOCK, blocks, &g))) return error;
++	uint32_t array_blocks = (g.array_bytes + UFS_BLOCK - 1) / UFS_BLOCK;
++	if ((error = ufs_read_blocks(g.entries, array_blocks))) return error;
++	uint64_t first, count;
++	if ((error = redfin_gpt_partition(b, array_blocks * UFS_BLOCK, &g, want, &first, &count)))
++		return error;
++	/* Commit partition bounds only after capacity and both CRCs are validated. */
++	gpt_alt = g.alternate; gpt_hcrc = g.header_crc; gpt_ecrc = g.entries_crc;
++	/* Legacy watch checks backup only when this is nonzero. No backup claim. */
++	gpt_bhcrc = 0;
++	su.first_block = first;
++	su.nblocks = count;
++	return 0;
++}
++
+ static int
+ ufs_find_partition(const char *want)
+ {
++	uint32_t redfinroot = 0;
++	if (PE_parse_boot_argn("redfinroot", &redfinroot, sizeof(redfinroot)) && redfinroot == 1)
++		return redfin_ufs_find_partition(want);
+ 	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
+ 	int error = ufs_read_blocks(1, 1);
+ 	if (error) {
+ 		return error;
+ 	}
+@@ -930,4 +930,7 @@
+ redfin_ufs_read_probe(vm_offset_t base, bool wake)
+ {
++	redfin_ufs_probe_ready = false;
++	redfin_ufs_root_blocks = 0;
++	redfin_ufs_probe_base = base;
+ 	su.regs = base;
+ 	uint32_t cap = ufs_rd(REG_CAP), version = ufs_rd(0x08), hcs = ufs_rd(REG_HCS);
+@@ -1020,3 +1020,7 @@
++	if (wake && !error && redfin_ufs_capacity_valid && memcmp(buffer, "EFI PART", 8) == 0) {
++		redfin_ufs_root_blocks = (uint64_t)last + 1;
++		redfin_ufs_probe_ready = true;
++	}
+ 	/* Keep the private DMA list installed; never restore ABL state in flight. */
+ 	printf("REDFIN UFS: read probe done; no disk writes issued\n");
+ }
+@@ -1080,7 +1080,54 @@
++/* Publish a read-only partition after mode 3; no legacy hardware/log threads. */
++static int
++redfin_ufs_root_init(void)
++{
++	uint32_t rw = 0, rootrw = 0, log = 0;
++	(void)PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
++	(void)PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw));
++	(void)PE_parse_boot_argn("sweetlog", &log, sizeof(log));
++	if (rw || rootrw || log || su.writable) return EROFS;
++	if (su.ready) return redfin_ufs_root_read_only && su.dma ? 0 : ENXIO;
++	DTEntry node;
++	const uint64_t *reg = NULL;
++	unsigned size = 0;
++	if (SecureDTLookupEntry(NULL, "/redfin-ufs", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "reg", (const void **)&reg, &size) != kSuccess ||
++	    size != 2 * sizeof(uint64_t) || reg[0] != 0x01d84000 || reg[1] != 0x3000)
++		return ENXIO;
++	if (!redfin_ufs_probe_ready || !redfin_ufs_read_only || !redfin_ufs_capacity_valid ||
++	    redfin_ufs_wake_active || su.lun || !su.regs || su.regs != redfin_ufs_probe_base ||
++	    !su.dma || !su.dma_pa || !redfin_ufs_root_blocks ||
++	    ufs_rd(REG_UTRLDBR) || ufs_rd(0x78) || !(ufs_rd(REG_HCE) & 1) ||
++	    (ufs_rd(REG_HCS) & 0xf) != 0xf || !(ufs_rd(REG_UTRLRSR) & 1) ||
++	    ufs_rd(REG_UTRLBA) != (uint32_t)su.dma_pa ||
++	    ufs_rd(REG_UTRLBAU) != (uint32_t)(su.dma_pa >> 32)) return ENXIO;
++	/* From here every SCSI submission is permanently constrained to reads. */
++	redfin_ufs_root_read_only = true;
++	su.writable = false; su.cache = false; su.wait = false; su.secsize = DEV_BSIZE;
++	char want[64] = "userdata";
++	(void)PE_parse_boot_argn("ufsroot", want, sizeof(want));
++	want[sizeof(want) - 1] = 0;
++	int error = redfin_ufs_find_partition(want);
++	if (error) return error;
++	su.bmajor = bdevsw_add(-1, &sweet_ufs_bdevsw);
++	if (su.bmajor < 0) return ENXIO;
++	su.cmajor = cdevsw_add_with_bdev(-1, &sweet_ufs_cdevsw, su.bmajor);
++	if (su.cmajor < 0) return ENXIO;
++	su.bdev = makedev(su.bmajor, 0);
++	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
++	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
++	su.ready = true;
++	printf("REDFIN UFS: read-only partition %s, first=%#llx blocks=%llu sector=%u\n",
++	    want, su.first_block, su.nblocks, su.secsize);
++	return 0;
++}
++
+ static int
+ sweet_ufs_init(void)
+ {
+-	/* REDFIN: no storage, touch, keys or USB MMIO in the RAM-only milestone. */
+-	return ENOTSUP;
++	uint32_t redfinroot = 0;
++	if (PE_parse_boot_argn("redfinroot", &redfinroot, sizeof(redfinroot)) && redfinroot == 1)
++		return redfin_ufs_root_init();
++	return ENOTSUP; /* Legacy initialization below remains unreachable. */
+ 	DTEntry node;
+ 	uintptr_t const *reg = NULL;
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -775,5 +775,12 @@
+ 		extern void redfin_ufs_probe(void);
+ 		redfin_ufs_probe();
+ 	}
++	uint32_t redfin_publish = 0;
++	if (PE_parse_boot_argn("redfinroot", &redfin_publish, sizeof(redfin_publish)) && redfin_publish == 1) {
++		extern int sweet_ufs_rootdev(dev_t *dev);
++		dev_t published = NODEV;
++		int error = sweet_ufs_rootdev(&published);
++		IOLog("REDFIN UFS: read-only publication result=%d\n", error);
++	}
+ 	if (strcmp(rdBootVar, "ufsroot0") == 0) {
+ 		extern int sweet_ufs_rootdev(dev_t *dev);

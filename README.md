@@ -1,9 +1,18 @@
 # ios-redfin — Pixel 5 bring-up
 
 Pixel 5 boots XNU 8796 into a static Darwin PID1 from RAM. CPU0, IRQ/SGI,
-BSD/md0 and entry into EL0 are observed; `/dev/console` startup is under
-investigation. Kernel logs are recovered automatically through Android pstore.
-Full iOS/SpringBoard is not running on redfin yet.
+BSD/md0, console I/O and repeated PID1 heartbeats are observed. Kernel logs
+can be recovered through temporary Linux recovery and authenticated host
+decryption, without booting Android. Read-only UFS access is verified: PID1
+reads 4096 bytes and write-open returns `EROFS`. The full 16 GiB Apple root
+image is prepared and checked, but has not been installed; Apple launchd and
+SpringBoard have not run on redfin.
+
+Before erasing Android userdata, save its credential-encrypted ramoops keypair
+on the host. Recovery receives only the public key, primes the next boot's
+RAM metadata, and returns to bootloader. The [recovery workflow](ports/redfin/README.md#offline-recovery)
+uses `--ramoops-key-dir`, `--recovery-image`, `--from-bootloader` and
+`--leave-bootloader`; the private key stays off the device.
 
 Build and temporary boot instructions: [ports/redfin/README.md](ports/redfin/README.md).
 The original Sapphire documentation follows as reference.

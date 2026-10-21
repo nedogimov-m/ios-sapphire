@@ -20,6 +20,35 @@ class RedfinADTTests(unittest.TestCase):
     # Synthetic addresses for serialization tests, not a device RAM recommendation.
     BASE, SIZE = 0x200000000, 0x40000000
 
+    def test_apple_userspace_identity_cannot_import_hardware_or_identifiers(self):
+        source = mkadt.node('device-tree', [
+            ('model', mkadt.cstr('iPhone10,3')), ('target-sub-type', mkadt.cstr('D22AP')),
+            ('serial-number', b'source-private-identifier\0')], [
+                mkadt.node('product', [('artwork-display-gamut', b'P3\0'), ('device-class', b'iPhone\0')]),
+                mkadt.node('arm-io', [('reg', bytes(32))])])
+        source.children[0].props.append(('serial-placeholder', 1, b'placeholder'))
+        root = mkadt.build(self.BASE, self.SIZE, seed=bytes(64))
+        original_hardware = {name: mkadt.adt.serialize(child(root, name)) for name in ('cpus', 'arm-io')}
+        mkadt.apple_userspace_identity(root, mkadt.adt.serialize(source))
+        self.assertEqual(root.prop('model'), b'iPhone10,3\0')
+        self.assertIn(b'google,redfin\0', root.prop('compatible'))
+        for name, expected in original_hardware.items():
+            self.assertEqual(mkadt.adt.serialize(child(root, name)), expected)
+        chosen = child(root, 'chosen')
+        self.assertEqual(chosen.prop('dram-base'), mkadt.u64(self.BASE))
+        self.assertEqual(chosen.prop('dram-size'), mkadt.u64(self.SIZE))
+        self.assertEqual(child(root, 'product').prop('artwork-display-gamut'), b'sRGB\0')
+        self.assertIsNone(child(root, 'product').prop('serial-placeholder'))
+        self.assertNotIn(b'source-private-identifier', mkadt.adt.serialize(root))
+        self.assertEqual(child(chosen, 'asmb').prop('lp-sip0'), mkadt.u64(0x6f))
+        self.assertEqual(len(chosen.prop('boot-manifest-hash')), 48)
+        with self.assertRaises(ValueError):
+            mkadt.apple_userspace_identity(root, mkadt.adt.serialize(source))
+        source.props = [(key, flag, b'wrong\0' if key == 'model' else value)
+                        for key, flag, value in source.props]
+        with self.assertRaises(ValueError):
+            mkadt.apple_userspace_identity(mkadt.build(self.BASE, self.SIZE), mkadt.adt.serialize(source))
+
     def test_serialized_hardware_contract(self):
         blob = mkadt.adt.serialize(mkadt.build(self.BASE, self.SIZE, 0x700, bytes(64)))
         root, end = mkadt.adt.parse(blob)
