@@ -61,5 +61,7 @@ and a trailing four-byte little-endian uncompressed length. Raw Image with
 offset zero failed `Unsupported`; adding an unsigned AVB footer did not fix it.
 LZ4 with offset zero also failed; the controlled offset change fixed acceptance.
 Raw Image with offset `0x80000` has not been tested, so compression has not been
-shown to be required. Bootloader acceptance does not yet confirm diagnostic
-execution or visible output.
+shown to be required. Subsequent execution was confirmed by the user seeing
+REDFIN DIAGNOSTICS. XNU then reached BSD and executed the static PID1; RAMLOG
+captured its first syscall. The splash reservation start with 4320-byte pitch
+and 1080x2340 pixels is therefore observed working on this unit.

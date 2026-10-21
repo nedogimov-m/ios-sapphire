@@ -17,6 +17,14 @@ CONSOLE_OFFSET, CONSOLE_LENGTH = 0x280000, 0x100000
 MAX_PSTORE_BYTES = 8 * 1024 * 1024
 
 
+def extract_xnu(data):
+    start = data.find(b"[REDFIN RAMLOG v1")
+    if start < 0:
+        return b""
+    end = data.find(b"--- BOOT HISTORY", start)
+    return data[start:end if end >= 0 else len(data)]
+
+
 def extract_ring(raw, offset=CONSOLE_OFFSET, length=CONSOLE_LENGTH):
     if offset < 0 or length < 12 or offset + length > len(raw):
         raise ValueError("truncated ramoops console region")
@@ -171,6 +179,9 @@ class Cycle:
                                      and b"REDFIN init: still alive" in current else
                                      "logs-collected" if b"REDFIN" in current else "no-log")
         self.manifest["captured_bytes"] = len(current)
+        xnu = extract_xnu(current)
+        if xnu:
+            self.save("xnu-console.txt", xnu)
 
     def run(self):
         try:

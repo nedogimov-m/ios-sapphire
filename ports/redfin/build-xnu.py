@@ -180,14 +180,19 @@ def main(argv=None):
             shutil.copy2(panic_patch, patches / "zzzzzzzzz-redfin-panic-log.patch")
             open_patch = ROOT / "ports/redfin/console-open-trace.patch"
             shutil.copy2(open_patch, patches / "zzzzzzzzzz-redfin-console-open-trace.patch")
+            namei_patch = ROOT / "ports/redfin/namei-trace.patch"
+            shutil.copy2(namei_patch, patches / "zzzzzzzzzzz-redfin-namei-trace.patch")
+            pan_patch = ROOT / "ports/redfin/pan.patch"
+            shutil.copy2(pan_patch, patches / "zzzzzzzzzzzz-redfin-pan.patch")
             overlays = [overlay, logging_patch, trace_patch, cpu_trace_patch, battery_patch,
-                        watchdog_patch, pid1_patch, panic_patch, open_patch]
+                        watchdog_patch, pid1_patch, panic_patch, open_patch, namei_patch, pan_patch]
             result["patch_sha256"] = {path.name: digest(path)
                                       for path in local_patches + local_scripts + overlays}
             fingerprint_path = dxb / "xnu/.redfin-patches.json"
             fingerprint = {"builder_commit": DXB_SHA, "xnu_commit": XNU_SHA,
                            "patch_sha256": result["patch_sha256"]}
             resume = fingerprint_path.exists()
+            rebuild_objects = False
             verifier = dxb / "verify-redfin-overlays.py"
             verifier.write_text(VERIFY_OVERLAYS)
             verification_command = [sys.executable, verifier, dxb / "xnu", *overlays]
@@ -204,6 +209,7 @@ def main(argv=None):
                         previous.get("xnu_commit") != XNU_SHA or previous_base != expected_base):
                     raise ValueError("base source fingerprint changed; use a new --work-dir")
                 run(verification_command)
+                rebuild_objects = (previous["patch_sha256"].get(pan_patch.name) != digest(pan_patch))
             if not resume:
                 # Adopt a known prepared tree only after both final overlays
                 # and the staged provider are verified; no partial patch replay.
@@ -213,6 +219,15 @@ def main(argv=None):
                 except subprocess.CalledProcessError:
                     pass
             result["resumed_sources"] = resume
+            if rebuild_objects:
+                # Changing -mcpu or PAN support invalidates every kernel object.
+                # Retain all source trees, KDK files and dependency libraries.
+                object_directory = dxb / "build/xnu.obj"
+                if object_directory.is_dir() and not object_directory.is_symlink():
+                    log.write("Removing kernel objects after PAN/CPU configuration change\n")
+                    log.flush()
+                    shutil.rmtree(object_directory)
+                result["cleaned_kernel_objects"] = True
             # Recreate the wrapper from the exact pin on every invocation.
             source = run(["git", "show", DXB_SHA + ":build.sh"], cwd=dxb, capture=True)
             source = replace_once(source, '    install_deps\n',

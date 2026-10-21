@@ -553,3 +553,19 @@ What it took today (in order): 0058 HID services (Apple IOHIDFamily-1915 user cl
      cpu_init, before arm_vm_init.
   5. panic hook at top of panic_trap_to_debugger: va_copy + _doprnt(fmt, &copy, sweet_early_putc, 16).
   Verify with tools/xnu-cc.py (compile+symbols) and patch-order simulation before the single CI run.
+
+
+## REDFIN stopped at user request — 2026-10-21
+
+User requested stopping and will disconnect the phone. No further device
+operations are scheduled. Last completed kernel build: Cortex-A55 with PAN
+restored, SHA256 ff99416071826215cddcb5121ad464aa8cee30bc1603478985f98b131a8b49da.
+Disassembly verifies PAN disable/restore around copyinstr. Image is
+ports/redfin/out/pan/redfin-xnu.img; an automatic test boot was accepted, but
+its result was not yet assessed when stopped. Previously proven: XNU CPU/IRQ,
+BSD/md0, successful exec of static PID1 and first EL0 syscall open (code5).
+Latest diagnosed blocker: vn_open_auth/namei user-pointer access with the
+inherited A53 configuration lacking PAN support. Heartbeat remains unconfirmed.
+Next session: inspect logs/redfin/pan/ if the last collector captured anything;
+otherwise connect rooted Android and run the existing boot cycle when requested.
+All backups/dumps/binaries/logs stay local and ignored; no partitions flashed.

@@ -19,7 +19,7 @@
       "kernel_compression": "standard LZ4 frame, followed by 4-byte LE uncompressed size",
       "arm64_text_offset": "0x80000",
       "arm64_flags": "0xa",
-      "observation": "2026-10-21 temporary fastboot boot returned OKAY after changing only ARM64 Image text_offset from 0 to 0x80000 in the otherwise identical compressed diagnostic image. Execution/display not yet confirmed.",
+      "observation": "2026-10-21: text_offset 0x80000 corrected ABL rejection; user confirmed REDFIN DIAGNOSTICS. XNU later reached BSD/md0 and static PID1 EL0; logs recovered through Android pstore.",
       "isolated_raw_text_offset_0x80000_tested": false
     }
   },
@@ -703,6 +703,7 @@
     "ufs_hce_hcs_state_obtained": false,
     "evidence": "2026-10-21 root ADB captures; raw FDT and iomem are kept in ignored research/redfin-root/",
     "diagnostic_temporary_boot_accepted": true,
-    "diagnostic_execution_confirmed": false
+    "diagnostic_execution_confirmed": true,
+    "static_pid1_el0_syscall_confirmed": true
   }
 }
