@@ -1,0 +1,129 @@
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -698,6 +698,90 @@
+ 	gPESF = fns;
+ }
+ 
++
++/* Linux persistent_ram console ABI (ECC disabled): DBGC, start, size, data.
++ * The builder supplies verified reserved console ranges through /redfin-log.
++ * The redfin bring-up kernel supports one CPU; mask local exceptions while
++ * publishing a character so a panic/IRQ cannot interrupt header updates.
++ */
++#if defined(SWEET)
++struct redfin_ramlog {
++	volatile uint32_t signature, start, size;
++	volatile unsigned char data[];
++};
++static struct redfin_ramlog *redfin_logs[2];
++static uint32_t redfin_log_capacity[2];
++static unsigned redfin_log_count;
++
++void
++redfin_log_putc(char c)
++{
++	uint64_t daif = __builtin_arm_rsr64("DAIF");
++	__asm__ volatile("msr daifset, #3" ::: "memory");
++	for (unsigned i = 0; i < redfin_log_count; i++) {
++		struct redfin_ramlog *log = redfin_logs[i];
++		uint32_t capacity = redfin_log_capacity[i], start = log->start, size = log->size;
++		if (start >= capacity || size > capacity) continue;
++		log->data[start] = (unsigned char)c;
++		__asm__ volatile("dsb sy" ::: "memory");
++		start++;
++		if (start == capacity) start = 0;
++		log->start = start;
++		if (size < capacity) log->size = size + 1;
++	}
++	__asm__ volatile("dsb sy" ::: "memory");
++	__builtin_arm_wsr64("DAIF", daif);
++}
++
++static void redfin_log_init(void) {}
++static unsigned int redfin_log_ready(void) { return 1; }
++static unsigned int redfin_log_receive_ready(void) { return 0; }
++static uint8_t redfin_log_receive(void) { return 0; }
++static void redfin_log_transmit(uint8_t c) { redfin_log_putc((char)c); }
++
++SECURITY_READ_ONLY_LATE(static struct pe_serial_functions) redfin_log_serial = {
++	.init = redfin_log_init,
++	.transmit_ready = redfin_log_ready,
++	.transmit_data = redfin_log_transmit,
++	.receive_ready = redfin_log_receive_ready,
++	.receive_data = redfin_log_receive,
++	.device = SERIAL_SWEET_FBCON
++};
++
++static void
++redfin_log_probe(void)
++{
++	DTEntry entry;
++	const uint64_t *reg;
++	unsigned int size;
++	if (redfin_log_count || SecureDTLookupEntry(NULL, "/redfin-log", &entry) != kSuccess ||
++	    SecureDTGetProperty(entry, "reg", (const void **)&reg, &size) != kSuccess ||
++	    (size != 2 * sizeof(uint64_t) && size != 4 * sizeof(uint64_t))) return;
++	unsigned count = size / (2 * sizeof(uint64_t));
++	for (unsigned i = 0; i < count; i++) {
++		uint64_t base = reg[2 * i], length = reg[2 * i + 1];
++		if (!base || (base & 0xfff) || length < 0x1000 || length > 0x1000000 ||
++		    base >= (1ULL << 36) || length > (1ULL << 36) - base) return;
++	}
++	if (count == 2 && reg[0] < reg[2] + reg[3] && reg[2] < reg[0] + reg[1]) return;
++	for (unsigned i = 0; i < count; i++) {
++		redfin_logs[i] = (struct redfin_ramlog *)ml_io_map(reg[2 * i], reg[2 * i + 1]);
++		if (redfin_logs[i] == NULL) return;
++		redfin_log_capacity[i] = (uint32_t)reg[2 * i + 1] - 12;
++	}
++	for (unsigned i = 0; i < count; i++) {
++		redfin_logs[i]->signature = 0;
++		redfin_logs[i]->start = redfin_logs[i]->size = 0;
++		__asm__ volatile("dsb sy" ::: "memory");
++		redfin_logs[i]->signature = 0x43474244;
++	}
++	redfin_log_count = count;
++	register_serial_functions(&redfin_log_serial);
++	const char *banner = "\n[REDFIN RAMLOG v1: serial and console]\n";
++	while (*banner) redfin_log_putc(*banner++);
++}
++#endif /* SWEET */
++
+ /*****************************************************************************/
+ 
+ /*
+@@ -923,6 +1007,10 @@
+ 	PE_parse_boot_argn("disable-uart-irq", &disable_uart_irq, sizeof(disable_uart_irq));
+ 
+ 	fbcon_probe();
++#if defined(SWEET)
++	/* Register last so RAM receives each byte before framebuffer output. */
++	redfin_log_probe();
++#endif
+ 
+ #ifdef PI3_UART
+ 	if (SecureDTFindEntry("name", "gpio", &entryP) == kSuccess) {
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -113,6 +113,9 @@
+ 
+ extern int serial_getc(void);
+ extern void serial_putc_options(char, bool);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++extern void redfin_log_putc(char);
++#endif
+ 
+ #if DEBUG || DEVELOPMENT
+ TUNABLE(bool, allow_printf_from_interrupts_disabled_context, "nointr_consio", false);
+@@ -255,6 +258,10 @@
+ 		_cnputc('\r', poll);
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/* Serial output is already captured by its registered RAM backend. */
++	if (idx != 0) redfin_log_putc(c);
++#endif
+ 	cons_ops[idx].putc(c, poll);
+ }
+ 

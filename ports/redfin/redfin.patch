@@ -1,0 +1,341 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+index 6c91dbd..981a3cd 100644
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -739,6 +739,8 @@ sweet_gpt_watch(__unused void *arg, __unused wait_result_t wr)
+ static int
+ sweet_ufs_init(void)
+ {
++	/* REDFIN: no storage, touch, keys or USB MMIO in the RAM-only milestone. */
++	return ENOTSUP;
+ 	DTEntry node;
+ 	uintptr_t const *reg = NULL;
+ 	unsigned int size = 0;
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+index 96c557b..04ec272 100644
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -73,16 +73,16 @@ SweetCPU::start(IOService *provider)
+ 	if (*(const uint32_t *)reg->getBytesNoCopy() != cpu->phys_id) {
+ 		return false;
+ 	}
+-	/* topaz (SM6225): MPIDR Aff1 = cluster, Aff0 = core: 0x0-0x3 A53, 0x100-0x103 A73 */
+-	if ((cpu->phys_id >> 8) > 1 || (cpu->phys_id & 0xff) > 3 ||
+-	    topology->num_cpus > SWEET_SMP_MAX_CPUS) {
++	/* REDFIN: one CPU only; lito affinities are 0x000..0x700. */
++	if (cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0 ||
++	    topology->num_cpus != 1) {
+ 		panic("SWEET CPU: invalid topology cpu=%u mpidr=0x%x count=%u",
+ 		    cpu->cpu_id, cpu->phys_id, topology->num_cpus);
+ 	}
+ 	if (!IOCPU::start(provider)) {
+ 		return false;
+ 	}
+-	cpuName = OSSymbol::withCStringNoCopy("Kryo 260");
++	cpuName = OSSymbol::withCStringNoCopy("Kryo 475");
+ 	if (cpuName == NULL) {
+ 		return false;
+ 	}
+@@ -144,13 +144,11 @@ SweetCPU::startAll(void *arg __unused, wait_result_t result __unused)
+ 		}
+ 		IOSleep(1);
+ 	}
+-	/*
+-	 * topaz: the ADT lists only the A73 (gold) cores and the shim boots xnu
+-	 * on gold CPU 0x100 (the silver cluster has no 16K granule).
+-	 */
+-	if (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != 0x100) {
+-		panic("SWEET CPU: expected boot MPIDR 0x100 and logical CPU 0, got 0x%x/%u",
+-		    topology->boot_cpu->phys_id, topology->boot_cpu->cpu_id);
++	/* REDFIN: check the supplied affinity against the running processor. */
++	const uint32_t boot_mpidr = (uint32_t)(__builtin_arm_rsr64("MPIDR_EL1") & 0xffffffULL);
++	if (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != boot_mpidr) {
++		panic("REDFIN CPU: ADT boot MPIDR 0x%x does not match running MPIDR 0x%x",
++		    topology->boot_cpu->phys_id, boot_mpidr);
+ 	}
+ 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
+ 		SweetCPU *cpu = __atomic_load_n(&sweet_cpus[i], __ATOMIC_ACQUIRE);
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 835d1f1..1a08756 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -263,6 +263,8 @@ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ bool
+ AppleCLCD::start(IOService *provider)
+ {
++	/* REDFIN: display, modem and GPU drivers require separate board ports. */
++	return false;
+ 	PE_Video video;
+ 
+ 	if (!IOService::start(provider)) {
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index 06bb568..d2ed0ec 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1825,32 +1825,6 @@ init_ptpages(tt_entry_t *tt, vm_map_address_t start, vm_map_address_t end, bool
+ #define ARM64_PHYSMAP_ALIGNMENT_PADDING (PTOV_TABLE_SIZE * ARM_TT_TWIG_SIZE)
+ #endif
+ 
+-#if defined(SWEET)
+-/*
+- * The reserved low-globals/kernel region is excluded from VM allocation.
+- * Use the otherwise empty 32MB block above low globals and below gVirtBase
+- * for a Normal-NC framebuffer alias that survives bootstrap TTBR0 teardown.
+- */
+-#define SWEET_EARLY_FB_VA (VM_MIN_KERNEL_ADDRESS + ARM_TT_L2_SIZE)
+-
+-static void
+-sweet_early_map_final(void)
+-{
+-	const vm_map_address_t va = SWEET_EARLY_FB_VA;
+-	assert(va + ARM_TT_L2_SIZE <= gVirtBase);
+-	tt_entry_t l1 = cpu_tte[(va & ARM_TT_L1_INDEX_MASK) >> ARM_TT_L1_SHIFT];
+-	assert((l1 & (ARM_TTE_VALID | ARM_TTE_TYPE_MASK)) == (ARM_TTE_VALID | ARM_TTE_TYPE_TABLE));
+-	tt_entry_t *l2 = (tt_entry_t *)phystokv(l1 & ARM_TTE_TABLE_MASK);
+-	tt_entry_t *slot = &l2[(va & ARM_TT_L2_INDEX_MASK) >> ARM_TT_L2_SHIFT];
+-	assert(*slot == ARM_TTE_EMPTY);
+-	*slot = 0x9c000000ULL | ARM_TTE_VALID | ARM_TTE_TYPE_BLOCK |
+-	    ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) |
+-	    ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) |
+-	    ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX;
+-	__asm__ volatile("dsb ishst" ::: "memory");
+-}
+-#endif
+-
+ void
+ arm_vm_init(uint64_t memory_size, boot_args * args)
+ {
+@@ -2179,19 +2153,13 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 
+ 	arm_set_user_tbi();
+ 
+-#if defined(SWEET)
+-	/* phystokv() must still refer to the bootstrap aperture here. */
+-	sweet_early_map_final();
+-#endif
++	/* REDFIN: bootstrap framebuffer aliases are disabled. */
+ 	arm_vm_physmap_init(args);
+ 	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
+ 
+ 	ml_enable_monitor();
+ 
+-#if defined(SWEET)
+-	/* The final TTBR1 is live; leave the outgoing VA=PA framebuffer alias. */
+-	sweet_early_relocate(SWEET_EARLY_FB_VA);
+-#endif
++	/* REDFIN: bootstrap framebuffer aliases are disabled. */
+ 	set_mmu_ttb(invalid_ttep & TTBR_BADDR_MASK);
+ 
+ 	flush_mmu_tlb();
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index 023086f..3ff3920 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -513,24 +513,7 @@ LEXT(start_first_cpu)
+ 	mov		x20, x0
+ 	mov		x21, #0
+ 
+-#if defined(SWEET)
+-	/* Stage 0: white 64x32 band, no stack or page tables needed. */
+-	MOV64	x0, (0x9c000000 + 2368 * 4320)
+-	mov		w1, #-1
+-	mov		x2, #32
+-	mov		x4, #4320
+-Lsweet_mark_row:
+-	mov		x3, #64
+-	mov		x5, x0
+-Lsweet_mark_pixel:
+-	str		w1, [x5], #4
+-	subs	x3, x3, #1
+-	b.ne	Lsweet_mark_pixel
+-	add		x0, x0, x4
+-	subs	x2, x2, #1
+-	b.ne	Lsweet_mark_row
+-	dsb		sy
+-#endif
++/* REDFIN: no fixed splash framebuffer address before live DT validation. */
+ 
+ 	// Set low reset vector before attempting any loads
+ 	adrp	x0, EXT(LowExceptionVectorBase)@page
+@@ -678,22 +661,7 @@ Lkernelcache_base_found:
+ 	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
+ 	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
+ 
+-#if defined(SWEET)
+-	/*
+-	 * Splash framebuffer: one 32MB Normal-NC block in the EXISTING V=P
+-	 * L2 table. Both framebuffer and RAM use L1 index 0; another call to
+-	 * create_bootstrap_mapping would replace the RAM L2 table.
+-	 * SWEET uses 16K pages and all bring-up RAM is below 4GB, so the first
+-	 * V=P L2 page is bootstrap_pagetables + 2*PGBYTES.
+-	 */
+-	MOV64	x10, 0x9c000000
+-	MOV64	x11, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
+-	orr		x11, x11, x10
+-	and		x12, x10, #(ARM_TT_L2_INDEX_MASK)
+-	lsr		x12, x12, #(ARM_TT_L2_SHIFT)
+-	add		x13, x25, #(2 * PGBYTES)
+-	str		x11, [x13, x12, lsl #TTE_SHIFT]
+-#endif
++/* REDFIN: no fixed splash framebuffer address before live DT validation. */
+ 
+ 	/* Ensure TTEs are visible */
+ 	dsb		ish
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 6928957..6e284e3 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -1,143 +1,18 @@
+-/*
+- * Redmi Note 10 Pro bootstrap console. No allocation, locks, ADT parsing or
+- * per-CPU state: panic() can reach this before a current thread exists.
+- * start.s maps the splash framebuffer VA=PA as Normal Non-Cacheable memory.
+- * arm_vm_init installs a reserved kernel VA alias before removing TTBR0;
+- * retain this console until the normal framebuffer serial console is ready.
+- */
++/* REDFIN: no framebuffer writes before a live display mapping is validated. */
+ #include <arm64/sweet_early.h>
+ 
+ #if defined(SWEET)
+-#include <stdint.h>
+-#include <kern/misc_protos.h>
+-
+-static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x9c000000;
+-#define EARLY_FB early_fb
+-#define EARLY_WIDTH 1080u
+-#define EARLY_HEIGHT 2400u
+-#define EARLY_STRIDE (4320u / 4)
+-#define EARLY_SCALE 2u
+-#define EARLY_CELL_W (8u * EARLY_SCALE)
+-#define EARLY_CELL_H (16u * EARLY_SCALE)
+-#define EARLY_ROWS ((EARLY_HEIGHT - 32u) / EARLY_CELL_H)
+-#define EARLY_COLS (EARLY_WIDTH / EARLY_CELL_W)
+-
+-extern unsigned char iso_font[256 * 16];
+-
+-/* Initialized data must remain writable until disable, including panics. */
+-static unsigned int early_row, early_col;
+-static unsigned int early_started, early_disabled, early_panicking;
+-
+-static void
+-sweet_early_clear_row(void)
+-{
+-	for (unsigned int y = 0; y < EARLY_CELL_H; y++) {
+-		volatile uint32_t *line = EARLY_FB + (early_row * EARLY_CELL_H + y) * EARLY_STRIDE;
+-		for (unsigned int x = 0; x < EARLY_WIDTH; x++) {
+-			line[x] = 0xff000000u;
+-		}
+-	}
+-}
+-
+-void
+-sweet_early_putc(char c)
+-{
+-	if (early_disabled) {
+-		return;
+-	}
+-	if (!early_started) {
+-		early_started = 1;
+-		sweet_early_clear_row();
+-	}
+-	if (c == '\r') {
+-		early_col = 0;
+-		return;
+-	}
+-	if (c == '\n' || early_col == EARLY_COLS) {
+-		early_col = 0;
+-		early_row = (early_row + 1) % EARLY_ROWS;
+-		sweet_early_clear_row();
+-		if (c == '\n') {
+-			return;
+-		}
+-	}
+-	const unsigned char *glyph = iso_font + (unsigned char)c * 16;
+-	for (unsigned int gy = 0; gy < 16; gy++) {
+-		for (unsigned int sy = 0; sy < EARLY_SCALE; sy++) {
+-			volatile uint32_t *line = EARLY_FB +
+-			    (early_row * EARLY_CELL_H + gy * EARLY_SCALE + sy) * EARLY_STRIDE +
+-			    early_col * EARLY_CELL_W;
+-			for (unsigned int gx = 0; gx < 8; gx++) {
+-				uint32_t pixel = (glyph[gy] & (1u << gx)) ? 0xffffffffu : 0xff000000u;
+-				for (unsigned int sx = 0; sx < EARLY_SCALE; sx++) {
+-					line[gx * EARLY_SCALE + sx] = pixel;
+-				}
+-			}
+-		}
+-	}
+-	early_col++;
+-}
+-
+-static void
+-sweet_early_string(const char *s)
++void sweet_early_putc(char c) { (void)c; }
++void sweet_early_mark(unsigned int stage, const char *label)
+ {
+-	while (*s) {
+-		sweet_early_putc(*s++);
+-	}
++	(void)stage;
++	(void)label;
+ }
+-
+-void
+-sweet_early_mark(unsigned int stage, const char *label)
+-{
+-	if (early_disabled || stage > 20) {
+-		return;
+-	}
+-	uint32_t color = 0xff00ff00u | ((stage & 7u) * 32u << 16);
+-	for (unsigned int y = EARLY_HEIGHT - 32; y < EARLY_HEIGHT; y++) {
+-		for (unsigned int x = stage * 48; x < (stage + 1) * 48; x++) {
+-			EARLY_FB[y * EARLY_STRIDE + x] = color;
+-		}
+-	}
+-	__asm__ volatile("dsb sy" ::: "memory");
+-	sweet_early_string("SWEET EARLY ");
+-	if (stage >= 10) {
+-		sweet_early_putc((char)('0' + stage / 10));
+-	}
+-	sweet_early_putc((char)('0' + stage % 10));
+-	sweet_early_string(": ");
+-	sweet_early_string(label);
+-	sweet_early_putc('\n');
+-}
+-
+-void
+-sweet_early_panic(const char *fmt, va_list *args)
+-{
+-	if (early_disabled || early_panicking) {
+-		return;
+-	}
+-	early_panicking = 1;
+-	sweet_early_string("\nSWEET EARLY PANIC: ");
+-	va_list copy;
+-	va_copy(copy, *args);
+-	_doprnt(fmt, &copy, sweet_early_putc, 16);
+-	va_end(copy);
+-	sweet_early_putc('\n');
+-	__asm__ volatile("dsb sy" ::: "memory");
+-}
+-
+-void
+-sweet_early_relocate(uint64_t base)
+-{
+-	sweet_early_mark(8, "leaving bootstrap TTBR0");
+-	early_fb = (volatile uint32_t *)(uintptr_t)base;
+-	__asm__ volatile("dsb sy" ::: "memory");
+-	sweet_early_mark(9, "kernel framebuffer VA live");
+-}
+-
+-void
+-sweet_early_disable(void)
++void sweet_early_panic(const char *fmt, va_list *args)
+ {
+-	early_disabled = 1;
+-	__asm__ volatile("dsb sy" ::: "memory");
++	(void)fmt;
++	(void)args;
+ }
++void sweet_early_relocate(uint64_t base) { (void)base; }
++void sweet_early_disable(void) {}
+ #endif /* SWEET */

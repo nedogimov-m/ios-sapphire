@@ -1,0 +1,12 @@
+diff --git a/iokit/Kernel/arm/SweetBattery.cpp b/iokit/Kernel/arm/SweetBattery.cpp
+--- a/iokit/Kernel/arm/SweetBattery.cpp
++++ b/iokit/Kernel/arm/SweetBattery.cpp
+@@ -320,6 +320,8 @@
+ bool
+ SweetBattery::start(IOService *provider)
+ {
++	/* REDFIN: SM6225 cpufreq and fuel-gauge MMIO are not ported. */
++	return false;
+ 	if (!IOPMPowerSource::start(provider)) {
+ 		return false;
+ 	}

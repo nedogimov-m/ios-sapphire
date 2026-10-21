@@ -1,3 +1,13 @@
+# ios-redfin — Pixel 5 bring-up
+
+Pixel 5 boots XNU 8796 into a static Darwin PID1 from RAM. CPU0, IRQ/SGI,
+BSD/md0 and entry into EL0 are observed; `/dev/console` startup is under
+investigation. Kernel logs are recovered automatically through Android pstore.
+Full iOS/SpringBoard is not running on redfin yet.
+
+Build and temporary boot instructions: [ports/redfin/README.md](ports/redfin/README.md).
+The original Sapphire documentation follows as reference.
+
 # ios-sapphire
 
 **Apple's iOS 16 running on a Redmi Note 13 4G.**

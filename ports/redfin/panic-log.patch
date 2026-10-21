@@ -1,0 +1,34 @@
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -2,7 +2,11 @@
+ #include <arm64/sweet_early.h>
+ 
+ #if defined(SWEET)
+-void sweet_early_putc(char c) { (void)c; }
++#include <kern/misc_protos.h>
++extern void redfin_log_putc(char c);
++static unsigned redfin_panicking;
++
++void sweet_early_putc(char c) { redfin_log_putc(c); }
+ void sweet_early_mark(unsigned int stage, const char *label)
+ {
+ 	(void)stage;
+@@ -10,8 +14,15 @@
+ }
+ void sweet_early_panic(const char *fmt, va_list *args)
+ {
+-	(void)fmt;
+-	(void)args;
++	if (redfin_panicking || fmt == NULL || args == NULL) return;
++	redfin_panicking = 1;
++	const char *banner = "\nREDFIN PANIC: ";
++	while (*banner) redfin_log_putc(*banner++);
++	va_list copy;
++	va_copy(copy, *args);
++	_doprnt(fmt, &copy, sweet_early_putc, 16);
++	va_end(copy);
++	redfin_log_putc('\n');
+ }
+ void sweet_early_relocate(uint64_t base) { (void)base; }
+ void sweet_early_disable(void) {}

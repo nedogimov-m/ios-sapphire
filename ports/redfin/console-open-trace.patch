@@ -1,0 +1,104 @@
+diff --git a/bsd/dev/arm/cons.c b/bsd/dev/arm/cons.c
+--- a/bsd/dev/arm/cons.c
++++ b/bsd/dev/arm/cons.c
+@@ -51,7 +51,14 @@
+ int
+ cnopen(__unused dev_t dev, int flag, int devtype, struct proc *pp)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: cnopen entered\n");
++#endif
+ 	dev = cndev();
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: cndev resolved %d:%d\n", major(dev), minor(dev));
++#endif
++
+ 	return (*cdevsw[major(dev)].d_open)(dev, flag, devtype, pp);
+ }
+ 
+diff --git a/bsd/dev/arm/km.c b/bsd/dev/arm/km.c
+--- a/bsd/dev/arm/km.c
++++ b/bsd/dev/arm/km.c
+@@ -79,8 +79,15 @@
+ 	}
+ 
+ 	tp = km_tty[unit];
+-
+-	tty_lock(tp);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: kmopen before tty_lock tp=%p\n", tp);
++#endif
++
++	tty_lock(tp);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: kmopen tty_lock acquired\n");
++#endif
++
+ 
+ 	tp->t_oproc = kmstart;
+ 	tp->t_param = NULL;
+@@ -101,7 +108,14 @@
+ 
+ 	tp->t_state |= TS_CARR_ON;      /* lie and say carrier exists and is
+ 	                                 * on. */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: linesw open begin\n");
++#endif
+ 	ret = ((*linesw[tp->t_line].l_open)(dev, tp));
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: linesw open returned\n");
++#endif
++
+ 	{
+ 		PE_Video        video;
+ 		wp = &tp->t_winsize;
+@@ -115,9 +129,19 @@
+ 		tty_unlock(tp);         /* XXX race window */
+ 
+ 		bzero(&video, sizeof(video));
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: PE_current_console begin\n");
++#endif
+ 		PE_current_console(&video);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: PE_current_console done\n");
++#endif
++
+ 
+ 		tty_lock(tp);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(pp) == 1) printf("REDFIN OPEN: kmopen tty relock acquired\n");
++#endif
+ 
+ 		if (serialmode & SERIALMODE_OUTPUT) {
+ 			wp->ws_col = 80;
+diff --git a/bsd/vfs/vfs_syscalls.c b/bsd/vfs/vfs_syscalls.c
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -4583,7 +4583,14 @@
+ 		}
+ 	}
+ 
+-	if ((error = vn_open_auth(ndp, &flags, vap, authvp))) {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(p) == 1) printf("REDFIN OPEN: vn_open_auth begin\n");
++#endif
++	error = vn_open_auth(ndp, &flags, vap, authvp);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(p) == 1) printf("REDFIN OPEN: vn_open_auth returned\n");
++#endif
++	if (error) {
+ 		if (authvp != NULLVP) {
+ 			vnode_put(authvp);
+ 		}
+@@ -5066,6 +5073,10 @@
+ int
+ open(proc_t p, struct open_args *uap, int32_t *retval)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(p) == 1) printf("REDFIN OPEN: sys_open entered\n");
++#endif
++
+ 	__pthread_testcancel(1);
+ 	return open_nocancel(p, (struct open_nocancel_args *)uap, retval);
+ }

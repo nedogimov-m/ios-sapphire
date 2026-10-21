@@ -1,0 +1,68 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -6828,7 +6828,11 @@
+ 	 */
+ 	set_security_token(p);
+ 
+-	return execve(p, &init_exec_args, retval);
++	error = execve(p, &init_exec_args, retval);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	printf("REDFIN EXEC: result=%d\n", error);
++#endif
++	return error;
+ }
+ 
+ static const char * init_programs[] = {
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -15,6 +15,11 @@
+ #include <arm/thread.h>
+ #include <arm64/proc_reg.h>
+ #include <pexpert/pexpert.h>
++#include <pexpert/arm64/board_config.h>
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++static unsigned redfin_pid1_syscalls;
++#endif
+ 
+ #include <sys/kernel.h>
+ #include <sys/kern_debug.h>
+@@ -101,6 +106,14 @@
+ 	uthread_reset_proc_refcount(uthread);
+ 
+ 	code = arm_get_syscall_number(state);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	unsigned redfin_trace = 0;
++	if (proc_pid(proc) == 1 && redfin_pid1_syscalls < 17) {
++		unsigned sequence = ++redfin_pid1_syscalls;
++		if (sequence <= 16) redfin_trace = sequence;
++		if (redfin_trace) printf("REDFIN PID1: syscall %u enter code=%u\n", redfin_trace, code);
++	}
++#endif
+ 
+ #define unix_syscall_kprintf(x...)      /* kprintf("unix_syscall: " x) */
+ 
+@@ -204,6 +217,10 @@
+ 	assertf(prior == NULL, "thread_set_allocation_name(\"%s\") not cleared", kern_allocation_get_name(prior));
+ #endif /* DEBUG || DEVELOPMENT */
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (redfin_trace) printf("REDFIN PID1: syscall %u return code=%u error=%d value=%d\n",
++	    redfin_trace, code, error, uthread->uu_rval[0]);
++#endif
+ 	arm_prepare_syscall_return(callp, state, uthread, error);
+ 
+ 	uthread->uu_flag &= ~UT_NOTCANCELPT;
+@@ -264,6 +281,10 @@
+ 	/*
+ 	 * Get index into sysent table
+ 	 */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (proc_pid(proc) == 1 && redfin_pid1_syscalls && redfin_pid1_syscalls <= 16)
++		printf("REDFIN PID1: continuation code=%u error=%d value=%d\n", code, error, uthread->uu_rval[0]);
++#endif
+ 	arm_prepare_syscall_return(callp, regs, uthread, error);
+ 
+ 	uthread->uu_flag &= ~UT_NOTCANCELPT;

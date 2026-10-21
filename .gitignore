@@ -10,3 +10,8 @@ xnu/out-*/
 __pycache__/
 # boot logs: SSIDs nearby, device identifiers
 logs/
+
+# Pixel 5 generated artifacts
+ports/redfin/out/
+.DS_Store
+.serena/

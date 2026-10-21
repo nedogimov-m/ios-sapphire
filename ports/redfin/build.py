@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""Build a Pixel 5 boot-v3 diagnostic image or XNU plus a static Darwin PID1.
+
+No device commands are executed. XNU requires the redfin kernel overlay.
+"""
+import argparse
+import gzip
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import struct
+import subprocess
+import sys
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent
+PAGE = 4096
+
+
+def padded(data, alignment=PAGE):
+    return data + bytes((-len(data)) % alignment)
+
+
+def boot_v3(image, os_version):
+    # AOSP bootimg.h boot_img_hdr_v3: 1580 bytes, 4096-byte pages.
+    cpio = b'070701' + b''.join(f'{v:08x}'.encode() for v in
+        (0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 11, 0)) + b'TRAILER!!!\0'
+    ramdisk = gzip.compress(padded(padded(cpio, 4), 512), mtime=0)
+    cmdline = b'console=null'
+    header = b'ANDROID!' + struct.pack('<9I', len(image), len(ramdisk),
+        os_version, 1580, 0, 0, 0, 0, 3) + cmdline.ljust(1536, b'\0')
+    assert len(header) == 1580
+    return padded(header) + padded(image) + padded(ramdisk)
+
+
+def run(args):
+    subprocess.run([str(a) for a in args], check=True)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--out', type=Path, default=HERE / 'out')
+    p.add_argument('--stock-boot', type=Path, required=True,
+        help='saved active-slot boot.img; retain its OS version/security patch metadata')
+    p.add_argument('--cross-prefix', default=os.environ.get('CROSS_COMPILE', 'aarch64-elf-'))
+    p.add_argument('--splash', action='store_true', help=
+        'EXPERIMENTAL: draw at the live FDT splash reservation start; scanout is unverified')
+    p.add_argument('--stride', type=int, default=4320, help='bytes per row; used only with --splash')
+    p.add_argument('--seconds', type=int, default=30, help='time before PSCI system reset')
+    p.add_argument('--kernel', type=Path, help='kernel built with ports/redfin/redfin.patch')
+    p.add_argument('--dtb', type=Path, help='validated live Redfin DTB, required with --kernel')
+    p.add_argument('--memory-base', type=lambda x: int(x, 0))
+    p.add_argument('--memory-size', type=lambda x: int(x, 0))
+    p.add_argument('--boot-mpidr', type=lambda x: int(x, 0), default=0)
+    p.add_argument('--trace', action='store_true', help='enable verbose kernel kprintf tracing')
+    p.add_argument('--watchdog-seconds', type=int, default=28,
+        help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
+    a = p.parse_args()
+    if not 4320 <= a.stride <= 16384 or a.stride % 4:
+        p.error('--stride must be a multiple of 4 in [4320, 16384]')
+    if not 5 <= a.seconds <= 300:
+        p.error('--seconds must be in [5, 300]')
+    if not 10 <= a.watchdog_seconds <= 29:
+        p.error('--watchdog-seconds must be in [10, 29] (20-bit hardware counter)')
+    with a.stock_boot.open('rb') as stock:
+        stock_header = stock.read(44)
+    if len(stock_header) != 44 or stock_header[:8] != b'ANDROID!' or struct.unpack_from('<I', stock_header, 40)[0] != 3:
+        p.error('--stock-boot must be an Android boot image v3')
+    os_version = struct.unpack_from('<I', stock_header, 16)[0]
+    if not os_version:
+        p.error('stock boot image has no OS version/security patch metadata')
+    tools = {name: shutil.which(a.cross_prefix + name) for name in ('gcc', 'objcopy', 'nm', 'readelf')}
+    if not all(tools.values()):
+        p.error('missing AArch64 toolchain: brew install aarch64-elf-gcc (or --cross-prefix)')
+    clang = shutil.which('clang')
+    if not clang:
+        p.error('clang is required to assemble the Darwin PID1')
+    lz4 = shutil.which('lz4')
+    if not lz4:
+        p.error('lz4 is required for the verified Pixel boot format: brew install lz4')
+    out = a.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    init_source = (ROOT / 'tools/sweet-init.S').read_text().replace('SWEET', 'REDFIN')
+    (out / 'init.S').write_text(init_source)
+    run([clang, '-target', 'arm64-apple-ios16.0', '-c', out / 'init.S', '-o', out / 'init.o'])
+    run([sys.executable, ROOT / 'tools/mkinit.py', out / 'init.o', out / 'init'])
+    payload = b''
+    if a.kernel:
+        if a.dtb is None or a.memory_base is None or a.memory_size is None:
+            p.error('--kernel requires --dtb, --memory-base and --memory-size')
+        sys.path.insert(0, str(HERE))
+        from memory import validate_window
+        import mkadt
+        from tools import adt
+        validate_window(a.dtb.read_bytes(), a.memory_base, a.memory_size)
+        tree = mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr)
+        from memory import _tree
+        nodes, _ = _tree(a.dtb.read_bytes())
+        # Pixel's two ramoops areas are swapped/decrypted by Android. Mirror the
+        # console ABI in both; never write its encryption metadata or partitions.
+        consoles = []
+        for name in ('ramoops_region@B7E41000', 'alt_ramoops_region@B8241000'):
+            reg = nodes.get('/reserved-memory/' + name, {}).get('reg', b'')
+            if len(reg) != 16:
+                p.error('live FDT must contain both Pixel ramoops reservations')
+            base, size = struct.unpack('>QQ', reg)
+            if size != 0x400000:
+                p.error('unexpected Pixel ramoops reservation size')
+            consoles.extend((base + 0x280000, 0x100000))
+        tree.children.append(mkadt.node('redfin-log', [('reg', mkadt.u64(*consoles))]))
+        watchdogs = [props for props in nodes.values()
+            if b'qcom,msm-watchdog\0' in props.get('compatible', b'')]
+        if len(watchdogs) != 1 or watchdogs[0].get('reg') != struct.pack('>II', 0x17c10000, 0x1000):
+            p.error('live FDT watchdog must match the verified Redfin controller')
+        tree.children.append(mkadt.node('redfin-watchdog', [
+            ('reg', mkadt.u64(0x17c10000, 0x1000))]))
+        # XNU's panic machinery requires pram even on a DEVELOPMENT kernel.
+        # Use one unused dump area below the primary console, inside ramoops.
+        tree.children.append(mkadt.node('pram', [
+            ('reg', mkadt.u64(consoles[0] - 0x80000, 0x80000))]))
+        chosen = next(child for child in tree.children if child.name == 'chosen')
+        chosen.props.append(('embedded-panic-log-size', 0, mkadt.u32(0x80000)))
+        if a.splash:
+            regs = nodes.get('/reserved-memory/cont_splash_region', {}).get('reg', b'')
+            if len(regs) != 16:
+                p.error('live FDT must contain a splash reservation')
+            fb_base, fb_size = struct.unpack('>QQ', regs)
+            if fb_size < a.stride * 2340:
+                p.error('splash reservation cannot hold the requested console')
+            tree.children.append(mkadt.node('sweet-fbcon', [
+                ('reg', mkadt.u64(fb_base, fb_size)), ('width', mkadt.u32(1080)),
+                ('height', mkadt.u32(2340)), ('stride', mkadt.u32(a.stride))]))
+        (out / 'redfin.adt').write_bytes(adt.serialize(tree))
+        command_line = ('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
+            'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0')
+        if a.trace:
+            command_line += ' -enable_kprintf_spam'
+        run([sys.executable, ROOT / 'tools/mkpayload.py', a.kernel, out / 'redfin.adt',
+            out / 'payload.bin', '--ramdisk', out / 'init', '--cmdline',
+            command_line])
+        payload = (out / 'payload.bin').read_bytes()
+    (out / 'config.h').write_text(f'#define DIAG_SPLASH {int(a.splash)}\n'
+        f'#define DIAG_STRIDE {a.stride}\n#define DIAG_SECONDS {a.seconds}\n'
+        f'#define WATCHDOG_SECONDS {a.watchdog_seconds}\n'
+        f'#define XNU_PAYLOAD_SIZE {len(payload)}ULL\n')
+    flags = ['-O2', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-pic',
+        '-mgeneral-regs-only', '-mstrict-align', '-fno-stack-protector',
+        '-fno-tree-loop-distribute-patterns', '-Wall', '-Wextra', '-Werror', '-I', out]
+    objects = []
+    for src in (ROOT / 'shim/start.S', HERE / 'diag.c', HERE / 'fdt.c', HERE / 'loader.c', HERE / 'watchdog.c'):
+        obj = out / (src.stem + '.o')
+        run([tools['gcc'], *flags, '-c', src, '-o', obj])
+        objects.append(obj)
+    relocs = subprocess.check_output([tools['readelf'], '-r', *map(str, objects[1:])], text=True)
+    if 'R_AARCH64_ABS' in relocs:
+        raise SystemExit('C objects contain absolute addresses: image cannot relocate')
+    run([tools['gcc'], *flags, '-static', '-T', ROOT / 'shim/shim.ld',
+        '-Wl,--build-id=none', '-Wl,--no-warn-rwx-segments', '-Wl,-N',
+        *objects, '-o', out / 'redfin-diag.elf'])
+    run([tools['objcopy'], '-O', 'binary', out / 'redfin-diag.elf', out / 'Image'])
+    symbols = subprocess.check_output([tools['nm'], str(out / 'redfin-diag.elf')], text=True)
+    image_end = next(int(line.split()[0], 16) for line in symbols.splitlines()
+                     if line.split()[-1] == '_end')
+    image = (out / 'Image').read_bytes()
+    if len(image) > image_end or struct.unpack_from('<Q', image, 16)[0] != image_end:
+        raise SystemExit('invalid Linux Image image_size')
+    image = image.ljust(image_end, b'\0')
+    if payload:
+        image = padded(image, 16384) + payload
+        image = image[:16] + struct.pack('<Q', len(image)) + image[24:]
+    # Pixel ABL rejects text_offset=0; the code itself remains PC-relative.
+    image = image[:8] + struct.pack('<Q', 0x80000) + image[16:]
+    (out / 'Image').write_bytes(image)
+    run([lz4, '-f', '-q', '-B7', '-BI', '--no-content-size', out / 'Image', out / 'Image.lz4'])
+    # Match the stock Pixel LZ4 frame plus trailing uncompressed-size word.
+    compressed = (out / 'Image.lz4').read_bytes() + struct.pack('<I', len(image))
+    image_name = 'redfin-xnu.img' if payload else 'redfin-diag.img'
+    (out / image_name).write_bytes(boot_v3(compressed, os_version))
+    artifacts = ('Image', 'redfin-diag.elf', image_name, 'init')
+    manifest = dict(stage='XNU/PID1 execution unverified' if payload else 'diagnostics only',
+        splash_reservation_assumption=a.splash, stride=a.stride, seconds=a.seconds,
+        linux_text_offset='0x80000', kernel_encoding='LZ4 frame + LE32 size',
+        upstream=subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip(),
+        sha256={name: hashlib.sha256((out / name).read_bytes()).hexdigest() for name in artifacts})
+    (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    print(f'{out}/{image_name}: Android boot v3, execution unverified')
+    print(f'{out}/init: static arm64 Darwin PID1')
+
+
+if __name__ == '__main__':
+    main()

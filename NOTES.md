@@ -1,5 +1,63 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN bring-up — 2026-10-21
+
+Base: ios-sapphire `d7858e985c4fd2fd41c2c4300c5279cbc8eee178`, reference
+ios-topaz `89451b811a4e6cc5cdcf734c45887163d92c599e`. XNU is pinned to
+`xnu-8796.141.3` / `1b191cb58250d0705d8a51287127505aa4bc0789`, blacktop
+builder `663906528d1cd5ea8fde7de6f16de73db9511549`.
+
+Observed: unlocked Pixel 5, root ADB; saved active-slot boot/vendor_boot/DTBO
+and verified SHA256 against the device. Dumps and identifiers remain ignored.
+Live DTB confirms GIC 0x17a00000/0x17a60000, MPIDRs 0x000..0x700, timer INTID19,
+UFS 0x01d84000. Validated RAM window: 0x180000000+0x80000000, one live bank,
+no fixed reservations. Source references: `ports/redfin/HARDWARE.md`.
+
+Temporary diagnostic boot works with boot v3, Image text_offset=0x80000,
+LZ4 frame plus LE32 uncompressed size. Changing only text_offset from zero to
+0x80000 changed ABL rejection to successful boot. User confirmed the visible
+REDFIN DIAGNOSTICS screen; splash0xa0000000, 1080x2340, pitch4320 works here.
+
+XNU builds locally with Xcode27.1 and privately extracted KDK (no cloud build
+or system installation). Initial kernel SHA256:
+3d33adecd4dda69ad1c8a1a6ed72759bd2cce94c672b5f29c25e8239289cef71.
+CPU-trace kernel: ed3909aae905e10129a8832f49d35ecb878de65fd4ca14f897a14762ba1d053c.
+Latest build/hash/log paths are in `research/redfin-build/result.json`.
+
+Redfin overlay disables fixed early framebuffer writes and inherited
+UFS/display initialization, and supports one CPU. Static Mach-O PID1 and
+mockfs payload build without IPSW.
+
+Observed XNU: Darwin banner, pmap/VM, GIC INTID19, machine_init/clock_config/
+lockdown, platform expert, AKS, IOSurface and HID. CPU nubs are published but
+SweetCPU::start was not reached before the initial hang. Found another unsafe
+autostart: SweetBattery runs SM6225 cpufreq and I2C. Disable with
+sweetcpufreq=0 sweetbattery=0; permanent driver disable overlay is prepared.
+
+Automatic logs work: DBGC console rings mirrored into both reserved ramoops
+banks survive reset; boot-cycle.py retrieves Android pstore and a manifest.
+First successful capture: `logs/redfin/ramlog-first/after/console-ramoops-0`.
+Do not read /dev/access-ramoops by default: it can claim the alt region during
+Android's decrypt service and prevent use_alt=1. This race was observed and
+removed. Hardware watchdog starts after relocation: bark28s, bite31s. Its
+20-bit counter prohibits the initially considered 60s timeout.
+
+Current boot args:
+`debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress -enable_kprintf_spam rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0`.
+Next: resolve remaining CPU startup, then observe
+`REDFIN userspace: init running as PID 1` and heartbeat. Full iOS storage,
+touch/USB/graphics/firmware work remains. No partitions were flashed.
+
+Later observed: disabling SweetBattery and cpufreq resolved the IOKit hang.
+CPU0 registers and starts, SGI1 verified, BSD mounts md0 and executes PID1.
+`logs/redfin/pid1trace/xnu.txt` records `REDFIN EXEC: result=0` and
+`REDFIN PID1: syscall 1 enter code=5`. This proves execution in EL0; opening
+/dev/console is the next blocker and the heartbeat has not yet appeared.
+Panic output now goes directly to the persistent ring. The host no longer
+opens the raw alt bank during normal recovery; automatic pstore collection
+works without human screen reports. WDT pets are limited to output progress
+for the first 60s, then reset follows within 31s.
+
 ## SAPPHIRE port (Redmi Note 13 4G, sapphire/sapphiren) - handoff 2026-10-19
 
 Branch `sapphire`, forked from ios-topaz `topaz` at 5b208e0.

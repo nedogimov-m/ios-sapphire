@@ -1,0 +1,708 @@
+{
+  "device": "redfin",
+  "soc": "SM7250 (lito), Snapdragon 765G",
+  "sources": {
+    "qcom_commit": "afc98e2bb0716a57bf4f8d2b6191378dd7123ce4",
+    "qcom_dts": "https://android.googlesource.com/kernel/msm-extra/devicetree/+/afc98e2bb0716a57bf4f8d2b6191378dd7123ce4/qcom/lito.dtsi",
+    "google_commit": "500b3a2059c1eec0fec08ec56add06320ea901a8",
+    "google_dts": "https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/arch/arm64/boot/dts/google/",
+    "boardconfig": "https://android.googlesource.com/device/google/redbull/+/3595d0b214eeeddf87e2c37477e3e74f831eca82/BoardConfig-common.mk",
+    "gcc": "https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/clk/qcom/gcc-lito.c"
+  },
+  "boot_image": {
+    "header_version": 3,
+    "page_size": 4096,
+    "kernel_base": "0x00000000",
+    "requires_vendor_boot_and_dtbo_context": true,
+    "diagnostic_accepted_format": {
+      "header_version": 3,
+      "kernel_compression": "standard LZ4 frame, followed by 4-byte LE uncompressed size",
+      "arm64_text_offset": "0x80000",
+      "arm64_flags": "0xa",
+      "observation": "2026-10-21 temporary fastboot boot returned OKAY after changing only ARM64 Image text_offset from 0 to 0x80000 in the otherwise identical compressed diagnostic image. Execution/display not yet confirmed.",
+      "isolated_raw_text_offset_0x80000_tested": false
+    }
+  },
+  "cpus": {
+    "mpidr_affinity": [
+      "0x000",
+      "0x100",
+      "0x200",
+      "0x300",
+      "0x400",
+      "0x500",
+      "0x600",
+      "0x700"
+    ],
+    "performance_domains": [
+      [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ]
+    ],
+    "psci": {
+      "compatible": "arm,psci-1.0",
+      "conduit": "smc"
+    }
+  },
+  "gic": {
+    "version": 3,
+    "distributor_base": "0x17a00000",
+    "distributor_size": "0x10000",
+    "redistributor_base": "0x17a60000",
+    "redistributor_size": "0x100000",
+    "redistributor_stride": "0x20000"
+  },
+  "timer": {
+    "frequency_hz": 19200000,
+    "secure_physical_intid": 17,
+    "nonsecure_physical_intid": 18,
+    "virtual_intid": 19,
+    "hypervisor_intid": 16,
+    "trigger": "level-low"
+  },
+  "ufs": {
+    "base": "0x01d84000",
+    "size": "0x3000",
+    "spi": 265,
+    "intid": 297,
+    "phy": "qcom,ufs-phy-qmp-v4-lito",
+    "phy_base": "0x01d87000",
+    "phy_size": "0xe00",
+    "ice_base": "0x01d90000",
+    "ice_size": "0x8000",
+    "lanes": 2,
+    "gcc_base": "0x00100000",
+    "gcc_reset_offset": "0x77000",
+    "gcc_clock_offsets": {
+      "axi_src": "0x77024",
+      "ice_src": "0x7706c",
+      "unipro_src": "0x77084",
+      "aux_src": "0x770a0",
+      "ahb": "0x77018",
+      "axi": "0x77010",
+      "ice": "0x77064",
+      "unipro": "0x7705c",
+      "aux": "0x7709c",
+      "tx0": "0x7701c",
+      "rx0": "0x77020",
+      "rx1": "0x770b8",
+      "ref": "0x8c000"
+    },
+    "cold_init_verified": false,
+    "handoff_strategy": "Attempt preservation of ABL PHY/clocks/host only after checking HCE/HCS and outstanding transfer state; no live register state captured yet."
+  },
+  "usb": {
+    "controller": "snps,dwc3",
+    "base": "0x0a600000",
+    "size": "0xcd00",
+    "spi": 240,
+    "intid": 272,
+    "smmu_stream_id": "0xe0",
+    "mode": "drd"
+  },
+  "display": {
+    "width": 1080,
+    "height": 2340,
+    "panel_mode": "DSI command, DSC",
+    "panel_bpp": 24,
+    "splash_reservation_base": "0xa0000000",
+    "splash_reservation_size": "0x02300000",
+    "scanout_physical_address": null,
+    "scanout_stride": null,
+    "scanout_pixel_format": null,
+    "sde_base": "0x0ae00000",
+    "sspp_offsets": [
+      "0x5000",
+      "0x7000",
+      "0x25000",
+      "0x27000",
+      "0x29000"
+    ]
+  },
+  "memory": {
+    "runtime_fdt_required": true,
+    "banks": [
+      {
+        "base": "0x80000000",
+        "size": "0x3bb00000"
+      },
+      {
+        "base": "0x180000000",
+        "size": "0x100000000"
+      },
+      {
+        "base": "0xc0000000",
+        "size": "0xc0000000"
+      }
+    ],
+    "reservations": [
+      {
+        "name": "hyp_region@80000000",
+        "reg": [
+          [
+            "0x80000000",
+            "0x600000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "xbl_aop_region@80700000",
+        "reg": [
+          [
+            "0x80700000",
+            "0x160000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "reserved-memory@80860000",
+        "reg": [
+          [
+            "0x80860000",
+            "0x20000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "res_xbl_uefi_log_region@80880000",
+        "reg": [
+          [
+            "0x80880000",
+            "0x14000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "sec_apps_region@808ff000",
+        "reg": [
+          [
+            "0x808ff000",
+            "0x1000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "smem_region@80900000",
+        "reg": [
+          [
+            "0x80900000",
+            "0x200000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "removed_region@80b00000",
+        "reg": [
+          [
+            "0x80b00000",
+            "0x1300000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "qtee_apps_region@81e00000",
+        "reg": [
+          [
+            "0x81e00000",
+            "0x2600000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_camera_region@86000000",
+        "reg": [
+          [
+            "0x86000000",
+            "0x500000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_npu_region@86500000",
+        "reg": [
+          [
+            "0x86500000",
+            "0x500000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_video_region@86a00000",
+        "reg": [
+          [
+            "0x86a00000",
+            "0x500000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_cdsp_region@87400000",
+        "reg": [
+          [
+            "0x87400000",
+            "0x1e00000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_adsp_region@89200000",
+        "reg": [
+          [
+            "0x89200000",
+            "0x2800000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_wlan_fw_region@8ba00000",
+        "reg": [
+          [
+            "0x8ba00000",
+            "0x200000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_ipa_fw_region@8bc00000",
+        "reg": [
+          [
+            "0x8bc00000",
+            "0x10000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_ipa_gsi_region@8bc10000",
+        "reg": [
+          [
+            "0x8bc10000",
+            "0x5400"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "pil_gpu_region@8bc15400",
+        "reg": [
+          [
+            "0x8bc15400",
+            "0x2000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "reserved_pil_mem_region@8bc17400",
+        "reg": [
+          [
+            "0x8bc17400",
+            "0x3e8c00"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "modem_wlan_region@8c000000",
+        "reg": [
+          [
+            "0x8c000000",
+            "0x11800000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "qseecom_region",
+        "reg": [],
+        "no-map": false,
+        "reusable": true,
+        "size": [
+          "0x0",
+          "0x1400000"
+        ],
+        "alignment": [
+          "0x0",
+          "0x400000"
+        ],
+        "alloc-ranges": [
+          "0x0",
+          "0x0",
+          "0x0",
+          "0xffffffff"
+        ]
+      },
+      {
+        "name": "qseecom_ta_region",
+        "reg": [],
+        "no-map": false,
+        "reusable": true,
+        "size": [
+          "0x0",
+          "0x1000000"
+        ],
+        "alignment": [
+          "0x0",
+          "0x400000"
+        ],
+        "alloc-ranges": [
+          "0x0",
+          "0x0",
+          "0x0",
+          "0xffffffff"
+        ]
+      },
+      {
+        "name": "cdsp_sec_regions@9f400000",
+        "reg": [
+          [
+            "0x9f400000",
+            "0xc00000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "adsp_region",
+        "reg": [],
+        "no-map": false,
+        "reusable": true,
+        "size": [
+          "0x0",
+          "0xc00000"
+        ],
+        "alignment": [
+          "0x0",
+          "0x400000"
+        ],
+        "alloc-ranges": [
+          "0x0",
+          "0x0",
+          "0x0",
+          "0xffffffff"
+        ]
+      },
+      {
+        "name": "sdsp_region",
+        "reg": [],
+        "no-map": false,
+        "reusable": true,
+        "size": [
+          "0x0",
+          "0x400000"
+        ],
+        "alignment": [
+          "0x0",
+          "0x400000"
+        ],
+        "alloc-ranges": [
+          "0x0",
+          "0x0",
+          "0x0",
+          "0xffffffff"
+        ]
+      },
+      {
+        "name": "cdsp_region",
+        "reg": [],
+        "no-map": false,
+        "reusable": true,
+        "size": [
+          "0x0",
+          "0x400000"
+        ],
+        "alignment": [
+          "0x0",
+          "0x400000"
+        ],
+        "alloc-ranges": [
+          "0x0",
+          "0x0",
+          "0x0",
+          "0xffffffff"
+        ]
+      },
+      {
+        "name": "secure_display_region",
+        "reg": [],
+        "no-map": false,
+        "reusable": true,
+        "size": [
+          "0x0",
+          "0xa000000"
+        ],
+        "alignment": [
+          "0x0",
+          "0x400000"
+        ],
+        "alloc-ranges": [
+          "0x0",
+          "0x0",
+          "0x0",
+          "0xffffffff"
+        ]
+      },
+      {
+        "name": "cont_splash_region",
+        "reg": [
+          [
+            "0xa0000000",
+            "0x2300000"
+          ]
+        ],
+        "no-map": false,
+        "reusable": false
+      },
+      {
+        "name": "dfps_data_region@a2300000",
+        "reg": [
+          [
+            "0xa2300000",
+            "0x100000"
+          ]
+        ],
+        "no-map": false,
+        "reusable": false
+      },
+      {
+        "name": "disp_rdump_region@0xa0000000",
+        "reg": [
+          [
+            "0xa0000000",
+            "0x2300000"
+          ]
+        ],
+        "no-map": false,
+        "reusable": false
+      },
+      {
+        "name": "mem_dump_region",
+        "reg": [],
+        "no-map": false,
+        "reusable": true,
+        "size": [
+          "0x0",
+          "0x2800000"
+        ],
+        "alloc-ranges": [
+          "0x0",
+          "0x0",
+          "0x0",
+          "0xffffffff"
+        ]
+      },
+      {
+        "name": "linux,cma",
+        "reg": [],
+        "no-map": false,
+        "reusable": true,
+        "size": [
+          "0x0",
+          "0x2000000"
+        ],
+        "alignment": [
+          "0x0",
+          "0x400000"
+        ],
+        "alloc-ranges": [
+          "0x0",
+          "0x0",
+          "0x0",
+          "0xffffffff"
+        ]
+      },
+      {
+        "name": "debug_info@B7E01000",
+        "reg": [
+          [
+            "0xb7e01000",
+            "0x40000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "ramoops_region@B7E41000",
+        "reg": [
+          [
+            "0xb7e41000",
+            "0x400000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "alt_ramoops_region@B8241000",
+        "reg": [
+          [
+            "0xb8241000",
+            "0x400000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "ramoops_meta_region@0xB8641000",
+        "reg": [
+          [
+            "0xb8641000",
+            "0x1000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "ramdumplog_region@0xb8642000",
+        "reg": [
+          [
+            "0xb8642000",
+            "0x10000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      },
+      {
+        "name": "kregistry_mem@C8000000",
+        "reg": [
+          [
+            "0xc8000000",
+            "0x10000"
+          ]
+        ],
+        "no-map": true,
+        "reusable": false
+      }
+    ],
+    "source_memory_reg_is_placeholder": true,
+    "warning": "Snapshot captured under Android. Revalidate the incoming ABL FDT and loader/payload/initrd/ADT overlap on every boot. Never overwrite RAM while Android is running.",
+    "fdt_header_reservations": [],
+    "linux_iomem_reserved": [
+      {
+        "base": "0xa0000000",
+        "size": "0x2400000"
+      },
+      {
+        "base": "0xa9470000",
+        "size": "0xe0000"
+      },
+      {
+        "base": "0xae280000",
+        "size": "0xa4000"
+      },
+      {
+        "base": "0xafe00000",
+        "size": "0x1ee3000"
+      },
+      {
+        "base": "0xedc00000",
+        "size": "0x12000000"
+      },
+      {
+        "base": "0x275db8000",
+        "size": "0x1048000"
+      },
+      {
+        "base": "0x276e20000",
+        "size": "0x7fe0000"
+      },
+      {
+        "base": "0x27ee1d000",
+        "size": "0x1000"
+      },
+      {
+        "base": "0x27ee20000",
+        "size": "0x1000"
+      },
+      {
+        "base": "0x27ee21000",
+        "size": "0x1000"
+      },
+      {
+        "base": "0x27ee22000",
+        "size": "0x3000"
+      },
+      {
+        "base": "0x27ee25000",
+        "size": "0x11da000"
+      },
+      {
+        "base": "0x27ffff000",
+        "size": "0x1000"
+      }
+    ],
+    "recommended_xnu_window": {
+      "base": "0x180000000",
+      "size": "0x80000000",
+      "alignment": "0x4000",
+      "status": "candidate for temporary boot; revalidate handoff image overlaps",
+      "evidence": "Inside one live RAM bank; no fixed FDT, FDT header or Linux iomem reserved overlap. Dynamic FDT pools constrain allocation below 4 GiB."
+    }
+  },
+  "runtime_observations": {
+    "android_adb_available": true,
+    "bootloader_unlocked": true,
+    "reported_ram_gb": 8,
+    "adb_root_available": true,
+    "fdt_read_with_root": true,
+    "iomem_read_with_root": true,
+    "live_fdt_mmio_matches_sources": true,
+    "live_fdt_cpu_mpidrs_match_sources": true,
+    "live_fdt_gic_matches_sources": true,
+    "live_fdt_timer_matches_sources": true,
+    "scanout_state_obtained": false,
+    "ufs_hce_hcs_state_obtained": false,
+    "evidence": "2026-10-21 root ADB captures; raw FDT and iomem are kept in ignored research/redfin-root/",
+    "diagnostic_temporary_boot_accepted": true,
+    "diagnostic_execution_confirmed": false
+  }
+}

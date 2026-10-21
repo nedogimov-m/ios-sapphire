@@ -1,0 +1,93 @@
+diff --git a/osfmk/arm/machine_routines_common.c b/osfmk/arm/machine_routines_common.c
+--- a/osfmk/arm/machine_routines_common.c
++++ b/osfmk/arm/machine_routines_common.c
+@@ -1425,11 +1425,35 @@
+ void
+ machine_init(void)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: debug_log_init begin\n");
++#endif
+ 	debug_log_init();
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: debug_log_init done\n");
++#endif
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: clock_config begin\n");
++#endif
+ 	clock_config();
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: clock_config done\n");
++#endif
+ 	is_clock_configured = TRUE;
+ 	if (debug_enabled) {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: pmap_map_globals begin\n");
++#endif
+ 		pmap_map_globals();
+-	}
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: pmap_map_globals done\n");
++#endif
++	}
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: ml_lockdown_init begin\n");
++#endif
+ 	ml_lockdown_init();
+-}
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: ml_lockdown_init done\n");
++#endif
++}
+diff --git a/osfmk/kern/clock.c b/osfmk/kern/clock.c
+--- a/osfmk/kern/clock.c
++++ b/osfmk/kern/clock.c
+@@ -65,6 +65,7 @@
+ #include <mach/mach_types.h>
+ 
+ #include <kern/spl.h>
++#include <pexpert/pexpert.h>
+ #include <kern/sched_prim.h>
+ #include <kern/thread.h>
+ #include <kern/clock.h>
+@@ -356,13 +357,37 @@
+ void
+ clock_config(void)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: clock_lock begin\n");
++#endif
+ 	lck_ticket_init(&clock_lock, &clock_lock_grp);
+-
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: clock_lock done\n");
++#endif
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: clock_oldconfig begin\n");
++#endif
+ 	clock_oldconfig();
+-
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: clock_oldconfig done\n");
++#endif
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: ntp_init begin\n");
++#endif
+ 	ntp_init();
+-
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: ntp_init done\n");
++#endif
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: ticks_per_sec begin\n");
++#endif
+ 	nanoseconds_to_absolutetime((uint64_t)NSEC_PER_SEC, &ticks_per_sec);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("REDFIN TRACE: ticks_per_sec done\n");
++#endif
+ }
+ 
+ /*

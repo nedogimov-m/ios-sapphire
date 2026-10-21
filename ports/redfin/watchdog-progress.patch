@@ -1,0 +1,54 @@
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -712,6 +712,9 @@
+ static struct redfin_ramlog *redfin_logs[2];
+ static uint32_t redfin_log_capacity[2];
+ static unsigned redfin_log_count;
++/* Only RESET is written, for at most 60 seconds after RAM serial setup. */
++static volatile uint32_t *redfin_watchdog_reset;
++static uint64_t redfin_watchdog_deadline, redfin_watchdog_last, redfin_watchdog_frequency;
+ 
+ void
+ redfin_log_putc(char c)
+@@ -729,6 +732,14 @@
+ 		log->start = start;
+ 		if (size < capacity) log->size = size + 1;
+ 	}
++	if (c == '\n' && redfin_watchdog_reset) {
++		uint64_t now = __builtin_arm_rsr64("CNTPCT_EL0");
++		if (now < redfin_watchdog_deadline &&
++		    now - redfin_watchdog_last >= redfin_watchdog_frequency) {
++			*redfin_watchdog_reset = 1;
++			redfin_watchdog_last = now;
++		}
++	}
+ 	__asm__ volatile("dsb sy" ::: "memory");
+ 	__builtin_arm_wsr64("DAIF", daif);
+ }
+@@ -776,6 +787,25 @@
+ 		redfin_logs[i]->signature = 0x43474244;
+ 	}
+ 	redfin_log_count = count;
++	DTEntry watchdog;
++	const uint64_t *watchdog_reg;
++	unsigned int watchdog_size;
++	if (SecureDTLookupEntry(NULL, "/redfin-watchdog", &watchdog) == kSuccess &&
++	    SecureDTGetProperty(watchdog, "reg", (const void **)&watchdog_reg, &watchdog_size) == kSuccess &&
++	    watchdog_size == 2 * sizeof(uint64_t) &&
++	    watchdog_reg[0] == 0x17c10000ULL && watchdog_reg[1] == 0x1000) {
++		uint64_t frequency = __builtin_arm_rsr64("CNTFRQ_EL0");
++		uint64_t now = __builtin_arm_rsr64("CNTPCT_EL0");
++		if (frequency && frequency < 1000000000ULL && now < UINT64_MAX - frequency * 60) {
++			vm_offset_t mapping = ml_io_map(watchdog_reg[0], watchdog_reg[1]);
++			if (mapping) {
++				redfin_watchdog_reset = (volatile uint32_t *)(mapping + 4);
++				redfin_watchdog_frequency = frequency;
++				redfin_watchdog_last = now;
++				redfin_watchdog_deadline = now + frequency * 60;
++			}
++		}
++	}
+ 	register_serial_functions(&redfin_log_serial);
+ 	const char *banner = "\n[REDFIN RAMLOG v1: serial and console]\n";
+ 	while (*banner) redfin_log_putc(*banner++);
