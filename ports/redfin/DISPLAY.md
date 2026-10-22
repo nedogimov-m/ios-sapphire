@@ -100,3 +100,37 @@ source mappings immediately before guard pages. These checks do not establish
 device copy performance or physical camera alignment. The next device test
 is a temporary GUI8 `redfinfit=2` image with the existing 180-second graceful
 shutdown and authenticated framebuffer/touch capture.
+
+Automatic RAM capture check
+--------------------------
+
+Build the cutout experiment with `--display-fit cutout --capture-screen`.
+The bounded kernel capture needs no touch: two early positive presentations
+and the existing final snapshot are recorded automatically. After the normal
+authenticated recovery collection, run:
+
+```sh
+python3 ports/redfin/check-display-fit.py logs/redfin/CYCLE/xnu-console.txt
+python3 ports/redfin/decode-screen.py logs/redfin/CYCLE/xnu-console.txt --out logs/redfin/CYCLE/screens
+```
+
+The first command reads the log and reports JSON without writing files. It
+requires exactly one matching line from each service:
+
+```text
+REDFIN FB: fit 2 bilinear viewport 31,136 1017x2204 top-exclusion 136
+REDFIN HID: fit 2 inverse viewport 31,136 1017x2204
+```
+
+It reuses the strict capture decoder's chunk, order and CRC32 validation.
+Each 120×260 thumbnail samples physical pixels at `(9x+4,9y+4)`. Consequently,
+mode 2 must have black thumbnail rows 0–14, plus black columns 0–2 and
+116–119 in rows 15–259: 3515 black margin samples per frame. Every captured
+frame must satisfy those margins, and at least one frame must show nonblack
+content inside the viewport. A black final shutdown frame is allowed. The
+JSON includes the visible content's bounds, with exclusive right/bottom
+coordinates. Five host tests cover these checks and negative cases.
+
+This confirms the recorded RAM viewport, camera exclusion and rendered
+content without physical input. Physical camera alignment, panel corners,
+touch delivery and copy throughput need their own evidence.
