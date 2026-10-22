@@ -230,7 +230,7 @@ def main(argv=None):
                                          'early-return.patch', 'early-return-start.patch',
                                          'smp-log.patch', 'smp-return.patch', 'smp.patch',
                                          'early-bootid.patch', 'smp-eight.patch', 'smp-gui.patch',
-                                         'touch-overflow.patch'), 21):
+                                         'touch-overflow.patch', 'gpu-power.patch', 'display-fit.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

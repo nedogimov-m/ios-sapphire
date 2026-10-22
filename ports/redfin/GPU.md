@@ -69,8 +69,9 @@ requests `RPMH_REGULATOR_LEVEL_LOW_SVS` on `vdd_parent` before clearing
 `SW_COLLAPSE`. Its DT parser resolves both supply properties. The pinned
 `qcom,rpmh-regulator-levels.h` defines LOW_SVS as **64**, a consumer corner
 number, not microvolts or millivolts. Therefore a bare CX collapse-bit write
-does not yet reproduce the Redfin power sequence. No GPU power backend is
-implemented; firmware, GMU, GX, SMMU, reset and DMA writes remain disabled.
+does not reproduce the Redfin power sequence. The isolated CX power
+experiment described below supplies a bounded parent request before that
+write. Firmware, GMU, GX, SMMU, reset and DMA writes remain disabled there.
 
 The authenticated earlier RPMh observation found `cx.lvl` as ARC type3,
 address `0x30000`, aux version `0x1000`, 32 auxiliary bytes. Its raw
@@ -108,10 +109,35 @@ another master's temporary vote may disappear while CX is enabled.
 
 The touch backend is deliberately different: it votes a fixed PLDO VRM
 voltage/mode/enable triplet and verifies physical L17 state through SPMI.
-Its numeric values and physical proof cannot be reused for ARC. A future
-CX vote needs a source-backed current DRV2 floor or a demonstrably separate
-owned voter, checked ARC selector conversion, preservation of all existing
-active/sleep/wake votes, and fresh power completion evidence before the
-single CX GDSC write. Until that proof exists, the next GPU stage can only
-validate/report the parent chain, CMD-DB table and stable TCS snapshots;
-it must report parent power as unproved.
+Its numeric values and physical proof cannot be reused for ARC.
+
+### Isolated held CX experiment
+
+`--gpu-power-probe --return-bootloader` selects a separate CPU0/md0 test.
+It rejects GUI, UFS, splash, touch, USB, SMP and other diagnostic profiles.
+The live FDT parent/status phandles, regulator bounds and timeout must match
+before the builder emits a separate `/redfin-gpu-power` contract. The kernel
+checks that contract, the exact boot arguments, EL1/CPU0 and verified PMIC
+return before mapping the fixed GCC/GPUCC/RSC/GIC/CMD-DB ranges.
+
+`gpu-power.h` validates the complete table above and requests its **highest
+legal selector7/corner416**. This bounds the unknown inherited DRV2 request:
+no legal selector in the frozen table exceeds7, so the held request cannot
+lower that master's inherited level. This is deliberately above LOW_SVS;
+it is a short reset-bounded bring-up setting, not a runtime voltage policy.
+Every inherited enabled `cx.lvl` command must also have a legal selector.
+
+Both ACTIVE TCS slots must be idle/empty, all eight TCS snapshots stable and
+RSC IRQ37 masked/inactive. Only ACTIVE0 is written. Fresh local completion,
+command status and idle are required, then its transient registers/IRQ are
+cleared and all inherited templates rechecked. The ARC vote stays held until
+platform reset. Only then may the single CX `SW_COLLAPSE` clear occur; the
+separate live-DT hardware-status register `GPUCC+0x1540` must report power-on
+within the bounded poll. No vote-down or rollback of an uncertain transaction
+is attempted. GX, GMU, GPU core, SMMU, firmware and DMA remain untouched.
+
+Five host tests execute the actual leaf with malformed metadata, ownership,
+handoff, changed-template, write, IRQ/status/idle and domain-timeout faults.
+Native ARM64 build040531 succeeds. Device results are recorded in `NOTES.md`;
+this CX experiment by itself provides no graphics acceleration. The next
+stage is a separate reset-held GMU clock/counter/TCM test in [GMU.md](GMU.md).

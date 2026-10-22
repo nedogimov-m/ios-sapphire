@@ -148,5 +148,22 @@ malformed extents, margin gestures and ASan/UBSan. Physical alignment,
 rounded corners and on-device scaling throughput remain unverified;
 [DISPLAY.md](DISPLAY.md) records the exact contract and next bounded test.
 
+## Native GPU and Wi-Fi firmware boundaries — 2026-10-23
+
+The preferred HackiOS snapshots remain unchanged. Their GPU/Mesa and network
+interfaces are the later integration targets, while native Lito dependencies
+are derived from the pinned Google sources above. Commits `de80451` and
+`13f403b` add the A620 GMU firmware/HFI planner and reset-held 200MHz
+clock/counter/TCM helper; `52137f3` corrects its CX proof to use the live-DT
+separate hardware-status register. These helpers have host validation;
+GMU firmware execution, GPU commands and rendering are not established.
+
+Commit `05f371f` validates Redfin's native MPSS firmware layout and PAS4
+lifecycle. The private base-vendor inventory has 35 program headers/33 load
+segments/31 assets and a 0x8c000000+0x11800000 reserved span. Its endpoint
+0x9d800000 does not overlap Redfin's actual 0xa0000000 splash reservation.
+This adapts native ICNSS/MPSS dependencies; upstream Redwood WPSS/PAS6 and
+ath11k are different hardware. See [WiFi.md](WiFi.md) and [GMU.md](GMU.md).
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

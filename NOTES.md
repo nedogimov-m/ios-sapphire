@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CX power passes hardware; fitted GUI capture running — 2026-10-23
+
+The new separate CPU0/md0 CX experiment passes authenticated image-matched
+capture `logs/redfin/gpu-cx-v1/`, bootID d53638ba274b9712. Local ARM64
+build `build-20261023-040531.log`, kernel `913a661bb551f2f563713d7fe92969212c356758e67a89eb81b3d26f7c161017`;
+image `0926415de93157514db2fb9ad8ac2ca3ac28126ca1cf09a057ff9c5caed3460c`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xd53638ba274b9712`.
+Observation: ARC selector7/corner416 completes in1poll, IRQ1/CMD0x10101;
+CX control0x222001 becomes0xf8222000, separate HW status0x80001fe0/on1.
+Parent remains held; no GX/GMU/SMMU/firmware/DMA operations in this test.
+Static PID1 has11heartbeats, no panic; recovery authentication, fresh nonce,
+metadata priming and final fastboot return all pass. This proves CX power,
+not a GPU command or graphics acceleration. Five actual-leaf host tests cover
+metadata/ownership/handoff/transaction/domain failures; next is a separate
+reset-held GMU clock/counter/TCM probe after this fresh held-parent proof.
+
+Display commits `2893537`, `6074350` fit the full1125x2436 iPhone canvas and
+inverse touch to sourced Redfin viewports; mode2 puts1017x2204 at31,136 below
+Google's front-camera exclusion. Nine geometry host tests PASS. The native
+OSObject16KiB-size failure was fixed by separately allocating the workspace,
+with allocation-failure cleanup and final free. `7be93bd` adds an automatic
+RAM margin/content checker (5host tests), requiring the exact FB/HID fit logs
+and CRC-checked samples; physical calibration is not claimed. Root integration
+admits the existing optional screen capture only in strict cutout GUI8;
+C/Python/real-loader and capture-manifest parity tests PASS (9GUItests).
+Local build `build-20261023-040928.log` succeeds; cutout image
+`ac428885d06d4a49362757288625e0b83ece1666c8a4a690f07b2aa75db660be`, kernel `4dc8591629151472438fc8f94ff7b2d089f32f106d5299264f3c3fa6526d2384`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=1 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0c92c3566fe971d1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Complete payload/ADT/liveFDT plus host return policy PASS; temporary GUI boot
+and autonomous capture are running. No physical gesture is requested.
+
+Other completed source milestones, with no device startup yet: GMU firmware/
+HFI `de80451`, reset-held clock/TCM `13f403b`, corrected separate CX hardware
+status guard `52137f3` (22firmware+18TCMtests); native MPSS/PAS4 planner
+`05f371f`, AOP transport/platform binding `be1f813` (60Wi-Fitests). Wi-Fi
+association/data and GMU firmware execution remain unfinished. Preferred
+HackiOS upstream HEADs are unchanged and recorded in UPSTREAM.md. Next: collect
+cutout GUI result, integrate source-backed GMU adapter and native read-only
+AOP/SMEM/CMD-DB observer; keep serial temporary boots and all backups intact.
+
 ## REDFIN repeat60Hz touch session passes; next GPU and geometry — 2026-10-23
 
 Source `ddff37b`; local ARM64 build024851/kernel

@@ -379,7 +379,7 @@ diff --git a/osfmk/arm64/redfin_gui_profile.h b/osfmk/arm64/redfin_gui_profile.h
 new file mode 100644
 --- /dev/null
 +++ b/osfmk/arm64/redfin_gui_profile.h
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,112 @@
 +/* Exact bounded GUI8 profile shared by the relocatable shim and XNU.
 + * Display/touch geometry and the fenced HFS root are checked by their drivers.
 + * No allocation, libc, device access or absolute pointer tables here. */
@@ -441,7 +441,8 @@ new file mode 100644
 + if(!length || length==bytes) return false;
 + for(unsigned tail=length;tail<bytes;tail++) if(args[tail]) return false;
 + uint64_t seen=0,nonce=0;
-+ bool nonce_seen=false,trace_seen=false,cadence_seen=false;
++ bool nonce_seen=false,trace_seen=false,cadence_seen=false,screen_seen=false;
++ unsigned fit_mode=0;
 + for(unsigned pos=0;pos<length;) {
 +  if(args[pos]==' ') { pos++;continue; }
 +  unsigned start=pos;
@@ -456,6 +457,14 @@ new file mode 100644
 +   seen|=1ULL<<i;known=true;break;
 +  }
 +  if(known) continue;
++  if(redfin_gui_token(args+start,n,"redfinfit=1") || redfin_gui_token(args+start,n,"redfinfit=2")) {
++   if(fit_mode) return false;
++   fit_mode=(unsigned)(args[start+n-1]-'0');continue;
++  }
++  if(redfin_gui_token(args+start,n,"redfinscreen=1")) {
++   if(screen_seen) return false;
++   screen_seen=true;continue;
++  }
 +  if(redfin_gui_token(args+start,n,"sweetfb_hz=10") ||
 +     redfin_gui_token(args+start,n,"sweetfb_hz=30") ||
 +     redfin_gui_token(args+start,n,"sweetfb_hz=60")) {
@@ -478,7 +487,7 @@ new file mode 100644
 +  }
 +  return false;
 + }
-+ if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen) return false;
++ if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen || (screen_seen && fit_mode!=2)) return false;
 + if(boot_id) *boot_id=nonce;
 + return true;
 +}

@@ -59,7 +59,8 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
  if(!length || length==bytes) return false;
  for(unsigned tail=length;tail<bytes;tail++) if(args[tail]) return false;
  uint64_t seen=0,nonce=0;
- bool nonce_seen=false,trace_seen=false,cadence_seen=false;
+ bool nonce_seen=false,trace_seen=false,cadence_seen=false,screen_seen=false;
+ unsigned fit_mode=0;
  for(unsigned pos=0;pos<length;) {
   if(args[pos]==' ') { pos++;continue; }
   unsigned start=pos;
@@ -74,6 +75,14 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
    seen|=1ULL<<i;known=true;break;
   }
   if(known) continue;
+  if(redfin_gui_token(args+start,n,"redfinfit=1") || redfin_gui_token(args+start,n,"redfinfit=2")) {
+   if(fit_mode) return false;
+   fit_mode=(unsigned)(args[start+n-1]-'0');continue;
+  }
+  if(redfin_gui_token(args+start,n,"redfinscreen=1")) {
+   if(screen_seen) return false;
+   screen_seen=true;continue;
+  }
   if(redfin_gui_token(args+start,n,"sweetfb_hz=10") ||
      redfin_gui_token(args+start,n,"sweetfb_hz=30") ||
      redfin_gui_token(args+start,n,"sweetfb_hz=60")) {
@@ -96,7 +105,7 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
   }
   return false;
  }
- if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen) return false;
+ if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen || (screen_seen && fit_mode!=2)) return false;
  if(boot_id) *boot_id=nonce;
  return true;
 }

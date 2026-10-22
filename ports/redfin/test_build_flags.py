@@ -22,6 +22,20 @@ class BuildFlagTests(unittest.TestCase):
     def test_display_cadence_needs_explicit_display(self):
         self.refused(['--display-hz', '10'], '--display-hz requires --display')
 
+    def test_gpu_power_requires_its_isolated_cpu0_ram_profile(self):
+        self.refused(['--gpu-power-probe'],
+                     '--gpu-power-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+        base = ['--gpu-power-probe', '--kernel', '/missing-kernel',
+                '--dtb', '/missing-dtb', '--return-bootloader']
+        self.refused([*base, '--boot-mpidr', '0x100'],
+                     '--gpu-power-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+        for option in ('--display', '--splash', '--touch-events', '--ufs-root', '--ufs-rw',
+                       '--capture-screen', '--userspace-stacks', '--trace-syscalls',
+                       '--smp-gui', '--smp-probe', '--shim-early-return', '--usb-probe',
+                       '--touch-probe', '--wifi-probe', '--rpmh-probe'):
+            with self.subTest(option=option):
+                self.refused([*base, option], '--gpu-power-probe requires its separate RAM-only profile')
+
     def test_cpu_capability_probe_requires_runtime_return_and_cpu0(self):
         self.refused(['--cpu-capability-probe'],
                      '--cpu-capability-probe requires --kernel, --dtb and --return-bootloader')

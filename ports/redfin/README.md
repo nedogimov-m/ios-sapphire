@@ -85,6 +85,14 @@ thread restores its affinity before starting Apple userspace. The shim owns
 bootloader return (`redfinreturn=0`); USB/Wi-Fi/GPU remain off. The strict
 builder, loader and recovery-cycle contracts reject mixed diagnostic profiles.
 
+Add `--display-fit cutout --capture-screen` to GUI8 to fit the complete iPhone
+canvas below the source-backed front-camera exclusion and collect automatic
+RAM thumbnails. This retains the iPhone X/20H392 userland ABI; inverse touch
+uses the same viewport. `--display-fit full` fits to the entire panel.
+GUI8 capture is admitted only with `cutout`; trace plus capture exceeds the
+608-byte argument field. Physical alignment and scaling throughput require
+device validation; see [DISPLAY.md](DISPLAY.md).
+
 `--capture-screen` also requires `--display` and enables up to three 120×260 RGB
 thumbnails in the authenticated RAM log, only after a positive CPU copy. It
 does not write image files on the phone. Decode the captured log on the host:

@@ -68,9 +68,15 @@ def xnu_return_proof(image):
 def smp_gui_return_profile(image, manifest, arguments, checksum):
     """Require the separately compiled, bounded GUI8 contract and provenance."""
     boot_id = gui_profile.validate(arguments)
+    fit_tokens = [token for token in arguments.split() if token.startswith('redfinfit=')]
+    fit = {'redfinfit=1': 'full', 'redfinfit=2': 'cutout'}.get(fit_tokens[0]) if fit_tokens else None
+    if manifest.get('display_fit') != fit:
+        raise ValueError('GUI8 display-fit manifest does not match boot args')
+    if manifest.get('capture_screen') is not ('redfinscreen=1' in arguments.split()):
+        raise ValueError('GUI8 capture manifest does not match boot args')
     required_true = ('shim_early_return', 'root_writable', 'cpu_copy_display',
                      'splash_reservation_assumption', 'touch_events')
-    required_false = ('capture_screen', 'userspace_stacks', 'syscall_tracing')
+    required_false = ('userspace_stacks', 'syscall_tracing')
     if (any(manifest.get(name) is not True for name in required_true) or
             any(manifest.get(name) is not False for name in required_false) or
             manifest.get('smp_probe', False) is not False or

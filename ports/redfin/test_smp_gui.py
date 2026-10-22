@@ -75,6 +75,14 @@ class GUIProfileTests(unittest.TestCase):
         for hz in ('0', '1', '20', '90', '060'):
             self.check(ARGS.replace('sweetfb_hz=10', 'sweetfb_hz=' + hz), 0)
         self.check(ARGS + ' sweetfb_hz=60', 0)
+        for fit in (1, 2):
+            args = ARGS + f' redfinfit={fit}'
+            self.check(args, 1)
+            self.assertEqual(gui_profile.validate(args), '0123456789abcdef')
+        for extra in ('redfinfit=0', 'redfinfit=3', 'redfinfit=01', 'redfinfit=1 redfinfit=2'):
+            self.check(ARGS + ' ' + extra, 0)
+            with self.assertRaises(ValueError):
+                gui_profile.validate(ARGS + ' ' + extra)
 
     def test_missing_duplicate_unknown_and_changed_required_arguments_fail(self):
         for token in ARGS.split():
@@ -85,6 +93,17 @@ class GUIProfileTests(unittest.TestCase):
                     gui_profile.validate(args)
         for extra in ('redfincpu=0', 'redfinusb=0', 'redfinearlyreturn=1', 'redfinfuture=0'):
             self.check(ARGS + ' ' + extra, 0)
+
+    def test_capture_requires_cutout_and_bounded_arguments(self):
+        args = ARGS + ' redfinfit=2 redfinscreen=1'
+        self.check(args, 1)
+        self.assertEqual(gui_profile.validate(args), '0123456789abcdef')
+        for bad in (ARGS + ' redfinscreen=1', args.replace('redfinfit=2', 'redfinfit=1'),
+                    args + ' redfinscreen=1', args.replace('redfinscreen=1', 'redfinscreen=0'),
+                    args + ' -enable_kprintf_spam'):
+            self.check(bad, 0)
+            with self.assertRaises(ValueError):
+                gui_profile.validate(bad)
 
     def test_hidden_tail_controls_unterminated_field_and_invalid_nonce_fail(self):
         for args in (ARGS + '\0hidden=1', ARGS.replace(' ', '\t', 1), ARGS + '\n',
@@ -127,6 +146,14 @@ class GUICycleTests(unittest.TestCase):
             self.manifest['display_hz'] = hz
             self.assertEqual(self.verify()['cpus'], 8)
         self.manifest.update(boot_args=ARGS, display_hz=10)
+        for fit, mode in (('full', 1), ('cutout', 2)):
+            self.manifest.update(boot_args=ARGS + f' redfinfit={mode}', display_fit=fit)
+            self.assertEqual(self.verify()['cpus'], 8)
+            self.manifest['display_fit'] = 'cutout' if fit == 'full' else 'full'
+            with self.assertRaises(ValueError):
+                self.verify()
+        self.manifest.update(boot_args=ARGS)
+        self.manifest.pop('display_fit')
         for key, value in (('smp_gui', False), ('smp_probe', True), ('smp_cpus', 2),
                            ('root_writable', False), ('touch_events', False),
                            ('root_device', 'md0'), ('shutdown_seconds', 120),
@@ -137,6 +164,18 @@ class GUICycleTests(unittest.TestCase):
                 self.verify()
             self.manifest = old
         self.config.write_bytes(self.config.read_bytes().replace(b'GUI 1', b'GUI 0'))
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_capture_manifest_must_match_cutout_token(self):
+        self.manifest.update(boot_args=ARGS + ' redfinfit=2 redfinscreen=1',
+                             display_fit='cutout', capture_screen=True)
+        self.assertEqual(self.verify()['cpus'], 8)
+        for value in (False, 1, None):
+            self.manifest['capture_screen'] = value
+            with self.assertRaises(ValueError):
+                self.verify()
+        self.manifest.update(capture_screen=True, boot_args=ARGS + ' redfinfit=2')
         with self.assertRaises(ValueError):
             self.verify()
 
@@ -189,6 +228,9 @@ class GUILoaderTests(unittest.TestCase):
     def test_compiled_gui_gate_is_independent_of_md0(self):
         for name, lib in self.libs.items():
             self.assertEqual(lib.command(ARGS.encode().ljust(608, b'\0')), name == 'gui', name)
+        capture = ARGS + ' redfinfit=2 redfinscreen=1'
+        for name, lib in self.libs.items():
+            self.assertEqual(lib.command(capture.encode().ljust(608, b'\0')), name == 'gui', name)
 
     def test_gui_tree_requires_all_eight_cpus_and_exact_hardware_leaves(self):
         lib = self.libs['gui']

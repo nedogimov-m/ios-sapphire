@@ -67,6 +67,7 @@ def main():
     p.add_argument('--smp-cpus', type=int, choices=(2, 8), help='CPU count for the isolated --smp-probe; default 2')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
     p.add_argument('--display-hz', type=int, help='software copy cadence: 1..10 Hz, or 30/60 with --smp-gui; requires --display')
+    p.add_argument('--display-fit', choices=('full', 'cutout'), help='fit complete iPhone canvas, optionally below Pixel camera; requires --smp-gui')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
     p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
@@ -85,6 +86,7 @@ def main():
     p.add_argument('--usb-live-log', action='store_true', help='stream kernel log over bounded USB ECM; requires --usb-network-probe')
     p.add_argument('--rpmh-probe', action='store_true', help='inspect CMD-DB and RPMh TCS handoff without commands')
     p.add_argument('--gpu-probe', action='store_true', help='observe Adreno 620 clock handoff; requires --display')
+    p.add_argument('--gpu-power-probe', action='store_true', help='isolated md0/UP CX parent/ARC/GDSC test; requires verified bootloader return')
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
     p.add_argument('--shutdown-seconds', type=int, default=0,
         help='gracefully stop iOS after 5..300 seconds; requires --ufs-root and --return-bootloader')
@@ -100,6 +102,17 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.display_fit and not a.smp_gui:
+        p.error('--display-fit requires the strict --smp-gui profile')
+    if a.gpu_power_probe:
+        if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
+            p.error('--gpu-power-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+        competing = ('display', 'splash', 'touch_events', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
+                     'capture_screen', 'userspace_stacks', 'trace_syscalls', 'smp_gui', 'shim_early_return')
+        if (any(getattr(a, name) for name in competing) or
+                any(value for name, value in vars(a).items() if name.endswith('_probe') and name != 'gpu_power_probe')):
+            p.error('--gpu-power-probe requires its separate RAM-only profile')
+        a.rpmh_probe = True
     if a.smp_cpus is not None and not (a.smp_probe or a.smp_gui):
         p.error('--smp-cpus requires --smp-probe or --smp-gui')
     if a.smp_gui:
@@ -114,7 +127,7 @@ def main():
             p.error('--smp-gui requires CPU0, --display-hz 10/30/60 and --shutdown-seconds 180')
         if (any(value for name, value in vars(a).items() if name.endswith('_probe')) or
                 a.usb_aarch64_context or a.usb_live_log or a.userspace_stacks or
-                a.capture_screen or a.trace_syscalls):
+                (a.capture_screen and a.display_fit != 'cutout') or a.trace_syscalls):
             p.error('--smp-gui excludes other probes and diagnostic writers')
     if a.cpu_capability_target is not None:
         if not a.cpu_capability_probe:
@@ -288,11 +301,17 @@ def main():
         from peripherals import add_observers
         try:
             add_observers(tree, nodes, touch=a.touch_probe or a.touch_id_probe or a.touch_events, usb=a.usb_probe,
-                          gpu=a.gpu_probe, wifi=a.wifi_probe,
+                          gpu=a.gpu_probe or a.gpu_power_probe, wifi=a.wifi_probe,
                           usb_route=a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe,
                           usb_bypass=a.usb_bypass_probe, rpmh=a.rpmh_probe)
         except ValueError as error:
             p.error(str(error))
+        if a.gpu_power_probe:
+            from gpu_power import add_contract
+            try:
+                add_contract(tree, nodes)
+            except ValueError as error:
+                p.error(str(error))
         if a.spmi_probe or a.smp_probe or a.smp_gui:
             spmi = nodes.get('/soc/qcom,spmi@c440000', {})
             names = spmi.get('reg-names', b'').rstrip(b'\0').split(b'\0')
@@ -386,6 +405,8 @@ def main():
             command_line += ' redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0'
         if a.smp_gui:
             command_line += ' redfingui=1'
+        if a.display_fit:
+            command_line += f' redfinfit={1 if a.display_fit == "full" else 2}'
         if a.display:
             command_line += ' redfinfb=1 sweetfb_noconsole=1'
         if a.display_hz is not None:
@@ -399,10 +420,12 @@ def main():
         usb_mode = 3 if a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe else 2 if a.usb_route_probe else int(a.usb_probe)
         touch_mode = 2 if a.touch_id_probe or a.touch_events else int(a.touch_probe)
         for mode, name in ((touch_mode, 'redfintouch'), (usb_mode, 'redfinusb'),
-                           (int(a.gpu_probe), 'redfingpu'), (int(a.wifi_probe), 'redfinwifi'),
+                           (2 if a.gpu_power_probe else int(a.gpu_probe), 'redfingpu'), (int(a.wifi_probe), 'redfinwifi'),
                            (int(a.rpmh_probe), 'redfinrpmh'), (int(a.touch_rail_probe), 'redfinrail')):
             if mode:
                 command_line += f' {name}={mode}'
+        if a.gpu_power_probe:
+            command_line += ' redfingpupower=1'
         if a.touch_id_probe or a.touch_events:
             command_line += ' redfintouchsetup=1 redfinrpmhtouch=1'
         if a.touch_scan_probe:
@@ -499,6 +522,8 @@ def main():
                                 'sha256': hashlib.sha256(a.kernel.read_bytes()).hexdigest()})
     if a.display_hz is not None:
         manifest['display_hz'] = a.display_hz
+    if a.display_fit:
+        manifest['display_fit'] = a.display_fit
     if a.cpu_capability_probe:
         manifest['cpu_capability_probe'] = True
     if a.cpu_capability_target is not None:
@@ -516,6 +541,8 @@ def main():
         manifest['smp_cpus'] = 8
         manifest['touch_events'] = True
         manifest['sha256']['config.h'] = hashlib.sha256((out / 'config.h').read_bytes()).hexdigest()
+    if a.gpu_power_probe:
+        manifest['gpu_power_probe'] = True
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')
     print(f'{out}/init: static arm64 Darwin PID1')

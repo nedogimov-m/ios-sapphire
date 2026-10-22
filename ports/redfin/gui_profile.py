@@ -17,6 +17,14 @@ def validate(arguments):
     ids = [token for token in tokens if token.startswith('redfinbootid=')]
     match = re.fullmatch(r'redfinbootid=0x([0-9a-f]{16})', ids[0]) if len(ids) == 1 else None
     flags = [token for token in tokens if token not in ids and token != '-enable_kprintf_spam']
+    fits = [token for token in flags if token.startswith('redfinfit')]
+    if len(fits) > 1 or any(token not in ('redfinfit=1', 'redfinfit=2') for token in fits):
+        raise ValueError('GUI8 fit must be full-canvas mode1 or camera-exclusion mode2')
+    screens = [token for token in flags if token.startswith('redfinscreen')]
+    if screens and (screens != ['redfinscreen=1'] or fits != ['redfinfit=2']):
+        raise ValueError('GUI8 screen capture requires the camera-exclusion profile')
+    flags = [token for token in flags if token not in screens]
+    flags = [token for token in flags if token not in fits]
     rates = [token for token in flags if token.startswith('sweetfb_hz=')]
     if len(rates) != 1 or rates[0] not in ('sweetfb_hz=10', 'sweetfb_hz=30', 'sweetfb_hz=60'):
         raise ValueError('GUI8 copy cadence must be exactly 10, 30 or 60 Hz')
