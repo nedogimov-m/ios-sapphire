@@ -1,8 +1,9 @@
 # Physical touch-rail evidence
 
 `touch-rail-observe.patch` appends `int redfin_touch_rail_observe(void)` to
-`redfin_spmi.c`; it leaves the fixed PON reader unchanged. There is no startup
-hook or rail-ready API. `redfinrail=1`, `cpus=1`, verified SPMI/bootloader-return
+`redfin_spmi.c`; it leaves the fixed PON reader unchanged. This raw observer
+alone publishes no readiness; the proof and startup overlays are described
+below. `redfinrail=1`, `cpus=1`, verified SPMI/bootloader-return
 proof and exact Redfin/Lito compatible tokens are required before hardware
 access. The function uses the existing mappings and runs once per boot.
 
@@ -117,15 +118,30 @@ and STATUS VREG_READY, with OCP/reserved bits clear. Every failure returns 0.
 The public state and prototypes live in `redfin_touch_rail.h`. This overlay
 contains no startup hook, RPMh vote, PMIC write, GPIO or clock operation.
 
-# Controlled initial md0 vote
+# Controlled vote and typed boot lease
 
-`rpmh-touch.patch` adds a separate one-shot backend. Its trusted caller supplies
-`struct redfin_touch_rail_ops` with an actual initial-md0 DRV2 lease and the
-fresh snapshot callback. Boot arguments cannot grant that software lease.
-The backend additionally requires `rd=md0`, no root publication, UP, verified
-return, exact platform/RAM bounds, explicit touch/setup/vote flags and disabled
-legacy/native GPU, Wi-Fi and USB paths. The caller must disable every competing
-writer; `touch-start.patch` owns that policy and the sticky software claim.
+`rpmh-touch.patch` adds the one-shot backend; `touch-event-start.patch`
+extends `struct redfin_touch_rail_ops` with `boot_lease_mode`, a pure
+`boot_lease_valid(owner, context, mode)` callback and its owner/context.
+Mode 0 preserves the original `initial_md0_drv2_lease` contract. Modes 1
+(md0 scan) and 2 (UFS events) require the callback and reject that legacy
+boolean. Boot arguments corroborate policy and never grant the lease.
+
+The startup module claims a static owner once, publishes its immutable mode
+with release/acquire ordering, and never releases or retries. The callback
+binds the exact static caller/context/mode and rechecks source/boot/ADT gates
+without MMIO or manager recursion. The backend checks it before physical
+samples and every TCS store; hardware floor, completion and quarantine checks
+remain unchanged. `redfin_touch_boot_lease_valid(mode)` gives the worker the
+same permanent-owner check.
+
+Modes 0/1 require `rd=md0` with no UFS/root publication or write flags. Mode 1
+requires `redfintouchscan=1`. Mode 2 requires the explicit UFS/CPU-display
+profile and `redfintouchevents=1` documented in [TOUCH-EVENTS.md](TOUCH-EVENTS.md).
+Native UFS uses its fenced HCI/UTP path and writes no DRV2, SE0 or touch
+GPIO/GIC resource. All modes require UP, verified return, exact platform/RAM
+bounds, touch/setup/vote flags and disabled competing USB/modem/WLAN/GPU and
+legacy writers. The exception is restricted to this UFS mode.
 
 V5 observed `ldoa17=0x41300`, DRV2 `0x18220000`, major 2, NCPT 16, eight normal
 TCS slots, ACTIVE0/1 empty, RSC IRQ enable `1`, status `0`, and GIC INTID37
@@ -159,12 +175,19 @@ zero only if power was already proved or after the owned ACTIVE0 transaction
 and two stable configured+VALID 3304 mV/HPM7/enabled/VREG_READY samples. All
 uncertain write, completion or physical-proof failures leave the owner
 quarantined and never unvote, reset or retry. No automatic startup is added by
-this patch. The separately reviewed initial caller invokes power preparation,
-fresh `ready()==1`, then the guarded cold SEC ID setup; no event worker runs.
+this patch. The startup caller invokes power preparation, fresh `ready()==1`,
+then guarded cold SEC ID setup. Only the selected scan/event mode continues
+to sensing or creates the asynchronous HID worker.
 
 Host validation: 9 observer tests, 8 proof tests, 29 backend tests, and 4 initial
 caller tests pass. Controlled device results and their remaining limits are
 recorded below.
+
+Current hardware result, 2026-10-22: configured+VALID 3304 mV/HPM7/enabled
+power, cold SEC ID `53:45:37:91:00`, and bounded md0 sensing/queue reads have
+passed. The new lease/startup tests preserve the successful vote's exact
+3 maps/234 reads/19 stores/5 physical samples; an already-powered rail needs
+no MMIO and two samples. UFS GUI contacts remain unverified pending capture.
 
 
 ## First controlled vote and cached diagnostics — 2026-10-22

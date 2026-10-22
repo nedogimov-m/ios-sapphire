@@ -1,23 +1,44 @@
-# SEC events and Redfin HID draft
+# SEC sensing, events and Redfin HID
 
-`touch-events.patch` is an unapplied overlay after `touch.patch`,
-`touch-spi.patch` and `touch-setup.patch`. It adds no startup hook. The root
-caller may later invoke `redfin_touch_events_start()` only after the same
-boot's successful ID-only probe, while retaining the proven rail, clocks,
-GPIO, GENI and GIC interrupt ownership for the whole session.
+`touch-events.patch`, `touch-sensing.patch` and `touch-event-start.patch`
+are included by both kernel builders. The startup caller owns DRV2/SE0 for
+the entire boot and selects one explicit mode:
 
-The explicit event switch is `redfintouchevents=1`; the existing ID path
-still requires `redfintouch=2`. `redfintouchsecs` defaults to 120 and accepts
-1..300 seconds. The switch alone does not call the start function.
-Start returning zero means the worker was created, not that physical input
-or an iOS gesture has been demonstrated. No controller scan/wake command,
-firmware upload, flash, NVM, reset, calibration or event-clear is added.
+| Image-builder flag | Boot mode | Result |
+| --- | --- | --- |
+| `--touch-id-probe` | `rd=md0`, no scan/events | Power, cold setup and SEC ID only |
+| `--touch-scan-probe` | `rd=md0 redfintouchscan=1` | ID, volatile sensing init and at most four raw queue batches; no HID |
+| `--touch-events` | UFS GUI, `redfintouchevents=1` | ID, then an asynchronous HID worker |
+
+ID/scan require `--return-bootloader` and no UFS. Add
+`--touch-events --ufs-root --display --return-bootloader` to an existing GUI image build;
+the builder supplies the touch/rail/SPMI flags. The kernel requires
+`rd=ufsroot0 redfinroot=1 redfinufs=3 ufsroot=userdata`, explicit equal
+`ufsrw/rootrw` values of 0 or 1, `sweetlog=0`, `redfinfb=1`, UP and verified
+return. USB, modem, WLAN, GPU and competing legacy paths remain disabled.
+The display contract is exact: framebuffer `0xa0000000+0x02300000`,
+1080x2340, stride 4320, BGRA, canvas 1125x2436 and the ABL-copy marker.
+Screen capture (`redfinscreen=1`) is optional. Scan and events are mutually
+exclusive; an old initial-md0 lease boolean cannot authorize either mode.
+
+`redfintouchsecs` defaults to 120 and accepts 1..300 seconds. Start returning
+zero means the worker was created. The boot thread never waits for HID.
+The permanent owner has no release or retry after a power/SPI failure; see
+[TOUCH-RAIL.md](TOUCH-RAIL.md) for its typed callback contract.
+
+Hardware, 2026-10-22: SEC ID `53:45:37:91:00` and the md0 scan both passed.
+Scan read APP boot `0x20`, STATUS `00:03:01:00`, functions `0x61` with exact
+`0x61` readback, then STATUS `00:02:01:02`. It consumed boot/vendor status
+events followed by an empty queue and returned zero. This proves the bounded
+sensing/queue path. GUI contact delivery and a physical gesture remain
+unverified pending the UFS/HID capture.
 
 The overlay extends the generated SPI source, without changing the frozen
 earlier patch files. Successful ID comparison stores this boot's SE address
 and clock bound. The new event-session API requires that proof and a fresh
-GIC-mask proof; only reads `0x55/1 byte`, `0x60/8 bytes`, and
-`0x61/8..248 bytes` are accepted. Requests and responses use the existing
+GIC-mask proof. The SPI read allowlist covers ID `0x22/5`, boot `0x55/1`, status
+`0xaf/4`, functions `0x30/2`, and FIFO `0x60/8`, `0x61/8..248` bytes.
+Requests and responses use the existing
 bounded SPI transport and SEC sync/register/checksum validation. Any read
 failure closes local IRQ routes, invalidates the session and identity proof,
 and prevents retries. Event reads consume the controller queue.
@@ -39,14 +60,25 @@ HID readiness requires all of the following:
   checked under its client lock. A service pointer or empty open is not enough.
 
 Before this readiness, the worker consumes no events and emits no contacts.
-After readiness it verifies boot status `0x55 == 0x20`, then drains at most
-four startup batches until the queue is empty. Those queued contacts are
-discarded. A previously held contact remains suppressed until UP; an
-unknown MOVE cannot start a new gesture. One initial queued hardware/software
+After readiness and a verified open SPI session, the worker performs the
+same one-shot sensing sequence used by md0 scan: require boot `0x55 == 0x20`,
+read `0xaf` and reject FLASH status, read current functions `0x30`, write
+`current | 0x61` (TOUCH/PALM/WET), require exact readback, send SENSE_ON `0x10`,
+and reread `0xaf`. Only these two volatile writes are allowed, with native
+checksums and 12/8-byte padded frames. There is no firmware upload, flash,
+NVM, reset, calibration or event-clear command, and no retry.
+
+Lease, HID and GIC/GPIO guards run before the whole bounded sensing routine;
+the SPI transport retains its own hardware checks for each phase. The lease
+callback is also checked during HID wait, before opening SPI, before every
+event read and before DOWN. It does not run between every sensing command.
+The worker then drains at most four startup batches until the queue is empty.
+Those queued contacts are discarded. A previously held contact remains
+suppressed until UP; an unknown MOVE cannot start a new gesture. One initial queued hardware/software
 reset notification is accepted during this drain. Watchdog reset, later
 reset, error/queue-full/ESD status, malformed data, loss of consumer, loss of
 ownership or transport failure stops the worker and releases every active
-contact. DOWN rechecks readiness immediately before HID injection; UP still
+contact. DOWN rechecks readiness and ownership before HID injection; UP still
 clears SweetHID's state after its consumer disappears. The saved transition
 is retained for the event mask, while local UP state is cleared under its
 lock before collection allocation; an allocation failure cannot retain a
@@ -78,17 +110,20 @@ types and application boot status. Transport references are in
 Host validation:
 
 ```
-python3 -m unittest ports/redfin/test_touch_events.py ports/redfin/test_touch_events_worker.py -v
+python3 -m unittest ports.redfin.test_touch_events ports.redfin.test_touch_events_worker \
+  ports.redfin.test_touch_sensing ports.redfin.test_touch_event_start -v
 ```
 
 The tests compile the actual event state/session functions, geometry/profile
 and readiness helpers, the actual SweetHID touch method with allocation
 failure injection, and the worker with a virtual scheduler and scripted SEC
-queue. The 17 tests cover ten contacts, startup suppression, trailing corruption,
+queue. Tests cover ten contacts, startup suppression, trailing corruption,
 oversized batches, status errors, unsupported contacts, ID/session gates,
 registration timing, consumer loss during a read, finite lifetime/drain,
 release of all contacts on failure (including collection/child allocation
 failure without later resurrection), and the corrected bottom-edge mapping.
-The full overlay applies to a temporary earlier-stage source tree. ARM
-kernel compilation, live identity/events and a physical unlock gesture
-remain unproved; this draft is not wired into the current kernel.
+The startup tests also execute the patched RPMh backend and worker: all three
+lease modes, exact root/display gates, reentrancy, loss of lease at each power
+boundary and after one or ten DOWNs, and sensing failure before FIFO access.
+ARM kernel compilation and md0 sensing have passed; physical GUI input remains
+the next validation step.

@@ -1,0 +1,50 @@
+diff --git a/bsd/dev/redfin_usb_owned.c b/bsd/dev/redfin_usb_owned.c
+--- a/bsd/dev/redfin_usb_owned.c
++++ b/bsd/dev/redfin_usb_owned.c
+@@ -465,6 +465,28 @@
+  memcpy(&marker,raw,sizeof(marker));
+  return marker==1;
+ }
++/* Only completed cached snapshots: no MMIO, stores, delays or proof changes. */
++static void
++rf_usb_bypass_report_difference(bool warm,const struct rf_usb_context_image *current)
++{
++ const struct rf_usb_context_image *expected=&rf_usb_bypass.expected;
++ const struct rf_usb_snapshot *a=&expected->streams,*b=&current->streams;
++ unsigned stream=RF_USB_GROUPS,bank=RF_USB_CONTEXTS;
++ for (unsigned i=0;i<RF_USB_GROUPS;i++)
++  if (a->smr[i]!=b->smr[i] || a->s2cr[i]!=b->s2cr[i]) { stream=i;break; }
++ for (unsigned i=0;i<RF_USB_CONTEXTS;i++)
++  if (memcmp(&expected->bank[i],&current->bank[i],sizeof(current->bank[i]))) { bank=i;break; }
++ printf("REDFIN USB BYPASS: cached-diff warm=%u stores=%u first-stream=%u first-bank=%u expected-ID=%#x/%#x/%#x CR0=%#x groups=%u current-ID=%#x/%#x/%#x CR0=%#x groups=%u\n",
++     warm,rf_usb_bypass.stores,stream,bank,a->id0,a->id1,a->id2,a->cr0,a->groups,b->id0,b->id1,b->id2,b->cr0,b->groups);
++ if (stream<RF_USB_GROUPS)
++  printf("REDFIN USB BYPASS: cached-stream=%u expected-SMR=%#x S2CR=%#x current-SMR=%#x S2CR=%#x\n",
++      stream,a->smr[stream],a->s2cr[stream],b->smr[stream],b->s2cr[stream]);
++ if (bank<RF_USB_CONTEXTS) {
++  const struct rf_usb_context_bank *x=&expected->bank[bank],*y=&current->bank[bank];
++  printf("REDFIN USB BYPASS: cached-bank=%u expected-SCTLR=%#x CBAR=%#x CBA2R=%#x FSR=%#x current-SCTLR=%#x CBAR=%#x CBA2R=%#x FSR=%#x\n",
++      bank,x->sctlr,x->cbar,x->cba2r,x->fsr,y->sctlr,y->cbar,y->cba2r,y->fsr);
++ }
++}
+ static int
+ rf_usb_bypass_verify(bool warm)
+ {
+@@ -483,8 +505,15 @@
+  }
+  error=rf_usb_context_snapshot(&rf_usb_context_images[0],rf_usb_bypass.cb,
+      rf_usb_bypass.banks,rf_usb_bypass.shift,"bypass-revalidate");
+- if (error) return error;
+- if (memcmp(&rf_usb_context_images[0],&rf_usb_bypass.expected,sizeof(rf_usb_bypass.expected))) return EAGAIN;
++ if (error) {
++  printf("REDFIN USB BYPASS: cached-snapshot warm=%u error=%d stores=%u; comparison skipped\n",
++      warm,error,rf_usb_bypass.stores);
++  return error;
++ }
++ if (memcmp(&rf_usb_context_images[0],&rf_usb_bypass.expected,sizeof(rf_usb_bypass.expected))) {
++  rf_usb_bypass_report_difference(warm,&rf_usb_context_images[0]);
++  return EAGAIN;
++ }
+  return 0;
+ }
+ static __attribute__((noinline)) void

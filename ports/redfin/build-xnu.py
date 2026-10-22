@@ -215,12 +215,13 @@ def main(argv=None):
                                          'rpmh-touch.patch', 'touch-start.patch',
                                          'touch-spi-diag.patch', 'touch-platform-diag.patch',
                                          'touch-dfs-diag.patch', 'touch-dfs-disable.patch',
-                                         'touch-rx-irq.patch',
+                                         'touch-rx-irq.patch', 'touch-sensing.patch',
                                          'usb-owned-route.patch', 'usb-owned-diag.patch',
                                          'usb-owned-build.patch',
                                          'usb-gadget.patch', 'usb-start.patch',
                                          'usb-context-probe.patch', 'usb-bypass-context.patch',
-                                         'peripheral-start.patch'), 21):
+                                         'usb-enumeration-start.patch', 'usb-bypass-diagnostic.patch',
+                                         'peripheral-start.patch', 'touch-event-start.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

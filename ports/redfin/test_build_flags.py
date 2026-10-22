@@ -39,8 +39,8 @@ class BuildFlagTests(unittest.TestCase):
         self.refused(['--userspace-stacks'], '--userspace-stacks requires --shutdown-seconds')
 
     def test_peripheral_observers_require_kernel(self):
-        for option in ('--touch-probe', '--touch-rail-probe', '--touch-id-probe', '--usb-probe', '--usb-route-probe', '--usb-owned-probe',
-                       '--usb-context-probe', '--usb-bypass-probe', '--rpmh-probe', '--gpu-probe', '--wifi-probe'):
+        for option in ('--touch-probe', '--touch-rail-probe', '--touch-id-probe', '--touch-scan-probe', '--touch-events', '--usb-probe', '--usb-route-probe', '--usb-owned-probe',
+                       '--usb-context-probe', '--usb-bypass-probe', '--usb-enumeration-probe', '--rpmh-probe', '--gpu-probe', '--wifi-probe'):
             self.refused([option], 'peripheral observers require --kernel')
 
     def test_initial_touch_id_is_ram_only_with_verified_return(self):
@@ -49,6 +49,29 @@ class BuildFlagTests(unittest.TestCase):
         self.refused(['--kernel', '/missing-kernel', '--touch-id-probe',
                       '--return-bootloader', '--ufs-probe'],
                      '--touch-id-probe requires the initial RAM root without UFS')
+
+    def test_touch_scan_inherits_id_power_ram_and_return_fences(self):
+        self.refused(['--kernel', '/missing-kernel', '--touch-scan-probe'],
+                     '--touch-id-probe requires --return-bootloader')
+        self.refused(['--kernel', '/missing-kernel', '--touch-scan-probe',
+                      '--return-bootloader', '--ufs-root'],
+                     '--touch-id-probe requires the initial RAM root without UFS')
+        self.refused(['--kernel', '/missing-kernel', '--touch-scan-probe',
+                      '--return-bootloader', '--usb-bypass-probe'],
+                     'USB bypass experiment must run separately from touch ID, direct claim and context observation')
+
+    def test_touch_events_requires_ufs_display_return_and_separate_mode(self):
+        self.refused(['--kernel', '/missing-kernel', '--touch-events'],
+                     '--touch-events requires --ufs-root, --display and --return-bootloader')
+        for option in ('--touch-id-probe', '--touch-scan-probe'):
+            self.refused(['--kernel', '/missing-kernel', '--touch-events', option],
+                         'GUI touch events must run separately from RAM touch ID or scan probes')
+        for option in ('--usb-probe','--usb-route-probe','--usb-owned-probe','--usb-context-probe',
+                       '--usb-bypass-probe','--usb-enumeration-probe','--gpu-probe','--wifi-probe','--rpmh-probe'):
+            with self.subTest(option=option):
+                self.refused(['--kernel', '/missing-kernel', '--touch-events', '--ufs-root',
+                              '--display', '--return-bootloader', option],
+                             'GUI touch events require USB, GPU, Wi-Fi and RPMh probes disabled')
 
     def test_owned_usb_is_ram_only_with_verified_return_and_separate_touch(self):
         self.refused(['--kernel', '/missing-kernel', '--usb-owned-probe'],
@@ -87,6 +110,16 @@ class BuildFlagTests(unittest.TestCase):
                 self.refused(['--kernel', '/missing-kernel', '--usb-bypass-probe',
                               '--return-bootloader', option],
                              'USB bypass experiment must run separately from touch ID, direct claim and context observation')
+
+    def test_usb_enumeration_inherits_bypass_ram_return_and_exclusive_mode(self):
+        self.refused(['--kernel', '/missing-kernel', '--usb-enumeration-probe'],
+                     '--usb-bypass-probe requires --return-bootloader')
+        self.refused(['--kernel', '/missing-kernel', '--usb-enumeration-probe',
+                      '--return-bootloader', '--ufs-root'],
+                     '--usb-bypass-probe requires the initial RAM root without UFS')
+        self.refused(['--kernel', '/missing-kernel', '--usb-enumeration-probe',
+                      '--return-bootloader', '--touch-scan-probe'],
+                     'USB bypass experiment must run separately from touch ID, direct claim and context observation')
 
 
 if __name__ == '__main__':

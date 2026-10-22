@@ -1,0 +1,210 @@
+diff --git a/bsd/dev/redfin_usb_owned.c b/bsd/dev/redfin_usb_owned.c
+--- a/bsd/dev/redfin_usb_owned.c
++++ b/bsd/dev/redfin_usb_owned.c
+@@ -123,9 +123,10 @@
+  return true;
+ }
+ static int
+-rf_usb_core_snapshot(struct rf_usb_core_state *out)
+-{
+- vm_offset_t gcc=rf_usb_owner.gcc,dwc=rf_usb_owner.dwc;
++rf_usb_power_ready(void)
++{
++ vm_offset_t gcc=rf_usb_owner.gcc;
++ if (!gcc) return ENXIO;
+  uint32_t power=rf_usb_rd(gcc,0x3004),reset=rf_usb_rd(gcc,0x3000);
+  if (!(power&0x80000000u) || (power&1) || (reset&1)) return EBUSY;
+  const unsigned clocks[]={0x3010,0x307c,0x3080,0x3018,0x301c};
+@@ -133,6 +134,14 @@
+   uint32_t value=rf_usb_rd(gcc,clocks[i]);
+   if (!(value&1) || (value&0x80000000u)) return EBUSY;
+  }
++ return 0;
++}
++static int
++rf_usb_core_snapshot(struct rf_usb_core_state *out)
++{
++ int error=rf_usb_power_ready();
++ if (error) return error;
++ vm_offset_t dwc=rf_usb_owner.dwc;
+  uint32_t id=rf_usb_rd(dwc,0x120),params=rf_usb_rd(dwc,0x140);
+  out->gctl=rf_usb_rd(dwc,0x110);
+  if (id!=0x5533330au || (params>>24)!=64 ||
+@@ -457,15 +466,21 @@
+  return marker==1;
+ }
+ static int
+-rf_usb_bypass_verify(void)
++rf_usb_bypass_verify(bool warm)
+ {
+  uint64_t base=0,bytes=0;
+  if (!rf_usb_bypass.lease || !rf_usb_bypass_contract(&base,&bytes) ||
+      base!=rf_usb_bypass.base || bytes!=rf_usb_bypass.bytes) return EPERM;
+- struct rf_usb_core_state core;
+- int error=rf_usb_core_snapshot(&core);
+- if (error) return error;
+- if (memcmp(&core,&rf_usb_owner.core,sizeof(core))) return EAGAIN;
++ int error=0;
++ if (warm) {
++  struct rf_usb_core_state core;
++  error=rf_usb_core_snapshot(&core);
++  if (error) return error;
++  if (memcmp(&core,&rf_usb_owner.core,sizeof(core))) return EAGAIN;
++ } else {
++  error=rf_usb_power_ready();
++  if (error) return error;
++ }
+  error=rf_usb_context_snapshot(&rf_usb_context_images[0],rf_usb_bypass.cb,
+      rf_usb_bypass.banks,rf_usb_bypass.shift,"bypass-revalidate");
+  if (error) return error;
+@@ -585,10 +600,10 @@
+  printf("REDFIN USB BYPASS: leased bank=%u slot=%u inherited-SCTLR=%#x first-fit NS allocator; no DMA\n",
+      bank,slot,image->bank[bank].sctlr);
+  for (unsigned step=0;step<4;step++) {
+-  error=rf_usb_bypass_verify();if (error) goto failed;
++  error=rf_usb_bypass_verify(true);if (error) goto failed;
+   error=rf_usb_bypass_store(step);if (error) goto failed;
+  }
+- error=rf_usb_bypass_verify();if (error) goto failed;
++ error=rf_usb_bypass_verify(true);if (error) goto failed;
+  rf_usb_owner.state=RF_USB_CONTEXT_ROUTED;
+  printf("REDFIN USB BYPASS: retained SID=e0 slot=%u TRANS bank=%u SCTLR=0 CBAR=10000 stores=4; no gadget or DMA\n",slot,bank);
+  goto done;
+@@ -605,7 +620,35 @@
+  int error=0;
+  if (!caller_id || caller_id!=rf_usb_owner.caller) error=EPERM;
+  else if (rf_usb_owner.state!=RF_USB_CONTEXT_ROUTED) error=EBUSY;
+- else { error=rf_usb_bypass_verify();if (error) error=rf_usb_quarantine(error); }
++ else { error=rf_usb_bypass_verify(true);if (error) error=rf_usb_quarantine(error); }
++ lck_mtx_unlock(&rf_usb_lock);
++ return error;
++}
++
++/* Active gadget may change its own controller/ring, never the leased route. */
++int
++redfin_usb_owned_route_retained_bypass(const void *caller_id)
++{
++ lck_mtx_lock(&rf_usb_lock);
++ int error=0;
++ if (!caller_id || caller_id!=rf_usb_owner.caller) error=EPERM;
++ else if (rf_usb_owner.state!=RF_USB_CONTEXT_ROUTED) error=EBUSY;
++ else { error=rf_usb_bypass_verify(false);if (error) error=rf_usb_quarantine(error); }
++ lck_mtx_unlock(&rf_usb_lock);
++ return error;
++}
++/* Route uncertainty must not prevent the sole controller owner from halting.
++ * Only physical power/clock proof is returned, never route or DMA authority. */
++int
++redfin_usb_owned_quiesce_bypass(const void *caller_id)
++{
++ lck_mtx_lock(&rf_usb_lock);
++ int error=0;
++ uint64_t base=0,bytes=0;
++ if (!caller_id || caller_id!=rf_usb_owner.caller || !rf_usb_bypass.lease ||
++     (rf_usb_owner.state!=RF_USB_CONTEXT_ROUTED && rf_usb_owner.state!=RF_USB_QUARANTINED) ||
++     !rf_usb_bypass_contract(&base,&bytes) || base!=rf_usb_bypass.base || bytes!=rf_usb_bypass.bytes) error=EPERM;
++ else error=rf_usb_power_ready();
+  lck_mtx_unlock(&rf_usb_lock);
+  return error;
+ }
+diff --git a/bsd/dev/redfin_usb_owned.h b/bsd/dev/redfin_usb_owned.h
+--- a/bsd/dev/redfin_usb_owned.h
++++ b/bsd/dev/redfin_usb_owned.h
+@@ -19,6 +19,10 @@
+ /* Explicit sole-NS-allocator bypass-CB experiment; no gadget or DMA authority. */
+ int redfin_usb_owned_claim_bypass(const void *caller_id);
+ int redfin_usb_owned_revalidate_bypass(const void *caller_id);
++/* Active route proof includes live power/clocks and every leased stream/CB. */
++int redfin_usb_owned_route_retained_bypass(const void *caller_id);
++/* Sole-owner/power proof solely for controller halt, even after quarantine. */
++int redfin_usb_owned_quiesce_bypass(const void *caller_id);
+ /* Retained route evidence only. No API here authorizes or starts DMA. */
+ int redfin_usb_owned_revalidate(const void *caller_id);
+ /* Active gadget may have changed core/ring state; all SMMU proofs still apply.
+diff --git a/bsd/dev/redfin_usb_start.c b/bsd/dev/redfin_usb_start.c
+--- a/bsd/dev/redfin_usb_start.c
++++ b/bsd/dev/redfin_usb_start.c
+@@ -1,10 +1,10 @@
+-/* Initial md0-only USB SMMU claim; no gadget, DMA or controller writes.
++/* Initial md0-only USB owner; explicit enumeration follows a proved CB route.
+  * Sole-writer audit for the compiled SWEET/Redfin image, after ABL exits:
+  * - TopazModem.cpp topaz_modem_init/wifi_enabled gate the legacy SMMU writer
+  *   behind modem/wifi; SapphireGpu.cpp sapphire_gpu_init gates its SMMU writer
+  *   behind gpu. All are explicitly disabled before this module claims a lease.
+  * - sweet_usb_probe refuses native Redfin; sweet_usb=0 also prevents its legacy
+- *   controller path. redfin_usb_gadget_start is unhooked and never called here.
++ *   controller path. The explicit enumeration path below is the sole gadget caller.
+  * - sweet_ufs_init's legacy body is unreachable on Redfin; redfinroot=0,
+  *   redfinufs=0, no ufsroot and rd=md0 exclude native UFS initialization/DMA.
+  * - Other native probes/activation paths are disabled below. The only enabled
+@@ -24,12 +24,14 @@
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
+ #include "redfin_usb_owned.h"
++#include "redfin_usb_gadget.h"
+ 
+ extern bool redfin_usb_platform(void);
+ extern int redfin_spmi_return_ready(void);
+ int redfin_usb_start_initial(void);
+ 
+ static uint32_t redfin_initial_usb_lease;
++static uint32_t redfin_initial_usb_gadget_owned;
+ static const uint8_t redfin_initial_usb_caller;
+ 
+ static bool
+@@ -62,10 +64,12 @@
+ static bool
+ redfin_initial_usb_gates(void)
+ {
+- uint32_t contexts=0,bypass=0;
++ uint32_t contexts=0,bypass=0,gadget=0;
+  (void)PE_parse_boot_argn("redfinusbcontexts",&contexts,sizeof(contexts));
+  (void)PE_parse_boot_argn("redfinusbbypass",&bypass,sizeof(bypass));
+- if (contexts>1 || bypass>1 || (contexts && bypass)) return false;
++ (void)PE_parse_boot_argn("redfinusbgadget",&gadget,sizeof(gadget));
++ if (contexts>1 || bypass>1 || gadget>1 || (contexts && bypass) || (gadget && !bypass)) return false;
++ if (gadget && !redfin_initial_usb_arg("redfinusbsecs",30,false)) return false;
+  if (!redfin_usb_platform() || redfin_spmi_return_ready()!=1 ||
+      !redfin_initial_usb_arg("redfinusb",3,true) ||
+      !redfin_initial_usb_arg("redfinusbowned",1,true) ||
+@@ -98,6 +102,22 @@
+      __atomic_load_n(&redfin_initial_usb_lease,__ATOMIC_ACQUIRE)==1 && redfin_initial_usb_gates();
+ }
+ 
++/* This immutable policy is bound to the same acquired boot-lifetime owner.
++ * ACTIVE accepts only controller changes; full SMMU and power proof remains.
++ * QUIESCE permits only halt under sole ownership/power, including route loss. */
++static int
++redfin_initial_usb_gadget_authorize(const void *caller_id,void *context,enum redfin_usb_gadget_phase phase)
++{
++ if (!redfin_initial_usb_exclusive(caller_id,context) ||
++     __atomic_load_n(&redfin_initial_usb_gadget_owned,__ATOMIC_ACQUIRE)!=1) return EPERM;
++ switch (phase) {
++ case RF_USB_WARM:return redfin_usb_owned_revalidate_bypass(caller_id);
++ case RF_USB_ACTIVE:return redfin_usb_owned_route_retained_bypass(caller_id);
++ case RF_USB_QUIESCE:return redfin_usb_owned_quiesce_bypass(caller_id);
++ default:return EPERM;
++ }
++}
++
+ int
+ redfin_usb_start_initial(void)
+ {
+@@ -123,7 +143,16 @@
+   printf("REDFIN USB START: bypass-CB claim result=%d\n",error);
+   if (error) return error;
+   error=redfin_usb_owned_revalidate_bypass(&redfin_initial_usb_caller);
+-  printf("REDFIN USB START: bypass-CB revalidate result=%d; no gadget or DMA\n",error);
++  printf("REDFIN USB START: bypass-CB revalidate result=%d\n",error);
++  if (error) return error;
++  uint32_t gadget=0;
++  (void)PE_parse_boot_argn("redfinusbgadget",&gadget,sizeof(gadget));
++  if (gadget==1) {
++   static const struct redfin_usb_gadget_policy gadget_policy={redfin_initial_usb_gadget_authorize,&redfin_initial_usb_lease};
++   __atomic_store_n(&redfin_initial_usb_gadget_owned,1,__ATOMIC_RELEASE);
++   error=redfin_usb_gadget_start(&redfin_initial_usb_caller,&gadget_policy);
++   printf("REDFIN USB START: enumeration-only gadget result=%d (bounded DMA)\n",error);
++  }
+   return error;
+  }
+  error=redfin_usb_owned_claim(&redfin_initial_usb_caller);

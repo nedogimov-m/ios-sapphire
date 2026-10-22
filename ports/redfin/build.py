@@ -63,11 +63,14 @@ def main():
     p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
     p.add_argument('--touch-rail-probe', action='store_true', help='read fixed PMIC identity and candidate LDO states without PMIC writes')
     p.add_argument('--touch-id-probe', action='store_true', help='prepare L17 and cold SEC SPI, then read ID only; RAM root and bootloader return required')
+    p.add_argument('--touch-scan-probe', action='store_true', help='read SEC state and enable runtime sensing with a bounded queue probe; initial RAM root only')
+    p.add_argument('--touch-events', action='store_true', help='start SEC sensing and HID events with the validated UFS/CPU-display profile')
     p.add_argument('--usb-probe', action='store_true', help='observe DWC3 handoff without PHY or DMA changes')
     p.add_argument('--usb-route-probe', action='store_true', help='observe halted DWC3 and standard SMMU routing without writes')
     p.add_argument('--usb-owned-probe', action='store_true', help='claim only the USB SMMU stream in the initial RAM experiment; no gadget or DMA')
     p.add_argument('--usb-context-probe', action='store_true', help='read inherited SMMU context banks only; RAM root and bootloader return required')
     p.add_argument('--usb-bypass-probe', action='store_true', help='claim a dedicated NS bypass context and USB route only; no gadget or DMA')
+    p.add_argument('--usb-enumeration-probe', action='store_true', help='start the guarded enumeration-only USB gadget for 30 seconds; initial RAM root only')
     p.add_argument('--rpmh-probe', action='store_true', help='inspect CMD-DB and RPMh TCS handoff without commands')
     p.add_argument('--gpu-probe', action='store_true', help='observe Adreno 620 clock handoff; requires --display')
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
@@ -85,12 +88,26 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.usb_enumeration_probe:
+        a.usb_bypass_probe = True
+    if a.touch_scan_probe:
+        a.touch_id_probe = True
     if a.touch_id_probe:
+        a.touch_rail_probe = True
+    if a.touch_events:
         a.touch_rail_probe = True
     if (a.touch_probe or a.touch_rail_probe or a.usb_probe or a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe or a.rpmh_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
         p.error('peripheral observers require --kernel')
     if a.gpu_probe and not a.display:
         p.error('--gpu-probe requires --display')
+    if a.touch_events and a.touch_id_probe:
+        p.error('GUI touch events must run separately from RAM touch ID or scan probes')
+    if a.touch_events and not (a.ufs_root and a.display and a.return_bootloader):
+        p.error('--touch-events requires --ufs-root, --display and --return-bootloader')
+    if a.touch_events and (a.usb_probe or a.usb_route_probe or a.usb_owned_probe or
+                           a.usb_context_probe or a.usb_bypass_probe or a.gpu_probe or
+                           a.wifi_probe or a.rpmh_probe):
+        p.error('GUI touch events require USB, GPU, Wi-Fi and RPMh probes disabled')
     if a.touch_id_probe and not a.return_bootloader:
         p.error('--touch-id-probe requires --return-bootloader')
     if a.usb_owned_probe and not a.return_bootloader:
@@ -184,7 +201,7 @@ def main():
         nodes, _ = _tree(a.dtb.read_bytes())
         from peripherals import add_observers
         try:
-            add_observers(tree, nodes, touch=a.touch_probe or a.touch_id_probe, usb=a.usb_probe,
+            add_observers(tree, nodes, touch=a.touch_probe or a.touch_id_probe or a.touch_events, usb=a.usb_probe,
                           gpu=a.gpu_probe, wifi=a.wifi_probe,
                           usb_route=a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe,
                           usb_bypass=a.usb_bypass_probe, rpmh=a.rpmh_probe)
@@ -281,20 +298,26 @@ def main():
         if a.userspace_stacks:
             command_line += ' redfinstacks=1'
         usb_mode = 3 if a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe else 2 if a.usb_route_probe else int(a.usb_probe)
-        touch_mode = 2 if a.touch_id_probe else int(a.touch_probe)
+        touch_mode = 2 if a.touch_id_probe or a.touch_events else int(a.touch_probe)
         for mode, name in ((touch_mode, 'redfintouch'), (usb_mode, 'redfinusb'),
                            (int(a.gpu_probe), 'redfingpu'), (int(a.wifi_probe), 'redfinwifi'),
                            (int(a.rpmh_probe), 'redfinrpmh'), (int(a.touch_rail_probe), 'redfinrail')):
             if mode:
                 command_line += f' {name}={mode}'
-        if a.touch_id_probe:
+        if a.touch_id_probe or a.touch_events:
             command_line += ' redfintouchsetup=1 redfinrpmhtouch=1'
+        if a.touch_scan_probe:
+            command_line += ' redfintouchscan=1'
+        if a.touch_events:
+            command_line += ' redfintouchevents=1'
         if a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe:
             command_line += ' redfinusbowned=1'
         if a.usb_context_probe:
             command_line += ' redfinusbcontexts=1'
         if a.usb_bypass_probe:
             command_line += ' redfinusbbypass=1'
+        if a.usb_enumeration_probe:
+            command_line += ' redfinusbgadget=1 redfinusbsecs=30'
         if ufs_mode:
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:

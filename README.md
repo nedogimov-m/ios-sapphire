@@ -10,8 +10,8 @@ backboardd opens it, allocates an iPhone X canvas and submits swaps. The earlier
 SpringBoard `main CADisplay` trap is absent in that test. Authenticated RAM
 captures show the Apple logo and lock screen rendered into the framebuffer.
 Fresh physical panel scanout and the home screen remain unverified. Physical
-SEC touch identity53:45:37:91:00 now reads successfully over native cold SPI;
-contact-event startup and iOS HID connection remain in progress. Timed
+SEC touch identity53:45:37:91:00, runtime sensing and backboardd opening the
+native HID service are observed; physical contact delivery remains unverified. Timed
 process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
 The minimal MobileGestalt Wi-Fi identity fix is validated on the device.

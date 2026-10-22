@@ -1,16 +1,18 @@
-# Cold SEC setup draft
+# Cold SEC setup
 
 `touch-setup.patch` has no startup hook of its own. It adds
 `int redfin_touch_setup(bool rail_ready, bool host_exclusive)` on top of
-`touch.patch` and `touch-spi.patch`; the initial md0 caller now invokes it.
+`touch.patch` and `touch-spi.patch`. The permanent startup owner invokes it
+for initial md0 ID, bounded md0 scan or explicitly selected UFS/HID mode;
+see [TOUCH-EVENTS.md](TOUCH-EVENTS.md) for image flags and root/display gates.
 The call requires `redfintouch=2 redfintouchsetup=1` and runs at most once
 per boot. Missing power/exclusivity proof returns before mapping hardware.
 
-Hardware result, 2026-10-22 (`touch-id-v3`): fresh physical power proof
-passed, followed by clock votes, idle-SE checks, XO configuration, SPI host
-configuration, TLMM configuration and reset release/settling. The subsequent
-ID exchange returned timeout 60; cancel/abort also timed out. Preparation is
-observed, while SEC identity and the failing TX/RX opcode remain unproved.
+Hardware, 2026-10-22: power and cold preparation passed in V3; later DFS and
+RX-notification corrections produced exact SEC ID `53:45:37:91:00` in V8.
+The subsequent md0 scan passed volatile sensing initialization and bounded
+queue reads. Physical contacts in the UFS GUI remain unverified pending
+capture; setup success alone does not prove HID delivery.
 
 `rail_ready` must represent the power backend's fresh, successful preparation
 of PM8150 L17 / `ldoa17` at the DT's exact 3,304,000 uV (`0x326a40`,
@@ -53,7 +55,8 @@ The implemented sequence is:
    protocol 1 and 16x32-bit FIFO geometry. On failure, do not cancel, reset
    or configure that host. Only the preceding clock votes have changed.
 3. Gate local GENI interrupts. Disable generated serial clock, clear only
-   DFS enable bit 0 at GCC `+0x17024`, then configure XO source 0 / HID 1 /
+   DFS enable bit 0 at SE `+0x80` and GCC `+0x17024`, with exact readback and
+   preservation of other bits, then configure XO source 0 / HID 1 /
    integer mode / software clock control with CFG mask `0x10371f`, value 1.
    Poll UPDATE bit 0 at `+0x17010` for at most 500 us and verify readback.
    Set GENI clock selection 0 and MCLK `0x141`: 19.2 MHz divided by 20,
@@ -78,7 +81,9 @@ The implemented sequence is:
 `GENI_FORCE_DEFAULT=1` selects the source-defined SPI default IO levels; it
 is not the touch controller reset GPIO or a firmware command. GPIO reset is
 never written low. No firmware upload, flash, NVM, selftest, calibration,
-event-clear or SENSE_ON command is implemented. An ID failure stops here.
+event-clear or SENSE_ON command is issued by cold setup. An ID failure stops
+here. The separately selected scan/event path can perform the two volatile
+sensing writes described in [TOUCH-EVENTS.md](TOUCH-EVENTS.md).
 Failure leaves this boot's added clock votes and any completed setup in
 place; it does not turn off clocks that another client may also need.
 
@@ -95,7 +100,5 @@ The actual C is compiled with MMIO/DT models. Tests cover missing proofs,
 exact mappings, GPIO ownership, foreign active/DMA/GSI state, no unclocked SE
 reads, preservation of unrelated votes, finite clock/DFS/reset timeouts,
 latch-before-OE, absence of reset pulses, GIC becoming enabled mid-setup and
-exactly one ID call after settling. V3 observed hardware preparation; identity
-remains unknown. The bounded read-only GENI diagnostics in
-[TOUCH-SPI.md](TOUCH-SPI.md) will identify the pending command without changing
-transport writes, explicit delays or timeout budgets.
+exactly one ID call after settling. [TOUCH-SPI.md](TOUCH-SPI.md) records the
+transport diagnostics and corrections that led to successful V8 identity.

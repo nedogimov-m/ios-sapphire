@@ -171,10 +171,12 @@ def main(argv=None):
              'touch-events.patch', 'touch-rail-ready.patch', 'rpmh-touch.patch',
              'touch-start.patch', 'touch-spi-diag.patch', 'touch-platform-diag.patch',
              'touch-dfs-diag.patch', 'touch-dfs-disable.patch', 'touch-rx-irq.patch',
+             'touch-sensing.patch',
              'usb-owned-route.patch', 'usb-owned-diag.patch', 'usb-owned-build.patch',
              'usb-gadget.patch', 'usb-start.patch', 'usb-context-probe.patch',
-             'usb-bypass-context.patch',
-             'peripheral-start.patch')]
+             'usb-bypass-context.patch', 'usb-enumeration-start.patch',
+             'usb-bypass-diagnostic.patch',
+             'peripheral-start.patch', 'touch-event-start.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

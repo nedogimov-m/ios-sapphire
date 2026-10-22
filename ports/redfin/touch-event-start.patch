@@ -1,0 +1,463 @@
+diff --git a/bsd/dev/redfin_touch_start.c b/bsd/dev/redfin_touch_start.c
+--- a/bsd/dev/redfin_touch_start.c
++++ b/bsd/dev/redfin_touch_start.c
+@@ -1,23 +1,26 @@
+-/* Initial md0-only SEC ID experiment. No event worker or userspace injection.
+- * This built-in module is the sole Redfin DRV2/SE0 owner for this experiment:
+- * the legacy RPMh entry refuses Redfin, competing native paths remain off,
+- * and a one-shot software claim spans power preparation and cold SPI setup.
+- * Hardware/TCS/PMIC proof is independently enforced by the called backends.
+- */
++/* Sole DRV2/SE0 boot owner: initial md0 ID, bounded md0 sensing, or UFS HID.
++ * Native UFS only writes its fenced HCI/UTP path, never DRV2/SE0/touch GPIOs.
++ * Competing USB/modem/WLAN/GPU paths stay off. Legacy RPMh refuses Redfin.
++ * No release, retry or boot-thread HID wait, including after any failure. */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <sys/param.h>
+ #include <sys/systm.h>
+ #include <sys/errno.h>
+ #include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
+ #include "redfin_rpmh_touch.h"
+-
++#include "redfin_touch_sensing.h"
+ extern bool redfin_usb_platform(void);
+ extern int redfin_spmi_return_ready(void);
+ extern int redfin_touch_setup(bool, bool);
++extern int redfin_touch_events_start(void);
+ int redfin_touch_start_initial(void);
+-
++bool redfin_touch_boot_lease_valid(unsigned mode);
++/* 0=unclaimed, 1=claimed/unpublished, 2=permanently published. */
+ static uint32_t redfin_initial_touch_owner;
++static unsigned redfin_touch_boot_mode;
++static const uint8_t redfin_touch_boot_caller;
+ static bool
+ redfin_initial_touch_arg(const char *name, uint32_t expected, bool required)
+ {
+@@ -25,45 +28,134 @@
+  bool found = PE_parse_boot_argn(name, &value, sizeof(value));
+  return found ? value == expected : !required;
+ }
+-
++static bool
++redfin_touch_string(const char *name, const char *expected)
++{
++ char value[16] = {0};
++ return PE_parse_boot_argn(name, value, sizeof(value)) && !strncmp(value, expected, sizeof(value));
++}
++static bool
++redfin_touch_property(DTEntry node, const char *name, const void *expected, unsigned bytes)
++{
++ const void *raw = NULL;
++ unsigned size = 0;
++ return SecureDTGetProperty(node, name, &raw, &size) == kSuccess &&
++     raw && size == bytes && !memcmp(raw, expected, bytes);
++}
++static bool
++redfin_touch_gui_contract(void)
++{
++ DTEntry display, touch;
++ const uint32_t one = 1, width = 1080, height = 2340, stride = 4320;
++ const uint32_t cw = 1125, ch = 2436, touch_size[] = {1080, 2340};
++ const uint64_t fb[] = {0xa0000000ULL, 0x02300000ULL};
++ return SecureDTLookupEntry(NULL, "/arm-io/disp0", &display) == kSuccess &&
++     redfin_touch_property(display, "compatible", "sweet,display", sizeof("sweet,display")) &&
++     redfin_touch_property(display, "redfin,abl-copy-only", &one, sizeof(one)) &&
++     redfin_touch_property(display, "redfin,framebuffer", fb, sizeof(fb)) &&
++     redfin_touch_property(display, "width", &width, sizeof(width)) &&
++     redfin_touch_property(display, "height", &height, sizeof(height)) &&
++     redfin_touch_property(display, "stride", &stride, sizeof(stride)) &&
++     redfin_touch_property(display, "canvas-width", &cw, sizeof(cw)) &&
++     redfin_touch_property(display, "canvas-height", &ch, sizeof(ch)) &&
++     redfin_touch_property(display, "pixel-format", "BGRA", sizeof("BGRA")) &&
++     SecureDTLookupEntry(NULL, "/redfin-touch", &touch) == kSuccess &&
++     redfin_touch_property(touch, "compatible", "redfin,sec-touch", sizeof("redfin,sec-touch")) &&
++     redfin_touch_property(touch, "touch-size", touch_size, sizeof(touch_size));
++}
++static bool
++redfin_touch_boot_gates(unsigned mode)
++{
++ if (mode > REDFIN_TOUCH_UFS_EVENTS || !redfin_usb_platform() || redfin_spmi_return_ready() != 1 ||
++     !redfin_initial_touch_arg("cpus", 1, true) ||
++     !redfin_initial_touch_arg("redfinreturn", 1, true) ||
++     !redfin_initial_touch_arg("redfinspmi", 1, true) ||
++     !redfin_initial_touch_arg("redfintouch", 2, true) ||
++     !redfin_initial_touch_arg("redfintouchsetup", 1, true) ||
++     !redfin_initial_touch_arg("redfinrpmhtouch", 1, true) ||
++     !redfin_initial_touch_arg("redfinrail", 1, true) ||
++     !redfin_initial_touch_arg("redfintouchscan", mode == REDFIN_TOUCH_MD0_SCAN, mode == REDFIN_TOUCH_MD0_SCAN) ||
++     !redfin_initial_touch_arg("redfintouchevents", mode == REDFIN_TOUCH_UFS_EVENTS, mode == REDFIN_TOUCH_UFS_EVENTS)) return false;
++ const char *legacy[] = {"sweettouch", "sweetkeys", "sweetusb", "sweetcpufreq",
++     "sweetbattery", "modem", "wifi", "gpu"};
++ const char *native[] = {"sweethw", "sweetusblog", "redfinusb", "redfinwifi", "redfingpu",
++     "redfinusbowned", "redfinusbbypass", "redfinusbcontexts", "redfinusbgadget",
++     "redfinusbnet", "redfinusblog", "redfinrpmh"};
++ for (unsigned i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++)
++  if (!redfin_initial_touch_arg(legacy[i], 0, true)) return false;
++ for (unsigned i = 0; i < sizeof(native) / sizeof(native[0]); i++)
++  if (!redfin_initial_touch_arg(native[i], 0, false)) return false;
++ if (mode == REDFIN_TOUCH_UFS_EVENTS) {
++  uint32_t ufsrw = 0, rootrw = 0;
++  return redfin_touch_string("rd", "ufsroot0") && redfin_touch_string("ufsroot", "userdata") &&
++      redfin_initial_touch_arg("redfinroot", 1, true) &&
++      redfin_initial_touch_arg("redfinufs", 3, true) &&
++      redfin_initial_touch_arg("redfinfb", 1, true) &&
++      redfin_initial_touch_arg("sweetlog", 0, true) &&
++      PE_parse_boot_argn("ufsrw", &ufsrw, sizeof(ufsrw)) &&
++      PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw)) &&
++      ufsrw <= 1 && rootrw == ufsrw && redfin_touch_gui_contract();
++ }
++ char ufsroot[16] = {0};
++ return redfin_touch_string("rd", "md0") &&
++     redfin_initial_touch_arg("redfinroot", 0, false) &&
++     redfin_initial_touch_arg("redfinufs", 0, false) &&
++     redfin_initial_touch_arg("ufsrw", 0, false) &&
++     redfin_initial_touch_arg("rootrw", 0, false) &&
++     !PE_parse_boot_argn("ufsroot", ufsroot, sizeof(ufsroot));
++}
++static bool
++redfin_touch_boot_owned(const void *owner, void *context, unsigned mode)
++{
++ return owner == &redfin_touch_boot_caller && context == &redfin_initial_touch_owner &&
++     __atomic_load_n(&redfin_initial_touch_owner, __ATOMIC_ACQUIRE) == 2 &&
++     mode == redfin_touch_boot_mode && redfin_touch_boot_gates(mode);
++}
++/* Worker rechecks the same permanent owner. Pure source/args/ADT, no MMIO. */
++bool
++redfin_touch_boot_lease_valid(unsigned mode)
++{
++ return redfin_touch_boot_owned(&redfin_touch_boot_caller, &redfin_initial_touch_owner, mode);
++}
+ int
+ redfin_touch_start_initial(void)
+ {
+- if (!redfin_usb_platform() || !redfin_spmi_return_ready() ||
+-     !redfin_initial_touch_arg("cpus", 1, true) ||
+-     !redfin_initial_touch_arg("redfintouch", 2, true) ||
+-     !redfin_initial_touch_arg("redfintouchsetup", 1, true) ||
+-     !redfin_initial_touch_arg("redfinrpmhtouch", 1, true) ||
+-     !redfin_initial_touch_arg("redfinrail", 1, true)) return ENOTSUP;
+- const char *legacy[] = {"sweettouch", "sweetkeys", "sweetusb", "sweetcpufreq",
+-     "sweetbattery", "modem", "wifi", "gpu"};
+- const char *native[] = {"redfinusb", "redfinwifi", "redfingpu", "redfinroot",
+-     "redfinufs", "redfintouchevents"};
+- for (unsigned i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++)
+-  if (!redfin_initial_touch_arg(legacy[i], 0, true)) return ENOTSUP;
+- for (unsigned i = 0; i < sizeof(native) / sizeof(native[0]); i++)
+-  if (!redfin_initial_touch_arg(native[i], 0, false)) return ENOTSUP;
+- /* Boot arguments corroborate the compiled sole-writer policy. The lease
+-  * itself is this module's actual exclusive software claim, never an arg.
+-  * No release/retry: a failed power or bus transaction can be uncertain.
+-  */
++ uint32_t scan = 0, events = 0;
++ (void)PE_parse_boot_argn("redfintouchscan", &scan, sizeof(scan));
++ (void)PE_parse_boot_argn("redfintouchevents", &events, sizeof(events));
++ if (scan > 1 || events > 1 || (scan && events)) return ENOTSUP;
++ unsigned mode = events ? REDFIN_TOUCH_UFS_EVENTS : scan ? REDFIN_TOUCH_MD0_SCAN : REDFIN_TOUCH_INITIAL_MD0;
++ if (!redfin_touch_boot_gates(mode)) return ENOTSUP;
+  uint32_t expected = 0;
+- bool held = __atomic_compare_exchange_n(&redfin_initial_touch_owner, &expected,
+-     1, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
+- if (!held) return EBUSY;
+- const struct redfin_touch_rail_ops ops = {held, redfin_touch_rail_snapshot, NULL};
++ if (!__atomic_compare_exchange_n(&redfin_initial_touch_owner, &expected,
++     1, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) return EBUSY;
++ redfin_touch_boot_mode = mode;
++ __atomic_store_n(&redfin_initial_touch_owner, 2, __ATOMIC_RELEASE);
++ const struct redfin_touch_rail_ops ops = {
++     .initial_md0_drv2_lease = mode == REDFIN_TOUCH_INITIAL_MD0,
++     .read = redfin_touch_rail_snapshot, .context = NULL,
++     .boot_lease_mode = mode, .boot_lease_valid = redfin_touch_boot_owned,
++     .boot_lease_owner = &redfin_touch_boot_caller,
++     .boot_lease_context = &redfin_initial_touch_owner
++ };
+  int error = redfin_rpmh_touch_prepare(&ops);
+- printf("REDFIN TOUCH START: power preparation result=%d\n", error);
++ printf("REDFIN TOUCH START: lease-mode=%u power preparation result=%d\n", mode, error);
+  if (error) return error;
++ if (!redfin_touch_boot_lease_valid(mode)) return EPERM;
+  bool rail_ready = redfin_touch_rail_ready() == 1;
+- if (!rail_ready) {
+-  printf("REDFIN TOUCH START: fresh physical rail proof lost; SPI skipped\n");
+-  return ENXIO;
++ if (!rail_ready) return ENXIO;
++ if (!redfin_touch_boot_lease_valid(mode)) return EPERM;
++ error = redfin_touch_setup(rail_ready, true);
++ printf("REDFIN TOUCH START: SEC ID result=%d\n", error);
++ if (error) return error;
++ if (!redfin_touch_boot_lease_valid(mode)) return EPERM;
++ if (mode == REDFIN_TOUCH_MD0_SCAN) {
++  error = redfin_touch_spi_scan_probe(true, 4);
++  printf("REDFIN TOUCH START: bounded md0 sensing result=%d; no HID\n", error);
++ } else if (mode == REDFIN_TOUCH_UFS_EVENTS) {
++  error = redfin_touch_events_start();
++  printf("REDFIN TOUCH START: asynchronous HID worker result=%d\n", error);
+  }
+- /* setup independently requires masked GIC633, cold/free GPIO/SE state,
+-  * exact live-FDT contracts and its own one-shot before hardware writes. */
+- error = redfin_touch_setup(rail_ready, held);
+- printf("REDFIN TOUCH START: SEC ID result=%d; no event worker\n", error);
+  return error;
+ }
+ #endif
+diff --git a/bsd/dev/redfin_rpmh_touch.h b/bsd/dev/redfin_rpmh_touch.h
+--- a/bsd/dev/redfin_rpmh_touch.h
++++ b/bsd/dev/redfin_rpmh_touch.h
+@@ -2,6 +2,11 @@
+ #ifndef REDFIN_RPMH_TOUCH_H
+ #define REDFIN_RPMH_TOUCH_H
+ #include "redfin_touch_rail.h"
++enum redfin_touch_boot_lease_mode {
++ REDFIN_TOUCH_INITIAL_MD0 = 0,
++ REDFIN_TOUCH_MD0_SCAN = 1,
++ REDFIN_TOUCH_UFS_EVENTS = 2
++};
+ struct redfin_touch_rail_ops {
+  /* Caller must own DRV2, interrupt37 and all of its RPMh clients for this boot.
+   * read() must perform fresh physical SPMI reads, and set index_verified only
+@@ -10,9 +15,16 @@
+  bool initial_md0_drv2_lease;
+  int (*read)(void *context, struct redfin_touch_rail_state *out);
+  void *context;
++ /* Append-only: legacy callers keep the original initial-md0 contract.
++  * Scan/UFS callers must publish a durable source-audited boot owner. The
++  * callback is pure (no MMIO/manager calls) and binds owner/context/mode. */
++ unsigned boot_lease_mode;
++ bool (*boot_lease_valid)(const void *owner, void *lease_context, unsigned mode);
++ const void *boot_lease_owner;
++ void *boot_lease_context;
+ };
+ /* Zero means either power was already verified, or the floor-preserving ACTIVE
+  * vote completed, followed by two fresh configured+VALID power samples.
+- * One-shot, initial-md0 manager only; no startup hook. */
++ * One-shot; UFS is accepted only with the explicit durable event lease. */
+ int redfin_rpmh_touch_prepare(const struct redfin_touch_rail_ops *ops);
+ #endif
+diff --git a/bsd/dev/redfin_rpmh_touch.c b/bsd/dev/redfin_rpmh_touch.c
+--- a/bsd/dev/redfin_rpmh_touch.c
++++ b/bsd/dev/redfin_rpmh_touch.c
+@@ -27,7 +27,9 @@
+ #define RT_TRIGGER (1u << 24)
+ #define RT_COMPLETE ((1u << 8) | (1u << 16))
+ static bool rt_attempted, rt_poisoned;
+-struct rt_context { vm_offset_t rsc, gic; unsigned commands; uint32_t irq_enable; };
++static bool rt_boot_lease_valid(const struct redfin_touch_rail_ops *ops);
++struct rt_context { vm_offset_t rsc, gic; unsigned commands; uint32_t irq_enable;
++ const struct redfin_touch_rail_ops *ops; };
+ struct rt_snapshot {
+  uint32_t idle, control, enable, wait;
+  struct { uint32_t message, address, data; } command[16];
+@@ -50,6 +52,7 @@
+ static int
+ rt_sync(struct rt_context *c, unsigned offset, uint32_t value)
+ {
++ if (!rt_boot_lease_valid(c->ops)) return EPERM;
+  rt_write(c->rsc, offset, value);
+  uint32_t observed = 0;
+  for (unsigned us = 0; us < 1000; us++) {
+@@ -146,6 +149,7 @@
+ static int
+ rt_irq(struct rt_context *c, bool before)
+ {
++ if (!rt_boot_lease_valid(c->ops)) return EPERM;
+  uint32_t enable = rt_read(c->gic, 0x104), pending = rt_read(c->gic, 0x204), active = rt_read(c->gic, 0x304);
+  if (enable == 0xffffffffu || pending == 0xffffffffu || active == 0xffffffffu) return EIO;
+  if ((enable | active | (before ? pending : 0)) & RT_IRQ37) return EBUSY;
+@@ -209,6 +213,7 @@
+  }
+  if (rt_sync(c, RT_TCS(0) + 0x10, 7) || rt_sync(c, RT_TCS(0) + 0x1c, 7) ||
+      rt_sync(c, RT_TCS(0) + 0x14, 0) || rt_sync(c, RT_TCS(0) + 0x14, RT_AMC)) return EIO;
++ if (!rt_boot_lease_valid(c->ops)) return EPERM;
+  rt_write(c->rsc, RT_TCS(0) + 0x14, RT_AMC | RT_TRIGGER);
+  bool completed = false;
+  uint32_t irq = 0, idle = 0, observed_status[3] = {0};
+@@ -241,9 +246,51 @@
+  if (!completed) return ETIMEDOUT;
+  if (rt_sync(c, RT_TCS(0) + 0x14, RT_AMC) || rt_sync(c, RT_TCS(0) + 0x14, 0) ||
+      rt_sync(c, RT_TCS(0) + 0x1c, 0) || rt_sync(c, RT_TCS(0) + 0x10, 0)) return EIO;
++ if (!rt_boot_lease_valid(c->ops)) return EPERM;
+  rt_write(c->rsc, 0xd08, 1); /* Owned W1C only; no global reset or unvote. */
+  if (rt_read(c->rsc, 0xd04)) return EIO;
+  return rt_irq(c, false);
++}
++
++/* Typed root policy: a legacy initial-md0 boolean never grants UFS access. */
++static bool
++rt_arg(const char *name, uint32_t expected, bool required)
++{
++ uint32_t value = 0;
++ bool found = PE_parse_boot_argn(name, &value, sizeof(value));
++ return found ? value == expected : !required;
++}
++static bool
++rt_root(const char *name, const char *expected)
++{
++ char value[16] = {0};
++ return PE_parse_boot_argn(name, value, sizeof(value)) && !strncmp(value, expected, sizeof(value));
++}
++static bool
++rt_boot_lease_valid(const struct redfin_touch_rail_ops *ops)
++{
++ if (!ops || !ops->read || ops->boot_lease_mode > REDFIN_TOUCH_UFS_EVENTS) return false;
++ unsigned mode = ops->boot_lease_mode;
++ if (mode == REDFIN_TOUCH_INITIAL_MD0) {
++  if (!ops->initial_md0_drv2_lease) return false;
++ } else if (ops->initial_md0_drv2_lease || !ops->boot_lease_valid || !ops->boot_lease_owner || !ops->boot_lease_context ||
++     !ops->boot_lease_valid(ops->boot_lease_owner, ops->boot_lease_context, mode)) return false;
++ if (!rt_arg("redfintouchscan", mode == REDFIN_TOUCH_MD0_SCAN, mode == REDFIN_TOUCH_MD0_SCAN) ||
++     !rt_arg("redfintouchevents", mode == REDFIN_TOUCH_UFS_EVENTS, mode == REDFIN_TOUCH_UFS_EVENTS)) return false;
++ if (mode != REDFIN_TOUCH_INITIAL_MD0 &&
++     (!rt_arg("redfinreturn", 1, true) || !rt_arg("redfinspmi", 1, true))) return false;
++ if (mode == REDFIN_TOUCH_UFS_EVENTS) {
++  uint32_t ufsrw = 0, rootrw = 0;
++  return rt_root("rd", "ufsroot0") && rt_root("ufsroot", "userdata") &&
++      rt_arg("redfinroot", 1, true) && rt_arg("redfinufs", 3, true) &&
++      rt_arg("redfinfb", 1, true) && rt_arg("sweetlog", 0, true) &&
++      PE_parse_boot_argn("ufsrw", &ufsrw, sizeof(ufsrw)) &&
++      PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw)) && ufsrw <= 1 && rootrw == ufsrw;
++ }
++ char ufsroot[16] = {0};
++ return rt_root("rd", "md0") && rt_arg("redfinroot", 0, false) &&
++     rt_arg("redfinufs", 0, false) && rt_arg("ufsrw", 0, false) && rt_arg("rootrw", 0, false) &&
++     !PE_parse_boot_argn("ufsroot", ufsroot, sizeof(ufsroot));
+ }
+ 
+ int
+@@ -253,26 +300,25 @@
+  (void)PE_parse_boot_argn("redfinrpmhtouch", &mode, sizeof(mode));
+  (void)PE_parse_boot_argn("redfintouch", &touch, sizeof(touch));
+  (void)PE_parse_boot_argn("redfintouchsetup", &setup, sizeof(setup));
+- if (mode != 1 || touch != 2 || setup != 1 || !ops || !ops->initial_md0_drv2_lease || !ops->read) return ENOTSUP;
++ if (mode != 1 || touch != 2 || setup != 1 || !rt_boot_lease_valid(ops)) return ENOTSUP;
+  if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 || !redfin_spmi_return_ready() || !rt_platform()) return ENXIO;
+- char root_device[16] = {0};
+- uint32_t publication = 0;
+- (void)PE_parse_boot_argn("redfinroot", &publication, sizeof(publication));
+- if (publication || !PE_parse_boot_argn("rd", root_device, sizeof(root_device)) ||
+-     memcmp(root_device, "md0", sizeof("md0"))) return ENOTSUP;
+  const char *legacy[] = {"sweethw", "sweetkeys", "sweetbattery", "sweetusb", "modem", "wifi", "gpu",
+-     "redfingpu", "redfinwifi", "redfinusb"};
++     "redfingpu", "redfinwifi", "redfinusb", "sweettouch", "sweetcpufreq",
++     "sweetusblog", "redfinusbowned", "redfinusbbypass", "redfinusbcontexts",
++     "redfinusbgadget", "redfinusbnet", "redfinusblog", "redfinrpmh"};
+  for (unsigned i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++) {
+   uint32_t enabled = 0; (void)PE_parse_boot_argn(legacy[i], &enabled, sizeof(enabled));
+   if (enabled) return EBUSY;
+  }
+  if (__atomic_exchange_n(&rt_attempted, true, __ATOMIC_RELAXED)) return EBUSY;
+  struct redfin_touch_rail_state initial = {0}, check = {0};
++ if (!rt_boot_lease_valid(ops)) return EPERM;
+  int error = ops->read(ops->context, &initial);
+  if (!error) error = rt_physical_floor(&initial);
+  rt_report_physical("pre", &initial, error, 1);
+  if (error) return error;
+  delay(100);
++ if (!rt_boot_lease_valid(ops)) return EPERM;
+  error = ops->read(ops->context, &check);
+  if (error || !rt_same(&initial, &check)) {
+   rt_report_physical("pre-check", &check, error, 2);
+@@ -288,7 +334,7 @@
+  struct rf_cmddb_resource resource;
+  if (rf_cmddb_lookup((const volatile uint8_t *)db, RF_CMDDB_BYTES, key, RF_CMDDB_VRM, &resource) != RF_CMDDB_OK ||
+      resource.address != RT_BASE) return EINVAL;
+- struct rt_context c = {ml_io_map(0x18220000, 0x10000), 0, 0, 0};
++ struct rt_context c = {ml_io_map(0x18220000, 0x10000), 0, 0, 0, ops};
+  if (!c.rsc) return ENOMEM;
+  uint32_t id = rt_read(c.rsc, 0), config = rt_read(c.rsc, 0xc);
+  unsigned major = (id >> 16) & 255, count = (config >> 12) & 63;
+@@ -303,6 +349,7 @@
+  if (!error) error = rt_inherited(&c);
+  if (error) return error;
+  /* Last physical/RSC/GIC check before acquiring the slot with any write. */
++ if (!rt_boot_lease_valid(ops)) return EPERM;
+  error = ops->read(ops->context, &check);
+  rt_report_physical("pre-trigger", &check, error, 3);
+  if (error) return error;
+@@ -320,6 +367,7 @@
+  unsigned physical_samples = 0;
+  for (unsigned us = 0; us < 100000; us += 100) {
+   struct redfin_touch_rail_state a = {0}, b = {0};
++  if (!rt_boot_lease_valid(ops)) return EPERM;
+   error = ops->read(ops->context, &a);
+   last = a; physical_samples++;
+   if (error) {
+@@ -329,6 +377,7 @@
+   if (physical_samples == 1) rt_report_physical("post-first", &a, 0, physical_samples);
+   if (rt_powered(&a)) {
+    delay(100);
++   if (!rt_boot_lease_valid(ops)) return EPERM;
+    error = ops->read(ops->context, &b);
+    last = b; physical_samples++;
+    if (error) { rt_report_physical("post-error", &b, error, physical_samples); return error; }
+diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
+--- a/bsd/dev/redfin_touch_events.c
++++ b/bsd/dev/redfin_touch_events.c
+@@ -1,4 +1,4 @@
+-/* Opt-in bounded event worker; no startup hook and no IC write command.
++/* Opt-in bounded event worker with volatile source-backed sensing init.
+  * Requires the same boot's successful SEC ID, retained power/clocks/ownership,
+  * and a registered Redfin HID consumer. Event read/checksum lives in SPI backend.
+  */
+@@ -12,6 +12,9 @@
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
+ #include "redfin_touch_events.h"
++#include "redfin_rpmh_touch.h"
++#include "redfin_touch_sensing.h"
++extern bool redfin_touch_boot_lease_valid(unsigned);
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern kern_return_t thread_terminate(thread_t);
+ extern bool redfin_touch_spi_identity_ready(void);
+@@ -37,7 +40,8 @@
+ redfin_events_owned(void)
+ {
+ 	/* INTID633 must stay disabled at the distributor; IRQ9 stays GPIO input. */
+-	return !(redfin_events_rd(redfin_events_gic,0x14c) & (1u << 25)) &&
++	return redfin_touch_boot_lease_valid(REDFIN_TOUCH_UFS_EVENTS) &&
++	    !(redfin_events_rd(redfin_events_gic,0x14c) & (1u << 25)) &&
+ 	    !(redfin_events_rd(redfin_events_gpio,0x1000) & 0x23cu);
+ }
+ static void
+@@ -61,7 +65,7 @@
+ {
+ 	(void)ctx;
+ 	/* UP also clears SweetHID's state if its consumer just disappeared. */
+-	if (down && !sweet_hid_redfin_touch_ready()) { redfin_events_delivery_failed = true; return; }
++	if (down && (!sweet_hid_redfin_touch_ready() || !redfin_events_owned())) { redfin_events_delivery_failed = true; return; }
+ 	sweet_hid_touch((int)finger,down,(int)x,(int)y);
+ }
+ static void
+@@ -78,15 +82,18 @@
+ 	unsigned ticks = 0,batches = 0;
+ 	/* No SPI events consumed and no DOWN emitted before a real callback consumer. */
+ 	while (!sweet_hid_redfin_touch_ready()) {
++		if (!redfin_touch_boot_lease_valid(REDFIN_TOUCH_UFS_EVENTS)) { error = EPERM; goto done; }
+ 		if (mach_absolute_time() >= deadline) { error = ETIMEDOUT; goto done; }
+ 		redfin_events_wait(100);
+ 	}
+ 	if (!redfin_events_owned()) { error = EBUSY; goto done; }
+ 	error = redfin_touch_spi_events_begin(true);
+ 	if (error) goto done;
+-	uint8_t boot = 0;
+-	error = redfin_events_read(NULL,0x55,1,&boot);
+-	if (error || boot != 0x20) { if (!error) error = ENOTSUP; goto done; }
++	/* Real HID, permanent source lease and open verified SPI precede IC writes.
++	 * One-shot BOOT/AF/functions proof, volatile feature mask and SENSE_ON only. */
++	if (!sweet_hid_redfin_touch_ready() || !redfin_events_owned()) { error = EPIPE; goto done; }
++	error = redfin_touch_spi_events_sense_init();
++	if (error) goto done;
+ 	/* Discard pre-registration contacts; require an empty queue within4 batches.
+ 	 * A held old contact stays suppressed until UP; an unknown MOVE is ignored. */
+ 	for (unsigned i = 0; i < 4 && !state.synchronized; i++) {
+@@ -138,7 +145,8 @@
+ 	uint32_t enabled = 0,seconds = 120;
+ 	(void)PE_parse_boot_argn("redfintouchevents",&enabled,sizeof(enabled));
+ 	(void)PE_parse_boot_argn("redfintouchsecs",&seconds,sizeof(seconds));
+-	if (enabled != 1 || redfin_events_attempted || !redfin_touch_spi_identity_ready()) return ENOTSUP;
++	if (enabled != 1 || redfin_events_attempted ||
++	    !redfin_touch_boot_lease_valid(REDFIN_TOUCH_UFS_EVENTS) || !redfin_touch_spi_identity_ready()) return ENOTSUP;
+ 	if (seconds < 1 || seconds > 300) return EINVAL;
+ 	redfin_events_attempted = true;
+ 	int error = redfin_events_contract();

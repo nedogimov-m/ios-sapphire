@@ -1,0 +1,213 @@
+diff --git a/bsd/dev/redfin_touch_protocol.h b/bsd/dev/redfin_touch_protocol.h
+--- a/bsd/dev/redfin_touch_protocol.h
++++ b/bsd/dev/redfin_touch_protocol.h
+@@ -16,6 +16,7 @@
+ redfin_touch_read_allowed(unsigned reg, unsigned count)
+ {
+ 	return (reg == 0x22 && count == 5) || (reg == 0x55 && count == 1) ||
++ (reg == 0xaf && count == 4) || (reg == 0x30 && count == 2) ||
+ 	       (reg == 0x60 && count == 8) ||
+ 	       (reg == 0x61 && count >= 8 && count <= 31 * 8 && count % 8 == 0);
+ }
+@@ -37,7 +38,7 @@
+ redfin_touch_read_delay(unsigned reg)
+ {
+ 	if (reg == 0x61) return 500;
+-	return reg == 0x22 || reg == 0x55 || reg == 0x60 ? 100 : 0;
++	return reg == 0x22 || reg == 0x55 || reg == 0x60 || reg == 0xaf || reg == 0x30 ? 100 : 0;
+ }
+ static inline unsigned
+ redfin_touch_response_size(unsigned reg, unsigned count)
+@@ -55,6 +56,35 @@
+ 	uint8_t checksum = 0;
+ 	for (unsigned i = 0; i < 7u + count; i++) checksum = (uint8_t)(checksum + in[i]);
+ 	return checksum == in[7u + count];
++}
++/* SEC sec_ts.c:79..151,3580..3595. Only the volatile native scan setup.
++ * No reset, firmware, calibration, NVM or arbitrary register-write builder. */
++static inline unsigned
++redfin_touch_sense_frame(int sense_on, uint16_t current, uint8_t out[12])
++{
++ if (!out) return 0;
++ for (unsigned i=0;i<12;i++) out[i]=0;
++ unsigned payload=sense_on ? 1 : 3;
++ out[0]=0xaa;out[2]=(uint8_t)payload;out[5]=sense_on ? 0x10 : 0x30;
++ if (!sense_on) { uint16_t functions=current|0x61u;out[6]=(uint8_t)functions;out[7]=(uint8_t)(functions>>8); }
++ unsigned checksum=5+payload;
++ for (unsigned i=0;i<checksum;i++) out[checksum]=(uint8_t)(out[checksum]+out[i]);
++ return (checksum+1+3)&~3u;
++}
++static inline int
++redfin_touch_tx_valid(const uint8_t *tx,unsigned bytes)
++{
++ if (!tx || (bytes!=8 && bytes!=12)) return 0;
++ uint8_t expected[12]={0};
++ if (bytes==8 && tx[5]!=0x10) {
++  unsigned count=((unsigned)tx[3]<<8)|tx[4];
++  if (!redfin_touch_read_request(tx[5],count,expected)) return 0;
++ } else {
++  uint16_t functions=bytes==12 ? (uint16_t)(tx[6]|((uint16_t)tx[7]<<8)) : 0;
++  if (redfin_touch_sense_frame(bytes==8,functions,expected)!=bytes) return 0;
++ }
++ for (unsigned i=0;i<bytes;i++) if (tx[i]!=expected[i]) return 0;
++ return 1;
+ }
+ /* 0 empty/non-coordinate, -1 invalid, 1 coordinate. Raw panel pixels,
+  * low 4 bits packed in byte3. No conversion to SweetHID's 1080x2400 yet.
+diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
+--- a/bsd/dev/redfin_touch_spi.c
++++ b/bsd/dev/redfin_touch_spi.c
+@@ -13,6 +13,8 @@
+ #include <kern/clock.h>
+ #include <pexpert/pexpert.h>
+ #include "redfin_touch_protocol.h"
++#include "redfin_touch_sensing.h"
++#include "redfin_touch_events.h"
+ int redfin_touch_spi_probe(vm_offset_t se, unsigned verified_speed_hz, bool gic_irq_masked);
+ 
+ #define RF_SPI_DONE 1u
+@@ -26,6 +28,7 @@
+ #define RF_SPI_PACK1 0x000ffefeu
+ struct redfin_spi { vm_offset_t se; unsigned tx_depth, rx_depth; bool dead, command_owned; };
+ static bool redfin_spi_attempted;
++static bool redfin_spi_scan_attempted,redfin_spi_scan_active,redfin_spi_sense_attempted;
+ /* Proof is created only by this boot's successful ID and invalidated on close. */
+ static vm_offset_t redfin_spi_verified_se;
+ static unsigned redfin_spi_verified_hz;
+@@ -205,7 +208,7 @@
+ static int
+ redfin_spi_transfer(struct redfin_spi *s, const uint8_t *tx, uint8_t *rx, unsigned count)
+ {
+-	if (s->dead || (!tx == !rx) || !count || count % 4 || count > 256 || (tx && count != 8)) return EINVAL;
++	if (s->dead || (!tx == !rx) || !count || count % 4 || count > 256 || (tx && !redfin_touch_tx_valid(tx,count))) return EINVAL;
+ 	if ((redfin_spi_rd(s, 0x40) & 0x1001) ||
+ 	    (redfin_spi_rd(s, 0x800) & 0x0fffffff) ||
+ 	    (redfin_spi_rd(s, 0x804) & 0x01ffffff)) return redfin_spi_failed(s, EBUSY);
+@@ -299,14 +302,15 @@
+ bool
+ redfin_touch_spi_identity_ready(void)
+ {
+-	return redfin_spi_verified_se && redfin_spi_verified_hz && !redfin_spi_event_open;
++	return redfin_spi_verified_se && redfin_spi_verified_hz && !redfin_spi_event_open &&
++     !__atomic_load_n(&redfin_spi_scan_active,__ATOMIC_ACQUIRE);
+ }
+ void
+ redfin_touch_spi_events_close(void)
+ {
+ 	if (redfin_spi_event_open) {
+ 		/* Only this session's own in-flight command may be cancelled. */
+-		if (redfin_spi_event_context.command_owned)
++		if (redfin_spi_event_context.command_owned && !redfin_spi_event_context.dead)
+ 			(void)redfin_spi_failed(&redfin_spi_event_context, EIO);
+ 		redfin_spi_wr(&redfin_spi_event_context, 0xe1c, 0);
+ 		redfin_spi_wr(&redfin_spi_event_context, 0x614, 0);
+@@ -341,4 +345,95 @@
+ 	if (error) redfin_touch_spi_events_close();
+ 	return error;
+ }
++
++/* One source-bounded volatile initialization per boot, after this boot's ID.
++ * sec_ts_read_information:3338..3371 reads55/AF/30; fw_init:3580..3595
++ * preserves current touch functions, enables TOUCH/PALM/WET, then SENSE_ON.
++ * The native SPI writer79..151 has one TX phase and no reply/retry required.
++ */
++static int
++redfin_spi_sense_init(struct redfin_spi *s)
++{
++ if (__atomic_exchange_n(&redfin_spi_sense_attempted,true,__ATOMIC_ACQ_REL)) return EBUSY;
++ uint8_t boot=0,status[4]={0},functions[2]={0},frame[12]={0};
++ int error=redfin_spi_read(s,0x55,1,&boot);
++ if (error) return error;
++ printf("REDFIN TOUCH SENSE: pre BOOT55=%#x\n",boot);
++ if (boot!=0x20) return redfin_spi_failed(s,ENOTSUP);
++ error=redfin_spi_read(s,0xaf,4,status);
++ if (error) return error;
++ printf("REDFIN TOUCH SENSE: pre STATUSaf=%02x:%02x:%02x:%02x\n",status[0],status[1],status[2],status[3]);
++ if (status[1]==4) return redfin_spi_failed(s,ENOTSUP); /* Native FLASH system mode. */
++ error=redfin_spi_read(s,0x30,2,functions);
++ if (error) return error;
++ uint16_t current=(uint16_t)(functions[0]|((uint16_t)functions[1]<<8)),wanted=current|0x61u;
++ printf("REDFIN TOUCH SENSE: FUNCTIONS30=%#x target=%#x (preserve +TOUCH/PALM/WET)\n",current,wanted);
++ unsigned bytes=redfin_touch_sense_frame(false,current,frame);
++ error=redfin_spi_transfer(s,frame,NULL,bytes);
++ if (error) return error;
++ error=redfin_spi_read(s,0x30,2,functions);
++ if (error) return error;
++ uint16_t observed=(uint16_t)(functions[0]|((uint16_t)functions[1]<<8));
++ printf("REDFIN TOUCH SENSE: FUNCTIONS30 readback=%#x\n",observed);
++ if (observed!=wanted) return redfin_spi_failed(s,EIO);
++ bytes=redfin_touch_sense_frame(true,0,frame);
++ error=redfin_spi_transfer(s,frame,NULL,bytes);
++ if (error) return error;
++ error=redfin_spi_read(s,0xaf,4,status);
++ if (error) return error;
++ printf("REDFIN TOUCH SENSE: post STATUSaf=%02x:%02x:%02x:%02x\n",status[0],status[1],status[2],status[3]);
++ if (status[1]==4) return redfin_spi_failed(s,EIO);
++ return 0;
++}
++static int
++redfin_spi_scan_queue(struct redfin_spi *s,unsigned batches)
++{
++ struct redfin_events_state state={0};state.startup_reset=true;
++ for (unsigned batch=0;batch<batches;batch++) {
++  uint8_t events[32*8]={0};
++  int error=redfin_spi_read(s,0x60,8,events);
++  if (error) return error;
++  if (!events[0]) { printf("REDFIN TOUCH SCAN: batch=%u empty\n",batch);break; }
++  unsigned remaining=events[7]&63u;
++  if (remaining>31) return redfin_spi_failed(s,EIO);
++  if (remaining) { error=redfin_spi_read(s,0x61,remaining*8,events+8);if (error) return error; }
++  for (unsigned i=0;i<=remaining;i++) {
++   const uint8_t *p=events+i*8;
++   printf("REDFIN TOUCH SCAN: batch=%u event=%u raw=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x (no HID)\n",
++       batch,i,p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7]);
++   if (!p[0]) return redfin_spi_failed(s,EINVAL);
++   error=redfin_events_accept(&state,p,false,NULL,NULL);
++   if (error) return redfin_spi_failed(s,error);
++  }
++ }
++ return 0;
++}
++int
++redfin_touch_spi_scan_probe(bool gic_irq_masked,unsigned batches)
++{
++ if (!gic_irq_masked || batches>4 || !redfin_touch_spi_identity_ready() ||
++     __atomic_exchange_n(&redfin_spi_scan_attempted,true,__ATOMIC_ACQ_REL)) return ENOTSUP;
++ __atomic_store_n(&redfin_spi_scan_active,true,__ATOMIC_RELEASE);
++ struct redfin_spi s={redfin_spi_verified_se,0,0,false,false};
++ int error=redfin_spi_prepare(&s);
++ if (!error) {
++  error=redfin_spi_sense_init(&s);
++  if (!error) error=redfin_spi_scan_queue(&s,batches);
++  redfin_spi_wr(&s,0xe1c,0);redfin_spi_wr(&s,0x614,0);
++ }
++ if (error) { redfin_spi_verified_se=0;redfin_spi_verified_hz=0; }
++ __atomic_store_n(&redfin_spi_scan_active,false,__ATOMIC_RELEASE);
++ printf("REDFIN TOUCH SCAN: result=%d batches-limit=%u; one-shot, no HID/reset/retry\n",error,batches);
++ return error;
++}
++int
++redfin_touch_spi_events_sense_init(void)
++{
++ if (!redfin_spi_event_open || !redfin_spi_verified_se || !redfin_spi_verified_hz ||
++     redfin_spi_event_context.se!=redfin_spi_verified_se || redfin_spi_event_context.dead ||
++     __atomic_load_n(&redfin_spi_scan_active,__ATOMIC_ACQUIRE)) return ENOTSUP;
++ int error=redfin_spi_sense_init(&redfin_spi_event_context);
++ if (error) redfin_touch_spi_events_close();
++ return error;
++}
+ #endif
+diff --git a/bsd/dev/redfin_touch_sensing.h b/bsd/dev/redfin_touch_sensing.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_touch_sensing.h
+@@ -0,0 +1,9 @@
++/* Source-bounded SEC scan initialization; no arbitrary register-write API. */
++#ifndef REDFIN_TOUCH_SENSING_H
++#define REDFIN_TOUCH_SENSING_H
++#include <stdbool.h>
++/* Same-boot identity/exclusive host/GIC proof required; batches0..4 consume queue. */
++int redfin_touch_spi_scan_probe(bool gic_irq_masked,unsigned batches);
++/* Only an open verified event session; caller has a real HID consumer. */
++int redfin_touch_spi_events_sense_init(void);
++#endif

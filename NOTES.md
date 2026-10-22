@@ -1,5 +1,87 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN USB enumeration V2: real translation fault isolated — 2026-10-22
+
+Cached-only diagnostics preserve route policy/MMIO and have eight actual-C
+equivalence tests; the full peripheral suite passes 523 tests. Local ARM64
+build `research/redfin-build/build-20261022-200129.log` succeeded, kernel SHA256
+`086378b2d7139e6a7f543aa661f4c768b3257f46d9175eab0d4f2ca02194f93c`.
+Image `ports/redfin/out/usb-enum-v2/redfin-xnu.img` SHA256
+`b596f151974475e093c5d855927d980d69552fdf693d06f996bb6eef3f6aaa92`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbgadget=1 redfinusbsecs=30 redfinspmi=1 redfinreturn=1 redfinbootid=0x73e514a987d0e3a0`.
+Authenticated, image-matched `logs/redfin/usb-enum-v2/` reaches static PID1,
+has no panic, primes metadata and verifies return to fastboot. CB4/slot4
+claim and strict warm revalidation return zero. After device soft reset,
+the first cached difference is CB4 FSR `0 -> 0x2`; SCTLR=0, CBAR=0x10000,
+CBA2R=0 and all sampled stream/header words remain unchanged. Pinned
+`arm-smmu-regs.h` defines bit1 as TF (translation fault), not UUT or FORMAT.
+Guard quarantines, gadget returns EPERM, bounded halt reports halted=1 and
+the DMA slab is retained. Host watch sees no new 1209:0001 device.
+The cause of TF with this bypass context is not established. Next: collect
+read-only fault address/syndrome and compare with the bounded DMA slab;
+do not mask FSR, change context format or invalidate global TLB on a guess.
+
+## REDFIN runtime sensing and real iOS HID consumer validated — 2026-10-22
+
+Commit663adbb records the successful dedicated USB bypass route. New
+usb-enumeration-start binds the same permanent caller to strict WARM,
+ACTIVE (live power/clocks and complete SMMU/CB proof) and QUIESCE (sole
+owner/live power solely for halt, even after route quarantine). Nine actual-C
+policy tests/independent review PASS; legacy absent/0 warm IO trace unchanged.
+Enumeration-only mode keeps network/logging off, deadline30s, bounded16KiB DMA.
+
+Build build-20261022-194511.log; kernel SHA256 fd78ccbfa5a971c83511beec165c401f1c3b928f19a995f6237ae7ed1a1bd082.
+Image ports/redfin/out/usb-enum-v1/redfin-xnu.img SHA256
+0b49e191ad300a11c5e1a60b7d4b5e55e48a6f91180dacebf109a72b08a28eef.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbgadget=1 redfinusbsecs=30 redfinspmi=1 redfinreturn=1 redfinbootid=0x3c6600bb077cb79e`.
+Authenticated/image-matched capture logs/redfin/usb-enum-v1-cycle/ reached
+PID1, no panic, metadata primed and verified fastboot. Route claim/strict0;
+local DWC3 reset completed, then ACTIVE SMMU proof failed EAGAIN35, before
+host enumeration. Sticky error stopped further MMIO; authorized quiesce
+reported halted1 and retained the DMA slab. Subsequent EP0 timeout is not
+proof that the physical command hung: guard rejection can produce it.
+Host-only no-serial watch logs/redfin/usb-enum-v1/host-usb.json observed no
+new1209:0001 device. Cached-only bypass diagnostics preserve all MMIO/writes/
+delays and will identify the actual divergence; no FSR mask relaxed.
+
+New touch-sensing implements only source-approved volatile30|61/readback and
+SENSE_ON10, with55/AF/30 preflight, APP/non-FLASH gate, post-AF and bounded
+raw queue probe. Narrow8/12-byte TX validation exposes no arbitrary command,
+firmware/NVM/reset/retry API. Eight actual-C tests/two reviews PASS. Typed
+permanent startup lease supports original md0 ID, md0 scan, and exact UFS/GUI
+events with source-audited noncompeting UFS code.20 new startup/backend/worker
+tests PASS; async worker waits real HID then senses, rechecks lease during
+contacts, releases all contacts on proof loss. Full suite514 PASS initially;
+GUI CLI + cached USB diagnostics now523 PASS (peripherals-host-tests-v19.txt).
+
+Build build-20261022-194803.log; kernel SHA256 693cfc32b85967bc57f61466246b4eb0dd05a445c6647125272af37a8354b376.
+Image ports/redfin/out/touch-scan-v1/redfin-xnu.img SHA256
+cdb3e38db49084c8b5504616b0936ef8a84cff031f3799cbb138c50fcb10b39c.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchscan=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x46e6444cda2080c3`.
+Authenticated/image-matched logs/redfin/touch-scan-v1/ reached PID1, no panic,
+metadata primed/verified fastboot. Typed lease1 power/ID0, BOOT20,
+AFpre00:03:01:00, functions61->61/readback61, AFpost00:02:01:02; queue has
+boot/vendor status records then empty, result0. This proves runtime sensing
+initialization/readback and queue transport, not a physical finger contact.
+
+Build build-20261022-194803.log; kernel SHA256 693cfc32b85967bc57f61466246b4eb0dd05a445c6647125272af37a8354b376.
+Image ports/redfin/out/touch-gui-v1/redfin-xnu.img SHA256
+4a0f0b12afd7a6a6f61d56591c62a20f70b3bd8f36b512b4fcb06fcbafa05093.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinfb=1 sweetfb_noconsole=1 redfinscreen=1 redfinshutdown=120 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xd90e6c8b6d64595e redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Authenticated/image-matched logs/redfin/touch-gui-v1/ status logs-collected
+(the static-PID1 collector verdict is not applicable to normal launchd).
+Typed lease2 power0, ID53:45:37:91:00; worker created before UFS publication.
+launchd/backboardd/SpringBoard execute; backboardd opens SweetHIDTouch, real
+consumer ready and sensing initialize successfully. Worker stops error0 after
+926 batches, contacts0/releases0; no physical contact was observed/reported.
+Three CRC-verified RAM screenshots decode in screens/, final frame shows the
+lock screen. Fresh physical panel scanout still needs external observation.
+Graceful shutdown completed; final HFSX16GiB header journaled/unmounted-clean,
+not inconsistent; metadata primed and verified fastboot. Original partitions
+and backups remain intact. User has a pending optional physical-display/touch
+question; independent USB work continues without treating silence as an answer.
+Next: cached USB enum V2 divergence and physical contact through this real HID.
+
 ## REDFIN dedicated USB bypass context works on hardware — 2026-10-22
 
 Commit2c4b625 records successful physical SEC identity and RX-status handling.

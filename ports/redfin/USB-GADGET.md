@@ -1,10 +1,12 @@
-# Redfin unhooked USB gadget draft
+# Redfin guarded USB gadget experiment
 
 `usb-gadget.patch` reuses the generated `bsd/dev/sweet_usb.c` DWC3/CDC-ECM
-core and adds Redfin guards. Apply it after the existing USB probe overlay.
-It adds no startup hook and no caller. This draft has not enabled DMA or
-enumerated a host on the device. The initial owned-route experiment remains
-claim plus strict revalidation only.
+core and adds Redfin guards. `usb-enumeration-start.patch` connects it to the
+permanent md0 owner after a dedicated bypass-context claim and strict warm
+revalidation. The explicit `--usb-enumeration-probe` builder option selects
+this 30-second, enumeration-only experiment; UFS and competing peripheral
+writers remain disabled. The first hardware attempt passed warm route proof
+but failed ACTIVE authorization. Enumeration remains unproved.
 
 The exported API is:
 
@@ -14,20 +16,23 @@ int redfin_usb_gadget_start(const void *caller_id,
 ```
 
 The caller must be the same stable, trusted kernel owner used for
-`redfin_usb_owned_claim`. The policy callback and its context must remain
+`redfin_usb_owned_claim_bypass`. The policy callback and its context must remain
 valid throughout the experiment. Neither a boot argument nor a cached
 boolean is ownership proof. Its callback returns zero only after these
 phase-specific checks:
 
 - `RF_USB_WARM`: actual sole controller/SMMU ownership, disabled competing
   writers, md0-only operation, and successful
-  `redfin_usb_owned_revalidate(caller_id)` against the halted ABL handoff.
+  `redfin_usb_owned_revalidate_bypass(caller_id)` against the halted ABL handoff.
 - `RF_USB_ACTIVE`: continuing sole controller ownership and live
-  power/clocks, plus `redfin_usb_owned_route_retained(caller_id)`. The original
-  ring/DCTL snapshot is expected to change during gadget operation.
+  power/clocks, plus `redfin_usb_owned_route_retained_bypass(caller_id)`. The
+  complete imported SMMU header, stream table and sampled context-bank words
+  must still match. The original ring/DCTL snapshot may change during gadget
+  operation.
 - `RF_USB_QUIESCE`: continuing exclusive control of the powered, clocked
-  DWC3, even if the SMMU route proof failed. This phase authorizes only
-  clearing RUN_STOP and polling HALT. It does not authorize new DMA.
+  DWC3 through `redfin_usb_owned_quiesce_bypass(caller_id)`, including after
+  route quarantine. This phase authorizes only clearing RUN_STOP and bounded
+  HALT polling. It does not authorize new DMA.
 
 The owner manager's retained-route result alone does not authorize DMA.
 The trusted integration must supply the complete callback above. If
@@ -37,6 +42,8 @@ an uncertain halt cannot expose freed memory to the controller.
 
 The API additionally requires the Redfin platform contract and
 `redfinusb=3`. Its finite lifetime is `redfinusbsecs=1..120`, default 30 s.
+The integrated enumeration caller fixes this at 30 s and rejects network
+and log streaming options.
 `redfinusbnet=0` is the default: only EP0 is configured, CDC data alternate
 setting 1 stalls, no network interface is created, and log streaming is off.
 `redfinusbnet=1` separately opts into the inherited ECM network path.
@@ -81,12 +88,28 @@ SS PHY control + `0x30` has LANE0_PWR_PRESENT bit 24, which native code changes
 only for SuperSpeed. This high-speed Redfin draft sets only HS bit 20 and
 preserves SW_SESSVLD_SEL bit 28, the complete SS control register, PHY setup,
 clocks and reset/power rails. It does not prove that the retained PHY/session
-configuration will enumerate; hardware validation is still required.
+configuration will enumerate.
+
+The authenticated V1 hardware capture on 2026-10-22 leased CB4/slot4 and
+completed all four route stores; claim and strict warm revalidation both
+returned zero. Device soft reset then completed with GCTL `0x00112001` and
+DCFG `0x0048080c`. ACTIVE proof returned `EAGAIN` (35), quarantining the
+route owner. The capture subsequently logged an EP0 command `0x6` timeout;
+gadget startup returned `EPERM` (1), the bounded halt reported `halted=1`,
+and the DMA slab remained allocated. A 90-second host watch observed no
+`1209:0001` device. These results establish the warm route and reported halt,
+while DMA completion and enumeration remain unproved. The cause of the
+ACTIVE proof failure is still unknown.
+
+The follow-up experiment uses `usb-bypass-diagnostic.patch`; hardware
+results are pending. The overlay reports snapshot errors, cached headers and
+the first changed stream and bank, without extra SMMU reads, writes,
+delays or changes to the proof policy.
 
 Host validation:
 
 ```
-python3 -m unittest ports/redfin/test_usb_gadget.py -v
+python3 -m unittest ports.redfin.test_usb_gadget ports.redfin.test_usb_enumeration_start ports.redfin.test_usb_bypass_context ports.redfin.test_usb_bypass_diagnostic -v
 ```
 
 Ten tests reconstruct the tracked upstream USB patches and Redfin probe,
@@ -96,5 +119,7 @@ virtual hardware/time. They inject policy loss, missing clocks/maps,
 allocation/physical-mapping failures, reset/command/run/halt/thread failures,
 all-ones MMIO/false-HALT faults, and malformed/full event queues. They check cache ordering, DMA region
 bounds, default logging/network behavior and the inherited Sapphire path.
-The network stack and actual electrical behavior are not modeled. Actual
-ARM compilation and independent review are required before integration.
+The enumeration caller and cached diagnostics have separate actual-C tests
+for permanent ownership, phase authorization, quarantine/halt authority and
+identical MMIO counts, order, values and images with diagnostics enabled.
+The network stack and actual electrical behavior are not modeled.
