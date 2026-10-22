@@ -68,7 +68,7 @@ diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
    bool stable = a.header == b.header && a.millivolts == b.millivolts &&
        a.mode_enable == b.mode_enable && a.status == b.status;
    changed |= !stable;
-@@ -404,8 +418,93 @@
+@@ -404,8 +418,95 @@
   error = redfin_rail_read(&targets[0], 0x0104, 2, &check);
   if (error) return error;
   changed |= model != check;
@@ -154,12 +154,14 @@ diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
 + delay(100);
 + if (redfin_touch_rail_snapshot(NULL, &b)) return 0;
 + /* The producer and each snapshot establish model/index/type provenance.
-+  * Compare fields explicitly; struct padding is not part of the proof. */
++  * Compare fields explicitly; struct padding is not part of the proof.
++  * Unified Qualcomm READY80/OCP20; V2 stable87 permits observed bit2 only.
++  * Its bit2 name is unproven; other unproven/fault bits remain rejected. */
 + return a.index_verified && b.index_verified &&
 +     a.millivolts == 3304 && b.millivolts == 3304 &&
 +     a.valid_millivolts == 3304 && b.valid_millivolts == 3304 &&
 +     a.mode == 7 && b.mode == 7 && a.enable == 0x80 && b.enable == 0x80 &&
-+     a.status == b.status && (a.status & 0x80) && !(a.status & ~0x83u);
++     a.status == b.status && (a.status & 0x80) && !(a.status & ~0x87u);
 +}
  #endif
 diff --git a/bsd/dev/redfin_touch_rail.h b/bsd/dev/redfin_touch_rail.h

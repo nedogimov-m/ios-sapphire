@@ -162,6 +162,47 @@ quarantined and never unvote, reset or retry. No automatic startup is added by
 this patch. The separately reviewed initial caller invokes power preparation,
 fresh `ready()==1`, then the guarded cold SEC ID setup; no event worker runs.
 
-Host validation: 9 observer tests, 6 proof tests, 22 backend tests, and 4 initial
-caller tests pass. The combined vote/readback/ID path still requires its first
-device result; V7 only established the disabled physical state.
+Host validation: 9 observer tests, 8 proof tests, 29 backend tests, and 4 initial
+caller tests pass. Controlled device results and their remaining limits are
+recorded below.
+
+
+## First controlled vote and cached diagnostics — 2026-10-22
+
+The first controlled run (`touch-id-v1`, build `20261022-173614`) completed
+its TCS transaction, then timed out proving physical rail power (errno 60).
+SPI setup was skipped and the owner remained quarantined. Its pre-vote tuple
+was configured 3304 mV, MODE 7, ENABLE 0, STATUS 3. The original log did not
+include the post-vote tuple. Completion alone proves neither rail power nor
+touch ID.
+
+The diagnostic overlay reports cached pre/pre-trigger and first/last post-vote
+tuples, including VALID voltage, identity and STATUS, plus the existing TCS
+IRQ/idle/three command-status samples. It adds no physical or MMIO reads,
+writes, retries or policy relaxation. Twenty-six backend tests lock the
+transaction counts: success 234 reads/19 writes/5 physical samples; VALID
+timeout 234/19/1003; stale-IRQ timeout 900216/14/3. Those 36 tests passed before
+the following STATUS correction.
+
+## V2 proves rail power; STATUS bit 2 correction — 2026-10-22
+
+The authenticated `touch-id-v2` capture observed TCS completion after 16 polls:
+IRQ 1, IDLE 1 and all three CMD statuses `0x10101`. Both the first and last
+physical samples reported configured and VALID voltage 3304 mV, MODE 7,
+ENABLE `0x80`, STATUS `0x87`. The previous status mask `0x83` rejected bit 2
+and caused a false power timeout; it did not show an unpowered rail.
+
+Pinned Qualcomm unified-regulator
+[readiness code](https://github.com/Rivko/android-firmware-qti-sdm670/blob/20bb8ae36c93fc16bbadda0e0a83f930c0c8a271/boot_images/QcomPkg/Library/PmicLib/drivers/pwr/src/pm_pwr_alg.c#L571)
+tests VREG_READY bit 7, while its
+[OCP code](https://github.com/Rivko/android-firmware-qti-sdm670/blob/20bb8ae36c93fc16bbadda0e0a83f930c0c8a271/boot_images/QcomPkg/Library/PmicLib/drivers/pwr/src/pm_pwr_alg.c#L943)
+tests bit 5 of the same STATUS register. Bit 2's exact name remains unproven;
+neither source algorithm treats it as a fault. The minimal correction permits
+only this additional observed bit (`0x87` mask) in both readiness and the RPMh
+physical-floor predicate. OCP and bits 3, 4 and 6 remain rejected; all identity,
+voltage, MODE, ENABLE, fresh-sample and stability checks remain required.
+
+New actual-C regressions accept the observed `0x87`, prove that already-powered
+`0x87` needs no MMIO/vote, and reject `0x8f/0x97/0xa7/0xc7` before and after
+a vote. Transaction counts remain unchanged. All 41 backend/proof/start tests
+pass. Cold SPI setup and SEC chip ID still require a fresh device run.

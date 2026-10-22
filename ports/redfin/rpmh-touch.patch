@@ -36,7 +36,7 @@ diff --git a/bsd/dev/redfin_rpmh_touch.c b/bsd/dev/redfin_rpmh_touch.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_rpmh_touch.c
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,348 @@
 +/* DRAFT: one floor-preserving PM8150 PMIC5-PLDO ACTIVE vote, no startup hook.
 + * Requires a trusted fresh physical reader with proven L17 indexing, which
 + * this patch deliberately does not implement. No GPIO, SPMI writes or unvote.
@@ -90,11 +90,32 @@ new file mode 100644
 +rt_sync(struct rt_context *c, unsigned offset, uint32_t value)
 +{
 + rt_write(c->rsc, offset, value);
++ uint32_t observed = 0;
 + for (unsigned us = 0; us < 1000; us++) {
-+  if (rt_read(c->rsc, offset) == value) return 0;
++  observed = rt_read(c->rsc, offset);
++  if (observed == value) return 0;
 +  delay(1);
 + }
++ printf("REDFIN RPMH TOUCH: write-readback failed offset=%#x expected=%#x observed=%#x polls=1000\n",
++     offset, value, observed);
 + return EIO;
++}
++
++/* Diagnostics consume only values already read for the existing guards/polls.
++ * They must not add MMIO, physical reads or retries to a failed transaction. */
++static void
++rt_report_physical(const char *phase, const struct redfin_touch_rail_state *s, int error, unsigned sample)
++{
++ printf("REDFIN RPMH TOUCH: physical phase=%s sample=%u read-error=%d index=%u pmic=%#x:%#x SID=%u base=%#x type=%#x:%#x VSET-mV=%u VALID-mV=%u MODE=%#x ENABLE=%#x STATUS=%#x\n",
++     phase, sample, error, s->index_verified, s->pmic_type, s->pmic_subtype, s->sid, s->base,
++     s->peripheral_type, s->peripheral_subtype, s->millivolts, s->valid_millivolts, s->mode, s->enable, s->status);
++}
++static void
++rt_report_tcs(const struct rt_context *c, const char *phase, int error, unsigned polls,
++    uint32_t irq, uint32_t idle, const uint32_t status[3])
++{
++ printf("REDFIN RPMH TOUCH: TCS0 phase=%s error=%d polls=%u IRQ-enable=%#x IRQ=%#x IDLE=%#x CMD=%#x/%#x/%#x\n",
++     phase, error, polls, c->irq_enable, irq, idle, status[0], status[1], status[2]);
 +}
 +
 +static bool
@@ -145,9 +166,11 @@ new file mode 100644
 + if (!s->index_verified || s->pmic_type != 0x51 || s->pmic_subtype != 0x1e ||
 +     s->sid != 1 || s->base != 0x5000 || s->peripheral_type != 4 || s->peripheral_subtype != 0x7d) return ENXIO;
 + /* V7 inherited configured3304/HPM7, disabled. Preserve voltage and mode;
-+  * enable may only rise0->1. 3304 is not the PMIC5PLDO hardware maximum. */
++  * enable may only rise0->1. 3304 is not the PMIC5PLDO hardware maximum.
++  * Unified Qualcomm READY80/OCP20; V2 stable87 permits observed bit2 only.
++  * Its bit2 name is unproven; other unproven/fault bits remain rejected. */
 + if (s->millivolts != 3304 || s->mode != 7 ||
-+     (s->enable != 0 && s->enable != 0x80) || (s->status & ~0x83u)) return EINVAL;
++     (s->enable != 0 && s->enable != 0x80) || (s->status & ~0x87u)) return EINVAL;
 + if (!!s->enable != !!(s->status & 0x80) ||
 +     (s->enable && s->valid_millivolts != 3304)) return EBUSY;
 + return 0;
@@ -227,15 +250,25 @@ new file mode 100644
 +     rt_sync(c, RT_TCS(0) + 0x14, 0) || rt_sync(c, RT_TCS(0) + 0x14, RT_AMC)) return EIO;
 + rt_write(c->rsc, RT_TCS(0) + 0x14, RT_AMC | RT_TRIGGER);
 + bool completed = false;
++ uint32_t irq = 0, idle = 0, observed_status[3] = {0};
++ unsigned polls = 0;
 + for (unsigned us = 0; us < 100000; us++) {
 +  int error = rt_irq(c, false);
-+  if (error) return error;
-+  uint32_t irq = rt_read(c->rsc, 0xd04), idle = rt_read(c->rsc, RT_TCS(0) + 0x18);
-+  if (irq == 0xffffffffu || idle == 0xffffffffu || (irq & ~1u)) return EIO;
++  if (error) { rt_report_tcs(c, "poll-guard", error, polls, irq, idle, observed_status); return error; }
++  irq = rt_read(c->rsc, 0xd04); idle = rt_read(c->rsc, RT_TCS(0) + 0x18);
++  polls++;
++  if (irq == 0xffffffffu || idle == 0xffffffffu || (irq & ~1u)) {
++   rt_report_tcs(c, "invalid-irq-idle", EIO, polls, irq, idle, observed_status);
++   return EIO;
++  }
 +  bool commands = true;
 +  for (unsigned n = 0; n < 3; n++) {
 +   uint32_t status = rt_read(c->rsc, RT_TCS(0) + 0x3c + n * 0x14);
-+   if (status == 0xffffffffu) return EIO;
++   observed_status[n] = status;
++   if (status == 0xffffffffu) {
++    rt_report_tcs(c, "invalid-command", EIO, polls, irq, idle, observed_status);
++    return EIO;
++   }
 +   commands &= (status & RT_COMPLETE) == RT_COMPLETE;
 +  }
 +  /* The initially-clear, enabled local completion bit must become set.
@@ -243,6 +276,7 @@ new file mode 100644
 +  if ((irq & 1) && idle && commands) { completed = true; break; }
 +  delay(1);
 + }
++ rt_report_tcs(c, completed ? "completion" : "timeout", completed ? 0 : ETIMEDOUT, polls, irq, idle, observed_status);
 + if (!completed) return ETIMEDOUT;
 + if (rt_sync(c, RT_TCS(0) + 0x14, RT_AMC) || rt_sync(c, RT_TCS(0) + 0x14, 0) ||
 +     rt_sync(c, RT_TCS(0) + 0x1c, 0) || rt_sync(c, RT_TCS(0) + 0x10, 0)) return EIO;
@@ -275,11 +309,14 @@ new file mode 100644
 + struct redfin_touch_rail_state initial = {0}, check = {0};
 + int error = ops->read(ops->context, &initial);
 + if (!error) error = rt_physical_floor(&initial);
++ rt_report_physical("pre", &initial, error, 1);
 + if (error) return error;
 + delay(100);
 + error = ops->read(ops->context, &check);
-+ if (error) return error;
-+ if (!rt_same(&initial, &check)) return EAGAIN;
++ if (error || !rt_same(&initial, &check)) {
++  rt_report_physical("pre-check", &check, error, 2);
++  return error ? error : EAGAIN;
++ }
 + if (rt_powered(&initial)) {
 +  printf("REDFIN RPMH TOUCH: two physical samples already prove power; no vote needed\n");
 +  return 0;
@@ -306,6 +343,7 @@ new file mode 100644
 + if (error) return error;
 + /* Last physical/RSC/GIC check before acquiring the slot with any write. */
 + error = ops->read(ops->context, &check);
++ rt_report_physical("pre-trigger", &check, error, 3);
 + if (error) return error;
 + if (!rt_same(&initial, &check) || rt_read(c.rsc, 0) != id || rt_read(c.rsc, 0xc) != config ||
 +     rt_read(c.rsc, 0xd04)) return EAGAIN;
@@ -317,15 +355,24 @@ new file mode 100644
 +  printf("REDFIN RPMH TOUCH: transaction failed=%d; ACTIVE0/DRV owner quarantined, no retry/unvote\n", error);
 +  return error;
 + }
++ struct redfin_touch_rail_state last = {0};
++ unsigned physical_samples = 0;
 + for (unsigned us = 0; us < 100000; us += 100) {
 +  struct redfin_touch_rail_state a = {0}, b = {0};
 +  error = ops->read(ops->context, &a);
-+  if (error) return error;
++  last = a; physical_samples++;
++  if (error) {
++   rt_report_physical("post-error", &a, error, physical_samples);
++   return error;
++  }
++  if (physical_samples == 1) rt_report_physical("post-first", &a, 0, physical_samples);
 +  if (rt_powered(&a)) {
 +   delay(100);
 +   error = ops->read(ops->context, &b);
-+   if (error) return error;
++   last = b; physical_samples++;
++   if (error) { rt_report_physical("post-error", &b, error, physical_samples); return error; }
 +   if (rt_powered(&b) && rt_same(&a, &b)) {
++    rt_report_physical("post-verified", &b, 0, physical_samples);
 +    rt_poisoned = false;
 +    printf("REDFIN RPMH TOUCH: retained ACTIVE vote3304mV/HPM7/enable1; configured+VALID L17 samples verified\n");
 +    return 0;
@@ -333,6 +380,7 @@ new file mode 100644
 +  }
 +  delay(100);
 + }
++ rt_report_physical("post-timeout", &last, 0, physical_samples);
 + printf("REDFIN RPMH TOUCH: physical readback did not prove power; enable vote retained, owner quarantined\n");
 + return ETIMEDOUT;
 +}

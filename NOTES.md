@@ -1,5 +1,52 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN L17 physically enabled; STATUS87 guard corrected — 2026-10-22
+
+V2 cached diagnostics add no MMIO reads/writes or physical callbacks. Build
+research/redfin-build/build-20261022-175302.log passed; kernel
+1d8f8a4e8d9e0112aab4b09d8a55ba8e8a9dd1b47c9841fd68140b10eccd641b.
+Image ports/redfin/out/touch-id-v2/redfin-xnu.img SHA256
+ad30236420cce45107067386cfeecea44d511453382057db64d52373124fe761.
+Args exactly match touch-id-v1 except `redfinbootid=0xd87bb66d192cdf52`.
+Automatic authenticated/image-matched capture logs/redfin/touch-id-v2/:
+ACTIVE0 completed after16 polls, IRQ-enable1/IRQ1/IDLE1, all three command
+statuses10101. Both first/1000th physical post samples: configured3304mV,
+VALID3304mV,MODE7,ENABLE80,STATUS87. Power is present; the previous timeout
+was a false rejection of STATUS bit2 by our overly narrow83 allowed mask.
+No SPI setup ran, no UFS enabled; public metadata primed/verified fastboot.
+
+Pinned Qualcomm unified readiness uses READY80 (pm_pwr_alg.c571..587) and
+OCP20 (943..947), without giving bit2 a name. Both ready/floor guards now
+add only observed bit2 to their allowed mask87. Existing configured+VALID,
+MODE/ENABLE, model/index/stability/OCP proof is preserved;8f/97/a7/c7 still
+fail. 41 related tests and independent review PASS; full suite405 PASS
+(logs/redfin/peripherals-host-tests-v10.txt).
+
+Latest actual ARM64 build180523/kernel
+b10cfe0ba85d50d78f9d27c5a67478dd0567edaa3ee50caba71772abae8bd606
+contains the fix plus the initial USB trusted caller. V3 ID image
+cd092f49f6cfd64c3104cc866d5ac40c2efcf0a3e40e472e5e23a32175320919
+is running; exact v1 args with image IDc81e1432db027e51. Immutable output
+ports/redfin/out/touch-id-v3/ retains kernel/image metadata; capture target
+logs/redfin/touch-id-v3/. Actual SPI ID remains pending.
+
+USB initial RAM mode3 now has an explicit builder flag and a source-audited
+sticky trusted caller: exact md0/UP/off-path/ADT proof, register/claim/strict
+revalidation only, no gadget or DMA. 10 caller tests and peer review passed;
+full kernel build175738 also passed. Immutable image usb-owned-v1 is prepared
+but has not booted. Touch and USB ownership experiments cannot be combined.
+
+Stock modem_b was read in verified offline Linux recovery, with no disk
+mounts/writes or ramoops access; live GPT matched saved metadata, by-name
+resolved to sda13 and the exact204472320-byte partition size matched GPT.
+Private capture manifest: research/redfin-modem-inventory/capture.json;
+host image SHA0f9b2f1bb44ec567bcdb99bf6a5c8a6c1bcd9d7a3b458895050ad0e7b08a8229.
+Bounded host FAT/ELF inventory has13 passing tests and31 extracted files
+(MDT+30 blobs,99,394,046bytes). All35 PHDRs/required original indices/hashes
+are retained privately. Loadable span8c000000..9d800000 matches live reserved
+memory exactly. GPU/WLAN board assets are absent from this modem partition;
+vendor inventory/native PAS+GLINK remain unimplemented. No firmware loaded.
+
 ## REDFIN first controlled L17 vote: completion but no power proof — 2026-10-22
 
 New initial md0-only touch caller owns a sticky software lease, explicitly

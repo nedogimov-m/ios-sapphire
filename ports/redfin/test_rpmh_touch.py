@@ -29,11 +29,12 @@ PREFIX = r'''
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <errno.h>
 #include "redfin_rpmh.h"
 #include "redfin_rpmh_touch.h"
-#define printf(...) ((void)0)
+#define printf model_log
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
 typedef uintptr_t vm_offset_t;
@@ -43,7 +44,21 @@ static uint8_t db[RF_CMDDB_BYTES];
 static uint32_t rsc[0x10000/4],gic[0x4000/4],hits[0x10000/4];
 static uint32_t offsets[32],values[32];
 static unsigned maps,reads,writes,bad,rail_calls,delay1,delay100,polls;
+static char log_buffer[16384];
+static size_t log_used;
+static int model_log(const char *format,...) __attribute__((format(__printf__,1,2)));
+static int model_log(const char *format,...)
+{
+ va_list args;
+ va_start(args,format);
+ int count=vsnprintf(log_buffer+log_used,sizeof(log_buffer)-log_used,format,args);
+ va_end(args);
+ if(count<0 || (size_t)count>=sizeof(log_buffer)-log_used){bad++;return -1;}
+ log_used+=(size_t)count;
+ return count;
+}
 static int ready,platform,failmap,rail_mode,post_mode,fail_rail_at,drop_at,completion;
+static uint8_t physical_status;
 static unsigned mutate_offset,mutate_hit;
 static uint32_t mutate_value;
 static bool triggered,completed;
@@ -195,8 +210,9 @@ static int physical(void *context,struct redfin_touch_rail_state *out)
  case 18:if(rail_calls==3)out->mode=4;break;
  default:break;
  }
+ if(rail_mode==14)out->status=physical_status;
  if(rail_calls>=4 && completed){
-  out->enable=0x80;out->status=0x83;out->valid_millivolts=3304;
+  out->enable=0x80;out->status=physical_status;out->valid_millivolts=3304;
   switch(post_mode){case 1:out->enable=0;out->status=3;break;
   case 2:out->valid_millivolts=3300;break;case 3:out->millivolts=3400;break;
   case 4:out->status=0xa3;break;case 5:out->status=rail_calls&1?0x80:0x83;break;
@@ -213,7 +229,9 @@ void host_reset(const void *fixture)
  memcpy(db,fixture,sizeof(db));memset(rsc,0,sizeof(rsc));memset(gic,0,sizeof(gic));memset(hits,0,sizeof(hits));
  memset(offsets,0,sizeof(offsets));memset(values,0,sizeof(values));
  maps=reads=writes=bad=rail_calls=delay1=delay100=polls=0;
+ memset(log_buffer,0,sizeof(log_buffer));log_used=0;
  ready=1;platform=failmap=rail_mode=post_mode=fail_rail_at=drop_at=completion=0;
+ physical_status=0x83;
  mutate_offset=mutate_hit=mutate_value=0;triggered=completed=false;
  ram_base=0x180000000ULL;ram_size=0x80000000;
  memset(root_arg,0,sizeof(root_arg));memcpy(root_arg,"md0",3);root_present=true;
@@ -245,7 +263,7 @@ void host_config(unsigned key,uint64_t value)
  case 3:rail_mode=value;break;case 4:post_mode=value;break;case 5:fail_rail_at=value;break;
  case 6:drop_at=value;break;case 7:completion=value;break;case 8:ram_base=value;break;
  case 9:ram_size=value;break;case 10:mutate_offset=value;break;case 11:mutate_hit=value;break;
- case 12:mutate_value=value;break;default:bad++;break;}
+ case 12:mutate_value=value;break;case 13:physical_status=value;break;default:bad++;break;}
 }
 void host_reg(unsigned region,unsigned offset,uint32_t value)
 {
@@ -267,6 +285,7 @@ unsigned host_stat(unsigned key)
  case 8:return rt_attempted;case 9:return rt_poisoned;default:return 0;}
 }
 uint32_t host_write(unsigned n,unsigned field){return n<32?(field?values[n]:offsets[n]):0;}
+const char *host_log(void){return log_buffer;}
 '''
 
 
@@ -310,6 +329,7 @@ class RpmhTouchTests(unittest.TestCase):
         cls.lib.host_reg.argtypes = [C.c_uint, C.c_uint, C.c_uint32]
         cls.lib.host_page.restype = C.c_void_p
         cls.lib.host_write.restype = C.c_uint32
+        cls.lib.host_log.restype = C.c_char_p
         fixture = database()
         struct.pack_into('<I', fixture, 144+0x200+16, 0x41300)
         cls.fixture = C.create_string_buffer(bytes(fixture))
@@ -329,6 +349,19 @@ class RpmhTouchTests(unittest.TestCase):
 
     def stat(self, key):
         return self.lib.host_stat(key)
+
+    def log(self):
+        return self.lib.host_log().decode()
+
+    @staticmethod
+    def physical_line(phase, sample, *, valid=3200, configured=3304, mode=7,
+                      enable=0, status=3, index=1, read_error=0):
+        def hx(value):
+            return hex(value) if value else '0'
+        return (f'REDFIN RPMH TOUCH: physical phase={phase} sample={sample} '
+                f'read-error={read_error} index={index} pmic=0x51:0x1e SID=1 '
+                f'base=0x5000 type=0x4:0x7d VSET-mV={configured} VALID-mV={valid} '
+                f'MODE={hx(mode)} ENABLE={hx(enable)} STATUS={hx(status)}\n')
 
     def config(self, key, value):
         self.lib.host_config(key, value)
@@ -496,7 +529,7 @@ class RpmhTouchTests(unittest.TestCase):
     def test_exact_success_sequence_preserves_unowned_slots_and_no_unvote(self):
         before = self.images()
         self.assertEqual(self.lib.host_prepare(0), 0)
-        self.assertEqual(tuple(self.stat(k) for k in (0, 2, 4, 8, 9)), (3, 19, 5, 1, 0))
+        self.assertEqual(tuple(self.stat(k) for k in (0, 1, 2, 4, 8, 9)), (3, 234, 19, 5, 1, 0))
         writes = [(self.lib.host_write(i, 0), self.lib.host_write(i, 1)) for i in range(19)]
         expected = []
         for n, (address, data) in enumerate(((0x41300, 3304), (0x41308, 7), (0x41304, 1))):
@@ -527,6 +560,7 @@ class RpmhTouchTests(unittest.TestCase):
         self.config(7, 1)
         self.assertEqual(self.lib.host_prepare(0), errno.ETIMEDOUT)
         self.assertEqual((self.stat(2), self.stat(5), self.stat(7), self.stat(9)), (14, 100000, 100000, 1))
+        self.assertEqual((self.stat(1), self.stat(4)), (900216, 3))
         self.one_shot()
 
     def test_completion_requires_all_command_status_and_idle(self):
@@ -568,6 +602,7 @@ class RpmhTouchTests(unittest.TestCase):
                 self.config(4, mode)
                 self.assertNotEqual(self.lib.host_prepare(0), 0)
                 self.assertEqual((self.stat(2), self.stat(9)), (19, 1))
+                self.assertEqual(self.stat(1), 234)
                 self.assertGreaterEqual(self.stat(4), 1003)
                 self.one_shot()
 
@@ -578,6 +613,87 @@ class RpmhTouchTests(unittest.TestCase):
                 self.config(5, call)
                 self.assertNotEqual(self.lib.host_prepare(0), 0)
                 self.assertEqual((self.stat(2), self.stat(9)), (19, 1))
+                self.one_shot()
+
+    def test_diagnostics_report_cached_pre_and_last_failed_power_tuple(self):
+        self.config(4, 2)
+        self.assertEqual(self.lib.host_prepare(0), errno.ETIMEDOUT)
+        log = self.log()
+        self.assertIn(self.physical_line('pre', 1), log)
+        self.assertIn(self.physical_line('pre-trigger', 3), log)
+        self.assertIn('REDFIN RPMH TOUCH: TCS0 phase=completion error=0 polls=1 '
+                      'IRQ-enable=0x1 IRQ=0x1 IDLE=0x1 CMD=0x10100/0x10100/0x10100\n', log)
+        self.assertIn(self.physical_line('post-first', 1, valid=3300, enable=0x80, status=0x83), log)
+        self.assertIn(self.physical_line('post-timeout', 1000, valid=3300, enable=0x80, status=0x83), log)
+        self.assertLessEqual(len(log.splitlines()), 8, 'diagnostics must stay bounded')
+        self.assertEqual((self.stat(0), self.stat(1), self.stat(2), self.stat(4)), (3, 234, 19, 1003))
+        self.one_shot()
+
+    def test_diagnostics_report_cached_completion_timeout_without_post_reads(self):
+        self.config(7, 1)
+        self.assertEqual(self.lib.host_prepare(0), errno.ETIMEDOUT)
+        log = self.log()
+        self.assertIn(self.physical_line('pre', 1), log)
+        self.assertIn(self.physical_line('pre-trigger', 3), log)
+        self.assertIn(f'REDFIN RPMH TOUCH: TCS0 phase=timeout error={errno.ETIMEDOUT} polls=100000 '
+                      'IRQ-enable=0x1 IRQ=0 IDLE=0x1 CMD=0x10100/0x10100/0x10100\n', log)
+        self.assertNotIn('physical phase=post', log)
+        self.assertLessEqual(len(log.splitlines()), 5)
+        self.assertEqual((self.stat(1), self.stat(2), self.stat(4)), (900216, 14, 3))
+        self.one_shot()
+
+    def test_diagnostic_failure_tuple_keeps_observed_index_and_fault_status(self):
+        for mode, index, status in ((6, 0, 0x83), (4, 1, 0xa3)):
+            with self.subTest(mode=mode):
+                self.reset()
+                self.config(4, mode)
+                self.assertEqual(self.lib.host_prepare(0), errno.ETIMEDOUT)
+                self.assertIn(self.physical_line('post-timeout', 1000, valid=3304,
+                                                enable=0x80, status=status, index=index), self.log())
+                self.assertEqual((self.stat(1), self.stat(2), self.stat(4)), (234, 19, 1003))
+
+    def test_diagnostics_mark_failed_post_reader_without_extra_sample(self):
+        for call, sample in ((4, 1), (5, 2)):
+            with self.subTest(call=call):
+                self.reset()
+                self.config(5, call)
+                self.assertEqual(self.lib.host_prepare(0), errno.EIO)
+                self.assertIn(f'physical phase=post-error sample={sample} read-error={errno.EIO} ', self.log())
+                self.assertNotIn('physical phase=post-verified', self.log())
+                self.assertEqual((self.stat(1), self.stat(2), self.stat(4)), (234, 19, call))
+                self.one_shot()
+
+    def test_observed_pmic5_status87_proves_power_with_unchanged_vote_sequence(self):
+        self.config(13, 0x87)
+        self.assertEqual(self.lib.host_prepare(0), 0)
+        self.assertEqual((self.stat(0), self.stat(1), self.stat(2), self.stat(4)), (3, 234, 19, 5))
+        self.assertIn(self.physical_line('post-verified', 2, valid=3304,
+                                        enable=0x80, status=0x87), self.log())
+        self.one_shot()
+
+    def test_already_powered_status87_needs_no_mmio_or_vote(self):
+        self.config(3, 14)
+        self.config(13, 0x87)
+        self.assertEqual(self.lib.host_prepare(0), 0)
+        self.assertEqual((self.stat(0), self.stat(1), self.stat(2), self.stat(4)), (0, 0, 0, 2))
+        self.one_shot()
+
+    def test_status87_does_not_hide_ocp_or_reserved_status_bits(self):
+        for status in (0x8f, 0x97, 0xa7, 0xc7):
+            with self.subTest(status=status):
+                self.reset()
+                self.config(13, status)
+                self.assertEqual(self.lib.host_prepare(0), errno.ETIMEDOUT)
+                self.assertEqual((self.stat(1), self.stat(2), self.stat(4), self.stat(9)),
+                                 (234, 19, 1003, 1))
+                self.assertIn(self.physical_line('post-timeout', 1000, valid=3304,
+                                                enable=0x80, status=status), self.log())
+                self.one_shot()
+                self.reset()
+                self.config(3, 14)
+                self.config(13, status)
+                self.fail_no_writes()
+                self.assertEqual(self.stat(0), 0)
                 self.one_shot()
 
 

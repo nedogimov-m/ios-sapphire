@@ -1,7 +1,7 @@
 diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 --- a/iokit/bsddev/IOKitBSDInit.cpp
 +++ b/iokit/bsddev/IOKitBSDInit.cpp
-@@ -108,6 +108,58 @@
+@@ -108,6 +108,61 @@
  /* REDFIN_WIFI_OBSERVER_TEST_END */
  #endif
  
@@ -14,6 +14,7 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 +int redfin_rpmh_probe(void);
 +int redfin_touch_rail_observe(void);
 +int redfin_touch_start_initial(void);
++int redfin_usb_start_initial(void);
 +}
 +
 +/* REDFIN_PERIPHERAL_START_TEST_BEGIN */
@@ -31,7 +32,8 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 + bool any = false;
 + for (unsigned i = 0; i < 6; i++) {
 +  (void)PE_parse_boot_argn(names[i], &modes[i], sizeof(modes[i]));
-+  if (modes[i] > 1 && !((i == 0 || i == 1) && modes[i] == 2)) {
++  if (modes[i] > 1 && !((i == 0 && modes[i] == 2) ||
++      (i == 1 && (modes[i] == 2 || modes[i] == 3)))) {
 +   IOLog("REDFIN PERIPHERALS: unsupported mode; observers skipped\n");
 +   return;
 +  }
@@ -50,7 +52,8 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 + if (modes[4]) IOLog("REDFIN RPMH: snapshot result=%d\n", redfin_rpmh_probe());
 + if (modes[0] == 1) IOLog("REDFIN TOUCH: host snapshot result=%d\n", redfin_touch_probe());
 + if (modes[0] == 2) IOLog("REDFIN TOUCH: initial ID result=%d\n", redfin_touch_start_initial());
-+ if (modes[1]) redfin_usb_probe();
++ if (modes[1] && modes[1] < 3) redfin_usb_probe();
++ if (modes[1] == 3) IOLog("REDFIN USB: initial owned-route result=%d\n", redfin_usb_start_initial());
 + if (modes[2]) redfin_wifi_observe();
 + if (modes[3]) IOLog("REDFIN GPU: clock snapshot result=%d\n", redfin_gpu_probe());
 +}
@@ -60,7 +63,7 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
  extern "C" {
  #include <libkern/amfi/amfi.h>
  #include <sys/codesign.h>
-@@ -859,6 +911,7 @@
+@@ -859,6 +914,7 @@
  		int result = redfin_spmi_arm_return();
  		IOLog("REDFIN RETURN: arm result=%d\n", result);
  	}

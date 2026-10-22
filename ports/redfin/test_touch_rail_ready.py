@@ -96,6 +96,11 @@ if(ppid==1){
     if(ready_variant==11)return 0xff;
     if(ready_variant==12)return 0x83;
     if(ready_variant==22)return 0xc3;
+ if(ready_variant==23)return 0x87;
+ if(ready_variant==24)return 0xa7;
+ if(ready_variant==25)return 0x8f;
+ if(ready_variant==26)return 0x97;
+ if(ready_variant==27)return 0xc7;
    }
 ''')
         # The producer must observe exact7d at5000 before publishing its proof.
@@ -174,6 +179,21 @@ unsigned state_size(void){return sizeof(struct redfin_touch_rail_state);}
             before=tuple(self.lib.proof_stat(i) for i in (0,1))
             self.assertEqual(self.ready(),0)
             self.assertEqual(tuple(self.lib.proof_stat(i) for i in (0,1)),before)
+
+    def test_observed_pmic5_status87_proves_two_fresh_power_samples(self):
+        self.prepare(variant=12)
+        self.assertEqual(self.ready(),1)
+        baseline=tuple(self.lib.proof_stat(i) for i in (0,1,5))
+        self.prepare(variant=23)
+        self.assertEqual(self.ready(),1)
+        self.assertEqual(tuple(self.lib.proof_stat(i) for i in (0,1,5)),baseline)
+        self.assertEqual(self.lib.proof_stat(5),2)
+
+    def test_status87_still_rejects_ocp_and_all_reserved_status_bits(self):
+        for variant in (24,25,26,27):
+            with self.subTest(variant=variant):
+                self.prepare(variant=variant)
+                self.assertEqual(self.ready(),0)
 
     def test_flags_up_and_serialization_refuse_before_bus_access(self):
         for variant in (20,21):

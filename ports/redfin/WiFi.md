@@ -152,3 +152,64 @@ ping to a test AP), rather than a MAC identity or a scan-only result.
 Sapphire transport addresses differ: SMEM `0x46000000`, TCSR `0x00340000`, APCS
 `0x0f111000`, MSA `0x51900000`, WLAN SID `0x1a0`, CE base `0x0ca40000`.
 Do not enable `modem=1 wifi=1` on Redfin as a substitute for this port.
+
+
+## Native MPSS firmware boundary — 2026-10-22
+
+The saved Redfin FDT identifies `/soc/qcom,mss@4080000` as
+`qcom,pil-tz-generic`, firmware `modem`, PAS ID 4. Google's pinned
+[peripheral loader](https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/soc/qcom/peripheral-loader.c#1008)
+requests `modem.mdt`, then `modem.b%02d` for non-hash PT_LOAD entries with
+nonzero file size. The suffix is the original program-header index, not an
+index after filtering. The exact required suffixes must come from the stock
+Redfin MDT. A separate hash blob is needed only when the metadata is not
+already contained in the MDT; reproduce the observed layout before PAS init.
+Google's `ueventd` firmware directory is `/vendor/firmware_mnt/image/`.
+
+The public Redfin vendor inventory also includes
+`vendor/firmware/wlanmdsp.mbn`, `modemuw.jsn`, `bdwlan-redfin.bin` and
+`bdwlan-u-redfin.bin`. The service metadata describes `msm/modem/wlan_pd`,
+QMI instance 180, with `kernel/elf_loader`, `tms/servreg` and `wlan/fw`
+services. These describe a later modem user-domain/board-data stage; they do
+not replace the PAS modem image. Legacy `icnss.c` has no direct
+`request_firmware` call. ICNSS2/WCN6750 board-file naming is not evidence for
+this device. Preserve the exact stock board-data alternatives until live
+capabilities and the stock selection path establish which one is required.
+
+The compiled Topaz/Sapphire modem implementation cannot be enabled unchanged.
+Its modem carveout `0x4ab00000+0x6900000`, SMEM `0x46000000`, firmware pool
+`0xe0000000`, APCS `0x0f111000` and hardware mutex `0x00340000` differ from
+Redfin. Its firmware tables contain other boards' offsets/CRCs; patch 0143
+falls back to the Topaz table when no MDT CRC matches. Its ELF loader and
+SMEM allocator also lack the bounds required by the native Redfin port.
+`tools/fwtable-modem.py` assumes FAT16 and follows unbounded cluster chains;
+it must not be used directly against an unvalidated stock capture.
+
+The first native implementation should consume a bounded, identity-checked
+manifest rather than a board-table fallback. Validate FAT geometry, every
+cluster/extent and duplicate path; then ELF class/endianness, header and
+program-header sizes/counts, all arithmetic, `filesz <= memsz`, exact blob
+lengths, relocation and nonoverlapping destination bounds inside the proven
+modem reservation. Establish a separate source-backed SCM metadata buffer;
+do not reuse the Sapphire pool. Build any SMEM allocator on the existing
+bounded Redfin parser, with the proven TCSR lock. PAS 4, fresh remote-ready,
+GLINK and WLFW capability exchange follow these prerequisites. No native
+loader, PAS call or MPSS readiness is claimed by this audit.
+
+### Read-only stock extraction
+
+The validated saved LUN0 GPT identifies `modem_a` as `sda12` and `modem_b` as
+`sda13`. Reconfirm the live by-name symlink, sysfs geometry, partition length
+and GPT name/LBA bounds in temporary safe recovery before reading either.
+Keep Android filesystems unmounted. Stream only the selected modem partition
+with host-side binary capture, verify its exact length and SHA-256 against a
+read-only device digest, then inventory the host file without mounting it.
+Retain the dump, extracted firmware and per-device manifest only in ignored
+private paths. Do not print GPT GUIDs or serials into public reports.
+
+This inventory requires no modem flash, mount, slot switch, GPT write,
+remote-processor start, or access to `modemst1/2`, `fsg` or `fsc`. Vendor
+assets can be inventoried later from a separate read-only stock vendor source;
+booting Android on the replaced userdata is not part of extraction. Any future
+UFS firmware reader must authorize only the verified modem partition/ranges
+and retain the existing userdata/write fences.

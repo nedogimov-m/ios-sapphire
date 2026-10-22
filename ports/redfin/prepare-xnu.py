@@ -170,7 +170,7 @@ def main(argv=None):
              'touch-spi.patch', 'touch-setup.patch', 'touch-rail-observe.patch',
              'touch-events.patch', 'touch-rail-ready.patch', 'rpmh-touch.patch',
              'touch-start.patch', 'usb-owned-route.patch', 'usb-owned-build.patch',
-             'usb-gadget.patch', 'peripheral-start.patch')]
+             'usb-gadget.patch', 'usb-start.patch', 'peripheral-start.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

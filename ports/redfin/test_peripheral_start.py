@@ -53,6 +53,7 @@ static int redfin_gpu_probe(void){calls[3]++;return 0;}
 static int redfin_rpmh_probe(void){calls[4]++;return 0;}
 static int redfin_touch_rail_observe(void){calls[5]++;return 0;}
 static int redfin_touch_start_initial(void){calls[0]++;return 0;}
+static int redfin_usb_start_initial(void){calls[1]++;return 0;}
 '''
         suffix = r'''
 int main(int argc,char **argv){
@@ -93,7 +94,7 @@ int main(int argc,char **argv){
     def test_unknown_mode_refuses_entire_group(self):
         for i in range(6):
             modes = [1] * 6
-            modes[i] = 3 if i in (0, 1) else 2
+            modes[i] = 4 if i == 1 else 3 if i == 0 else 2
             self.assertEqual(self.run_case(modes), (0, 0, 0, 0, 0, 0))
 
     def test_explicit_usb_route_mode_dispatches_usb_once(self):
@@ -102,6 +103,10 @@ int main(int argc,char **argv){
     def test_explicit_initial_touch_mode_dispatches_once_after_return(self):
         self.assertEqual(self.run_case((2, 0, 0, 0, 0, 1)), (1, 0, 0, 0, 0, 1))
         self.assertEqual(self.run_case((2, 0, 0, 0, 0, 1), ready=0), (0, 0, 0, 0, 0, 0))
+
+    def test_explicit_owned_usb_mode_dispatches_once_after_return(self):
+        self.assertEqual(self.run_case((0, 3, 0, 0, 0, 0)), (0, 1, 0, 0, 0, 0))
+        self.assertEqual(self.run_case((0, 3, 0, 0, 0, 0), ready=0), (0, 0, 0, 0, 0, 0))
 
     def test_only_requested_observers_run_once(self):
         for mask in range(64):

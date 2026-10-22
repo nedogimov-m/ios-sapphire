@@ -1,0 +1,128 @@
+diff --git a/bsd/dev/redfin_usb_start.c b/bsd/dev/redfin_usb_start.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_usb_start.c
+@@ -0,0 +1,115 @@
++/* Initial md0-only USB SMMU claim; no gadget, DMA or controller writes.
++ * Sole-writer audit for the compiled SWEET/Redfin image, after ABL exits:
++ * - TopazModem.cpp topaz_modem_init/wifi_enabled gate the legacy SMMU writer
++ *   behind modem/wifi; SapphireGpu.cpp sapphire_gpu_init gates its SMMU writer
++ *   behind gpu. All are explicitly disabled before this module claims a lease.
++ * - sweet_usb_probe refuses native Redfin; sweet_usb=0 also prevents its legacy
++ *   controller path. redfin_usb_gadget_start is unhooked and never called here.
++ * - sweet_ufs_init's legacy body is unreachable on Redfin; redfinroot=0,
++ *   redfinufs=0, no ufsroot and rd=md0 exclude native UFS initialization/DMA.
++ * - Other native probes/activation paths are disabled below. The only enabled
++ *   APPS-SMMU writer is redfin_usb_owned.c, reached through this fixed caller.
++ * Boot args corroborate those audited source gates; they are not ownership.
++ * The acquired module lease and caller/context identity establish software
++ * ownership. Never release/retry it, including after an uncertain failed claim.
++ * This is the normal nonsecure-driver trust that secure firmware does not
++ * concurrently rewrite nonsecure APPS routing. It does not assert secure-world
++ * exclusion or authorize DMA merely because an SMR slot happens to be invalid.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include "redfin_usb_owned.h"
++
++extern bool redfin_usb_platform(void);
++extern int redfin_spmi_return_ready(void);
++int redfin_usb_start_initial(void);
++
++static uint32_t redfin_initial_usb_lease;
++static const uint8_t redfin_initial_usb_caller;
++
++static bool
++redfin_initial_usb_arg(const char *name,uint32_t expected,bool required)
++{
++ uint32_t value=0;
++ bool found=PE_parse_boot_argn(name,&value,sizeof(value));
++ return found ? value==expected : !required;
++}
++
++/* ADT evidence is checked before acquiring any lease or entering the manager.
++ * memcpy permits unaligned properties; sizes and the complete tuple are exact. */
++static bool
++redfin_initial_usb_route(void)
++{
++ DTEntry node;
++ const void *value=NULL;
++ unsigned bytes=0;
++ uint64_t reg[2]={0};
++ uint32_t sid=0;
++ if (SecureDTLookupEntry(NULL,"/redfin-usb-route",&node)!=kSuccess ||
++     SecureDTGetProperty(node,"reg",&value,&bytes)!=kSuccess || !value || bytes!=sizeof(reg)) return false;
++ memcpy(reg,value,sizeof(reg));
++ if (reg[0]!=0x15000000ULL || reg[1]!=0x100000ULL ||
++     SecureDTGetProperty(node,"stream-id",&value,&bytes)!=kSuccess || !value || bytes!=sizeof(sid)) return false;
++ memcpy(&sid,value,sizeof(sid));
++ return sid==0xe0;
++}
++
++static bool
++redfin_initial_usb_gates(void)
++{
++ if (!redfin_usb_platform() || redfin_spmi_return_ready()!=1 ||
++     !redfin_initial_usb_arg("redfinusb",3,true) ||
++     !redfin_initial_usb_arg("redfinusbowned",1,true) ||
++     !redfin_initial_usb_arg("cpus",1,true) ||
++     !redfin_initial_usb_arg("redfinreturn",1,true)) return false;
++ const char *legacy[]={"sweettouch","sweetkeys","sweetusb","sweetcpufreq",
++     "sweetbattery","modem","wifi","gpu"};
++ const char *native[]={"redfintouch","redfintouchsetup","redfintouchevents",
++     "redfinrpmhtouch","redfinrpmh","redfinrail","redfinwifi","redfingpu",
++     "redfinroot","redfinufs","ufsrw","rootrw","redfinusbnet","redfinusblog",
++     "redfinfb","redfinscreen","sweethw","sweetusblog"};
++ for (unsigned i=0;i<sizeof(legacy)/sizeof(legacy[0]);i++)
++  if (!redfin_initial_usb_arg(legacy[i],0,true)) return false;
++ for (unsigned i=0;i<sizeof(native)/sizeof(native[0]);i++)
++  if (!redfin_initial_usb_arg(native[i],0,false)) return false;
++ char root[16]={0},ufsroot[16]={0};
++ if (!PE_parse_boot_argn("rd",root,sizeof(root)) || root[sizeof(root)-1] ||
++     strcmp(root,"md0") || PE_parse_boot_argn("ufsroot",ufsroot,sizeof(ufsroot))) return false;
++ return redfin_initial_usb_route();
++}
++
++/* Static code/context live for the entire boot; this pure callback never
++ * enters the manager, maps MMIO, starts a thread or invokes a hardware writer.
++ * Boot args/ADT are immutable. Rechecking source gates keeps the audited paths
++ * disabled while the permanent software lease is retained. */
++static bool
++redfin_initial_usb_exclusive(const void *caller_id,void *context)
++{
++ return caller_id==&redfin_initial_usb_caller && context==&redfin_initial_usb_lease &&
++     __atomic_load_n(&redfin_initial_usb_lease,__ATOMIC_ACQUIRE)==1 && redfin_initial_usb_gates();
++}
++
++int
++redfin_usb_start_initial(void)
++{
++ if (!redfin_initial_usb_gates()) return ENOTSUP;
++ uint32_t expected=0;
++ if (!__atomic_compare_exchange_n(&redfin_initial_usb_lease,&expected,1,false,
++     __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return EBUSY;
++ static const struct redfin_usb_owned_policy policy={redfin_initial_usb_exclusive,&redfin_initial_usb_lease};
++ int error=redfin_usb_owned_register(&redfin_initial_usb_caller,&policy);
++ printf("REDFIN USB START: owner register result=%d\n",error);
++ if (error) return error;
++ error=redfin_usb_owned_claim(&redfin_initial_usb_caller);
++ printf("REDFIN USB START: sole-owner claim result=%d\n",error);
++ if (error) return error;
++ error=redfin_usb_owned_revalidate(&redfin_initial_usb_caller);
++ printf("REDFIN USB START: strict warm revalidate result=%d; no gadget or DMA\n",error);
++ return error;
++}
++#endif
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -124,3 +124,4 @@
+ bsd/dev/redfin_usb.c			standard
+ bsd/dev/redfin_usb_owned.c			standard
++bsd/dev/redfin_usb_start.c			standard
+ bsd/dev/mem.c				standard
