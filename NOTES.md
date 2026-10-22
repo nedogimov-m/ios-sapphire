@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GUI8 60Hz boots; touch stops on queue-count overflow — 2026-10-23
+
+Source `69ff90f`; local ARM64 build023513/kernel
+`751fa8c92727db9e143162e2b64a9af1ec43bf252aafe553049feb14dd485afa`.
+Image `gui8-60hz-v1` SHA256 `3faa038180a81e9212354c428cb6716744348f1eb3ca8da942b0a36aec718b7c`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x6ff7bad8f1b964be redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Authenticated/image-matched `logs/redfin/gui8-60hz-v1/`:8/8 CPUs,60Hz copy
+configuration, Apple userspace and180s HID session start successfully.
+User observes smoother UI, then lost input/possible freeze and artifacts.
+Observation: after381 batches/12 contacts/12 releases the event worker
+stops with Darwin84=EOVERFLOW. Existing parser returns this for a reported
+remaining-event count>31; raw offending bytes were not captured. Rendering
+continues to at least CPU present120 after the stop; kernel does not panic,
+and180s graceful shutdown, clean HFSX and verified fastboot return succeed.
+Thus input stopped independently of the kernel/display; actual queue overflow
+versus an invalid count is not yet distinguished. Artifacts have no proven
+cause (CPU scanout synchronization and missing GPU features remain candidates).
+Next: compare pinned SEC source's overflow handling and implement bounded,
+source-backed queue recovery without relaxing SPI/ownership/media fences.
+
 ## REDFIN GUI8 60Hz comparison prepared — 2026-10-23
 
 Preserves proven GUI8 10Hz and admits only10/30/60Hz copy profiles; duplicate,
