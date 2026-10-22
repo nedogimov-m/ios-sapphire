@@ -47,3 +47,71 @@ The targeted base-vendor pass now has a650 SQE31,632 bytes, GMU41,548 bytes
 and a620 zap MDT plus original b00/b01/b02 blobs. Host hashes and filesystem
 read coverage are retained privately; no GPU power, SCM/PAS or firmware load
 was attempted. The source remains explicitly the raw vendor base view.
+
+## CX power prerequisite: ARC parent vote
+
+The captured Redfin FDT adds a dependency absent from the base
+`lito-gdsc.dtsi` fragment. The complete live chain is:
+
+| Node | Relevant contract |
+| --- | --- |
+| `/soc/qcom,gdsc@3d9106c` | `gpu_cx_gdsc`, register `0x03d9106c+4`; both `parent-supply` and `vdd_parent-supply` reference the regulator below |
+| `/soc/rsc@18200000/rpmh-regulator-cxlvl/regulator-pm8150-s1-level` | `pm8150_s1_level`, `qcom,set=3` (active and sleep); minimum consumer level16, maximum65535; no boot-on/always-on property |
+| `/soc/rsc@18200000/rpmh-regulator-cxlvl` | `qcom,rpmh-arc-regulator`, resource `cx.lvl` |
+
+The CX node also references `/soc/syscon@3d91540` as `hw-ctrl-addr`, has a
+500us GDSC timeout and `qcom,clk-dis-wait-val=8`. The existing `/redfin-gpu`
+GCC/GPUCC ranges and chip ID do **not** describe or prove this parent supply.
+
+At Google msm pin `500b3a2059c1eec0fec08ec56add06320ea901a8`,
+[`gdsc-regulator.c:220`](https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/clk/qcom/gdsc-regulator.c#220)
+requests `RPMH_REGULATOR_LEVEL_LOW_SVS` on `vdd_parent` before clearing
+`SW_COLLAPSE`. Its DT parser resolves both supply properties. The pinned
+`qcom,rpmh-regulator-levels.h` defines LOW_SVS as **64**, a consumer corner
+number, not microvolts or millivolts. Therefore a bare CX collapse-bit write
+does not yet reproduce the Redfin power sequence. No GPU power backend is
+implemented; firmware, GMU, GX, SMMU, reset and DMA writes remain disabled.
+
+The authenticated earlier RPMh observation found `cx.lvl` as ARC type3,
+address `0x30000`, aux version `0x1000`, 32 auxiliary bytes. Its raw
+little-endian level table was
+`[0,16,64,128,192,256,384,416,0,0,0,0,0,0,0,0]`.
+The pinned
+[`rpmh-regulator.c:1317`](https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/regulator/rpmh-regulator.c#1317)
+ends the table at the first zero after index0. Hardware selectors0..7
+therefore map to consumer corners0,16,64,128,192,256,384,416. LOW_SVS64
+requires **selector2**, never a raw command value64. This table must be
+looked up and validated freshly; it is metadata, not a physical voltage
+measurement or a current-vote readback.
+The resource address is carried inside an RPMh command; it is not a
+physical MMIO address to pass to `ml_io_map`.
+
+The existing `redfin_rpmh.h` reader already bounds and validates CMD-DB ARC
+metadata, and the observer snapshots DRV2 ACTIVE/SLEEP/WAKE TCS state.
+That is useful for a separate read-only parent-supply audit. It does not
+prove the currently latched `cx.lvl` floor. A completed ACTIVE transaction
+can leave its vote latched after its command slots become empty; sleep/wake
+templates describe future requests. A free TCS is a transport resource,
+not an independent ARC voter. Writing selector2 through another DRV2 TCS
+can replace a higher existing DRV2 vote. Preserving other masters' votes
+does not by itself preserve this master's inherited floor.
+
+The inspected HLOS driver offers no proven hardware readback of that
+latched or aggregate ARC value:
+[`rpmh_regulator_arc_get_voltage_sel`](https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/regulator/rpmh-regulator.c#1186)
+returns its software request cache. RSC command data, status and response
+registers are not an established aggregate-voltage interface. No new ARC
+MMIO address or read transaction is authorized by the current contract.
+Physical S1 VSET alone would also need a validated CPR/corner mapping.
+Even an aggregate level above LOW_SVS would need a held-floor argument:
+another master's temporary vote may disappear while CX is enabled.
+
+The touch backend is deliberately different: it votes a fixed PLDO VRM
+voltage/mode/enable triplet and verifies physical L17 state through SPMI.
+Its numeric values and physical proof cannot be reused for ARC. A future
+CX vote needs a source-backed current DRV2 floor or a demonstrably separate
+owned voter, checked ARC selector conversion, preservation of all existing
+active/sleep/wake votes, and fresh power completion evidence before the
+single CX GDSC write. Until that proof exists, the next GPU stage can only
+validate/report the parent chain, CMD-DB table and stable TCS snapshots;
+it must report parent power as unproved.

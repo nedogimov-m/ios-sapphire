@@ -57,6 +57,7 @@ def main():
     p.add_argument('--boot-mpidr', type=lambda x: int(x, 0), default=0)
     p.add_argument('--trace', action='store_true', help='enable verbose kernel kprintf tracing')
     p.add_argument('--trace-syscalls', action='store_true', help='enable PID1 syscall and pathname diagnostics')
+    p.add_argument('--cpu-capability-probe', action='store_true', help='wake and park CPU6 to record architectural capabilities; RAM root and verified return only')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
     p.add_argument('--display-hz', type=int, help='software display copy cadence, 1..10 Hz; requires --display; omitted keeps kernel default')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
@@ -92,6 +93,19 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.cpu_capability_probe:
+        if not (a.kernel and a.dtb and a.return_bootloader):
+            p.error('--cpu-capability-probe requires --kernel, --dtb and --return-bootloader')
+        if a.boot_mpidr != 0:
+            p.error('--cpu-capability-probe requires boot CPU0')
+        competing = ('display', 'splash', 'touch_events', 'usb_aarch64_context',
+                     'usb_live_log', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
+                     'userspace_stacks', 'capture_screen', 'trace_syscalls')
+        if (any(getattr(a, name) for name in competing) or
+                any(value for name, value in vars(a).items()
+                    if name.endswith('_probe') and name not in
+                    ('cpu_capability_probe', 'spmi_probe'))):
+            p.error('--cpu-capability-probe requires a separate RAM-only profile')
     if a.display_hz is not None:
         if not 1 <= a.display_hz <= 10:
             p.error('--display-hz must be in [1, 10]')
@@ -305,6 +319,8 @@ def main():
             command_line += ' -enable_kprintf_spam'
         if a.trace_syscalls:
             command_line += ' redfintrace=1'
+        if a.cpu_capability_probe:
+            command_line += ' redfincpu=1'
         if a.display:
             command_line += ' redfinfb=1 sweetfb_noconsole=1'
         if a.display_hz is not None:
@@ -412,6 +428,8 @@ def main():
                                 'sha256': hashlib.sha256(a.kernel.read_bytes()).hexdigest()})
     if a.display_hz is not None:
         manifest['display_hz'] = a.display_hz
+    if a.cpu_capability_probe:
+        manifest['cpu_capability_probe'] = True
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')
     print(f'{out}/init: static arm64 Darwin PID1')

@@ -1,6 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## REDFIN touch GUI V3: display cadence comparison started — 2026-10-22
+## REDFIN parked CPU6 capability kernel prepared — 2026-10-23
+
+User requests more cores/GPU after the unchanged V3 lag and About freeze.
+New cpu-probe/cpu-probe-start overlays keep every existing UP fence and
+wake only OFF CPU6 through PSCI after actual return_ready. The secondary
+publishes registers to a permanent checked16KiB page and parks with IRQs,
+MMU and caches off. No secondary XNU entry or device MMIO/DMA; CPU0 owns
+all logs and bounded500ms polling. Exact token presence dispatch blocks
+other observers even for malformed/bare/overflow/zero redfincpu; the backend
+uses strict frozen flags, full Aff3 checks and one-shot ownership.
+13 actual-C/ARM64 backend tests and2 dispatch tests PASS; full649 PASS
+(`peripherals-host-tests-v28.txt`), with independent review. Builder exposes
+exclusive --cpu-capability-probe and documents it in CPU.md.
+Local build000025 failed on missing delay declaration;000628 correctly
+refused a prepared/header-order mismatch. After matching kern/clock.h,
+ARM64 build `research/redfin-build/build-20261023-000903.log` succeeds.
+Kernel SHA256 `f7c3dc43cf942f169d1d72d3801d8a9bdbf129df190cb3eeb0ca6353d679063f`;
+CPU overlay SHA256 `9a95a6f95be5fa090e72e52cb46d764118eb306f08e4c027808940fd177318cf`.
+Image generation/hardware proof is next; no CPU6 capability result yet.
+Full SMP additionally needs early return ownership, synchronized logging,
+MMU/GIC/timer/cross-IPI/progress proof before UFS/GUI. A separate SMP log
+overlay is being prepared but is not part of this kernel.
+GPU audit found live CX parent cx.lvl ARC dependency: LOW_SVS64 maps to
+hardware selector2, and a free TCS is not an independent latched voter.
+Current/held HLOS floor is unproved; no GPU power/firmware writes were
+added. Source-backed details and future requirements are in GPU.md.
+
+## REDFIN touch GUI V3: cadence/debug change did not resolve lag — 2026-10-22
 
 Commit `414929b` records physical touch/UI confirmation and reported1FPS.
 Builder now exposes optional --display-hz1..10 with --display required;
@@ -11,10 +38,20 @@ preserved. No kernel changes; same kernel7da40f41/build214311.
 Image `ports/redfin/out/touch-gui-v3/redfin-xnu.img` SHA256
 `41546f6110a9aab53a43c75934788c17287f843312c39d8af10a03d0ac431590`.
 Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=10 redfinshutdown=120 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x729677d55a2ce393 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
-Temporary comparison is running, with automatic recovery/return; no flash.
-User feedback and authenticated device results are still pending. This
-changes three debug/cadence settings together and cannot isolate a single
+Commit `65d0add` records the CLI/guide. Authenticated, image-matched
+`logs/redfin/touch-gui-v3/`: Apple userspace alive, no kernel panic,
+touch error0/batches1060/contacts9/releases9, clean-unmounted HFSX16GiB,
+metadata primed and fastboot return verified. User reports roughly unchanged
+lag and slow app opening. About in Settings appeared to freeze the screen,
+without an immediate restart; no Preferences crash is visible in console.
+There is an earlier driverkitd SIGKILL and later scheduled120s shutdown;
+neither establishes the cause of the reported UI freeze. This changes
+three debug/cadence settings together and cannot isolate a single
 performance cause. Requested10Hz is software cadence, not measured FPS.
+User now requests more cores and GPU. Next: separate md0/UP CPU6 PSCI and
+16K capability probe AFTER verified return; full SMP additionally needs
+topology/loader fences, pre-CPU_ON return ownership and synchronized RAM
+logging/watchdog. GPU next stage is separately fenced CX-only power proof.
 
 ## REDFIN touch GUI V2: physical contacts and UI response confirmed — 2026-10-22
 

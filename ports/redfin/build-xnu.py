@@ -225,7 +225,8 @@ def main(argv=None):
                                          'usb-aarch64-context.patch',
                                          'usb-context-format-status.patch',
                                          'usb-network-worker.patch', 'usb-network-start.patch',
-                                         'peripheral-start.patch', 'touch-event-start.patch'), 21):
+                                         'peripheral-start.patch', 'touch-event-start.patch',
+                                         'cpu-probe.patch', 'cpu-probe-start.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

@@ -22,6 +22,18 @@ class BuildFlagTests(unittest.TestCase):
     def test_display_cadence_needs_explicit_display(self):
         self.refused(['--display-hz', '10'], '--display-hz requires --display')
 
+    def test_cpu_capability_probe_requires_runtime_return_and_cpu0(self):
+        self.refused(['--cpu-capability-probe'],
+                     '--cpu-capability-probe requires --kernel, --dtb and --return-bootloader')
+        base = ['--cpu-capability-probe', '--kernel', '/missing-kernel',
+                '--dtb', '/missing-dtb', '--return-bootloader']
+        self.refused([*base, '--boot-mpidr', '0x100'],
+                     '--cpu-capability-probe requires boot CPU0')
+        for option in ('--usb-probe', '--touch-events', '--ufs-root', '--gpu-probe', '--trace-syscalls'):
+            with self.subTest(option=option):
+                self.refused([*base, option],
+                             '--cpu-capability-probe requires a separate RAM-only profile')
+
     def test_display_cadence_is_bounded(self):
         for value in ('-1', '0', '11'):
             with self.subTest(value=value):

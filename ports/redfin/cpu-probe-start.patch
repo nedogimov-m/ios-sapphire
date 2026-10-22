@@ -1,0 +1,38 @@
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -118,6 +118,7 @@
+ int redfin_touch_rail_observe(void);
+ int redfin_touch_start_initial(void);
+ int redfin_usb_start_initial(void);
++int redfin_cpu_probe(void);
+ }
+ 
+ /* REDFIN_PERIPHERAL_START_TEST_BEGIN */
+@@ -130,6 +131,26 @@
+   if (PE_parse_boot_argn("redfinbootid", &boot_id, sizeof(boot_id)) && boot_id)
+    IOLog("REDFIN BOOT ID: %016llx\n", (unsigned long long)boot_id);
+  }
++ /* REDFIN_CPU_PROBE_DISPATCH_TEST_BEGIN */
++ const char *cpu_args = PE_boot_args();
++ bool cpu_requested = false;
++ for (unsigned pos = 0; cpu_args && pos < 608 && cpu_args[pos];) {
++  if (cpu_args[pos] == ' ' || cpu_args[pos] == '\t' || cpu_args[pos] == '\r' || cpu_args[pos] == '\n') {
++   ++pos; continue;
++  }
++  unsigned start = pos;
++  while (pos < 608 && cpu_args[pos] && cpu_args[pos] != ' ' && cpu_args[pos] != '\t' &&
++         cpu_args[pos] != '\r' && cpu_args[pos] != '\n') ++pos;
++  if (pos - start >= 9 && !memcmp(cpu_args + start, "redfincpu", 9) &&
++      (pos - start == 9 || cpu_args[start + 9] == '=')) cpu_requested = true;
++ }
++ if (cpu_requested) {
++  static uint32_t attempted_cpu;
++  if (!__atomic_exchange_n(&attempted_cpu, 1, __ATOMIC_RELAXED))
++   IOLog("REDFIN CPUCAP: probe result=%d\n", redfin_cpu_probe());
++  return; /* A requested capability probe never falls through to other writers. */
++ }
++ /* REDFIN_CPU_PROBE_DISPATCH_TEST_END */
+  uint32_t modes[6] = {}, cpus = 0;
+  const char *names[] = {"redfintouch", "redfinusb", "redfinwifi", "redfingpu", "redfinrpmh", "redfinrail"};
+  bool any = false;

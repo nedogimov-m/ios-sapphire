@@ -179,7 +179,8 @@ def main(argv=None):
              'usb-aarch64-context.patch',
              'usb-context-format-status.patch',
              'usb-network-worker.patch', 'usb-network-start.patch',
-             'peripheral-start.patch', 'touch-event-start.patch')]
+             'peripheral-start.patch', 'touch-event-start.patch',
+             'cpu-probe.patch', 'cpu-probe-start.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

@@ -23,7 +23,7 @@ before dispatch; ordinary boot keeps them disabled. V3 hardware logs verified
 the GPIO/SPI state, warm DWC3 controller, reserved SMEM and collapsed GPU
 clock state, then iOS rendered its lock screen and cleanly unmounted HFS.
 These options do not enable functional touch, Wi-Fi, USB networking or GPU
-acceleration. Hardware contracts and next steps: [touch](TOUCH.md),
+acceleration. Hardware contracts and next steps: [CPU](CPU.md), [touch](TOUCH.md),
 [USB](USB.md), [Wi-Fi](WiFi.md), [GPU](GPU.md), [new upstream](UPSTREAM.md).
 
 ## Reproduce

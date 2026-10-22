@@ -1,0 +1,334 @@
+diff --git a/bsd/dev/redfin_cpu_probe.c b/bsd/dev/redfin_cpu_probe.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_cpu_probe.c
+@@ -0,0 +1,252 @@
++/* One-shot Redfin CPU6 capability observer. The secondary never joins XNU.
++ * PSCI: Arm DEN0022D, CPU_ON64/AFFINITY_INFO64/FEATURES, SMC conduit.
++ * Target: pinned Lito DTS afc98e2bb0716a57bf4f8d2b6191378dd7123ce4,
++ * MPIDR 0x600 (Kryo 475 gold), independently captured Android CPU part0x804.
++ * Called by the initial CPU0 md0 owner only AFTER PMIC+IMEM return proof.
++ * No GIC, clocks, power MMIO, CPU_OFF, UFS, device DMA or secondary logging.
++ * Source audit: legacy IOCPU sees only CPU0; restart/hotplug is unsupported.
++ * All native/legacy peripheral writers are disabled by the frozen contract.
++ * The permanent mailbox and parked core remain owned until hardware reset.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <kern/clock.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++
++#define RF_CPU_PAGE 16384u
++#define RF_CPU_TARGET 0x600ULL
++#define RF_CPU_MAGIC 0x5246435055303031ULL
++#define RF_CPU_ON 0xc4000003u
++#define RF_CPU_AFFINITY 0xc4000004u
++#define RF_CPU_ARGS 1024u
++#define RF_CPU_POLLS 500u
++struct rf_cpu_page {
++ uint64_t magic,target,boot_id,reserved[5];
++ volatile uint64_t midr,mpidr,mmfr0,current_el,sctlr,ctr,counter,ready;
++ unsigned char padding[RF_CPU_PAGE-128];
++};
++_Static_assert(sizeof(struct rf_cpu_page)==RF_CPU_PAGE,"CPU mailbox page");
++_Static_assert(offsetof(struct rf_cpu_page,midr)==64,"CPU assembly payload offset");
++_Static_assert(offsetof(struct rf_cpu_page,ready)==120,"CPU assembly publication offset");
++static struct rf_cpu_page rf_cpu_mailbox __attribute__((aligned(RF_CPU_PAGE)));
++static uint32_t rf_cpu_attempted;
++static char rf_cpu_frozen[RF_CPU_ARGS];
++static unsigned rf_cpu_frozen_bytes;
++static uint64_t rf_cpu_boot_id;
++extern int redfin_spmi_return_ready(void);
++extern vm_offset_t ml_static_vtop(vm_offset_t);
++extern void CleanPoC_DcacheRegion_Force(vm_offset_t,size_t);
++extern unsigned char redfin_cpu_probe_entry[],redfin_cpu_probe_entry_end[];
++int redfin_cpu_probe(void);
++
++enum { RF_CPU_EL,RF_CPU_MPIDR,RF_CPU_MIDR,RF_CPU_MMFR0,RF_CPU_CTR,RF_CPU_SCTLR };
++/* RF_CPU_HW_BEGIN: actual policy/ordering below is compiled by host tests. */
++static uint64_t
++rf_cpu_reg(unsigned reg)
++{
++ switch(reg) {
++ case RF_CPU_EL: return __builtin_arm_rsr64("CurrentEL");
++ case RF_CPU_MPIDR: return __builtin_arm_rsr64("MPIDR_EL1");
++ case RF_CPU_MIDR: return __builtin_arm_rsr64("MIDR_EL1");
++ case RF_CPU_MMFR0: return __builtin_arm_rsr64("ID_AA64MMFR0_EL1");
++ case RF_CPU_CTR: return __builtin_arm_rsr64("CTR_EL0");
++ default: return __builtin_arm_rsr64("SCTLR_EL1");
++ }
++}
++static int64_t
++rf_cpu_smc(uint32_t function,uint64_t a1,uint64_t a2,uint64_t a3)
++{
++ register uint64_t x0 __asm__("x0")=function,x1 __asm__("x1")=a1;
++ register uint64_t x2 __asm__("x2")=a2,x3 __asm__("x3")=a3;
++ __asm__ volatile("smc #0" : "+r"(x0),"+r"(x1),"+r"(x2),"+r"(x3) : :
++  "x4","x5","x6","x7","x8","x9","x10","x11","x12","x13", "x14","x15","x16","x17","cc","memory");
++ return (int64_t)x0;
++}
++static void rf_cpu_barrier(void) { __asm__ volatile("dsb sy" ::: "memory"); }
++static void
++rf_cpu_invalidate(void)
++{
++ /* CPU0 never dirties this dedicated report line after the pre-wake clean.
++  * IVAC only: a clean here could overwrite uncached CPU6 report stores. */
++ vm_offset_t line=(vm_offset_t)&rf_cpu_mailbox.midr;
++ __asm__ volatile("dsb sy\ndc ivac, %0\ndsb sy" :: "r"(line) : "memory");
++}
++/* RF_CPU_HW_END */
++
++static bool rf_cpu_space(char c) { return c==' ' || c=='\t' || c=='\r' || c=='\n'; }
++static bool
++rf_cpu_word(const char *word,unsigned bytes,const char *wanted)
++{
++ return strlen(wanted)==bytes && !memcmp(word,wanted,bytes);
++}
++static bool
++rf_cpu_flags(const char *args,unsigned bytes,uint64_t *boot_id)
++{
++ static const char *required[]={"redfincpu","cpus","redfinspmi","redfinreturn",
++  "sweettouch","sweetkeys","sweetusb","sweetcpufreq","sweetbattery","modem","wifi","gpu","rd","redfinbootid"};
++ static const char *optional[]={"redfintouch","redfintouchsetup","redfintouchscan","redfintouchevents",
++  "redfinrpmhtouch","redfinrpmh","redfinrail","redfinwifi","redfingpu","redfinusb","redfinusbowned",
++  "redfinusbcontexts","redfinusbbypass","redfinusbrw64","redfinusbgadget","redfinusbnet","redfinusblog",
++  "redfinroot","redfinufs","redfinfb","redfinscreen","redfinshutdown","redfinstacks","redfintrace",
++  "ufsrw","rootrw","sweethw","sweetusblog"};
++ uint32_t seen=0,optional_seen=0;
++ uint64_t nonce=0;
++ if (!args || !bytes || bytes>RF_CPU_ARGS || args[bytes-1]) return false;
++ for (unsigned pos=0;pos<bytes-1;) {
++  if (rf_cpu_space(args[pos])) { pos++; continue; }
++  unsigned start=pos;
++  while (pos<bytes-1 && !rf_cpu_space(args[pos])) pos++;
++  unsigned end=pos,key=start;
++  while (key<end && args[key]!='=') key++;
++  const char *value=args+key+(key<end);
++  unsigned length=end-key-(key<end);
++  if (rf_cpu_word(args+start,key-start,"ufsroot") || rf_cpu_word(args+start,key-start,"cpumask")) return false;
++  for (unsigned i=0;i<sizeof(required)/sizeof(required[0]);i++) {
++   if (!rf_cpu_word(args+start,key-start,required[i])) continue;
++   if ((seen&(1u<<i)) || key==end) return false;
++   seen|=1u<<i;
++   if (i<12) { if (length!=1 || value[0]!=(i<4?'1':'0')) return false; }
++   else if (i==12) { if (length!=3 || memcmp(value,"md0",3)) return false; }
++   else {
++    if (length!=18 || value[0]!='0' || value[1]!='x') return false;
++    for (unsigned n=2;n<18;n++) {
++     unsigned digit=(unsigned)(value[n]-'0');
++     if (digit>9) { if (value[n]<'a' || value[n]>'f') return false; digit=(unsigned)(value[n]-'a'+10); }
++     nonce=(nonce<<4)|digit;
++    }
++    if (!nonce) return false;
++   }
++  }
++  for (unsigned i=0;i<sizeof(optional)/sizeof(optional[0]);i++) {
++   if (!rf_cpu_word(args+start,key-start,optional[i])) continue;
++   if ((optional_seen&(1u<<i)) || key==end || length!=1 || value[0]!='0') return false;
++   optional_seen|=1u<<i;
++  }
++ }
++ if (seen!=((1u<<(sizeof(required)/sizeof(required[0])))-1)) return false;
++ *boot_id=nonce;
++ return true;
++}
++static bool
++rf_cpu_contract(uint64_t *base,uint64_t *bytes)
++{
++ DTEntry node;
++ const void *value=NULL;
++ unsigned length=0;
++ if (SecureDTLookupEntry(NULL,"/",&node)!=kSuccess ||
++     SecureDTGetProperty(node,"compatible",&value,&length)!=kSuccess ||
++     !value || !length || length>256 || ((const char *)value)[length-1]) return false;
++ bool redfin=false,lito=false;
++ for (unsigned pos=0;pos<length;) {
++  unsigned end=pos;
++  while (end<length && ((const char *)value)[end]) end++;
++  if (end==length || end==pos) return false;
++  if (rf_cpu_word((const char *)value+pos,end-pos,"google,redfin")) redfin=true;
++  if (rf_cpu_word((const char *)value+pos,end-pos,"qcom,sm7250")) lito=true;
++  pos=end+1;
++ }
++ if (!redfin || !lito || SecureDTLookupEntry(NULL,"/chosen",&node)!=kSuccess ||
++     SecureDTGetProperty(node,"dram-base",&value,&length)!=kSuccess || !value || length!=8) return false;
++ memcpy(base,value,8);
++ if (SecureDTGetProperty(node,"dram-size",&value,&length)!=kSuccess || !value || length!=8) return false;
++ memcpy(bytes,value,8);
++ return *base==0x180000000ULL && *bytes==0x80000000ULL;
++}
++static bool
++rf_cpu_runtime(void)
++{
++ const ml_topology_info_t *topology=ml_get_topology_info();
++ uint64_t midr=rf_cpu_reg(RF_CPU_MIDR),ctr=rf_cpu_reg(RF_CPU_CTR);
++ unsigned granule=(unsigned)((rf_cpu_reg(RF_CPU_MMFR0)>>20)&15);
++ return PAGE_SIZE==RF_CPU_PAGE && topology && topology->num_cpus==1 && topology->boot_cpu &&
++  topology->boot_cpu->cpu_id==0 && topology->boot_cpu->phys_id==0 &&
++  rf_cpu_reg(RF_CPU_EL)==4 && !(rf_cpu_reg(RF_CPU_MPIDR)&0xff00ffffffULL) &&
++  ((midr>>24)&255)==0x51 && ((midr>>4)&0xfff)==0x805 &&
++  ((ctr>>16)&15)==4 && (ctr&15)==4 && (granule==1 || granule==2) &&
++  (rf_cpu_reg(RF_CPU_SCTLR)&5)==5 && redfin_spmi_return_ready()==1;
++}
++static bool
++rf_cpu_frozen_valid(void)
++{
++ const char *args=PE_boot_args();
++ return args && rf_cpu_frozen_bytes &&
++  !memcmp(args,rf_cpu_frozen,rf_cpu_frozen_bytes) && rf_cpu_runtime();
++}
++static bool
++rf_cpu_span(uint64_t address,uint64_t size,uint64_t base,uint64_t bytes)
++{
++ return size && address>=base && address-base<bytes && size<=bytes-(address-base) &&
++  address<(1ULL<<36) && size<=(1ULL<<36)-address;
++}
++int
++redfin_cpu_probe(void)
++{
++ uint32_t expected=0;
++ /* Consume before validation; malformed/failed attempts cannot be retried. */
++ if (!__atomic_compare_exchange_n(&rf_cpu_attempted,&expected,1,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return EBUSY;
++ const char *args=PE_boot_args();
++ unsigned count=0;
++ if (!args) return ENOTSUP;
++ while (count<RF_CPU_ARGS && args[count]) count++;
++ if (count==RF_CPU_ARGS || !rf_cpu_flags(args,count+1,&rf_cpu_boot_id) || !rf_cpu_runtime()) return ENOTSUP;
++ memcpy(rf_cpu_frozen,args,count+1); rf_cpu_frozen_bytes=count+1;
++ uint64_t base=0,bytes=0;
++ if (!rf_cpu_contract(&base,&bytes)) return ENXIO;
++ vm_offset_t va=(vm_offset_t)&rf_cpu_mailbox;
++ uint64_t pa=ml_static_vtop(va),last=ml_static_vtop(va+RF_CPU_PAGE-1);
++ vm_offset_t entry_va=(vm_offset_t)redfin_cpu_probe_entry;
++ vm_offset_t end_va=(vm_offset_t)redfin_cpu_probe_entry_end;
++ if (end_va<=entry_va || end_va-entry_va>512) return EINVAL;
++ uint64_t entry=ml_static_vtop(entry_va),entry_last=ml_static_vtop(end_va-1);
++ if ((va&(RF_CPU_PAGE-1)) || (pa&(RF_CPU_PAGE-1)) ||
++     last!=pa+RF_CPU_PAGE-1 || !rf_cpu_span(pa,RF_CPU_PAGE,base,bytes) ||
++     (entry&3) || !rf_cpu_span(entry,end_va-entry_va,base,bytes) ||
++     entry_last!=entry+end_va-entry_va-1 ||
++     (entry<pa+RF_CPU_PAGE && pa<entry+end_va-entry_va)) return EINVAL;
++ int32_t version=(int32_t)rf_cpu_smc(0x84000000u,0,0,0);
++ if (version<0 || (unsigned)version>>16<1) return ENOTSUP;
++ if ((int32_t)rf_cpu_smc(0x8400000au,RF_CPU_ON,0,0)<0 ||
++     (int32_t)rf_cpu_smc(0x8400000au,RF_CPU_AFFINITY,0,0)<0) return ENOTSUP;
++ int32_t affinity=(int32_t)rf_cpu_smc(RF_CPU_AFFINITY,RF_CPU_TARGET,0,0);
++ printf("REDFIN CPU PROBE: PSCI version=%#x target=%#llx affinity=%d (OFF=1)\n",version,RF_CPU_TARGET,affinity);
++ if (affinity!=1) return EBUSY;
++ if (!rf_cpu_frozen_valid()) return EPERM;
++ memset(&rf_cpu_mailbox,0,sizeof(rf_cpu_mailbox));
++ rf_cpu_mailbox.magic=RF_CPU_MAGIC; rf_cpu_mailbox.target=RF_CPU_TARGET; rf_cpu_mailbox.boot_id=rf_cpu_boot_id;
++ CleanPoC_DcacheRegion_Force(va,RF_CPU_PAGE);
++ CleanPoC_DcacheRegion_Force(entry_va,end_va-entry_va);
++ rf_cpu_barrier();
++ if (!rf_cpu_frozen_valid()) return EPERM;
++ printf("REDFIN CPU PROBE: CPU_ON target=%#llx entry=%#llx mailbox=%#llx; secondary parks outside XNU\n",RF_CPU_TARGET,entry,pa);
++ int32_t result=(int32_t)rf_cpu_smc(RF_CPU_ON,RF_CPU_TARGET,entry,pa);
++ __atomic_store_n(&rf_cpu_attempted,2,__ATOMIC_RELEASE);
++ printf("REDFIN CPU PROBE: CPU_ON result=%d; no retry/free/CPU_OFF\n",result);
++ if (result) return EIO;
++ for (unsigned poll=0;poll<RF_CPU_POLLS;poll++) {
++  rf_cpu_invalidate();
++  if (rf_cpu_mailbox.ready==rf_cpu_boot_id) {
++   rf_cpu_barrier();
++   uint64_t midr=rf_cpu_mailbox.midr,mpidr=rf_cpu_mailbox.mpidr,mmfr0=rf_cpu_mailbox.mmfr0;
++   uint64_t el=rf_cpu_mailbox.current_el,sctlr=rf_cpu_mailbox.sctlr,ctr=rf_cpu_mailbox.ctr;
++   printf("REDFIN CPU PROBE: ready MIDR=%#llx MPIDR=%#llx MMFR0=%#llx CurrentEL=%#llx SCTLR-current=%#llx CTR=%#llx\n",midr,mpidr,mmfr0,el,sctlr,ctr);
++   unsigned granule=(unsigned)((mmfr0>>20)&15);
++   bool valid=(mpidr&0xff00ffffffULL)==RF_CPU_TARGET && (el==4 || el==8) && !(sctlr&0x1005) &&
++    ((midr>>24)&255)==0x51 && ((midr>>4)&0xfff)==0x804 && ((ctr>>16)&15)==4 && (ctr&15)==4 &&
++    (granule==1 || granule==2) && rf_cpu_frozen_valid();
++   printf("REDFIN CPU PROBE: target CPU6 TGran16=%u valid=%u; parked until hardware watchdog reset\n",granule,valid);
++   return valid?0:ENOTSUP;
++  }
++  delay(1000);
++ }
++ printf("REDFIN CPU PROBE: ready timeout after %u polls; core/mailbox retained until reset\n",RF_CPU_POLLS);
++ return ETIMEDOUT;
++}
++#endif
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -327,6 +327,62 @@
+ 	/* x0 is deliberately unused; reset_vector selects CPU data by MPIDR. */
+ 	msr		SPSel, #1
+ 	b		EXT(LowResetVectorBase)
++
++/* CPU6 PSCI entry: x0 is the permanent mailbox PA. No stack, MMU setup,
++ * GIC, IRQ enabling, XNU entry or logging. Private reports begin at offset64.
++ * Refuse unknown EL, active translation/cache or a foreign context before any store.
++ */
++ .align 6
++ .globl EXT(redfin_cpu_probe_entry)
++LEXT(redfin_cpu_probe_entry)
++ msr DAIFSet, #0xf
++ mrs x1, CurrentEL
++ cmp x1, #4
++ b.eq Lrf_cpu_probe_el1
++ cmp x1, #8
++ b.ne Lrf_cpu_probe_park
++ mrs x2, SCTLR_EL2
++ b Lrf_cpu_probe_sctlr
++Lrf_cpu_probe_el1:
++ mrs x2, SCTLR_EL1
++Lrf_cpu_probe_sctlr:
++ mov x3, #0x1005
++ tst x2, x3
++ b.ne Lrf_cpu_probe_park
++ cbz x0, Lrf_cpu_probe_park
++ tst x0, #0x3fff
++ b.ne Lrf_cpu_probe_park
++ ldr x3, [x0, #0]
++ MOV64 x4, 0x5246435055303031
++ cmp x3, x4
++ b.ne Lrf_cpu_probe_park
++ ldr x3, [x0, #8]
++ cmp x3, #0x600
++ b.ne Lrf_cpu_probe_park
++ mrs x4, MPIDR_EL1
++ MOV64 x6, 0xff00ffffff
++ and x5, x4, x6
++ cmp x5, x3
++ b.ne Lrf_cpu_probe_park
++ ldr x3, [x0, #16]
++ cbz x3, Lrf_cpu_probe_park
++ mrs x5, MIDR_EL1
++ str x5, [x0, #64]
++ str x4, [x0, #72]
++ mrs x5, ID_AA64MMFR0_EL1
++ str x5, [x0, #80]
++ str x1, [x0, #88]
++ str x2, [x0, #96]
++ mrs x5, CTR_EL0
++ str x5, [x0, #104]
++ dsb sy
++ str x3, [x0, #120]
++ dsb sy
++Lrf_cpu_probe_park:
++ wfe
++ b Lrf_cpu_probe_park
++ .globl EXT(redfin_cpu_probe_entry_end)
++LEXT(redfin_cpu_probe_entry_end)
+ #endif /* SWEET */
+ 
+ 	.align 2
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -125,6 +125,7 @@
+ bsd/dev/redfin_usb.c			standard
+ bsd/dev/redfin_usb_owned.c			standard
+ bsd/dev/redfin_usb_start.c			standard
++bsd/dev/redfin_cpu_probe.c		standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+ bsd/dev/unix_startup.c			standard
