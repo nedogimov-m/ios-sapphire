@@ -64,6 +64,27 @@ overrides the software copy cadence and requires `--display`. Copy cost and
 rendering add latency, so this does not guarantee the requested animation FPS.
 `--touch-events` enables the validated SEC/HID path for UFS/CPU-display tests.
 
+`--smp-probe --smp-cpus 8 --shim-early-return --return-bootloader` selects
+the isolated md0 scheduling/timer/cross-IPI test on all eight CPUs. The two-core
+profile remains available with `--smp-cpus 2` (CPU0 and physical CPU6).
+For the separate bounded Apple userspace comparison, add these options to the
+kernel/DTB/Apple-ADT/memory arguments:
+
+```sh
+--smp-gui --smp-cpus 8 --shim-early-return --return-bootloader \
+--ufs-root --ufs-rw --display --splash --display-hz 60 \
+--touch-events --shutdown-seconds 180
+```
+
+GUI8 permits copy cadences of 10, 30 or 60 Hz. These are software limits,
+not measured panel refresh rates or guaranteed rendered FPS. The notification
+clock remains 60 Hz; the panel's 90 Hz mode and hardware vblank are unported.
+GUI8 requires the complete SMP proof and CPU publication before root/touch
+initialization. Hardware touch and watchdog work stay on CPU0; the BSD root
+thread restores its affinity before starting Apple userspace. The shim owns
+bootloader return (`redfinreturn=0`); USB/Wi-Fi/GPU remain off. The strict
+builder, loader and recovery-cycle contracts reject mixed diagnostic profiles.
+
 `--capture-screen` also requires `--display` and enables up to three 120×260 RGB
 thumbnails in the authenticated RAM log, only after a positive CPU copy. It
 does not write image files on the phone. Decode the captured log on the host:
@@ -148,8 +169,9 @@ python3 -m unittest discover -s ports/redfin -p 'test_*.py' -q
 Host tests cover malformed FDTs, memory reservations, ADB failures, ADT generation
 and payload relocation bounds. They cannot prove hardware execution. PID1 success
 is confirmed by console output, getpid=1 and repeated heartbeats. The collector
-recognizes banners split by syscall tracing. Full iOS launchd/SpringBoard have
-not been demonstrated on redfin.
+recognizes banners split by syscall tracing. Apple launchd, backboardd and
+SpringBoard run on redfin; authenticated captures and user touch feedback
+confirm the interface. Eight-core GUI validation is recorded in `NOTES.md`.
 
 ## UFS diagnostics
 

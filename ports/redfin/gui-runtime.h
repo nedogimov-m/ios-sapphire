@@ -37,6 +37,8 @@ static void rf_gui_wait(void)
 }
 void *redfin_gui_root_enter(void)
 {
+ /* Root matching can reach this before the asynchronous CPU nubs start. */
+ (void)redfin_smp_mode();
  if(!redfin_gui_selected()) return NULL;
  uint64_t deadline;
  nanoseconds_to_deadline(15*NSEC_PER_SEC,&deadline);

@@ -34,7 +34,6 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
   "wdt=-1",
   "redfinfb=1",
   "sweetfb_noconsole=1",
-  "sweetfb_hz=10",
   "redfinshutdown=180",
   "redfintouch=2",
   "redfinrail=1",
@@ -60,7 +59,7 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
  if(!length || length==bytes) return false;
  for(unsigned tail=length;tail<bytes;tail++) if(args[tail]) return false;
  uint64_t seen=0,nonce=0;
- bool nonce_seen=false,trace_seen=false;
+ bool nonce_seen=false,trace_seen=false,cadence_seen=false;
  for(unsigned pos=0;pos<length;) {
   if(args[pos]==' ') { pos++;continue; }
   unsigned start=pos;
@@ -75,6 +74,12 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
    seen|=1ULL<<i;known=true;break;
   }
   if(known) continue;
+  if(redfin_gui_token(args+start,n,"sweetfb_hz=10") ||
+     redfin_gui_token(args+start,n,"sweetfb_hz=30") ||
+     redfin_gui_token(args+start,n,"sweetfb_hz=60")) {
+   if(cadence_seen) return false;
+   cadence_seen=true;continue;
+  }
   if(redfin_gui_token(args+start,n,"-enable_kprintf_spam")) {
    if(trace_seen) return false;
    trace_seen=true;continue;
@@ -91,7 +96,7 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
   }
   return false;
  }
- if(seen!=((1ULL<<count)-1) || !nonce_seen) return false;
+ if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen) return false;
  if(boot_id) *boot_id=nonce;
  return true;
 }

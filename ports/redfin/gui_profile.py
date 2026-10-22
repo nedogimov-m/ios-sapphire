@@ -17,7 +17,16 @@ def validate(arguments):
     ids = [token for token in tokens if token.startswith('redfinbootid=')]
     match = re.fullmatch(r'redfinbootid=0x([0-9a-f]{16})', ids[0]) if len(ids) == 1 else None
     flags = [token for token in tokens if token not in ids and token != '-enable_kprintf_spam']
+    rates = [token for token in flags if token.startswith('sweetfb_hz=')]
+    if len(rates) != 1 or rates[0] not in ('sweetfb_hz=10', 'sweetfb_hz=30', 'sweetfb_hz=60'):
+        raise ValueError('GUI8 copy cadence must be exactly 10, 30 or 60 Hz')
+    flags = ['sweetfb_hz=10' if token == rates[0] else token for token in flags]
     if (arguments != ' '.join(tokens) or len(flags) != len(REQUIRED) or set(flags) != REQUIRED or
             tokens.count('-enable_kprintf_spam') > 1 or match is None or not int(match[1], 16)):
         raise ValueError('GUI8 requires its exact eight-core, touch, RW root and 180s return profile')
     return match[1]
+
+
+def cadence(arguments):
+    validate(arguments)
+    return next(int(token.split('=', 1)[1]) for token in arguments.split() if token.startswith('sweetfb_hz='))

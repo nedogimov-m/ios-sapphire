@@ -114,6 +114,15 @@ diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
  	struct redfin_events_state state = {0};
  	state.startup_reset = true;
  	redfin_events_delivery_failed = false;
+@@ -142,7 +148,7 @@
+ int
+ redfin_touch_events_start(void)
+ {
+-	uint32_t enabled = 0,seconds = 120;
++	uint32_t enabled = 0,seconds = redfin_gui_selected() ? 180 : 120;
+ 	(void)PE_parse_boot_argn("redfintouchevents",&enabled,sizeof(enabled));
+ 	(void)PE_parse_boot_argn("redfintouchsecs",&seconds,sizeof(seconds));
+ 	if (enabled != 1 || redfin_events_attempted ||
 diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
 --- a/bsd/dev/redfin_spmi.c
 +++ b/bsd/dev/redfin_spmi.c
@@ -327,16 +336,35 @@ diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
 diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
 --- a/iokit/Kernel/arm/SweetFramebuffer.cpp
 +++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
-@@ -37,6 +37,8 @@
+@@ -37,6 +37,9 @@
  #include "SweetSurface.h"
  
  extern "C" int sweet_console_muted;     /* osfmk/console/serial_console.c */
 +extern "C" int redfin_gui_selected(void);
 +extern "C" int redfin_smp_verified(void);
++extern "C" int redfin_smp_mode(void);
  extern "C" void sweet_console_retarget(vm_offset_t va);   /* osfmk/console/video_console.c */
  extern "C" void (*sweet_console_show_hook)(void);
  extern "C" void topaz_modem_init(void);
-@@ -684,6 +686,10 @@
+@@ -423,6 +426,8 @@
+ bool
+ AppleCLCD::startRedfinCopy(IOService *provider)
+ {
++	/* Matching order must not decide GUI's SMP barrier or copy cadence. */
++	(void)redfin_smp_mode();
+ 	uint32_t marker = 0, width = 0, height = 0, stride = 0, cw = 0, ch = 0;
+ 	uint64_t framebuffer[2] = {};
+ 	char format[5] = {};
+@@ -494,7 +499,7 @@
+ 	/* This is a software notification clock, not measured hardware vblank. */
+ 	uint32_t hz = 5;
+ 	(void)PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
+-	if (hz < 1 || hz > 10) hz = 5;
++	if (hz < 1 || (hz > 10 && !(redfin_gui_selected() && (hz == 30 || hz == 60)))) hz = 5;
+ 	fFlushTicks = 60 / hz;
+ 	/* Publish only after all resources exist, before timer or clients can run. */
+ 	if (fRedfinCaptures == 0) {
+@@ -684,6 +689,10 @@
  void
  AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
  {
@@ -351,7 +379,7 @@ diff --git a/osfmk/arm64/redfin_gui_profile.h b/osfmk/arm64/redfin_gui_profile.h
 new file mode 100644
 --- /dev/null
 +++ b/osfmk/arm64/redfin_gui_profile.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,103 @@
 +/* Exact bounded GUI8 profile shared by the relocatable shim and XNU.
 + * Display/touch geometry and the fenced HFS root are checked by their drivers.
 + * No allocation, libc, device access or absolute pointer tables here. */
@@ -388,7 +416,6 @@ new file mode 100644
 +  "wdt=-1",
 +  "redfinfb=1",
 +  "sweetfb_noconsole=1",
-+  "sweetfb_hz=10",
 +  "redfinshutdown=180",
 +  "redfintouch=2",
 +  "redfinrail=1",
@@ -414,7 +441,7 @@ new file mode 100644
 + if(!length || length==bytes) return false;
 + for(unsigned tail=length;tail<bytes;tail++) if(args[tail]) return false;
 + uint64_t seen=0,nonce=0;
-+ bool nonce_seen=false,trace_seen=false;
++ bool nonce_seen=false,trace_seen=false,cadence_seen=false;
 + for(unsigned pos=0;pos<length;) {
 +  if(args[pos]==' ') { pos++;continue; }
 +  unsigned start=pos;
@@ -429,6 +456,12 @@ new file mode 100644
 +   seen|=1ULL<<i;known=true;break;
 +  }
 +  if(known) continue;
++  if(redfin_gui_token(args+start,n,"sweetfb_hz=10") ||
++     redfin_gui_token(args+start,n,"sweetfb_hz=30") ||
++     redfin_gui_token(args+start,n,"sweetfb_hz=60")) {
++   if(cadence_seen) return false;
++   cadence_seen=true;continue;
++  }
 +  if(redfin_gui_token(args+start,n,"-enable_kprintf_spam")) {
 +   if(trace_seen) return false;
 +   trace_seen=true;continue;
@@ -445,7 +478,7 @@ new file mode 100644
 +  }
 +  return false;
 + }
-+ if(seen!=((1ULL<<count)-1) || !nonce_seen) return false;
++ if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen) return false;
 + if(boot_id) *boot_id=nonce;
 + return true;
 +}
@@ -454,7 +487,7 @@ diff --git a/osfmk/arm64/redfin_gui_runtime.h b/osfmk/arm64/redfin_gui_runtime.h
 new file mode 100644
 --- /dev/null
 +++ b/osfmk/arm64/redfin_gui_runtime.h
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,73 @@
 +/* GUI8 starts hardware work only after the complete SMP proof and publication.
 + * IRQ/HID callers use cached acquire loads, never the CPU0-only return verifier.
 + * Included by redfin_smp.c after its proof and frozen-argument primitives. */
@@ -494,6 +527,8 @@ new file mode 100644
 +}
 +void *redfin_gui_root_enter(void)
 +{
++ /* Root matching can reach this before the asynchronous CPU nubs start. */
++ (void)redfin_smp_mode();
 + if(!redfin_gui_selected()) return NULL;
 + uint64_t deadline;
 + nanoseconds_to_deadline(15*NSEC_PER_SEC,&deadline);

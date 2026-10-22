@@ -68,6 +68,13 @@ class GUIProfileTests(unittest.TestCase):
             args = ARGS + trace
             self.check(args, 1)
             self.assertEqual(gui_profile.validate(args), '0123456789abcdef')
+        for hz in (30, 60):
+            args = ARGS.replace('sweetfb_hz=10', f'sweetfb_hz={hz}')
+            self.check(args, 1)
+            self.assertEqual(gui_profile.cadence(args), hz)
+        for hz in ('0', '1', '20', '90', '060'):
+            self.check(ARGS.replace('sweetfb_hz=10', 'sweetfb_hz=' + hz), 0)
+        self.check(ARGS + ' sweetfb_hz=60', 0)
 
     def test_missing_duplicate_unknown_and_changed_required_arguments_fail(self):
         for token in ARGS.split():
@@ -115,6 +122,11 @@ class GUICycleTests(unittest.TestCase):
     def test_gui8_return_and_manifest_mutations(self):
         self.assertEqual(self.verify()['cpus'], 8)
         self.assertEqual(self.verify()['armed_by'], 'shim')
+        for hz in (30, 60):
+            self.manifest['boot_args'] = ARGS.replace('sweetfb_hz=10', f'sweetfb_hz={hz}')
+            self.manifest['display_hz'] = hz
+            self.assertEqual(self.verify()['cpus'], 8)
+        self.manifest.update(boot_args=ARGS, display_hz=10)
         for key, value in (('smp_gui', False), ('smp_probe', True), ('smp_cpus', 2),
                            ('root_writable', False), ('touch_events', False),
                            ('root_device', 'md0'), ('shutdown_seconds', 120),
@@ -245,6 +257,7 @@ static void clock_interval_to_deadline(unsigned n,uint64_t d,uint64_t *p){*p=mac
 static int assert_wait_deadline(event_t e,unsigned f,uint64_t t){(void)e;(void)f;(void)t;if(publish_at&&clock_ticks>=publish_at)rf_smp_published=1;return THREAD_WAITING;}
 int redfin_gui_publish_return(void){publish_calls++;return !return_error;}
 static int rf_smp_prove_all(void){return proof_error;}
+static int redfin_smp_mode(void){if(redfin_gui_profile(rf_smp_frozen,rf_smp_frozen_bytes,NULL)){rf_gui_selected=1;return 1;}return 0;}
 ''' + proof + '\n#include "gui-runtime.h"\n' + r'''
 int run(unsigned scenario,const char *args){
  rf_gui_selected=1;rf_smp_proved=rf_smp_published=rf_gui_ready=0;
@@ -264,6 +277,7 @@ int run(unsigned scenario,const char *args){
  if(scenario==4){cpu=0;if(redfin_smp_prove())return -1;redfin_smp_publish();cpu=6;}
  else if(scenario==5)publish_at=3;
  else if(scenario==6){rf_smp_published=1;bad_frozen=1;}
+ else if(scenario==7){rf_gui_selected=0;publish_at=3;}
  if(setjmp(failed))return scenario==6&&!rf_gui_ready&&!publish_calls?0:-9;
  void *old=redfin_gui_root_enter();
  if(!redfin_gui_cpu0()||cpu||publish_calls!=1||old!=NULL)return -4;
@@ -277,7 +291,7 @@ int run(unsigned scenario,const char *args){
         cls.lib.run.argtypes = [C.c_uint, C.c_char_p]
 
     def test_failed_proof_timeout_failed_return_wrong_cpu_and_binding_restore(self):
-        for scenario in range(7):
+        for scenario in range(8):
             self.assertEqual(self.lib.run(scenario, ARGS.encode()), 0, scenario)
 
 

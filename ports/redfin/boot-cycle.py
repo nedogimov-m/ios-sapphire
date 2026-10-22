@@ -77,7 +77,7 @@ def smp_gui_return_profile(image, manifest, arguments, checksum):
             type(manifest.get('smp_cpus')) is not int or manifest['smp_cpus'] != 8 or
             manifest.get('root_device') != 'ufsroot0' or
             type(manifest.get('shutdown_seconds')) is not int or manifest['shutdown_seconds'] != 180 or
-            type(manifest.get('display_hz')) is not int or manifest['display_hz'] != 10):
+            type(manifest.get('display_hz')) is not int or manifest['display_hz'] != gui_profile.cadence(arguments)):
         raise ValueError('GUI8 manifest does not match its bounded root/touch/display profile')
     config = image.with_name('config.h').read_bytes()
     if (len(config) > 4096 or b'\0' in config or

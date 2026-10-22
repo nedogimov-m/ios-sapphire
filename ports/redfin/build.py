@@ -66,7 +66,7 @@ def main():
     p.add_argument('--smp-gui', action='store_true', help='bounded eight-core iOS, touch and RW-root profile; compiled shim owns return')
     p.add_argument('--smp-cpus', type=int, choices=(2, 8), help='CPU count for the isolated --smp-probe; default 2')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
-    p.add_argument('--display-hz', type=int, help='software display copy cadence, 1..10 Hz; requires --display; omitted keeps kernel default')
+    p.add_argument('--display-hz', type=int, help='software copy cadence: 1..10 Hz, or 30/60 with --smp-gui; requires --display')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
     p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
@@ -110,8 +110,8 @@ def main():
                     'ufs_root', 'ufs_rw', 'return_bootloader', 'shim_early_return')
         if not all(getattr(a, name) for name in required):
             p.error('--smp-gui requires kernel/DTB/Apple ADT, display/splash/touch, RW UFS root and compiled shim return')
-        if a.boot_mpidr or a.display_hz != 10 or a.shutdown_seconds != 180:
-            p.error('--smp-gui requires CPU0, --display-hz 10 and --shutdown-seconds 180')
+        if a.boot_mpidr or a.display_hz not in (10, 30, 60) or a.shutdown_seconds != 180:
+            p.error('--smp-gui requires CPU0, --display-hz 10/30/60 and --shutdown-seconds 180')
         if (any(value for name, value in vars(a).items() if name.endswith('_probe')) or
                 a.usb_aarch64_context or a.usb_live_log or a.userspace_stacks or
                 a.capture_screen or a.trace_syscalls):
@@ -162,8 +162,8 @@ def main():
                     ('cpu_capability_probe', 'spmi_probe'))):
             p.error('--cpu-capability-probe requires a separate RAM-only profile')
     if a.display_hz is not None:
-        if not 1 <= a.display_hz <= 10:
-            p.error('--display-hz must be in [1, 10]')
+        if not (1 <= a.display_hz <= 10 or (a.smp_gui and a.display_hz in (30, 60))):
+            p.error('--display-hz must be in [1, 10], or 30/60 for --smp-gui')
         if not a.display:
             p.error('--display-hz requires --display')
     if a.usb_live_log and not a.usb_network_probe:

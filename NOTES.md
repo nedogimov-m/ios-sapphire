@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GUI8 60Hz comparison prepared — 2026-10-23
+
+Preserves proven GUI8 10Hz and admits only10/30/60Hz copy profiles; duplicate,
+unknown and mismatched manifest cadences fail. The Redfin driver allows30/60
+only in strict GUI8, retaining the unchanged60Hz software notification clock.
+This does not program the panel's90Hz mode or claim measured60FPS.
+Root and framebuffer now parse the strict mode before using their cached
+latches, removing dependence on CPU-nub matching order. Touch default is180s
+in GUI8 and remains120s in UP. Full810 host tests PASS
+(`peripherals-host-tests-v36.txt`), including final real loader/ADT/liveFDT,
+shared-header equality, late selection/binding/return negatives, cadence and
+old2/8-core profile regressions. Local ARM64 build `build-20261023-023513.log`,
+kernel SHA256 `751fa8c92727db9e143162e2b64a9af1ec43bf252aafe553049feb14dd485afa`.
+Image `gui8-60hz-v1` SHA256 `3faa038180a81e9212354c428cb6716744348f1eb3ca8da942b0a36aec718b7c`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x6ff7bad8f1b964be redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Hardware60Hz comparison pending; previous10Hz GUI8 capture is clean and phone
+is in verified fastboot. Next: temporary60Hz boot and authenticated capture.
+
 ## REDFIN iOS GUI and SEC touch work on all8 CPUs — 2026-10-23
 
 Source `dc036d4`; local full ARM64 kernel build022643/SHA256
