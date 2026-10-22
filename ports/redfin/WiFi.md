@@ -213,3 +213,20 @@ assets can be inventoried later from a separate read-only stock vendor source;
 booting Android on the replaced userdata is not part of extraction. Any future
 UFS firmware reader must authorize only the verified modem partition/ranges
 and retain the existing userdata/write fences.
+
+### Bounded base vendor inventory
+
+`super_inventory.py` consumes at most4MiB of a regular host super prefix
+and an externally captured current-slot:b witness. It checks both geometry
+copies, both selected-slot header/table hashes and complete-slot equality,
+table references and source bounds before emitting vendor_b extents. Eleven
+synthetic tests cover corrupt/truncated metadata, ambiguous slot evidence,
+overlaps, oversized images and unsupported targets. It issues no device I/O;
+the caller must separately verify GPT, by-name, partition length and freshness.
+
+The observed metadata contains Virtual A/B COW entries. Raw vendor_b therefore
+means the base filesystem, not a proved current snapshot. Firmware inventory
+must preserve that distinction; reconcile base version, COW state and modem
+compatibility before loading any extracted assets. The firmware and per-device
+plans stay private. Targeted read-only filesystem requests can use the verified
+extent map without dumping the whole9.7GiB super partition.

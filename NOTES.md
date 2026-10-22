@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V5 clocks/pads stable; USB context read-only inventory — 2026-10-22
+
+Commit1da638d records USB V2 BYPASS-to-FAULT evidence and cached diagnostics.
+New platform SPI overlay adds at most54 RO reads/10 lines, with publication
+after complete capture; no new hardware writes/delays, and no new mappings.
+Six actual-C tests and peer review PASS,45 combined touch tests PASS.
+V5 local ARM64 build research/redfin-build/build-20261022-184139.log passed;
+kernel acdc2f12b4313c3fde059e17cc2842406b47334e98bfd9bbb2b080b62732203c.
+Image ports/redfin/out/touch-id-v5/redfin-xnu.img SHA256
+af99379f2737d2dd63525e6202f34f1c9971d009b147cc5b65bbc6732de60d33.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xa6a012aa288e8a0f`.
+Authenticated/image-matched logs/redfin/touch-id-v5/ reached PID1, no panic,
+metadata primed and verified fastboot return. SE0/core/core2x4220, vote fc17c0,
+RCG_CMD0/CFG1/M0/N0/D0/DFS20 and GPIO reset/AP/SPI remained unchanged across
+TX hang. AHBs changed2 to80000002 with HWCG enabled; source permits this
+idle gating. SEQ_START remained0. First TX/cancel/abort still timed out.
+Next hypothesis, not a fix: GCC DFS was disabled, but SE DFS_IF_CFG80 was
+not sampled; check for an interface mismatch plus wrapper initialization.
+
+USB context overlay is explicit one-shot RO registration/observation, never
+claim: two stable full81 stream/62 bank snapshots, DT-derived bounded maps,
+active+latent references, ownership0 in every result. Ten actual-C tests and
+independent review PASS;20 context/builder tests PASS. Both builders include
+it and --usb-context-probe rejects touch/claim/UFS/missing return combinations.
+Local ARM64 build research/redfin-build/build-20261022-184757.log passed;
+kernel e57be69e129d90efa958da215e67a3fc05dabec8caea44c93b24fafff2dec058.
+Image ports/redfin/out/usb-context-v1/redfin-xnu.img SHA256
+ee63a43e3e0cbdd8317097302078afd1b783656b36f1be7aa036cb7ca93de7c0.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbcontexts=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x95cc7885473c0267`.
+Authenticated/image-matched logs/redfin/usb-context-v1/ reached PID1, no panic,
+metadata primed and verified fastboot. CR0280406/layout4K/62CB/offset80000
+stable; unknown refs0. Banks0/1/2 have total TRANS refs3/1/1 (active2/1/1).
+Bank3 unreferenced but configured;4..61 unreferenced with CBAR/CBA2R/FSR0
+and stable nonzero SCTLR values, all M0. No fully zero unreferenced bank.
+These observations do not establish allocation or ownership. No SMMU stores,
+fault clear, route/DMA or gadget. Next: source interpretation/NS allocator
+proof before any bypass-CB initialization, preserving all inherited banks.
+
+The bounded host liblp parser and11 synthetic tests are now tracked under
+ports/redfin/super_inventory.py; no dumps/firmware moved into git. Full suite
+445 PASS (logs/redfin/peripherals-host-tests-v13.txt). Private covered ext4
+reader has10 real-libext2fs synthetic tests PASS; provider review pending
+before targeted read-only vendor-base asset extraction. Full super/vendor
+dump, COW merge, mounts and firmware loading remain unnecessary/uninvoked.
+
 ## REDFIN USB V2: hardware coerces BYPASS to FAULT — 2026-10-22
 
 Commit640ef10 records SPI V4 and its bounded GENI diagnostic overlay.

@@ -36,3 +36,9 @@ signed firmware loading, a bounded SMMU/DMA allocation and a completed GPU
 command with verified RAM output. Rendering then requires command/shader
 support and an iOS graphics interface. Existing CPU framebuffer capture
 proves lock-screen rendering only; it does not prove any GPU command.
+
+The bounded host `super_inventory.py` can identify base vendor_b extents from
+checksummed liblp metadata; see [vendor inventory](WiFi.md#bounded-base-vendor-inventory).
+The observed Virtual A/B COW entries leave the effective snapshot unproved.
+Inventory of a650 SQE/GMU and signed a620 zap assets is separate from GPU
+power-up or firmware loading, and all captured bytes remain private.

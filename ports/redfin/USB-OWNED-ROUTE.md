@@ -153,5 +153,45 @@ passed. Slot4 initially had SMR0/S2CR0; the only store requested S2CR10300
 (TYPE BYPASS1) at offsetc10, but readback was20300 (TYPE FAULT2) after1000
 polls. The guard quarantined before any SMR publication. This is evidence of
 hardware/firmware bypass coercion; it is not a working route. Do not relax
-readback acceptance or retry it. Next is a source-backed Qualcomm bypass
-quirk and context-bank ownership audit. Gadget and DMA remain uninvoked.
+readback acceptance or retry it. Gadget and DMA remain uninvoked.
+
+## Qualcomm bypass quirk and read-only context probe — 2026-10-22
+
+Linux v6.12's
+[Qualcomm SMMU driver](https://github.com/torvalds/linux/blob/v6.12/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c#L313)
+describes this exact firmware behavior: FAULT writes may be ignored, while
+BYPASS writes become FAULT. Its workaround reserves a context bank, writes
+SCTLR=0 and CBAR type S1_TRANS_S2_BYPASS, then substitutes TRANS to that bank
+for a BYPASS stream. Pinned Lito `arm-smmu.c:2363` likewise implements
+`DOMAIN_ATTR_S1_BYPASS` with SCTLR.M clear; its context allocator preserves
+bootloader handoff banks. The upstream last-bank reservation is not permission
+to seize an inherited Redfin bank.
+
+`usb-context-probe.patch` adds only observation. With explicit
+`redfinusb=3 redfinusbowned=1 redfinusbcontexts=1`, the trusted initial caller
+registers its owner, observes contexts and returns before claim. Observation
+consumes the owner once; subsequent claim/revalidation cannot activate a route.
+No route/CB stores, fault clears, TLB/ATS/RESUME operations, IRQ enables or DMA
+occur. Normal absent/zero selector behavior is unchanged.
+
+Exact DT primary-reg and full-range RAM exclusion checks precede mapping.
+Observed ID1 `0x6000003e` gives 4 KiB SMMU register pages, 62 banks and zero
+stage-2-only banks. GR1 is `base+0x1000`; CBAR/CBA2R are `GR1+4*n` and
+`GR1+0x800+4*n`. Context banks start at `base+0x80000`, with 4 KiB stride;
+bank 61 is `0x150bd000`. SCTLR/FSR offsets are `0/0x58`. Only the existing
+`0x4000` global span and derived `0x15080000+0x3e000` bank span are mapped,
+inside the verified `0x15000000+0x100000` primary range.
+
+Two complete, identity-bracketed snapshots must agree on all 81 SMR/S2CR pairs
+and all four fields of every bank; all-ones, layout, policy and stability
+failures stop the probe. S2CR type uses bits 17:16, bank index bits 7:0, and
+SMR validity bit 31. Logs distinguish active TRANS references from all TRANS
+references, including invalid-SMR entries. Unknown type/index blocks blank
+classification. A bank is labelled `blank-unreferenced` only with no references
+and all four raw fields zero; every line explicitly reports `ownership=0`.
+This is evidence for a future allocator audit, not a CB lease or DMA authority.
+
+Ten actual-C probe tests cover these guards, derived bounds, reference counts,
+one-shot behavior, zero writes/delays and unchanged legacy behavior. All 52
+focused context/owner/caller/diagnostic tests pass. Hardware context evidence
+and ownership remain to be established before any bypass-bank implementation.

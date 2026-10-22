@@ -40,7 +40,7 @@ class BuildFlagTests(unittest.TestCase):
 
     def test_peripheral_observers_require_kernel(self):
         for option in ('--touch-probe', '--touch-rail-probe', '--touch-id-probe', '--usb-probe', '--usb-route-probe', '--usb-owned-probe',
-                       '--rpmh-probe', '--gpu-probe', '--wifi-probe'):
+                       '--usb-context-probe', '--rpmh-probe', '--gpu-probe', '--wifi-probe'):
             self.refused([option], 'peripheral observers require --kernel')
 
     def test_initial_touch_id_is_ram_only_with_verified_return(self):
@@ -59,6 +59,20 @@ class BuildFlagTests(unittest.TestCase):
         self.refused(['--kernel', '/missing-kernel', '--usb-owned-probe',
                       '--return-bootloader', '--touch-id-probe'],
                      'initial touch ID and owned USB experiments must run separately')
+
+    def test_usb_context_observation_is_separate_ram_only_with_return(self):
+        self.refused(['--kernel', '/missing-kernel', '--usb-context-probe'],
+                     '--usb-context-probe requires --return-bootloader')
+        for option in ('--ufs-probe', '--ufs-read-probe', '--ufs-wake-probe', '--ufs-root-probe', '--ufs-root'):
+            with self.subTest(option=option):
+                self.refused(['--kernel', '/missing-kernel', '--usb-context-probe',
+                              '--return-bootloader', option],
+                             '--usb-context-probe requires the initial RAM root without UFS')
+        for option in ('--touch-id-probe', '--usb-owned-probe'):
+            with self.subTest(option=option):
+                self.refused(['--kernel', '/missing-kernel', '--usb-context-probe',
+                              '--return-bootloader', option],
+                             'USB context observation must run separately from touch ID and owned USB experiments')
 
 
 if __name__ == '__main__':

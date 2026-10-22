@@ -1,0 +1,128 @@
+diff --git a/bsd/dev/redfin_touch_setup.c b/bsd/dev/redfin_touch_setup.c
+--- a/bsd/dev/redfin_touch_setup.c
++++ b/bsd/dev/redfin_touch_setup.c
+@@ -153,6 +153,72 @@
+ 	}
+ 	return ETIMEDOUT;
+ }
++/* Read-only physical-clock/pad evidence, reusing this setup's exact maps.
++ * The two captures occur only after the original final GIC/idle checks.
++ * No new mapping, hardware write, delay, polling, retry or policy decision.
++ * CFG_SEQ_START84 is read by pinned spi-geni-qcom.c:900; sample it only
++ * when these fresh branch/root/vote readbacks still permit SE access.
++ */
++#define RF_TOUCH_PLATFORM_DIAG 1
++static struct redfin_setup redfin_platform_diag_maps;
++static bool redfin_platform_diag_published;
++struct redfin_platform_snapshot {
++ uint32_t gcc[12],pins[7][2],seq_start;
++ bool seq_read;
++};
++static struct redfin_platform_snapshot redfin_platform_snapshots[2];
++static bool redfin_platform_claimed[2],redfin_platform_ready[2],redfin_platform_reported[2];
++void redfin_touch_platform_diag_capture(unsigned phase);
++void redfin_touch_platform_diag_report(unsigned phase);
++static const unsigned redfin_platform_gcc_offsets[]={
++ 0x52008,0x17004,0x17008,0x1700c,0x23000,0x23008,
++ 0x17010,0x17014,0x17018,0x1701c,0x17020,0x17024
++};
++static uint32_t
++redfin_platform_diag_rd(vm_offset_t base,unsigned offset)
++{
++ return redfin_setup_rd(base,offset);
++}
++void
++redfin_touch_platform_diag_capture(unsigned phase)
++{
++ if (phase>1 || !__atomic_load_n(&redfin_platform_diag_published,__ATOMIC_ACQUIRE) ||
++     __atomic_exchange_n(&redfin_platform_claimed[phase],true,__ATOMIC_ACQ_REL)) return;
++ const struct redfin_setup *s=&redfin_platform_diag_maps;
++ struct redfin_platform_snapshot *d=&redfin_platform_snapshots[phase];
++ for (unsigned i=0;i<12;i++) d->gcc[i]=redfin_platform_diag_rd(s->gcc,redfin_platform_gcc_offsets[i]);
++ for (unsigned i=0;i<7;i++) {
++  d->pins[i][0]=redfin_platform_diag_rd(s->pins[i].page,s->pins[i].offset);
++  d->pins[i][1]=redfin_platform_diag_rd(s->pins[i].page,s->pins[i].offset+4);
++ }
++ const uint32_t *g=d->gcc;
++ bool clocks=(g[0]&0x7c0u)==0x7c0u && !(g[1]&0x80000000u) &&
++     ((g[2]&2u) || !(g[2]&0x80000000u)) && !(g[3]&0x80000000u) &&
++     !(g[4]&0x80000000u) && !(g[5]&0x80000000u) && !(g[6]&0x80000000u);
++ if (clocks) { d->seq_start=redfin_platform_diag_rd(s->se,0x84);d->seq_read=true; }
++ __atomic_store_n(&redfin_platform_ready[phase],true,__ATOMIC_RELEASE);
++}
++void
++redfin_touch_platform_diag_report(unsigned phase)
++{
++ if (phase>1 || !__atomic_load_n(&redfin_platform_diag_published,__ATOMIC_ACQUIRE) ||
++     !__atomic_load_n(&redfin_platform_ready[phase],__ATOMIC_ACQUIRE) ||
++     __atomic_exchange_n(&redfin_platform_reported[phase],true,__ATOMIC_ACQ_REL)) return;
++ const struct redfin_platform_snapshot *d=&redfin_platform_snapshots[phase];
++ const uint32_t *g=d->gcc;
++ const char *name=phase==0?"before-first-tx":"failure-before-recovery";
++ printf("REDFIN TOUCH PLATFORM: phase=%s VOTE=%#x AHBm=%#x AHBs=%#x SE0=%#x CORE=%#x CORE2X=%#x\n",
++     name,g[0],g[1],g[2],g[3],g[4],g[5]);
++ printf("REDFIN TOUCH PLATFORM: phase=%s RCG_CMD=%#x CFG=%#x M=%#x N=%#x D=%#x DFS=%#x\n",
++     name,g[6],g[7],g[8],g[9],g[10],g[11]);
++ printf("REDFIN TOUCH PLATFORM: phase=%s GPIO8=%#x/%#x GPIO9=%#x/%#x GPIO35=%#x/%#x (cfg/io)\n",
++     name,d->pins[0][0],d->pins[0][1],d->pins[1][0],d->pins[1][1],d->pins[2][0],d->pins[2][1]);
++ printf("REDFIN TOUCH PLATFORM: phase=%s GPIO42=%#x/%#x GPIO43=%#x/%#x GPIO44=%#x/%#x GPIO45=%#x/%#x (cfg/io)\n",
++     name,d->pins[3][0],d->pins[3][1],d->pins[4][0],d->pins[4][1],d->pins[5][0],d->pins[5][1],d->pins[6][0],d->pins[6][1]);
++ printf("REDFIN TOUCH PLATFORM: phase=%s SEQ_START-read=%u raw=%#x (read-only; skipped if clocks unavailable)\n",
++     name,d->seq_read,d->seq_start);
++}
++
+ int
+ redfin_touch_setup(bool rail_ready, bool host_exclusive)
+ {
+@@ -236,6 +302,9 @@
+ 	error = redfin_setup_idle(&s);
+ 	if (error) return error;
+ 	printf("REDFIN TOUCH SETUP: XO19.2MHz/div20, mode3, AP bus, reset released; ID only\n");
++ /* Copy mappings, never retain the stack context. They remain mapped for boot. */
++ redfin_platform_diag_maps=s;
++ __atomic_store_n(&redfin_platform_diag_published,true,__ATOMIC_RELEASE);
+ 	return redfin_touch_spi_probe(s.se,960000,true);
+ }
+ #endif
+diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
+--- a/bsd/dev/redfin_touch_spi.c
++++ b/bsd/dev/redfin_touch_spi.c
+@@ -54,6 +54,8 @@
+  */
+ #define RF_SPI_DIAG_MAX_FAILURES 4u
+ #define RF_SPI_DIAG_REGISTERS 41u
++extern void redfin_touch_platform_diag_capture(unsigned phase);
++extern void redfin_touch_platform_diag_report(unsigned phase);
+ static bool redfin_spi_diag_command_logged;
+ static unsigned redfin_spi_diag_failures;
+ struct redfin_spi_diag {
+@@ -100,7 +102,9 @@
+ {
+  if (__atomic_exchange_n(&redfin_spi_diag_command_logged,true,__ATOMIC_RELAXED)) return;
+  struct redfin_spi_diag snapshot;
++ if (transmit) redfin_touch_platform_diag_capture(0);
+  redfin_spi_diag_capture(s,&snapshot);
++ if (transmit) redfin_touch_platform_diag_report(0);
+  redfin_spi_diag_print(transmit?"before-first-tx":"before-first-rx",0,&snapshot);
+ }
+ static void
+@@ -117,7 +121,10 @@
+ {
+  bool diagnostic=redfin_spi_diag_failure_slot();
+  struct redfin_spi_diag before,after;
+- if (diagnostic) redfin_spi_diag_capture(s,&before);
++ if (diagnostic) {
++  redfin_touch_platform_diag_capture(1);
++  redfin_spi_diag_capture(s,&before);
++ }
+ 	s->dead = true;
+ 	/* Bound CS recovery. Never retry this SEC request after an error. */
+ 	if (s->command_owned && (redfin_spi_rd(s, 0x40) & 1)) {
+@@ -139,6 +146,7 @@
+ 	redfin_spi_wr(s, 0x614, 0);
+  if (diagnostic) {
+   redfin_spi_diag_capture(s,&after);
++  redfin_touch_platform_diag_report(1);
+   redfin_spi_diag_print("failure-before-recovery",error,&before);
+   redfin_spi_diag_print("failure-after-recovery",error,&after);
+  }
