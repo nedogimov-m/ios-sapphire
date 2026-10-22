@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN USB V5: host enumeration and EP0 DMA validated — 2026-10-22
+
+Commit `d14e784` records the five-store native-format experiment. The new
+format-status overlay changes only the expected owned-bank FSR FORMAT after
+accepted CBA2R1: `(old & ~0x600) | 0x400`. All non-FORMAT bits, other banks,
+fault checks and MMIO remain exact. Eight actual-C tests reproduce V4 and
+validate this transition/fault refusal; independent source review passes.
+Full host suite 554 PASS (`peripherals-host-tests-v22.txt`). Overlay SHA256
+`8abf48445d8d75bfef7c38283e4c662b0a11a9b28112a007b75084308e42434c`.
+ARM64 build `research/redfin-build/build-20261022-204018.log` succeeds;
+kernel SHA256 `a6f1046bb15ff1e9eac987817fc82e8893cf6ee3cb3baddaf7dafcd0334d75a4`.
+Image `ports/redfin/out/usb-enum-v5/redfin-xnu.img` SHA256
+`9e8fb370500f4ced299693658aa5d2c80390a432bf3cc143187d96dfaef25c2a`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinspmi=1 redfinreturn=1 redfinbootid=0x0f7677ee4513cb0b`.
+Authenticated, image-matched `logs/redfin/usb-enum-v5/` reaches PID1 without
+panic, primes metadata and verifies return to fastboot. CB4/slot4 claim and
+strict revalidation return zero; all five stores accepted. Slab PA182e50000,
+EP0 TRB182e51000. DWC3 runs DSTS00820001 and gadget start returns0. Real host
+SET_ADDRESS and device/string/configuration GET_DESCRIPTOR requests complete.
+Host-only no-serial capture `usb-enum-v5-host.json` sees 1209:0001 on the
+original Pixel port from45.342 to74.628 seconds. The worker's finite30s
+deadline reports ETIMEDOUT60 and halted1, slab retained. No SMMU quarantine
+or panic appears. This validates USB high-speed enumeration/control DMA,
+not networking or USB with UFS/GUI.
+Next network/log stage needs a typed md0 mode plus meaningful real-worker
+tests: inherited log sock_send is blocking and interface lock allocation is
+checked only after publication. Fix those before enabling ECM/live logs.
+Physical touch contacts, panel scanout, Wi-Fi and GPU remain unverified.
+
 ## REDFIN USB V4: owned CBA2R format write accepted — 2026-10-22
 
 Commit `afe1fce` records exact EP0 TRB/SID evidence. New opt-in

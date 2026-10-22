@@ -1,0 +1,20 @@
+diff --git a/bsd/dev/redfin_usb_owned.c b/bsd/dev/redfin_usb_owned.c
+--- a/bsd/dev/redfin_usb_owned.c
++++ b/bsd/dev/redfin_usb_owned.c
+@@ -612,8 +612,15 @@
+  case 0:rf_usb_bypass.expected.bank[bank].sctlr=value;break;
+  case 1:rf_usb_bypass.expected.bank[bank].cbar=value;break;
+  case 2:rf_usb_bypass.expected.streams.s2cr[slot]=value;break;
+  case 3:rf_usb_bypass.expected.streams.smr[slot]=value;break;
+- case 4:rf_usb_bypass.expected.bank[bank].cba2r=value;break;
++ case 4:
++  rf_usb_bypass.expected.bank[bank].cba2r=value;
++  /* Read-only FSR.FORMAT[10:9] is separate from the native fault bits.
++   * Redfin reports AArch64 (2) immediately after accepted CBA2R.RW64=1.
++   * Predict only this owned field; the next full import stays exact. */
++  rf_usb_bypass.expected.bank[bank].fsr=
++      (rf_usb_bypass.expected.bank[bank].fsr&~0x600u)|0x400u;
++  break;
+  }
+  return 0;
+ }

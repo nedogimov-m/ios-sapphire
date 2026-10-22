@@ -5,8 +5,9 @@ core and adds Redfin guards. `usb-enumeration-start.patch` connects it to the
 permanent md0 owner after a dedicated bypass-context claim and strict warm
 revalidation. The explicit `--usb-enumeration-probe` builder option selects
 this 30-second, enumeration-only experiment; UFS and competing peripheral
-writers remain disabled. The first hardware attempt passed warm route proof
-but failed ACTIVE authorization. Enumeration remains unproved.
+writers remain disabled. V5 with `--usb-aarch64-context` passes route/DMA
+startup and high-speed EP0 enumeration; the host observes `1209:0001` at
+the original Pixel USB location. Networking remains unproved.
 
 The exported API is:
 
@@ -133,6 +134,23 @@ accepts only exact textual `0`/`1` with a numeric cross-check, avoiding XNU's
 32-bit numeric truncation and bare-flag interpretation. No TLB or other-bank
 state is changed. This experiment tests the high-address/format hypothesis;
 it does not establish its cause or successful enumeration before a new capture.
+
+V4 accepted SCTLR0 and CBA2R1, then stopped before CBAR or DMA: only own-bank
+FSR changed from zero to `0x400`. Upstream defines FORMAT as bits 10:9,
+separately from `FSR_FAULT`. The format-status overlay therefore anticipates
+only this observed metadata transition after an accepted owned CBA2R1 write:
+expected FSR becomes `(old & ~0x600) | 0x400`. All other bits remain exact;
+the next complete snapshot must still match, so `0x402`, other status drift
+and any foreign-bank change quarantine. No FSR register is written and no
+read, retry or permission change is added.
+
+V5 completes all five stores and strict warm revalidation. DWC3 starts with
+DSTS `0x00820001` and a permanent DMA slab at `0x182e50000`. The host requests
+device, string and configuration descriptors; macOS reports `1209:0001`
+at the same USB port for the bounded run. The worker stops with `ETIMEDOUT`
+at its 30-second lease and reports `halted=1`; authenticated, image-matched
+logs reach PID1 without panic and the collector verifies return to fastboot.
+No USB network interface or live log transport was enabled by this test.
 
 Host validation:
 

@@ -223,6 +223,7 @@ def main(argv=None):
                                          'usb-enumeration-start.patch', 'usb-bypass-diagnostic.patch',
                                          'usb-fault-diagnostic.patch',
                                          'usb-aarch64-context.patch',
+                                         'usb-context-format-status.patch',
                                          'peripheral-start.patch', 'touch-event-start.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
