@@ -55,6 +55,11 @@ secondary CPU. A successful protected rehearsal must precede using the
 same helper in the shim before kernel or topology validation.
 `--shim-early-return` opts into that second rehearsal and currently requires
 `--early-return-probe`; it keeps all UP, md0 and peripheral exclusions.
+V2 on 2026-10-23 succeeds with the same kernel9a2d87a5: initial kernel
+observer already reads PON4 before the existing arm, fresh authenticated
+logs match boot-ID `de5ac7f14c6e3052`, PID1 heartbeats and fastboot return
+complete. The shim uses the shared leaf before payload validation; watchdog
+programming stays in the existing loader immediately before kernel entry.
 
 The current ADT, loader and SweetCPU restrict the profile to one CPU.
 PMIC return currently arms after CPU initialization, and RAM logging masks

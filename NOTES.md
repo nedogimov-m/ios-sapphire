@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN shim return V2: early PON reason and UP boot verified — 2026-10-23
+
+Commit `21c435e`; same kernel9a2d87a5/local ARM64 build004936 as V1 and
+protected leaf test. V2 removes redundant pre-relocation watchdog arm;
+the existing loader still arms the watchdog immediately before XNU.
+Image `ports/redfin/out/shim-return-v2/redfin-xnu.img` SHA256
+`84dc2b94273a2cdd76456a6ab6d4f59e716c0ffed2919bdb8fd52c59127283e9`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinearlyreturn=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xde5ac7f14c6e3052`.
+Authenticated/image-matched `logs/redfin/shim-return-v2/`: initial PON read
+already4/restart reason2 BEFORE existing kernel arm (protected-only V1
+initially read0x10). This establishes shim prearm before XNU entry. Existing
+arm and shared leaf repeat4->4 with IMEM0x77665500/result0; PID1 alive,
+11 heartbeats, no panic, metadata primed, fastboot return verified.
+V1's premature ending remains unexplained; removing the early watchdog
+correlates with success but does not prove causation. Next: isolated md0
+SMP2 startup after synchronized logger/strict topology/RO return proof and
+host checks. GUI/UFS SMP, GPU and About wait chain remain unverified.
+
 ## REDFIN shim return V1 inconclusive; V2 comparison started — 2026-10-23
 
 Same kernel9a2d87a5/build004936 as the successful protected leaf test.
