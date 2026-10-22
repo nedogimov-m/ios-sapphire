@@ -1,0 +1,58 @@
+diff --git a/bsd/dev/redfin_usb_owned.c b/bsd/dev/redfin_usb_owned.c
+--- a/bsd/dev/redfin_usb_owned.c
++++ b/bsd/dev/redfin_usb_owned.c
+@@ -465,6 +465,33 @@
+  memcpy(&marker,raw,sizeof(marker));
+  return marker==1;
+ }
++/* Pinned native fault handler: CB FSR/FAR/FSYNR0/1 and GR1 CBFRSYNRA.
++ * Read only the permanently owned bank after a complete snapshot proves a
++ * real fault. No clear, resume, TLBI, retry, mappings or authorization changes.
++ * FAR is sampled as two 32-bit words; FSR brackets the bounded seven reads. */
++static void
++rf_usb_bypass_report_fault(const struct rf_usb_context_image *current)
++{
++ unsigned bank=rf_usb_bypass.bank;
++ if (!rf_usb_bypass.lease || rf_usb_bypass.stores!=4 || bank>=rf_usb_bypass.banks ||
++     bank>=RF_USB_CONTEXTS || current->bank[bank].fsr==0xffffffffu || !(current->bank[bank].fsr&RF_USB_CONTEXT_FAULT)) return;
++ unsigned offset=bank<<rf_usb_bypass.shift;
++ uint32_t fsr=rf_usb_rd(rf_usb_bypass.cb,offset+0x58);
++ uint32_t lo=rf_usb_rd(rf_usb_bypass.cb,offset+0x60);
++ uint32_t hi=rf_usb_rd(rf_usb_bypass.cb,offset+0x64);
++ uint32_t syn0=rf_usb_rd(rf_usb_bypass.cb,offset+0x68);
++ uint32_t syn1=rf_usb_rd(rf_usb_bypass.cb,offset+0x6c);
++ uint32_t stream=rf_usb_rd(rf_usb_owner.smmu,0x1400+4*bank);
++ uint32_t end=rf_usb_rd(rf_usb_bypass.cb,offset+0x58);
++ if (fsr==0xffffffffu || lo==0xffffffffu || hi==0xffffffffu ||
++     syn0==0xffffffffu || syn1==0xffffffffu || stream==0xffffffffu ||
++     fsr!=current->bank[bank].fsr || end!=fsr) {
++  printf("REDFIN USB BYPASS: fault-snapshot bank=%u unavailable or changed; interpretation skipped\n",bank);
++  return;
++ }
++ printf("REDFIN USB BYPASS: fault-snapshot bank=%u FSR=%#x FAR-words=%#x:%08x FSYNR0=%#x FSYNR1=%#x CBFRSYNRA=%#x; diagnostic only\n",
++     bank,fsr,hi,lo,syn0,syn1,stream);
++}
+-/* Only completed cached snapshots: no MMIO, stores, delays or proof changes. */
++/* Completed cached tuples, plus bounded fault-only syndrome reads below. */
+ static void
+ rf_usb_bypass_report_difference(bool warm,const struct rf_usb_context_image *current)
+@@ -486,6 +513,7 @@
+   printf("REDFIN USB BYPASS: cached-bank=%u expected-SCTLR=%#x CBAR=%#x CBA2R=%#x FSR=%#x current-SCTLR=%#x CBAR=%#x CBA2R=%#x FSR=%#x\n",
+       bank,x->sctlr,x->cbar,x->cba2r,x->fsr,y->sctlr,y->cbar,y->cba2r,y->fsr);
+  }
++ rf_usb_bypass_report_fault(current);
+ }
+ static int
+ rf_usb_bypass_verify(bool warm)
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -901,6 +901,8 @@
+             rf_usb_gadget_fail(&ud.guard,EFAULT);return;
+         }
+         ud_sync(0,UD_SIZE); /* Clean zeroed event/TRB/data slab before publishing DMA addresses. */
++        printf("REDFIN USB GADGET: permanent DMA PA=%#llx bytes=%u event=%#llx ep0-TRB=%#llx setup=%#llx\n",
++            ud.dma_pa,UD_SIZE,ud.dma_pa+UD_EVT,ud.dma_pa+UD_TRB_OUT,ud.dma_pa+UD_SETUP);
+         if (!ud_redfin_proof()) return;
+         ud.guard.active=true; /* All future checks use retained route, never old core snapshot. */
+     }

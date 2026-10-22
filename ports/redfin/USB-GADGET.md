@@ -98,18 +98,31 @@ route owner. The capture subsequently logged an EP0 command `0x6` timeout;
 gadget startup returned `EPERM` (1), the bounded halt reported `halted=1`,
 and the DMA slab remained allocated. A 90-second host watch observed no
 `1209:0001` device. These results establish the warm route and reported halt,
-while DMA completion and enumeration remain unproved. The cause of the
-ACTIVE proof failure is still unknown.
+while DMA completion and enumeration remain unproved.
 
-The follow-up experiment uses `usb-bypass-diagnostic.patch`; hardware
-results are pending. The overlay reports snapshot errors, cached headers and
+The V2 follow-up uses `usb-bypass-diagnostic.patch`. The overlay reports snapshot errors, cached headers and
 the first changed stream and bank, without extra SMMU reads, writes,
-delays or changes to the proof policy.
+delays or changes to the proof policy. Its authenticated, image-matched capture
+isolates CB4 FSR changing from zero to `0x2` (translation fault), with
+SCTLR/CBAR/CBA2R and sampled headers/stream table unchanged. The guard
+quarantines and the controller reports halted. This is a real fault;
+the reason translation faults occur with the bypass configuration is unproved.
+
+`usb-fault-diagnostic.patch` adds seven bounded read-only accesses only after
+a complete snapshot finds a real fault in the permanently owned bank:
+FSR, FAR low/high, FSYNR0, FSYNR1, GR1 CBFRSYNRA, then FSR again. Changed FSR
+or all-ones words cause interpretation to be skipped. FAR is explicitly a
+pair of sampled words, not an atomic 64-bit snapshot. The gadget separately
+prints its validated permanent DMA slab addresses before publishing them.
+These diagnostics do not clear faults, resume a context, invalidate TLBs,
+change authorization or retry. Six actual-C tests check exact additional
+reads, unchanged stores/failure policy, other-bank/FORMAT exclusions, and
+unavailable or changing syndrome data.
 
 Host validation:
 
 ```
-python3 -m unittest ports.redfin.test_usb_gadget ports.redfin.test_usb_enumeration_start ports.redfin.test_usb_bypass_context ports.redfin.test_usb_bypass_diagnostic -v
+python3 -m unittest ports.redfin.test_usb_gadget ports.redfin.test_usb_enumeration_start ports.redfin.test_usb_bypass_context ports.redfin.test_usb_bypass_diagnostic ports.redfin.test_usb_fault_diagnostic -v
 ```
 
 Ten tests reconstruct the tracked upstream USB patches and Redfin probe,

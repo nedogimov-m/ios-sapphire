@@ -228,8 +228,63 @@ class BootIdTests(unittest.TestCase):
 
 
 class AppleUserspaceTests(unittest.TestCase):
+    boot_id = "0123456789abcdef"
+    progress = (
+        b"Darwin Ignition Sequence Version 1.0.0\r\r\n"
+        b"libignition: 1: hello: hello from launchd.1\r\r\n"
+        b"com.apple.xpc.launchd|1970-01-01 00:00:51.730686 (system) <Notice>: created\r\r\n"
+        b"com.apple.xpc.launchd|1970-01-01 00:00:51.740785 (mount-phase-1) <Notice>: Doing boot task\r\r\n")
+
     def evidence(self, body, authenticated=True):
         return cycle.apple_userspace_evidence(b"[REDFIN RAMLOG v1]\n" + body, authenticated)
+
+    def run_capture(self, body=None, *, markers=None, authenticated=True,
+                    expected=True, image_binding="matched", pstore=None, leave_error=False):
+        if body is None:
+            body = self.progress
+        if markers is None:
+            markers = (self.boot_id.encode(),)
+        console = (b"[REDFIN RAMLOG v1]\n" +
+                   b"".join(b"REDFIN BOOT ID: " + marker + b"\n" for marker in markers) + body)
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            runner = cycle.Cycle(argparse.Namespace(out=out, serial=None, collect_only=True,
+                raw_ramoops=True, ramoops_key_dir=out if authenticated else None,
+                leave_bootloader=leave_error))
+            if expected:
+                runner.manifest["xnu_return"] = {"boot_id": self.boot_id,
+                                               "sha256": hashlib.sha256(b"XNU").hexdigest()}
+                if image_binding != "missing":
+                    runner.manifest["image"] = {"sha256": hashlib.sha256(
+                        b"XNU" if image_binding == "matched" else b"other image").hexdigest()}
+            def capture():
+                runner.save("after/redfin-console.txt", console)
+                return [("after/redfin-console.txt", console)]
+            def authenticate(artifacts):
+                runner.manifest["ramoops_decryption"] = {"status": "authenticated"}
+                return artifacts
+            def capture_pstore(stage):
+                self.assertEqual(stage, "after")
+                if pstore is None:
+                    return []
+                runner.save("after/console-ramoops-0", pstore)
+                return [("after/console-ramoops-0", pstore)]
+            with mock.patch.object(runner, "verify_ramoops_key_dir"), \
+                    mock.patch.object(runner, "verify_android", side_effect=lambda *_: setattr(runner, "android_verified", True)), \
+                    mock.patch.object(runner, "raw_ramoops", side_effect=capture), \
+                    mock.patch.object(runner, "keyed_ramoops", side_effect=authenticate), \
+                    mock.patch.object(runner, "pstore", side_effect=capture_pstore), \
+                    mock.patch.object(runner, "leave_bootloader", side_effect=ValueError("return verification failed")), \
+                    mock.patch.object(runner, "call", side_effect=AssertionError("unexpected device command")), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                result = runner.run()
+            saved = json.loads((out / "manifest.json").read_text())
+            self.assertEqual(saved, runner.manifest)
+            self.assertEqual((out / "xnu-console.txt").read_bytes(), cycle.extract_xnu(console))
+            self.assertEqual((out / "after/redfin-console.txt").read_bytes(), console)
+            if pstore is not None:
+                self.assertEqual((out / "after/console-ramoops-0").read_bytes(), pstore)
+            return result, saved
 
     def test_actual_launchd_runtime_and_boot_tasks_with_later_panic(self):
         result = self.evidence(
@@ -279,6 +334,67 @@ class AppleUserspaceTests(unittest.TestCase):
         self.assertEqual(runner.manifest["status"], "logs-collected")
         self.assertTrue(runner.manifest["apple_userspace"]["launchd_pid1_hello"])
         self.assertFalse(runner.manifest["userspace"]["pid1_alive"])
+
+    def test_authenticated_image_bound_launchd_progress_is_userspace_success(self):
+        result, manifest = self.run_capture()
+        self.assertEqual(result, 0)
+        self.assertEqual(manifest["status"], "userspace-alive")
+        self.assertEqual(manifest["log_freshness"]["status"], "boot-id-matched")
+        self.assertFalse(manifest["userspace"]["pid1_alive"])
+        self.assertEqual(manifest["userspace"]["heartbeats"], 0)
+        self.assertEqual(manifest["apple_userspace"]["boot_tasks"], ["mount-phase-1"])
+
+    def test_launchd_success_requires_authentication_nonce_and_matching_image(self):
+        cases = ({"authenticated": False}, {"expected": False},
+                 {"image_binding": "missing"}, {"image_binding": "mismatch"},
+                 {"markers": ()}, {"markers": (b"fedcba9876543210",)},
+                 {"markers": (self.boot_id.encode(), self.boot_id.encode())},
+                 {"markers": (b"malformed",)})
+        for options in cases:
+            with self.subTest(options=options):
+                result, manifest = self.run_capture(**options)
+                self.assertEqual(result, 1)
+                self.assertEqual(manifest["status"], "logs-collected")
+                self.assertTrue(manifest["apple_userspace"]["launchd_pid1_hello"])
+
+    def test_each_runtime_progress_marker_and_no_panic_are_required(self):
+        lines = self.progress.splitlines(keepends=True)
+        # splitlines also separates the vendor's doubled carriage return.
+        for marker in (b"Darwin Ignition", b"hello from launchd.1", b"(system)", b"Doing boot task"):
+            with self.subTest(marker=marker):
+                body = b"".join(line for line in lines if marker not in line)
+                result, manifest = self.run_capture(body)
+                self.assertEqual(result, 1)
+                self.assertEqual(manifest["status"], "logs-collected")
+        for panic in (b"REDFIN PANIC: mount failed\n", b"panic(cpu 0 caller 0x123): failed\n"):
+            with self.subTest(panic=panic):
+                result, manifest = self.run_capture(self.progress + panic)
+                self.assertEqual(result, 1)
+                self.assertEqual(manifest["status"], "logs-collected")
+                self.assertTrue(manifest["apple_userspace"]["panic"])
+
+    def test_pstore_cannot_supply_launchd_progress_or_freshness(self):
+        healthy = (b"[REDFIN RAMLOG v1]\nREDFIN BOOT ID: " + self.boot_id.encode() + b"\n" + self.progress)
+        for body, markers in ((b"kernel only\n", (self.boot_id.encode(),)),
+                              (self.progress, (b"fedcba9876543210",))):
+            with self.subTest(markers=markers):
+                result, manifest = self.run_capture(body, markers=markers, pstore=healthy)
+                self.assertEqual(result, 1)
+                self.assertEqual(manifest["status"], "logs-collected")
+
+    def test_boot_history_cannot_supply_progress_or_disqualify_current_success(self):
+        result, manifest = self.run_capture(b"kernel only\n--- BOOT HISTORY ---\n" + self.progress)
+        self.assertEqual(result, 1)
+        self.assertFalse(manifest["apple_userspace"]["launchd_pid1_hello"])
+        result, manifest = self.run_capture(self.progress + b"--- BOOT HISTORY ---\nREDFIN PANIC: old boot\n")
+        self.assertEqual(result, 0)
+        self.assertFalse(manifest["apple_userspace"]["panic"])
+
+    def test_successful_launchd_capture_does_not_override_failed_bootloader_return(self):
+        result, manifest = self.run_capture(leave_error=True)
+        self.assertEqual(result, 1)
+        self.assertEqual(manifest["status"], "runner-error")
+        self.assertIn("return verification failed", manifest["error"])
 
 
 class FakeClock:

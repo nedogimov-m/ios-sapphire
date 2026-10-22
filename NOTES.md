@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN USB V3 identifies the exact failing EP0 TRB — 2026-10-22
+
+Commit `3dcfe47` records runtime sensing/HID startup and the V2 translation
+fault. New `usb-fault-diagnostic.patch` adds only seven bounded RO reads on
+a fresh, complete owned-bank fault: FSR/FAR words/FSYNR0/1/GR1 CBFRSYNRA/FSR.
+No fault clear, resume, global TLBI, retry or policy change. All-ones or
+changing FSR skips interpretation. Six actual-C tests and independent review
+pass. Collector now recognizes normal launchd progression only with exact
+authenticated image/nonce binding and no panic; static PID1 evidence stays
+separate. Six new collector tests and independent review pass; offline replay
+of the existing authenticated GUI V1 capture recognizes launchd successfully.
+Full host suite: 535 PASS (`logs/redfin/peripherals-host-tests-v20.txt`).
+Local ARM64 build `research/redfin-build/build-20261022-201705.log` succeeds;
+kernel SHA256 `b43624055aedf5383a9b047c06677386e353f132e9b258722c058da80ebf909e`.
+Image `ports/redfin/out/usb-enum-v3/redfin-xnu.img` SHA256
+`abd3d4ac5b4e89d8efc61600b1d0d2d4424c803201db848ad8ad95e7f2f2913d`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbgadget=1 redfinusbsecs=30 redfinspmi=1 redfinreturn=1 redfinbootid=0x9d74a69d71cfe974`.
+Authenticated, image-matched `logs/redfin/usb-enum-v3/` reaches PID1 without
+panic, primes metadata and verifies return to fastboot. CB4/slot4 warm proof
+passes. Permanent slab PA=0x182e54000, EP0 TRB=0x182e55000, setup=0x182e55040.
+Fresh fault FSR=2, FAR words=1:82e55000, FSYNR0=1, FSYNR1=0, CBFRSYNRA=e0.
+Thus SID e0 faults on the exact EP0 TRB read; SCTLR0/CBAR10000/CBA2R0 remain
+unchanged. Guard quarantines, halt reports halted=1, slab retained; host
+sees no new 1209:0001 device. Enumeration still unproved.
+The cause remains unproved: >4GiB address with the AArch32 context format,
+or retained configuration/TLB state, are hypotheses. Native 64-bit S1 setup
+uses CBA2R.RW64, while upstream bypass quirk does not explicitly program it.
+Native skip-init reset also performs global invalidation; that touches other
+contexts and is not a justified next write. Review a narrow owned-bank
+format experiment before another temporary boot; retain all fault guards.
+
 ## REDFIN USB enumeration V2: real translation fault isolated — 2026-10-22
 
 Cached-only diagnostics preserve route policy/MMIO and have eight actual-C

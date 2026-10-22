@@ -516,8 +516,17 @@ class Cycle:
         if expected_boot_id and freshness["status"] != "boot-id-matched":
             evidence["pid1_alive"] = False
         self.manifest["userspace"] = evidence
-        self.manifest["apple_userspace"] = apple_userspace_evidence(evidence_capture, authenticated=authenticated)
-        self.manifest["status"] = ("userspace-alive" if evidence["pid1_alive"] else
+        apple = apple_userspace_evidence(evidence_capture, authenticated=authenticated)
+        self.manifest["apple_userspace"] = apple
+        expected_image = self.manifest.get("xnu_return", {}).get("sha256")
+        # Normal launchd has no static-init heartbeat. Require its runtime
+        # progression in the authenticated capture bound to this exact image.
+        apple_started = bool(authenticated and expected_boot_id and expected_image and
+                         self.manifest.get("image", {}).get("sha256") == expected_image and
+                         self.manifest["log_freshness"]["status"] == "boot-id-matched" and
+                         apple["launchd_pid1_hello"] and apple["darwin_ignition_banner"] and
+                         apple["system_domain_created"] and apple["boot_tasks"] and not apple["panic"])
+        self.manifest["status"] = ("userspace-alive" if evidence["pid1_alive"] or apple_started else
                                      "logs-collected" if b"REDFIN" in current else "no-log")
         self.manifest["captured_bytes"] = len(current)
         xnu = extract_xnu(evidence_capture)
