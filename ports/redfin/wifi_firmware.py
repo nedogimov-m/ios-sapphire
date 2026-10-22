@@ -14,7 +14,10 @@ import struct
 import subprocess
 import tempfile
 
-from memory import _tree, memory_map, validate_window
+if __package__:
+    from .memory import _tree, memory_map, validate_window
+else:
+    from memory import _tree, memory_map, validate_window
 
 MPSS_BASE, MPSS_BYTES = 0x8c000000, 0x11800000
 SMEM_BASE, SMEM_BYTES = 0x80900000, 0x200000

@@ -317,3 +317,53 @@ Integration still requires a source-complete native XO/CX/MSS and bandwidth
 lease, AOP QMP mailbox with acknowledged delivery, SCM convention/resume
 handling, APPS/MPSS allocator/SMP2P ownership and fresh ready/stop proof. A
 review of these hardware prerequisites follows before any startup hook.
+
+## Native AOP transport and exact platform binding — 2026-10-23
+
+`wifi_aop.c` now implements Redfin's QMP mailbox handshake, warm idle-channel
+adoption and the exact 64-byte modem `load_state` on/off messages. It uses the
+live Lito 4 KiB msgram range at `0x0c300000`; HackiOS's hardcoded 1 KiB map is
+not copied. The read-only observer requires two equal descriptor snapshots
+before publishing geometry. Every write/notification/poll rechecks the lease,
+immutable geometry and APPS-owned control words. Payload words are read back
+before the length is published. Message completion requires AOP consumption;
+it does not establish MPSS readiness. Failed or ambiguous operations poison the
+session, preserve an outstanding length and prohibit retries or link reset.
+
+`wifi_platform.py` validates the actual live MPSS XO/CX/MSS supplier chain,
+TURBO consumer level 384, RPMh DRV2 layout, AOP/QMP/IPCC phandles, APPS/MPSS
+SMP2P IDs and CMD-DB reservation. It emits a separate `redfin-wifi-native` ADT
+contract for the next read-only probe, after validating the physical inputs.
+Its host CLI accepts only the saved FDT and explicit kernel window:
+
+```sh
+python3 ports/redfin/wifi_platform.py --dtb research/private/device.dtb \
+  --xnu-base 0x180000000 --xnu-bytes 0x80000000
+```
+
+Source details are pinned to Google's kernel commit
+`500b3a2059c1eec0fec08ec56add06320ea901a8` (`msm_qmp.c`, `qcom_ipcc.c`,
+`clk-rpmh.c`, `rpmh-regulator.c`, `smp2p.c`, `subsys-pil-tz.c`) and Lito DT
+commit `afc98e2bb0716a57bf4f8d2b6191378dd7123ce4`. The primary HackiOS snapshot
+`8e61187098f2c26c5daee8f9f72b6416aa64b9ab` was reviewed for its mailbox
+interface and serialization; its WPSS/PAS6 power/radio path remains excluded.
+
+MPSS uses inbound SMEM item 435, outbound 428, local PID 0 and remote PID 1.
+Notifications are IPCC client 2, signal 2; AOP is client 0, signal 0. The
+`master-kernel` force-stop bit is 0. Incoming `slave-kernel` bits are fatal 0,
+ready 1, proxy-unvote 2, stop-ack 3 and shutdown-ack 7. The CX and MSS values
+384 are consumer levels, requiring CMD-DB ARC selector lookup. They must not
+be written directly as selector data. XO uses `xo.lvl` with clock-driver ARC
+data 3. Power votes must preserve inherited floors and coordinate with the
+existing DRV2 manager; no new RPMh writer is enabled here.
+
+Observation: the real saved live FDT passes the complete host binding with
+30 protected exclusions. All 60 Wi-Fi tests pass: 17 native AOP transport tests,
+6 platform-binding tests, 23 firmware tests and 14 SMEM tests. These cover all
+open-read failures, each control/payload write failure, ownership loss, word
+readback, exact packet bytes, descriptor/role mutations and bounded ACK waits.
+`wifi-aop.patch` exports the tested native source/header, with no startup or
+source-list change. No AOP doorbell, message-memory write or modem startup has
+run on hardware. Next: a bounded native read-only AOP/SMEM/CMD-DB probe to
+establish cold-ABL mailbox state and the missing MSS resource mapping, followed
+by native guarded SMP2P and power/SCM integration.
