@@ -1,15 +1,18 @@
 # ios-redfin — Pixel 5 bring-up
 
-Pixel 5 boots XNU 8796 and Apple's iOS 16.7.16 launchd from a journaled HFSX
-root in userdata. CPU0, IRQ/SGI, BSD, static Darwin PID1 heartbeats, bounded
+Pixel 5 boots XNU 8796 and Apple's iOS 16.7.16 launchd, backboardd and
+SpringBoard from a journaled HFSX root in the approved first 16 GiB of
+userdata. CPU0, IRQ/SGI, BSD, static Darwin PID1 heartbeats, bounded
 UFS read/write, Apple mount phases and FIPS checks are observed. Launchd
 passes keybag initialization and cache loading, starts system daemons, and
 backboardd makes IOKit calls. The opt-in CPU framebuffer publishes AppleCLCD;
 backboardd opens it, allocates an iPhone X canvas and submits swaps. The earlier
 SpringBoard `main CADisplay` trap is absent in that test. Authenticated RAM
-captures show an Apple logo rendered into the framebuffer; the lock and home
-screens remain unverified. Timed process shutdown leaves HFS clean; the
+captures show the Apple logo and lock screen rendered into the framebuffer.
+Fresh physical panel scanout and the home screen remain unverified; physical
+touch is unported. Timed process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
+The minimal MobileGestalt Wi-Fi identity fix is validated on the device.
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata

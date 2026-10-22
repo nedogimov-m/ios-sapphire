@@ -4,14 +4,16 @@ Source base: ios-sapphire `d7858e985c4fd2fd41c2c4300c5279cbc8eee178`,
 ios-topaz `89451b811a4e6cc5cdcf734c45887163d92c599e`, XNU
 `xnu-8796.141.3`. Hardware sources and live observations: [HARDWARE.md](HARDWARE.md).
 
-Static Darwin PID1 executes from RAM through mockfs. Successful exec, console
-open/write, getpid=1 and eleven heartbeats were captured after restoring PAN
-for the Pixel's A55/A76 cores. PID1 also reads 4096 bytes from the read-only UFS
-device; write-open returns `EROFS`. A complete 16 GiB iOS 16.7.16 HFSX root image
-is prepared and verified locally, but has not been installed. Apple launchd and
-SpringBoard have not run on redfin. Touch, USB and display acceleration remain
-unported. The overlay disables inherited Xiaomi drivers and fixed early
-framebuffer writes. It supports one CPU.
+Pixel 5 executes XNU 8796 and Apple's iOS 16.7.16 launchd, backboardd and
+SpringBoard from a journaled HFSX root installed in the approved first 16 GiB
+of userdata. Bounded UFS read/write and timed clean shutdown are observed;
+static Darwin PID1 console I/O, getpid=1 and heartbeats are also verified.
+The opt-in AppleCLCD CPU-copy backend produces CRC-checked framebuffer
+captures of the Apple logo and lock screen. The MobileGestalt Wi-Fi identity
+fix is validated on the device. Fresh physical panel scanout and the home
+screen remain unverified. Physical touch, USB and display acceleration remain
+unported. The overlay disables inherited Xiaomi hardware drivers and supports
+one CPU.
 
 ## Reproduce
 

@@ -104,7 +104,7 @@ diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
 +		unsigned frames = 0;
 +		const char *stop = "cap";
 +		uint64_t base = fp;
-+		for (; frames < 8; frames++) {
++		for (; frames < 20; frames++) {
 +			if (mach_absolute_time() >= deadline) { stop = "budget"; break; }
 +			if (!fp) { stop = "end"; break; }
 +			if ((fp & 15) || fp < base || fp - base > (8ULL << 20)) { stop = "invalid-fp"; break; }
@@ -150,8 +150,8 @@ diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
 +	uint32_t enabled = 0, cpus = 0;
 +	if (!PE_parse_boot_argn("redfinstacks", &enabled, sizeof(enabled)) || enabled != 1 ||
 +	    !PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1) return;
-+	const char *names[3] = { "SpringBoard", "backboardd", "launchd" };
-+	proc_t selected[3] = { PROC_NULL, PROC_NULL, PROC_NULL };
++	const char *names[5] = { "SpringBoard", "lsd", "securityd", "backboardd", "launchd" };
++	proc_t selected[5] = { PROC_NULL, PROC_NULL, PROC_NULL, PROC_NULL, PROC_NULL };
 +	uint64_t interval, now = mach_absolute_time();
 +	nanoseconds_to_absolutetime(2ULL * NSEC_PER_SEC, &interval);
 +	if (now > UINT64_MAX - interval) return;
@@ -164,7 +164,7 @@ diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
 +	unsigned scanned = 0;
 +	ALLPROC_FOREACH(p) {
 +		if (scanned++ == 512) break;
-+		for (unsigned i = 0; i < 3; i++) {
++		for (unsigned i = 0; i < 5; i++) {
 +			if (selected[i] != PROC_NULL || strncmp(p->p_comm, names[i], sizeof(p->p_comm))) continue;
 +			uint32_t bits = proc_ref_try_fast(p);
 +			if (!bits) continue;
@@ -173,8 +173,8 @@ diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
 +		}
 +	}
 +	proc_list_unlock();
-+	printf("RSTACK BEGIN cap_processes=3 cap_threads=16 cap_frames=8 budget_ms=2000 resident_only=1\n");
-+	for (unsigned i = 0; i < 3; i++) {
++	printf("RSTACK BEGIN cap_processes=5 cap_threads=16 cap_frames=20 budget_ms=2000 resident_only=1\n");
++	for (unsigned i = 0; i < 5; i++) {
 +		if (selected[i] == PROC_NULL) {
 +			printf("RSTACK SKIP name=%s reason=not-found-or-exec\n", names[i]);
 +			continue;

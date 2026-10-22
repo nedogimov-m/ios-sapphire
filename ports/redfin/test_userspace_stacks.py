@@ -149,12 +149,12 @@ const char *test_snapshot(int m,unsigned count,int with_proc) {
     }
     task=(struct task){1,count ? threads : NULL,&map,0x30000000,0x100000000};
     if (with_proc) {
-        static struct proc processes[3];memset(processes,0,sizeof(processes));
-        const char *names[]={"SpringBoard","backboardd","launchd"};
-        for (unsigned i=0;i<3;i++) {
+        static struct proc processes[5];memset(processes,0,sizeof(processes));
+        const char *names[]={"SpringBoard","lsd","securityd","backboardd","launchd"};
+        for (unsigned i=0;i<5;i++) {
             strcpy(processes[i].p_comm,names[i]);processes[i].pid=26+i;
             processes[i].task=&task;processes[i].bits=mode==24 ? 2 : 1;
-            processes[i].next=i<2 ? &processes[i+1] : NULL;
+            processes[i].next=i<4 ? &processes[i+1] : NULL;
         }
         procs=processes;redfin_userspace_stacks();
     } else redfin_stack_task("SpringBoard",26,&task,102000);
@@ -188,7 +188,7 @@ int test_copies(void) { return copies; }
         log = self.library.test_snapshot(0,40,0).decode()
         self.assertIn('slide=0x30000000 slide_valid=1',log)
         self.assertEqual(log.count('RSTACK THREAD'),16)
-        self.assertEqual(log.count('RSTACK FRAME'),16*8)
+        self.assertEqual(log.count('RSTACK FRAME'),16*20)
         self.assertIn('index=0 fp=0x1000 lr=0x180001001 next_fp=0x1010',log)
         self.assertIn('pc=0x180001000 lr=0x180002000',log)
         self.assertEqual(self.library.test_balanced(),1)
@@ -205,7 +205,7 @@ int test_copies(void) { return copies; }
                 if mode==8:
                     self.assertEqual(log.count('RSTACK FRAME'),16)
 
-    def test_default_off_up_gate_exec_skip_and_three_fixed_targets(self):
+    def test_default_off_up_gate_exec_skip_and_five_fixed_targets(self):
         for mode in (20,21,22):
             self.assertEqual(self.library.test_snapshot(mode,1,1),b'')
             self.assertEqual(self.library.test_balanced(),1)
@@ -214,9 +214,13 @@ int test_copies(void) { return copies; }
             self.assertNotIn('RSTACK TASK',log)
             self.assertEqual(self.library.test_balanced(),1)
         log=self.library.test_snapshot(0,1,1).decode()
-        self.assertEqual(log.count('RSTACK TASK'),3)
-        for name in ('SpringBoard','backboardd','launchd'):
+        self.assertEqual(log.count('RSTACK TASK'),5)
+        self.assertIn('cap_processes=5 cap_threads=16 cap_frames=20 budget_ms=2000',log)
+        for name in ('SpringBoard','backboardd','launchd','lsd','securityd'):
             self.assertIn('TASK name='+name,log)
+        positions = [log.index('TASK name='+name) for name in
+                     ('SpringBoard','lsd','securityd','backboardd','launchd')]
+        self.assertEqual(positions, sorted(positions))
         self.assertEqual(self.library.test_balanced(),1)
 
 

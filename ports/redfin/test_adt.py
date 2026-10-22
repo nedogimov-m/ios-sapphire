@@ -44,6 +44,14 @@ class RedfinADTTests(unittest.TestCase):
         self.assertNotIn(b'source-private-identifier', mkadt.adt.serialize(root))
         self.assertEqual(child(chosen, 'asmb').prop('lp-sip0'), mkadt.u64(0x6f))
         self.assertEqual(len(chosen.prop('boot-manifest-hash')), 48)
+        serialized, end = mkadt.adt.parse(mkadt.adt.serialize(root))
+        mac = child(serialized, 'chosen').prop('mac-address-wifi0')
+        self.assertEqual(len(mac), 6)
+        self.assertEqual(mac, bytes.fromhex('025245444649'))
+        self.assertEqual(mac[0] & 3, 2)  # locally administered, unicast
+        self.assertEqual(end, len(mkadt.adt.serialize(root)))
+        for name, expected in original_hardware.items():
+            self.assertEqual(mkadt.adt.serialize(child(serialized, name)), expected)
         with self.assertRaises(ValueError):
             mkadt.apple_userspace_identity(root, mkadt.adt.serialize(source))
         source.props = [(key, flag, b'wrong\0' if key == 'model' else value)

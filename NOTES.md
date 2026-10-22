@@ -1,5 +1,60 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN iOS lock screen rendered; MobileGestalt wait fixed — 2026-10-22
+
+V5 completed: HFS clean/write_count374738, authenticated logs and verified
+fastboot. Deep lsd stack reached MILaunchServicesDatabaseGatherer /
+MIInstallationIdentity / __GenerateBuiltInAppInstallSessionID /
+MGCopyAnswer(UniqueDeviceID). MobileGestalt WifiAddress queried missing
+/chosen/mac-address-wifi0, then waited for absent IONetworkController.
+Native disassembly independently confirmed CFData and length >=6 accepted.
+Added only a stable synthetic local-unicast six-byte chosen property; no
+radio driver or speculative Bluetooth property. Eight ADT tests pass,
+including serialized bytes and preserved hardware nodes.
+
+V6 temporary boot produced authenticated 120x260 framebuffer captures:
+first/fifth positive copies show Apple logo; final copy13 shows iOS lock
+screen, date/time and camera control (CRC32 28af2874). This proves software
+lock-screen rendering; physical panel refresh and interactive input were
+not independently checked. Home screen remains unverified; touch and live
+USB are unported. LaunchServices progressed beyond the V5 identity wait.
+Symbolicated stacks independently confirm lsd now serves its main run loop
+with zero MobileGestalt frames (V5: two waiting threads); SpringBoard main
+is laying out FCUIActivityControl/MTMaterial views, no _LSCopyServerStore
+wait. Its main stack hits the 20-frame cap; no claim of main-loop idleness.
+No panic. Ordinary timed shutdown left journaled HFSX clean, inconsistent
+false, write_count380188. Collector re-primed the public RAM-log key and
+left verified fastboot. No reinstall/repair or boot/GPT/modem/persist/EFS
+writes. Android must still not boot before restoring its userdata backup.
+
+Kernel unchanged from the successful deeper-probe build (206 host tests and
+actual ARM64 build): research/redfin-build/build-20261022-102326.log;
+SHA256 76a697ea59ebc61448181c1921566740490cb77c67932dc59bbd9b5c0e0ce2ff.
+Image ports/redfin/out/ios-mg-wifi-v6/redfin-xnu.img;
+SHA256 00386f34061efbfeb4a536b6138420aa05ce29fdddaa93862761e53cd504fbdb.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinfb=1 sweetfb_noconsole=1 redfinscreen=1 redfinshutdown=120 redfinstacks=1 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Evidence logs/redfin/ios-mg-wifi-v6/{manifest.json,xnu-console.txt,screens/,stacks.json};
+collection timeout300, recovery-adb-only.img, leave-bootloader. Collector
+status logs-collected/exit1 is its static-PID1 criterion, not Apple failure.
+Next: input/USB bring-up and home-screen validation using automatic evidence.
+
+## REDFIN waiting on LaunchServices; deeper probe running — 2026-10-22
+
+V4 resident-only stack capture worked, quiet framebuffer fixed, HFS stayed
+clean and phone returned to verified fastboot. SB main waits synchronous XPC;
+second thread is in LSContextInitCommon/LaunchServicesDatabase/
+FBApplicationDataStoreRepositoryManager. backboardd also has NSXPC syncwait.
+First eight frames do not reach caller; no SB crash. Root/jobs audit found
+no missing canonical LS seed/job/ownership. Do not preseed invented LSDB.
+V5 raises frame cap20 and includes SB,lsd,securityd,backboardd,launchd in that
+priority; threads16 and2s total budget unchanged. 206 tests and actual build
+pass. Current build /Users/spiceberries/redfin_ios/research/redfin-build/build-20261022-102326.log
+Kernel 76a697ea59ebc61448181c1921566740490cb77c67932dc59bbd9b5c0e0ce2ff
+Image 410a890e562d78b61c5fa256c6ec920eb4c62086430ae3cfa0ab1be5e99250a3
+Exact args unchanged from V4. Collector running logs/redfin/ios-ls-stacks-v5/.
+Symbolication script logs/redfin/ios-display-final-v3/symbolicate-rstack.py;
+read DSC path under extracted/mounts/systemos and private .a2s cache.
+
 ## REDFIN logo persists; bounded wait-stack probe prepared — 2026-10-22
 
 Finalv3 completed with clean HFS/write_count364664 and verified fastboot.

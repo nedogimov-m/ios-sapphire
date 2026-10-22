@@ -83,6 +83,9 @@ def apple_userspace_identity(root, blob):
         ('boot-manifest-hash', hashlib.sha384(b'redfin development boot manifest').digest()),
         ('crypto-hash-method', cstr('sha2-384')), ('display-scale', u32(3)),
         ('unique-chip-id', u64(0x52454446494e0001)), ('chip-id', u32(0x8015)),
+        # MG reads this before waiting for an absent IONetworkController.
+        # Stable synthetic local-unicast identity; no Wi-Fi hardware is bound.
+        ('mac-address-wifi0', bytes.fromhex('025245444649')),
         ('certificate-production-status', u32(0)), ('effective-production-status-ap', u32(0)),
         ('certificate-security-mode', u32(1)), ('effective-security-mode-sep', u32(1))])
     chosen.children.append(node('asmb', [
