@@ -123,5 +123,35 @@ revalidation. The mutation hooks represent external changes between snapshots.
 
 The 26 host tests pass. They validate the C transaction logic, not real MMIO
 ordering, kernel lock initialization, hardware bypass acceptance, isolation
-policy correctness, DMA addressing/cache behavior, or USB enumeration. A
-real ARM kernel build and the claim-only hardware result remain outstanding.
+policy correctness, DMA addressing/cache behavior, or USB enumeration.
+
+## First hardware claim and cached diagnostics — 2026-10-22
+
+The initial md0-only caller is built in the actual ARM64 kernel. Its first
+hardware run (`logs/redfin/usb-owned-v1/`) authenticated and matched the
+image ID, reached PID1 and returned to verified fastboot without panic.
+Registration succeeded, but the claim quarantined with EIO5. That log
+cannot distinguish an all-ones imported SMR/S2CR from a store/readback
+failure, or establish whether any store happened. Earlier observers read
+S2CR only for matching SMRs; zero matches did not verify the full S2CR bank.
+No gadget or DMA was invoked.
+
+`usb-owned-diag.patch` therefore records the snapshot phase, attempted store
+count, failing index and already-read SMR/S2CR/header, or the final existing
+readback value after1000 polls. The selected pair is logged before the first
+store. These are cached diagnostics: no additional MMIO reads, writes,
+barriers, delays or retries; policy and quarantine behavior are unchanged.
+Six actual-C baseline-versus-overlay tests verify identical read/write/delay
+traces and outcomes for both EIO sources, every snapshot phase, strict and
+retained-route checks, and repeated calls after quarantine. All42 focused
+owner/caller/diagnostic tests and independent review passed. Hardware route
+acceptance and USB enumeration remain unproved.
+
+V2 (`logs/redfin/usb-owned-v2/`) authenticated and matched its image, reached
+PID1 and returned to verified fastboot. Full import/pre-store verification
+passed. Slot4 initially had SMR0/S2CR0; the only store requested S2CR10300
+(TYPE BYPASS1) at offsetc10, but readback was20300 (TYPE FAULT2) after1000
+polls. The guard quarantined before any SMR publication. This is evidence of
+hardware/firmware bypass coercion; it is not a working route. Do not relax
+readback acceptance or retry it. Next is a source-backed Qualcomm bypass
+quirk and context-bank ownership audit. Gadget and DMA remain uninvoked.

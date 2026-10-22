@@ -214,7 +214,8 @@ def main(argv=None):
                                          'touch-events.patch', 'touch-rail-ready.patch',
                                          'rpmh-touch.patch', 'touch-start.patch',
                                          'touch-spi-diag.patch',
-                                         'usb-owned-route.patch', 'usb-owned-build.patch',
+                                         'usb-owned-route.patch', 'usb-owned-diag.patch',
+                                         'usb-owned-build.patch',
                                          'usb-gadget.patch', 'usb-start.patch',
                                          'peripheral-start.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name

@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN USB V2: hardware coerces BYPASS to FAULT — 2026-10-22
+
+Commit640ef10 records SPI V4 and its bounded GENI diagnostic overlay.
+New usb-owned-diag overlay adds cached phase/index/header/readback logs
+without additional MMIO/barriers/delays or guard changes. Six baseline-vs-
+diagnostic actual-C tests and independent review PASS;42 focused tests PASS;
+full suite417 PASS (logs/redfin/peripherals-host-tests-v12.txt).
+Local ARM64 build research/redfin-build/build-20261022-182913.log passed;
+kernel ab06eb9a82a4c815e40f72935e0f13837905f181e21bff67568451ff68a748c4.
+Image ports/redfin/out/usb-owned-v2/redfin-xnu.img SHA256
+e22d2a4ae84654491a3f99e5fa10086b9fbc1aebced3cc5c3f5e9791a00e6f75.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xec44740a75e6d698`.
+Authenticated/image-matched capture logs/redfin/usb-owned-v2/ reached PID1,
+no panic, public metadata re-primed and verified fastboot return. Full table
+import and pre-store verification passed. Selected slot4 importedSMR0/S2CR0;
+the sole store to S2CR offsetc10 requested10300 but read20300 after1000 polls.
+Thus TYPE BYPASS1 became FAULT2, not an import/all-ones failure. No SMR store
+or gadget/DMA occurred. Owner quarantined; do not accept20300 as bypass or
+retry. Next: source-backed Qualcomm bypass-quirk/context-bank ownership audit.
+
+Bounded stock super metadata read completed in safe recovery with no mounts,
+disk writes or ramoops access; GPT/by-name sda18/size9755951104 verified and
+fastboot returned. Private research/redfin-modem-inventory/super-prefix.raw
+contains only first4194304bytes, SHA256
+b985645755edb678f26682da8af9b48b73bd4a2b404e7b48c22406350be1a864.
+Both geometries/slot1 redundant metadata checksums and contents agree:
+max65536,slots3,logicalblock4096,v10.2/header256,tables1056; metadata ends405504.
+Fresh current-slot:b proof retained privately. Base vendor_b is798003200bytes
+in two linear extents. VirtualAB/COW entries exist, so raw vendor_b is not
+yet proved to be the effective current Android snapshot. No firmware loaded;
+host-only bounded parser tests and targeted asset inventory remain underway.
+
 ## REDFIN V4 identifies the first SPI TX hang — 2026-10-22
 
 New touch-spi-diag overlay adds bounded read-only GENI snapshots:41 safe
