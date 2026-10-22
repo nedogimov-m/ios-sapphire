@@ -142,7 +142,7 @@ the margins black. `redfinfit=1` fits into the complete panel without the
 camera exclusion. Both modes inverse-map SEC touch through the same checked
 viewport. The default remains the legacy crop.
 
-Eight host tests pass, including actual patched presentation/HID methods,
+Nine host tests pass, including actual patched presentation/HID methods,
 independent bilinear pixels, immutable guarded source memory, clipping,
 malformed extents, margin gestures and ASan/UBSan. Physical alignment,
 rounded corners and on-device scaling throughput remain unverified;

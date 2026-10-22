@@ -9,16 +9,45 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  #include <kern/thread_call.h>
  #include <IOKit/IOKitKeys.h>
  #include <IOKit/IOLib.h>
-@@ -230,6 +231,8 @@
+@@ -230,6 +231,10 @@
  	uint8_t       fPending[SWEET_FB_SWAP_REC_SIZE];     /* latest swap, not yet shown */
  	bool          fDirty;
  	bool          fRedfinCopyOnly;
 +	struct redfin_display_geometry fRedfinFit;
-+	struct redfin_display_workspace fRedfinFitWorkspace;
++	struct redfin_display_workspace *fRedfinFitWorkspace = NULL;
++	bool          allocateRedfinFitWorkspace(void);
++	void          free(void) APPLE_KEXT_OVERRIDE;
  	uint64_t      fRedfinFrames;
  	uint32_t      fRedfinCaptures;
  	IOLock       *fRedfinCaptureLock; /* independent of fLock, boot lifetime */
-@@ -445,7 +448,16 @@
+@@ -320,6 +325,26 @@
+ OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
+ OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
+ 
++bool
++AppleCLCD::allocateRedfinFitWorkspace(void)
++{
++	if (!fRedfinFit.mode || fRedfinFitWorkspace != NULL) return true;
++	/* This scalar-only allocation is larger than OSObject's 16-KiB limit. */
++	fRedfinFitWorkspace = (struct redfin_display_workspace *)
++	    IOMallocZeroData(sizeof(struct redfin_display_workspace));
++	return fRedfinFitWorkspace != NULL;
++}
++
++void
++AppleCLCD::free(void)
++{
++	if (fRedfinFitWorkspace != NULL) {
++		IOFreeData(fRedfinFitWorkspace, sizeof(struct redfin_display_workspace));
++		fRedfinFitWorkspace = NULL;
++	}
++	IOMobileFramebuffer::free();
++}
++
+ class IOMobileFramebufferUserClient : public IOUserClient {
+ 	OSDeclareDefaultStructors(IOMobileFramebufferUserClient);
+ 
+@@ -445,7 +470,16 @@
  		IOLog("REDFIN FB: rejected missing or unverified linear display contract\n");
  		return false;
  	}
@@ -35,7 +64,24 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  	fRedfinCopyOnly = true;
  	fRedfinFrames = 0;
  	fRedfinCaptureLock = NULL;
-@@ -525,6 +537,11 @@
+@@ -496,6 +530,16 @@
+ 		IOLockFree(fLock); fLock = NULL;
+ 		return false;
+ 	}
++	/* All earlier fatal resource checks precede this allocation. No timer or
++	 * client can use the workspace until successful publication below. */
++	if (!allocateRedfinFitWorkspace()) {
++		IOLog("REDFIN FB: fit workspace allocation failed\n");
++		fWorkLoop->removeEventSource(fVsync);
++		OSSafeReleaseNULL(fVsync); OSSafeReleaseNULL(fWorkLoop); OSSafeReleaseNULL(fClients);
++		OSSafeReleaseNULL(fSurface);
++		IOLockFree(fLock); fLock = NULL; fPixels = 0;
++		return false;
++	}
+ 	/* This is a software notification clock, not measured hardware vblank. */
+ 	uint32_t hz = 5;
+ 	(void)PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
+@@ -525,6 +569,11 @@
  	registerService();
  	IOLog("REDFIN FB: AppleCLCD CPU-copy %ux%u stride %u at %#llx, canvas %ux%u, %u Hz copies\n",
  	    width, height, stride, fPhys, cw, ch, hz);
@@ -47,7 +93,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  	return true;
  }
  
-@@ -1236,6 +1253,10 @@
+@@ -1236,6 +1285,10 @@
  		}
  	}
  
@@ -58,7 +104,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
  	for (uint32_t layer = 0; layer < SWEET_FB_LAYERS; layer++) {
  		uint32_t id = get32(rec, 0x54 + 4 * layer);
  		const uint8_t *a = rec + 0x64 + 16 * layer;
-@@ -1261,6 +1282,22 @@
+@@ -1261,6 +1314,22 @@
  		}
  		uintptr_t src = s->kernelAddress();
  		uint32_t bpe = s->bytesPerElement ? s->bytesPerElement : 4;
@@ -71,7 +117,7 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
 +				const int32_t source_rect[] = {sx, sy, (int32_t)get32(a, 8), (int32_t)get32(a, 12)};
 +				const int32_t destination_rect[] = {dx, dy, w, h};
 +				uint64_t layer_bytes = 0;
-+				if (redfin_display_draw(&fRedfinFit, &fRedfinFitWorkspace, dst,
++				if (redfin_display_draw(&fRedfinFit, fRedfinFitWorkspace, dst,
 +				    (uint64_t)fRowBytes * fHeight, fRowBytes, &surface,
 +				    source_rect, destination_rect, &layer_bytes)) copied += layer_bytes;
 +			}
@@ -165,7 +211,7 @@ diff --git a/iokit/Kernel/arm/RedfinDisplayGeometry.h b/iokit/Kernel/arm/RedfinD
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinDisplayGeometry.h
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,224 @@
 +/*
 + * Redfin CPU presentation and inverse digitizer geometry. No display/HID ABI
 + * change: Apple's iPhone X canvas remains 1125x2436.
@@ -196,7 +242,8 @@ new file mode 100644
 +	uint32_t x, y, w, h;
 +};
 +
-+/* Heap-owned AppleCLCD member, never a 70-KiB kernel stack allocation. */
++/* Separately allocated scalar workspace. AppleCLCD holds only a pointer:
++ * OSObject's typed allocation limits the service object itself to 16 KiB. */
 +struct redfin_display_workspace {
 +	uint32_t column[1080];
 +	uint16_t weight[1080];

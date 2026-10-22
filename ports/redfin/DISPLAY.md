@@ -62,8 +62,12 @@ Each layer uses its actual source rectangle, stride and allocation offset.
 It accepts only observed BGRA, four-byte, one-element pixels; checks the
 complete accessible allocation and both rectangles with wide arithmetic;
 clips output to the viewport; and leaves source surfaces untouched.
-Source dimensions are bounded to 16384 per axis. The row/column workspace
-lives in the heap-owned AppleCLCD object, never on the kernel stack.
+Source dimensions are bounded to 16384 per axis. AppleCLCD stores one pointer
+to a separate scalar row/column workspace allocated with `IOMallocZeroData`.
+This keeps the service object within OSObject's 16 KiB allocation limit and
+keeps the workspace off the kernel stack. Allocation failure aborts before
+timer/client publication and releases the startup resources; `free()` releases
+the workspace at the end of the service's lifetime.
 
 The 136-pixel exclusion comes from Google's
 [Redfin resource overlay at commit 62df7438508565dfc05fab923e84f0704f5a0f07](https://android.googlesource.com/device/google/redfin/+/62df7438508565dfc05fab923e84f0704f5a0f07/redfin/overlay/frameworks/base/core/res/res/values/config.xml#208).
@@ -83,12 +87,14 @@ inside. A contact that began in the viewport continues to its edge and
 retains its release when dragged into a margin. Edge gestures use viewport
 edges rather than panel edges.
 
-`python3 -m unittest ports.redfin.test_display_geometry -v` passes eight host
+`python3 -m unittest ports.redfin.test_display_geometry -v` passes nine host
 tests. They reconstruct production sources from ordered patches, execute
 the actual display/HID methods, check bilinear pixels against an independent
 reference, exercise subrectangles and clipped/extreme coordinates, preserve
 padded source allocations, test malformed extents/formats and legacy crop,
-and validate touch suppression/releases. C11 AddressSanitizer and
+and validate touch suppression/releases. The actual allocator/free methods
+also cover zero initialization, allocation failure, idempotence, legacy mode
+without an allocation, and the service-size limit. C11 AddressSanitizer and
 UndefinedBehaviorSanitizer also exercise 200 deterministic cases with read-only
 source mappings immediately before guard pages. These checks do not establish
 device copy performance or physical camera alignment. The next device test

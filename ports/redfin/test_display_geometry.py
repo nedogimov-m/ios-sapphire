@@ -81,6 +81,18 @@ static unsigned sweet_fb_swaps_logged;
 static int sweet_console_muted;
 static uint32_t get32(const uint8_t *p,unsigned n){uint32_t v;memcpy(&v,p+n,4);return v;}
 static void put32(uint8_t *p,unsigned n,uint32_t v){memcpy(p+n,&v,4);}
+static unsigned workspace_allocations,workspace_frees,workspace_live,workspace_parent_frees;
+static bool workspace_allocation_fault;
+static void *IOMallocZeroData(size_t bytes){
+ assert(bytes==sizeof(struct redfin_display_workspace));workspace_allocations++;
+ if(workspace_allocation_fault)return NULL;
+ void *memory=calloc(1,bytes);if(memory)workspace_live++;return memory;
+}
+static void IOFreeData(void *memory,size_t bytes){
+ assert(memory && bytes==sizeof(struct redfin_display_workspace) && workspace_live);
+ workspace_frees++;workspace_live--;free(memory);
+}
+class IOMobileFramebuffer {public:void free(){workspace_parent_frees++;}};
 struct Memory {uint64_t bytes;uint64_t getLength(){return bytes;}};
 struct SweetSurface {
  uint32_t width,height,pixelFormat,bytesPerRow,bytesPerElement,elementWidth,elementHeight;
@@ -90,7 +102,7 @@ struct SweetSurface {
 };
 static SweetSurface *current_surface;
 static SweetSurface *sweet_surface_copy(uint32_t id){return id==1 ? current_surface : NULL;}
-class AppleCLCD {public:
+class AppleCLCD : public IOMobileFramebuffer {public:
  bool fConsShown=false,fConsolePaused=false,fRedfinCopyOnly=true;
  uint8_t *fFlip[2]={};void *fVig0=NULL,*fLock=(void *)1,*fRedfinCaptureLock=NULL;
  uint32_t fScanPhys=0,fBootSrc=0,fBootStride=4320;
@@ -98,7 +110,9 @@ class AppleCLCD {public:
  int fOffX=20,fOffY=48;uintptr_t fPixels=0;const uint8_t *fLastVA=NULL;
  SweetSurface *fSurface=NULL;uint64_t fRedfinFrames=0;
  struct redfin_display_geometry fRedfinFit={};
- struct redfin_display_workspace fRedfinFitWorkspace;
+ WORKSPACE_FIELD
+ bool allocateRedfinFitWorkspace(void);
+ void free(void);
  bool directPresent(const uint8_t *){return false;}
  uint8_t *backBuffer(){assert(0);return NULL;}
  void scanFrom(uint32_t,uint32_t){assert(0);}
@@ -106,6 +120,7 @@ class AppleCLCD {public:
  void captureRedfin(uint32_t,uint64_t){assert(0);}
  void present(const uint8_t *);
 };
+static_assert(sizeof(AppleCLCD)<=16*1024,"AppleCLCD must fit the OSObject allocation limit");
 static uint32_t redfin_capture_early(AppleCLCD *){return 0;}
 
 typedef int32_t IOFixed;
@@ -172,6 +187,7 @@ unsigned present(unsigned mode,uint8_t *pixels,const struct redfin_display_surfa
  const int32_t *a,const int32_t *b,unsigned fault){
  AppleCLCD *fb=new AppleCLCD();
  if(mode)assert(redfin_display_geometry_make(mode,1080,2340,1125,2436,&fb->fRedfinFit));
+ workspace_allocation_fault=false;assert(fb->allocateRedfinFitWorkspace());
  Memory memory={input->length};
  SweetSurface surface={input->width,input->height,input->format,input->stride,4,1,1,
   input->offset,input->pixels,&memory};
@@ -186,7 +202,21 @@ unsigned present(unsigned mode,uint8_t *pixels,const struct redfin_display_surfa
  uint8_t record[0x46c]={};put32(record,0x104,1);put32(record,0x54,1);
  for(unsigned i=0;i<4;i++){put32(record,0x64+i*4,(uint32_t)a[i]);put32(record,0xc4+i*4,(uint32_t)b[i]);}
  releases=locks=barriers=0;fb->present(record);
- unsigned result=releases|(locks<<8)|(barriers<<16);delete fb;current_surface=NULL;return result;
+ unsigned result=releases|(locks<<8)|(barriers<<16);fb->free();delete fb;current_surface=NULL;return result;
+}
+unsigned workspace_lifecycle(unsigned mode,bool fault){
+ assert(!workspace_live);workspace_allocations=workspace_frees=workspace_parent_frees=0;
+ workspace_allocation_fault=fault;AppleCLCD *fb=new AppleCLCD();
+ if(mode)assert(redfin_display_geometry_make(mode,1080,2340,1125,2436,&fb->fRedfinFit));
+ bool ready=fb->allocateRedfinFitWorkspace();unsigned result=ready | ((fb->fRedfinFitWorkspace!=NULL)<<1);
+ if(ready){
+  void *first=fb->fRedfinFitWorkspace;assert(fb->allocateRedfinFitWorkspace() && fb->fRedfinFitWorkspace==first);
+  if(first){const uint8_t *bytes=(const uint8_t *)first;
+   for(size_t i=0;i<sizeof(struct redfin_display_workspace);i++)assert(!bytes[i]);}
+ }
+ fb->free();assert(!fb->fRedfinFitWorkspace && !workspace_live);
+ result|=workspace_allocations<<8 | workspace_frees<<16 | workspace_parent_frees<<24;
+ delete fb;workspace_allocation_fault=false;return result;
 }
 void fill(uint32_t *p,unsigned width,unsigned height,unsigned stride){
  for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)p[y*stride/4+x]=0xff000000u|((x&255)<<16)|((y&255)<<8)|((x+y)&255);
@@ -289,9 +319,13 @@ class DisplayGeometryTests(unittest.TestCase):
         (directory / 'display-geometry.h').write_text(actual[HEADER])
         present = function(actual[FB], 'void\nAppleCLCD::present(')
         present = present.replace('__asm__ volatile("dsb sy" ::: "memory");', 'fake_barrier();')
+        workspace = function(actual[FB], 'bool\nAppleCLCD::allocateRedfinFitWorkspace(')
+        workspace += function(actual[FB], 'void\nAppleCLCD::free(')
+        declaration = re.search(r'^\s*struct redfin_display_workspace [^;]+;', actual[FB], re.MULTILINE).group()
+        stubs = STUBS.replace('WORKSPACE_FIELD', declaration.strip())
         touch = function(actual[HID], 'void\nSweetHIDTouch::touch(')
         source = directory / 'display.cpp'
-        source.write_text(STUBS + present + touch + WRAPPERS)
+        source.write_text(stubs + workspace + present + touch + WRAPPERS)
         library = directory / 'display.so'
         result = subprocess.run([compiler, '-std=c++17', '-O2', '-Wall', '-Wextra', '-Werror',
                                  '-Wno-unused-parameter', '-Wno-unused-function', '-Wno-misleading-indentation',
@@ -308,6 +342,8 @@ class DisplayGeometryTests(unittest.TestCase):
         cls.lib.draw.restype = C.c_bool
         cls.lib.present.argtypes = [C.c_uint, C.c_void_p, C.POINTER(Surface), C.POINTER(C.c_int32),
                                     C.POINTER(C.c_int32), C.c_uint]
+        cls.lib.workspace_lifecycle.argtypes = [C.c_uint, C.c_bool]
+        cls.lib.workspace_lifecycle.restype = C.c_uint
         cls.lib.fill.argtypes = [C.c_void_p, C.c_uint, C.c_uint, C.c_uint]
         cls.lib.touch.argtypes = [C.c_int, C.c_bool, C.c_int, C.c_int, C.c_uint]
         cls.lib.hid_value.argtypes = [C.c_uint, C.c_uint]
@@ -345,6 +381,15 @@ class DisplayGeometryTests(unittest.TestCase):
         self.assertGreaterEqual(g.y,136)
         self.assertLessEqual(g.x + g.w,1080)
         self.assertEqual(g.y + g.h,2340)
+
+    def test_separate_workspace_zero_allocation_failure_idempotence_and_free(self):
+        for mode in (0,1,2):
+            for fault in (False,True):
+                ready=mode==0 or not fault
+                present=mode!=0 and not fault
+                allocations=int(mode!=0)
+                expected=int(ready) | (int(present)<<1) | (allocations<<8) | (int(present)<<16) | (1<<24)
+                self.assertEqual(self.lib.workspace_lifecycle(mode,fault),expected)
 
     def test_real_full_canvas_present_is_bilinear_and_source_immutable(self):
         source, surface, output = self.buffers(offset=64)

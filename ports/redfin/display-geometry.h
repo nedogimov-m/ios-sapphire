@@ -28,7 +28,8 @@ struct redfin_display_geometry {
 	uint32_t x, y, w, h;
 };
 
-/* Heap-owned AppleCLCD member, never a 70-KiB kernel stack allocation. */
+/* Separately allocated scalar workspace. AppleCLCD holds only a pointer:
+ * OSObject's typed allocation limits the service object itself to 16 KiB. */
 struct redfin_display_workspace {
 	uint32_t column[1080];
 	uint16_t weight[1080];
