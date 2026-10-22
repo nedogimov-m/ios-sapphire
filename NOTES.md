@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN installation authorized, backup first — 2026-10-22
+
+The user answered “газик” to the explicit question about installing the prepared
+16-GiB iOS16.7.16 image into userdata and losing Android data. This authorizes
+that exact userdata overwrite. No backup preference was selected, so use a
+full offline userdata plus metadata backup with independent SHA verification
+before writing. Boot/vendor_boot/DTBO/GPT/modem/persist/EFS remain untouched.
+No installation has started yet. Next: coherent offline backup, installer
+--erase-userdata, read-only Apple-root temporary boot and recovery-only logs.
+
+Full offline backup running at `backup/redfin/pre-ios-full-20261022/` using
+`backup-userdata.py`: metadata16MiB verified first, userdata117155278848B
+streams next with exact count_bytes; independent full device/host SHA follows.
+Raw snapshots are0600; host writes fsync/F_FULLFSYNC before acceptance.
+Binary dd transport was independently verified on tmpfs with16MiB+13 bytes.
+Installer now accepts aged recovery only when its live return timer is stopped;
+all storage/GPT/timer proofs are repeated before the write.
+New Apple boot image `0f127227e2c3998985acc3c5b864255377069992a75d009da76f04c5f0508371` at
+`ports/redfin/out/ios-root-readonly-apple/redfin-xnu.img` adds the canonical
+Sapphire launchd policy args while keeping UFS read-only. Exact args:
+`debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=0 rootrw=0 sweetlog=0`. No kernel rebuild was required.
+
+
 ## REDFIN host-decrypted recovery logs and bootloader return — 2026-10-22
 
 Local kernel build `research/redfin-build/build-20261022-000821.log` succeeded;

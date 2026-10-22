@@ -255,6 +255,20 @@ python3 ports/redfin/decrypt-ramoops.py \
 The helper verifies metadata CRC, RSA unwrap and AES-GCM authentication before
 creating plaintext with mode `0600`. It refuses existing output files.
 
+Before installation, keep the phone in verified offline recovery with its return
+timer stopped and save a complete rollback copy:
+
+```sh
+python3 ports/redfin/backup-userdata.py \
+  --expected-gpt backup/redfin/sda-gpt-before.bin \
+  --out backup/redfin/pre-ios-full-20261022
+```
+
+This reads all userdata bytes, including the final partial MiB, and metadata
+containing Android encryption context. It flushes private host files to disk and
+requires matching host/device SHA256, unchanged GPT and unmounted filesystems.
+Only a successful `backup.json` establishes a verified backup.
+
 `install-root.py` defaults to checking the image, recovery state, both GPT headers
 and partition geometry. It records the exact proposed write. Writing requires
 the separate `--erase-userdata` flag and prior approval; it first stops and

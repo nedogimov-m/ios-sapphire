@@ -275,6 +275,44 @@ class InstallerTests(unittest.TestCase):
              patch.object(INSTALL.time, 'sleep'), self.assertRaises(ValueError):
             adb.stop_timer()
 
+    def test_aged_recovery_requires_stopped_timer_and_fresh_storage_evidence(self):
+        primary, backup, state = self.primary, self.backup, self.state
+        for failure in (None, 'running', 'unknown', 'restarted', 'new_mount', 'normal_android', 'new_gpt'):
+            calls = []
+            class Fake:
+                def state(self):
+                    calls.append('state')
+                    timer = 'running' if failure == 'running' else '' if failure == 'unknown' else 'stopped'
+                    result = {**state, 'timer': timer, 'uptime': '3600.0 4000.0'}
+                    if calls.count('state') > 1:
+                        if failure == 'restarted':
+                            result['timer'] = 'running'
+                        if failure == 'new_mount':
+                            result['mountinfo'] += '3 1 8:19 / /data rw - f2fs /dev/block/sda19 rw\n'
+                        if failure == 'normal_android':
+                            result['marker'] = ''
+                    return result
+                def gpt(self, unused):
+                    calls.append('gpt')
+                    if calls.count('state') > 1 and failure == 'new_gpt':
+                        return bytes(len(primary)), backup
+                    return primary, backup
+                def stop_timer(self):
+                    raise AssertionError('aged recovery must already have its timer stopped')
+                def stream(self, *unused):
+                    calls.append('WRITE_SIMULATED')
+                def readback(self):
+                    calls.append('readback')
+                    return 'a'*64
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                code, report, unused = self.run_fixture(Path(directory), erase=True, fake=Fake())
+                self.assertEqual(code, 0 if failure is None else 1)
+                self.assertEqual(report['disk_write_started'], failure is None)
+                self.assertEqual('WRITE_SIMULATED' in calls, failure is None)
+                if failure is None:
+                    self.assertTrue(report['timer_stopped'])
+                    self.assertEqual(calls[:4], ['state', 'gpt', 'state', 'gpt'])
+
     def test_adb_script_transport_uses_shell_v2_stdin_and_preserves_bytes_and_exit_status(self):
         adb = INSTALL.ADB.__new__(INSTALL.ADB)
         adb.serial = 'private-test-target'

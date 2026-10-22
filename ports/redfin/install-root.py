@@ -384,9 +384,12 @@ def main(argv=None):
         atomic(args.out/'evidence.json', {'state': state, 'primary_path': str((args.out/'gpt-before-primary.bin').resolve()),
                                         'backup_path': str((args.out/'gpt-before-backup.bin').resolve())})
         if args.erase_userdata:
-            require(0 <= float(state['uptime'].split()[0]) < 105,
-                    'start installation in a fresh recovery (<105 s uptime) to avoid queued timer reboot')
-            adb.stop_timer()
+            # A full userdata backup can take much longer than the return
+            # timer. Only its already-stopped live state permits that age.
+            if state.get('timer') != 'stopped':
+                require(0 <= float(state['uptime'].split()[0]) < 105,
+                        'start installation in a fresh recovery (<105 s uptime), or stop its timer first')
+                adb.stop_timer()
             report['timer_stopped'] = True
             state, primary, tail, current_backup = evidence(adb, expected, target)
             require(state['timer'] == 'stopped' and current_backup == backup, 'pre-write recovery/GPT changed')

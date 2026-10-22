@@ -192,6 +192,10 @@ def main():
             'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0')
         if a.ufs_root:
             command_line = command_line.replace('rd=md0', 'rd=ufsroot0')
+            # Match upstream tools/sapphire-boot.sh for real Apple launchd.
+            # In particular, root tweaks invalidate launchd.plist's Apple sig.
+            command_line += (' unentitled_ios_sim_launch=1 ignition_level=1 '
+                'wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1')
         if a.trace:
             command_line += ' -enable_kprintf_spam'
         if ufs_mode:
