@@ -9,9 +9,10 @@ backboardd makes IOKit calls. The opt-in CPU framebuffer publishes AppleCLCD;
 backboardd opens it, allocates an iPhone X canvas and submits swaps. The earlier
 SpringBoard `main CADisplay` trap is absent in that test. Authenticated RAM
 captures show the Apple logo and lock screen rendered into the framebuffer.
-Fresh physical panel scanout and the home screen remain unverified. Physical
-SEC touch identity53:45:37:91:00, runtime sensing and backboardd opening the
-native HID service are observed; physical contact delivery remains unverified. Timed
+The user confirms physical iOS display and touch-driven UI response. A fresh
+capture records 41 physical SEC contacts and native HID DOWN/UP events;
+the home screen and multitouch remain unverified. Rendering is very slow
+(about 1 FPS reported by the user). Timed
 process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
 The minimal MobileGestalt Wi-Fi identity fix is validated on the device.
@@ -20,7 +21,7 @@ SMEM and Adreno 620 clocks. Guarded DWC3 DMA, high-speed USB enumeration,
 ARP, nonce-bearing ICMP and fresh UDP kernel logs are observed through
 macOS's native CDC-ECM driver with the opt-in AArch64 context profile.
 USB is validated in bounded md0 tests; integration with UFS/GUI remains
-unverified. Physical touch delivery, radio and GPU acceleration are still
+unverified. Display performance, radio and GPU acceleration are still
 in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

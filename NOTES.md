@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN touch GUI V2: physical contacts and UI response confirmed — 2026-10-22
+
+Commit `5c8d54e` records working bounded USB networking/live logs. The next
+temporary image `ports/redfin/out/touch-gui-v2/redfin-xnu.img` SHA256
+`24cc3ba67afa63c7a5aa1a6b9d73f668c990f21aad96a07f099f66af05904678`
+uses the same kernel7da40f41/build214311; all touch overlays match V1.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinfb=1 sweetfb_noconsole=1 redfinscreen=1 redfinshutdown=120 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x5fcad830b66fc202 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Authenticated/image-matched `logs/redfin/touch-gui-v2/`: actual Apple
+launchd/backboardd/SpringBoard, HID service open, SEC ID/sensing/readback0,
+consumer synchronized. Touch worker stops normally: error0, batches1458,
+contacts41/releases41; 41 DOWN and 41 UP logs contain changing coordinates.
+These are accepted physical SEC contacts and native kernel HID dispatch;
+releases also include cleanup, so do not label all41 physical finger-UPs.
+The user separately confirms visible iOS and taps/swipes changing the UI,
+establishing actual panel output and end-to-end single-finger interaction.
+No panic; HFSX16GiB journaled, clean-unmounted/not-inconsistent; metadata
+primed and fastboot return verified. RAM screenshots are early captures,
+not direct proof of later UI response. Touch lease120s includes HID wait.
+User reports severe lag, roughly1FPS. This is an observation, not measured
+frame timing. Source defaults software display to5Hz; each full present
+copies10108800 bytes and rearms its timer afterward. Capture diagnostics
+account for ~455KiB of641KiB console; swap logs are already bounded.
+Next safe comparison: omit screenshots/kprintf spam, use existing kernel
+sweetfb_hz=10 via a validated builder option, keep touch/return/HFS profile.
+Do not claim GPU absence or copy cost alone explains1FPS without timings.
+USB with UFS/GUI, multitouch, Wi-Fi and GPU acceleration remain unproved.
+
 ## REDFIN USB V7: ARP, ICMP and fresh live kernel logs work — 2026-10-22
 
 Native macOS `usb-native.py` uses typed nonpromiscuous libpcap, exact
