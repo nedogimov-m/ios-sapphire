@@ -121,6 +121,21 @@ class BuildFlagTests(unittest.TestCase):
                       '--return-bootloader', '--touch-scan-probe'],
                      'USB bypass experiment must run separately from touch ID, direct claim and context observation')
 
+    def test_usb_aarch64_format_requires_a_separate_owned_bypass_experiment(self):
+        for flags in ([], ['--usb-probe'], ['--usb-context-probe'], ['--touch-events']):
+            with self.subTest(flags=flags):
+                self.refused(['--usb-aarch64-context', *flags],
+                             '--usb-aarch64-context requires --usb-bypass-probe or --usb-enumeration-probe')
+
+    def test_usb_aarch64_format_keeps_ram_root_and_return_requirements(self):
+        for probe in ('--usb-bypass-probe', '--usb-enumeration-probe'):
+            with self.subTest(probe=probe):
+                self.refused(['--kernel', '/missing-kernel', probe, '--usb-aarch64-context'],
+                             '--usb-bypass-probe requires --return-bootloader')
+                self.refused(['--kernel', '/missing-kernel', probe, '--usb-aarch64-context',
+                              '--return-bootloader', '--ufs-root'],
+                             '--usb-bypass-probe requires the initial RAM root without UFS')
+
 
 if __name__ == '__main__':
     unittest.main()

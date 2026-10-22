@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN USB V4: owned CBA2R format write accepted — 2026-10-22
+
+Commit `afe1fce` records exact EP0 TRB/SID evidence. New opt-in
+`--usb-aarch64-context` / `redfinusbrw64=1` selects five owned-bank stores:
+SCTLR0, CBA2R1, CBAR10000, S2CR, SMR. Native nonstatic NS AArch64 setup
+supports CBA2R.RW64 bit0; no other-bank, TLBI or FSR stores are introduced.
+Absent/0 keeps exact original four-store I/O. Strict textual 0/1 plus numeric
+cross-check rejects uint32 overflow, empty and bare flags; mode is frozen
+for the lease. Nine actual-C tests, independent source review and 16 CLI
+tests pass; full suite 546 PASS (`peripherals-host-tests-v21.txt`). Overlay
+SHA256 `6f5e166eb1ace3ed5bfbb70542be300f6b3bfaaa469e56af8705034b8ce7cfc7`.
+ARM64 build `research/redfin-build/build-20261022-203130.log` succeeds;
+kernel SHA256 `d551c8a7e85a61bec24cf70a2728f7e8fe3236e9656127401bfb9e60033c4f6d`.
+Image `ports/redfin/out/usb-enum-v4/redfin-xnu.img` SHA256
+`90b65a48cdc690f4808c9042d38be96fb49d7178c9df5f223837d6f1a4b4b6e0`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinspmi=1 redfinreturn=1 redfinbootid=0x48dcb371c471bb59`.
+Authenticated, image-matched `logs/redfin/usb-enum-v4/` reaches PID1 without
+panic, primes metadata and verifies fastboot. CB4/slot4 selected. SCTLR0
+and CBA2R1 writes/readbacks succeed. Before CBAR or any gadget/DMA operation,
+complete snapshot finds only own-bank FSR changing 0 -> 0x400, with SCTLR0,
+CBAR0, CBA2R1 exact. Guard quarantines with EAGAIN35 after two stores.
+This is a format-field transition, not FSR_FAULT; enumeration was not reached.
+Next: establish exact FSR FORMAT encoding from source/spec and account only
+for the documented owned CBA2R write's observed metadata transition; preserve
+every fault bit and all other state, with no FSR clear/mask/retry.
+
 ## REDFIN USB V3 identifies the exact failing EP0 TRB — 2026-10-22
 
 Commit `3dcfe47` records runtime sensing/HID startup and the V2 translation

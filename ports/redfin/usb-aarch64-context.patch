@@ -1,0 +1,152 @@
+diff --git a/bsd/dev/redfin_usb_owned.c b/bsd/dev/redfin_usb_owned.c
+--- a/bsd/dev/redfin_usb_owned.c
++++ b/bsd/dev/redfin_usb_owned.c
+@@ -444,12 +444,26 @@
+ static struct {
+  vm_offset_t cb;
+  uint64_t base,bytes,offset;
+- unsigned banks,shift,s2only,bank,stores;
++ unsigned banks,shift,s2only,bank,stores,steps;
+  bool lease;
+  bool reserved[RF_USB_CONTEXTS];
+  struct rf_usb_context_image expected;
+ } rf_usb_bypass;
+ 
++/* Opt-in format experiment. Zero means invalid; no boot arg grants ownership. */
++static unsigned
++rf_usb_bypass_target_steps(void)
++{
++ uint32_t rw64=0;
++ char text[3]={0};
++ if (!PE_parse_boot_argn("redfinusbrw64",&rw64,sizeof(rw64))) return 4;
++ /* XNU numeric parsing truncates to uint32_t; string form must be exact.
++  * Numeric cross-check also rejects a bare flag, whose integer copy is '1'. */
++ if (!PE_parse_boot_arg_str("redfinusbrw64",text,sizeof(text)) || text[1] ||
++     (text[0]!='0' && text[0]!='1') || rw64!=(uint32_t)(text[0]-'0')) return 0;
++ return 4+rw64;
++}
++
+ static bool
+ rf_usb_bypass_contract(uint64_t *base,uint64_t *bytes)
+ {
+@@ -457,6 +471,8 @@
+  const void *raw=NULL;
+  unsigned size=0;
+  uint32_t marker=0;
++ unsigned steps=rf_usb_bypass_target_steps();
++ if (!steps || (rf_usb_bypass.steps && steps!=rf_usb_bypass.steps)) return false;
+  if (!rf_usb_flag("redfinusbbypass",1,true) || !rf_usb_flag("redfinusbcontexts",0,false) ||
+      !rf_usb_policy() || !rf_usb_platform() || !rf_usb_context_route(base,bytes) ||
+      SecureDTLookupEntry(NULL,"/redfin-usb-route",&node)!=kSuccess ||
+@@ -473,7 +489,7 @@
+ rf_usb_bypass_report_fault(const struct rf_usb_context_image *current)
+ {
+  unsigned bank=rf_usb_bypass.bank;
+- if (!rf_usb_bypass.lease || rf_usb_bypass.stores!=4 || bank>=rf_usb_bypass.banks ||
++ if (!rf_usb_bypass.lease || rf_usb_bypass.stores!=rf_usb_bypass.steps || bank>=rf_usb_bypass.banks ||
+      bank>=RF_USB_CONTEXTS || current->bank[bank].fsr==0xffffffffu || !(current->bank[bank].fsr&RF_USB_CONTEXT_FAULT)) return;
+  unsigned offset=bank<<rf_usb_bypass.shift;
+  uint32_t fsr=rf_usb_rd(rf_usb_bypass.cb,offset+0x58);
+@@ -555,17 +571,26 @@
+ static int
+ rf_usb_bypass_store(unsigned step)
+ {
+- if (!rf_usb_bypass.lease || step!=rf_usb_bypass.stores || step>=4 ||
++ if (!rf_usb_bypass.lease || step!=rf_usb_bypass.stores ||
++     (rf_usb_bypass.steps!=4 && rf_usb_bypass.steps!=5) || step>=rf_usb_bypass.steps ||
+      rf_usb_bypass.bank>=rf_usb_bypass.banks ||
+      rf_usb_owner.slot>=rf_usb_bypass.expected.streams.groups) return EINVAL;
+  vm_offset_t base=rf_usb_owner.smmu;
+  unsigned offset=0,bank=rf_usb_bypass.bank,slot=rf_usb_owner.slot;
+  uint32_t value=0,observed=0;
+- switch (step) {
++ /* Native AArch64 context order: disable SCTLR, CBA2R, CBAR, then route.
++  * Only the owned, unreferenced CB changes; no TCR/TTBR/TLBI/FSR writes.
++  * Four-step mode retains the original order and exact MMIO sequence. */
++ unsigned operation=step;
++ if (rf_usb_bypass.steps==5) operation=step==1 ? 4 : step>1 ? step-1 : 0;
++ switch (operation) {
+  case 0:base=rf_usb_bypass.cb;offset=bank<<rf_usb_bypass.shift;value=0;break;
+  case 1:offset=0x1000+4*bank;value=0x10000;break;
+  case 2:offset=0xc00+4*slot;value=0x300|bank;break; /* pinned NSH, TYPE_TRANS/default privilege */
+  case 3:offset=0x800+4*slot;value=RF_USB_VALID|RF_USB_SID;break;
++ case 4:
++  if (rf_usb_bypass.expected.bank[bank].sctlr || rf_usb_bypass.expected.bank[bank].cba2r) return EINVAL;
++  offset=0x1800+4*bank;value=1;break; /* native CBA2R.RW64, VMID remains zero */
+  }
+  rf_usb_bypass.stores++;
+  rf_usb_owner.diag_stores++;
+@@ -581,11 +606,12 @@
+       EIO,step,bank,slot,offset,value,observed);
+   return EIO;
+  }
+- switch (step) {
++ switch (operation) {
+  case 0:rf_usb_bypass.expected.bank[bank].sctlr=value;break;
+  case 1:rf_usb_bypass.expected.bank[bank].cbar=value;break;
+  case 2:rf_usb_bypass.expected.streams.s2cr[slot]=value;break;
+  case 3:rf_usb_bypass.expected.streams.smr[slot]=value;break;
++ case 4:rf_usb_bypass.expected.bank[bank].cba2r=value;break;
+  }
+  return 0;
+ }
+@@ -601,6 +627,8 @@
+  /* Sticky consumption before mapping or writes; no release/retry, even prewrite. */
+  rf_usb_owner.state=RF_USB_QUARANTINED;
+  if (!rf_usb_bypass_contract(&base,&bytes)) { error=EPERM;goto failed; }
++ rf_usb_bypass.steps=rf_usb_bypass_target_steps();
++ if (!rf_usb_bypass.steps) { error=EPERM;goto failed; }
+  rf_usb_owner.gcc=ml_io_map(0x10c000,0x4000);
+  rf_usb_owner.dwc=ml_io_map(0xa60c000,0x4000);
+  if (!rf_usb_owner.gcc || !rf_usb_owner.dwc) { error=ENOMEM;goto failed; }
+@@ -656,13 +684,16 @@
+  rf_usb_bypass.bank=bank;rf_usb_bypass.lease=true;rf_usb_owner.slot=slot;
+  printf("REDFIN USB BYPASS: leased bank=%u slot=%u inherited-SCTLR=%#x first-fit NS allocator; no DMA\n",
+      bank,slot,image->bank[bank].sctlr);
+- for (unsigned step=0;step<4;step++) {
++ for (unsigned step=0;step<rf_usb_bypass.steps;step++) {
+   error=rf_usb_bypass_verify(true);if (error) goto failed;
+   error=rf_usb_bypass_store(step);if (error) goto failed;
+  }
+  error=rf_usb_bypass_verify(true);if (error) goto failed;
+  rf_usb_owner.state=RF_USB_CONTEXT_ROUTED;
+- printf("REDFIN USB BYPASS: retained SID=e0 slot=%u TRANS bank=%u SCTLR=0 CBAR=10000 stores=4; no gadget or DMA\n",slot,bank);
++ if (rf_usb_bypass.steps==5)
++  printf("REDFIN USB BYPASS: retained SID=e0 slot=%u TRANS bank=%u SCTLR=0 CBA2R=1 CBAR=10000 stores=5; format experiment, no gadget or DMA\n",slot,bank);
++ else
++  printf("REDFIN USB BYPASS: retained SID=e0 slot=%u TRANS bank=%u SCTLR=0 CBAR=10000 stores=4; no gadget or DMA\n",slot,bank);
+  goto done;
+ failed:
+  error=rf_usb_quarantine(error);
+diff --git a/bsd/dev/redfin_usb_start.c b/bsd/dev/redfin_usb_start.c
+--- a/bsd/dev/redfin_usb_start.c
++++ b/bsd/dev/redfin_usb_start.c
+@@ -64,11 +64,26 @@
+-static bool
++/* Same exact optional format argument contract as the retained owner. */
++static unsigned
++redfin_initial_usb_context_steps(void)
++{
++ uint32_t rw64=0;
++ char text[3]={0};
++ if (!PE_parse_boot_argn("redfinusbrw64",&rw64,sizeof(rw64))) return 4;
++ /* XNU numeric parsing truncates to uint32_t; string form must be exact.
++  * Numeric cross-check also rejects a bare flag, whose integer copy is '1'. */
++ if (!PE_parse_boot_arg_str("redfinusbrw64",text,sizeof(text)) || text[1] ||
++     (text[0]!='0' && text[0]!='1') || rw64!=(uint32_t)(text[0]-'0')) return 0;
++ return 4+rw64;
++}
++
++static bool
+ redfin_initial_usb_gates(void)
+ {
+  uint32_t contexts=0,bypass=0,gadget=0;
++ unsigned steps=redfin_initial_usb_context_steps();
+  (void)PE_parse_boot_argn("redfinusbcontexts",&contexts,sizeof(contexts));
+  (void)PE_parse_boot_argn("redfinusbbypass",&bypass,sizeof(bypass));
+  (void)PE_parse_boot_argn("redfinusbgadget",&gadget,sizeof(gadget));
+- if (contexts>1 || bypass>1 || gadget>1 || (contexts && bypass) || (gadget && !bypass)) return false;
++ if (!steps || (steps==5 && !bypass) || contexts>1 || bypass>1 || gadget>1 || (contexts && bypass) || (gadget && !bypass)) return false;
+  if (gadget && !redfin_initial_usb_arg("redfinusbsecs",30,false)) return false;
+  if (!redfin_usb_platform() || redfin_spmi_return_ready()!=1 ||
+      !redfin_initial_usb_arg("redfinusb",3,true) ||

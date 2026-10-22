@@ -176,6 +176,7 @@ def main(argv=None):
              'usb-gadget.patch', 'usb-start.patch', 'usb-context-probe.patch',
              'usb-bypass-context.patch', 'usb-enumeration-start.patch',
              'usb-bypass-diagnostic.patch', 'usb-fault-diagnostic.patch',
+             'usb-aarch64-context.patch',
              'peripheral-start.patch', 'touch-event-start.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)

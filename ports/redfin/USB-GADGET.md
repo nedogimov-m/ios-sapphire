@@ -119,6 +119,21 @@ change authorization or retry. Six actual-C tests check exact additional
 reads, unchanged stores/failure policy, other-bank/FORMAT exclusions, and
 unavailable or changing syndrome data.
 
+V3's authenticated capture identifies the exact EP0 TRB at `0x182e55000`
+as the fault address, with CBFRSYNRA `0xe0`, FSYNR0 `1` and FSR `2`.
+The controller faults on a USB read above 4 GiB. The cause remains unproved.
+
+The separate `--usb-aarch64-context` option requires a bypass or enumeration
+probe and emits `redfinusbrw64=1`. `usb-aarch64-context.patch` retains the
+original four-store sequence when absent or zero. Opting in uses the native
+AArch64 format sequence on the leased, unreferenced bank only: SCTLR=0,
+CBA2R=1, CBAR=0x10000, S2CR, then SMR. Each write retains exact readback and
+complete fresh state proof; the format is frozen for that lease. The flag
+accepts only exact textual `0`/`1` with a numeric cross-check, avoiding XNU's
+32-bit numeric truncation and bare-flag interpretation. No TLB or other-bank
+state is changed. This experiment tests the high-address/format hypothesis;
+it does not establish its cause or successful enumeration before a new capture.
+
 Host validation:
 
 ```
