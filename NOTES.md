@@ -1,5 +1,21 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN touch GUI V3: display cadence comparison started — 2026-10-22
+
+Commit `414929b` records physical touch/UI confirmation and reported1FPS.
+Builder now exposes optional --display-hz1..10 with --display required;
+default boot args/manifest shape stay unchanged. 20 CLI checks PASS
+(`logs/redfin/display-hz-host-tests-v1.txt`), plus actual generated manifest
+assertions for cadence10, screenshots/spam absent, touch/return/shutdown
+preserved. No kernel changes; same kernel7da40f41/build214311.
+Image `ports/redfin/out/touch-gui-v3/redfin-xnu.img` SHA256
+`41546f6110a9aab53a43c75934788c17287f843312c39d8af10a03d0ac431590`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=10 redfinshutdown=120 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x729677d55a2ce393 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Temporary comparison is running, with automatic recovery/return; no flash.
+User feedback and authenticated device results are still pending. This
+changes three debug/cadence settings together and cannot isolate a single
+performance cause. Requested10Hz is software cadence, not measured FPS.
+
 ## REDFIN touch GUI V2: physical contacts and UI response confirmed — 2026-10-22
 
 Commit `5c8d54e` records working bounded USB networking/live logs. The next

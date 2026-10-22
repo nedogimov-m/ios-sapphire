@@ -19,6 +19,15 @@ class BuildFlagTests(unittest.TestCase):
         self.refused(['--display', '--kernel', '/missing-kernel'],
                      '--display requires --kernel, --apple-adt and --splash')
 
+    def test_display_cadence_needs_explicit_display(self):
+        self.refused(['--display-hz', '10'], '--display-hz requires --display')
+
+    def test_display_cadence_is_bounded(self):
+        for value in ('-1', '0', '11'):
+            with self.subTest(value=value):
+                self.refused(['--display', '--display-hz', value],
+                             '--display-hz must be in [1, 10]')
+
     def test_shutdown_needs_recovery_return(self):
         self.refused(['--kernel', '/missing-kernel', '--ufs-root', '--shutdown-seconds', '120'],
                      '--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')

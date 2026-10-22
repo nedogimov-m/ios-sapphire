@@ -10,10 +10,12 @@ of userdata. Bounded UFS read/write and timed clean shutdown are observed;
 static Darwin PID1 console I/O, getpid=1 and heartbeats are also verified.
 The opt-in AppleCLCD CPU-copy backend produces CRC-checked framebuffer
 captures of the Apple logo and lock screen. The MobileGestalt Wi-Fi identity
-fix is validated on the device. Fresh physical panel scanout and the home
-screen remain unverified. Physical touch, USB and display acceleration remain
-unported. The overlay disables inherited Xiaomi hardware drivers and supports
-one CPU.
+fix is validated on the device. The user confirms visible iOS and UI response
+to physical taps/swipes; a fresh log records 41 SEC contacts and HID dispatch.
+Bounded md0 USB tests pass ARP, ICMP and fresh UDP logging through native
+macOS CDC-ECM. USB with UFS/GUI, multitouch, the home screen, Wi-Fi and GPU
+acceleration remain unverified. The overlay disables inherited Xiaomi
+hardware drivers and supports one CPU; rendering remains slow.
 
 `--touch-probe --usb-probe --wifi-probe --gpu-probe` adds read-only peripheral
 observers. Common startup requires confirmed PMIC/IMEM bootloader return
@@ -57,8 +59,10 @@ The opt-in `--display --splash` build enables AppleCLCD with a CPU-copy
 backend for the observed Redfin ABL buffer: 1080×2340, 4320-byte pitch, BGRA,
 inside the live continuous-splash reservation. It requires `--apple-adt` and
 does not initialize the inherited Xiaomi display, modem or GPU controllers.
-The iOS canvas is 1125×2436; copies default to 5 Hz. Frame-copy log entries
-confirm software activity; visible panel refresh still needs observation.
+The iOS canvas is 1125×2436; copies default to 5 Hz. `--display-hz 1..10`
+overrides the software copy cadence and requires `--display`. Copy cost and
+rendering add latency, so this does not guarantee the requested animation FPS.
+`--touch-events` enables the validated SEC/HID path for UFS/CPU-display tests.
 
 `--capture-screen` also requires `--display` and enables up to three 120×260 RGB
 thumbnails in the authenticated RAM log, only after a positive CPU copy. It

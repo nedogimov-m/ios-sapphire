@@ -58,6 +58,7 @@ def main():
     p.add_argument('--trace', action='store_true', help='enable verbose kernel kprintf tracing')
     p.add_argument('--trace-syscalls', action='store_true', help='enable PID1 syscall and pathname diagnostics')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
+    p.add_argument('--display-hz', type=int, help='software display copy cadence, 1..10 Hz; requires --display; omitted keeps kernel default')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
     p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
@@ -91,6 +92,11 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.display_hz is not None:
+        if not 1 <= a.display_hz <= 10:
+            p.error('--display-hz must be in [1, 10]')
+        if not a.display:
+            p.error('--display-hz requires --display')
     if a.usb_live_log and not a.usb_network_probe:
         p.error('--usb-live-log requires --usb-network-probe')
     if a.usb_network_probe:
@@ -301,6 +307,8 @@ def main():
             command_line += ' redfintrace=1'
         if a.display:
             command_line += ' redfinfb=1 sweetfb_noconsole=1'
+        if a.display_hz is not None:
+            command_line += f' sweetfb_hz={a.display_hz}'
         if a.capture_screen:
             command_line += ' redfinscreen=1'
         if a.shutdown_seconds:
@@ -402,6 +410,8 @@ def main():
         manifest.update(boot_args=command_line, root_device='ufsroot0' if a.ufs_root else 'md0',
                         kernel={'path': str(a.kernel.resolve()),
                                 'sha256': hashlib.sha256(a.kernel.read_bytes()).hexdigest()})
+    if a.display_hz is not None:
+        manifest['display_hz'] = a.display_hz
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')
     print(f'{out}/init: static arm64 Darwin PID1')
