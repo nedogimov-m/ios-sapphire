@@ -193,6 +193,36 @@ every access. A lost lease or failed MMIO stops access immediately; keep
 reset held and return through the bounded platform-reset path. The 19.2MHz
 counter is a crystal/bus liveness observation, not proof of the GMU core rate.
 
+The callable leaf is [`include/redfin_gmu_tcm.h`](include/redfin_gmu_tcm.h):
+`rf_gt_run(ops, chip, report)`. The adapter provides guarded ordered 32-bit
+MMIO and a bounded busy wait. Callback units 0/1/2 mean GCC/GPUCC/GMU. It
+rejects an enabled inherited GMU/GX, mismatched PLL/GCC handoff, pending RCG
+configuration, nonzero firmware/HFI state or ambiguous reset. After enabling
+only native bus/crystal/AHB/SMMU clock votes, it examines GMU idle CSRs while
+the GMU core clock remains gated; reset 1 precedes the 200MHz core clock.
+It then requires 15,360–23,040 fresh crystal ticks over the adapter's 1ms
+busy wait before the two-word TCM test. Unsigned subtraction handles wrap.
+
+This leaf restores the two DTCM words and the RCG's original force-enable
+bit. It holds added clock votes and CM3 reset until the caller's bounded
+platform reset. It never restores/reset-releases an ambiguous inherited
+processor or guesses a previous ARC floor. An error or lost lease terminates
+MMIO immediately; `dtcm_dirty` distinguishes an attempted write from proved
+restoration. A semantic pattern mismatch is reported after guarded restore
+and readback; a callback failure cannot trigger an unsafe cleanup sequence.
+`reset_held` records the last successful assertion/readback, not a new proof
+after a later ownership failure. No kernel/ADT adapter is enabled here.
+
+Run `python3 -m unittest ports/redfin/test_gmu_tcm.py`. The 17 host tests
+include each individual lost-lease/read-error/committed-write-error edge of
+the complete real leaf, source/owner/rate changes, bounded stuck polls,
+counter wrap, pattern/restore corruption, preserved unrelated clock votes,
+and the explicit no-GX/no-SMMU/no-firmware-start MMIO allowlist. The first
+GMU CSR access remains a Redfin hardware accessibility experiment: the native
+AHB branch uses a 10us completion delay, and no AOP QDSS/APB register is
+programmed by this reset-held stage. Complete native cold boot remains a
+separate boundary.
+
 ## Remaining full-boot and secure-GPU contracts
 
 The native A620 path programs the GPU PDC at `0x0b290000`/`0x0b490000`
