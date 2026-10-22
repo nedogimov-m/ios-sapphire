@@ -1,13 +1,14 @@
 # Redfin USB handoff probe
 
 `usb-probe.patch` adds a separate `bsd/dev/redfin_usb.c` and calls it from
-`IOKitBSDInit.cpp`, before the existing Redfin UFS probe. It also prevents
+`IOKitBSDInit.cpp`, after verified bootloader return and before UFS. It also prevents
 `sweet_usb_probe()` from accessing Sapphire registers on a Redfin ADT.
-The builder does not apply this overlay automatically.
+The Redfin builder applies it with `usb-route.patch`; both default off.
 
-Only `redfinusb=1` enables the snapshot. The default and every other value
-perform no MMIO. The ADT root must contain the exact compatible strings
-`google,redfin` and `qcom,sm7250`. No ADT change is needed.
+`redfinusb=1` enables the core snapshot; `redfinusb=2` additionally enables
+the read-only SMMU route observer. Other values perform no MMIO. The ADT root must contain the exact compatible strings
+`google,redfin` and `qcom,sm7250`. Mode 2 also requires a validated
+`/redfin-usb-route` contract generated from the live FDT by `build.py`.
 
 The probe reads GCC first. It requires GDSC power-on with software collapse
 clear, deasserted core reset, and enabled/nonhalted master, config-NoC,
@@ -75,6 +76,23 @@ mode, `AWIDTH=64`, `DCTL=0x10f00000` (RUN_STOP clear), event-ring address
 passed the observer gates. This is a useful warm handoff, with no DMA or
 PHY writes. Halt/quiescence, PHY/VBUS state and the SMMU route still need
 verification before a CDC-ECM reset/start sequence can be enabled.
+
+The V4 RAM diagnostic read the standard SMMU configuration successfully:
+`ID0=0x4c017e51`, `ID1=0x6000003e`, `ID2=0x5111`, `CR0=0x2c0406`.
+All 81 SMRs were stable; none matched SID `0xe0`. `CLIENTPD=0` and
+`USFCFG=1` select an unmatched-stream fault, so the inherited ring address
+does not establish reachability. No context bank or table was read. The
+observer requires halted DWC3 and its masked 4 KiB event ring, rechecks
+every SMR and each matching S2CR, and never writes SMMU registers.
+
+`ID2` advertises 4 KiB/64 KiB table support, without 16 KiB support. A
+native USB backend needs its own proven stream route and DMA memory; XNU's
+16 KiB allocations can contain separate 4 KiB tables. Globally clearing
+`USFCFG` would also change policy for other devices and is not an ownership
+mechanism. With no match, selecting or walking an arbitrary context bank
+cannot supply the missing route. V4 evidence is AES-GCM authenticated;
+its collector did not capture a pre-boot baseline, so freshness alone was
+not established by authentication. Local capture: `logs/redfin/peripherals-v4-ram/`.
 
 Validation: `python3 -m unittest ports/redfin/test_usb_probe.py -v` executes
 the actual added C against fake MMIO, checks every clock mask, platform/mode

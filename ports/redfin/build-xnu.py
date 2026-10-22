@@ -208,7 +208,9 @@ def main(argv=None):
                                          'muted-log.patch', 'screen-capture.patch',
                                          'final-frame.patch', 'quiet-display.patch',
                                          'userspace-stacks.patch', 'touch.patch',
-                                         'usb-probe.patch', 'gpu-probe.patch', 'wifi-probe.patch', 'peripheral-start.patch'), 21):
+                                         'usb-probe.patch', 'gpu-probe.patch', 'wifi-probe.patch',
+                                         'rpmh-probe.patch', 'usb-route.patch', 'touch-spi.patch',
+                                         'touch-setup.patch', 'peripheral-start.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

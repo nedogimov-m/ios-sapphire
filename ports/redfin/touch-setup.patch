@@ -1,0 +1,253 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -109,2 +109,3 @@
++bsd/dev/redfin_touch_setup.c			standard
+ bsd/dev/redfin_touch_spi.c			standard
+ bsd/dev/redfin_touch.c			standard
+diff --git a/bsd/dev/redfin_touch_setup.c b/bsd/dev/redfin_touch_setup.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_touch_setup.c
+@@ -0,0 +1,241 @@
++/* DRAFT cold Redfin SEC setup, not wired to startup. No firmware/flash/NVM.
++ * Requires this boot's rail-ready proof and exclusive host ownership from caller.
++ * SEC source: msm-modules/sec_touch 0701b191882dc408104ad8af9e2f5eb2bf34c297,
++ * sec_ts.c parse_dt GPIO35 low/GPIO8 high and power-on delay70ms. We only
++ * release an already-low reset, never generate its high/low/high reset pulse.
++ * Host/pins: kernel/msm 500b3a2059c1eec0fec08ec56add06320ea901a8,
++ * gcc-lito.c, clk-{branch,rcg2}.c, pinctrl-{lito,msm}.c,
++ * drivers/platform/msm/qcom-geni-se.c, drivers/spi/spi-geni-qcom.c.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern int redfin_touch_spi_probe(vm_offset_t, unsigned, bool);
++int redfin_touch_setup(bool rail_ready, bool host_exclusive);
++
++struct redfin_setup_pin { vm_offset_t page; unsigned offset; };
++struct redfin_setup {
++	vm_offset_t gcc, se, gic;
++	struct redfin_setup_pin pins[7]; /* reset8, IRQ9, switch35, SPI42..45 */
++};
++static bool redfin_setup_attempted;
++static uint32_t
++redfin_setup_rd(vm_offset_t base, unsigned offset)
++{
++	uint32_t value = *(volatile const uint32_t *)(base + offset);
++	__asm__ volatile("dmb oshld" ::: "memory");
++	return value;
++}
++static void
++redfin_setup_wr(vm_offset_t base, unsigned offset, uint32_t value)
++{
++	__asm__ volatile("dmb oshst" ::: "memory");
++	*(volatile uint32_t *)(base + offset) = value;
++	__asm__ volatile("dsb osh" ::: "memory");
++}
++static void
++redfin_setup_update(vm_offset_t base, unsigned offset, uint32_t mask, uint32_t value)
++{
++	redfin_setup_wr(base, offset, (redfin_setup_rd(base, offset) & ~mask) | (value & mask));
++}
++static int
++redfin_setup_cells(DTEntry node, const char *name, const uint32_t *wanted, unsigned count)
++{
++	const uint32_t *p = NULL;
++	unsigned n = 0;
++	if (SecureDTGetProperty(node, name, (const void **)&p, &n) != kSuccess || !p || n != count * 4) return 0;
++	for (unsigned i = 0; i < count; i++) if (p[i] != wanted[i]) return 0;
++	return 1;
++}
++static int
++redfin_setup_map(struct redfin_setup *s)
++{
++	DTEntry node;
++	const uint64_t *r = NULL;
++	const char *compatible = NULL;
++	const char expected[] = "redfin,sec-touch";
++	const uint32_t mode[] = {3}, cs[] = {0}, hz[] = {10000000};
++	const uint32_t gpio[] = {8,9,35}, size[] = {1080,2340};
++	unsigned n = 0;
++	if (SecureDTLookupEntry(NULL, "/redfin-touch", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "compatible", (const void **)&compatible, &n) != kSuccess ||
++	    !compatible || n != sizeof(expected) || memcmp(compatible, expected, sizeof(expected)) ||
++	    SecureDTGetProperty(node, "reg", (const void **)&r, &n) != kSuccess || !r || n != 48 ||
++	    r[0] != 0x100000 || r[1] != 0x1f0000 || r[2] != 0x880000 || r[3] != 0x4000 ||
++	    r[4] != 0xf000000 || r[5] != 0x1000000 ||
++	    !redfin_setup_cells(node,"spi-mode",mode,1) || !redfin_setup_cells(node,"chip-select",cs,1) ||
++	    !redfin_setup_cells(node,"spi-max-frequency",hz,1) ||
++	    !redfin_setup_cells(node,"touch-gpios",gpio,3) || !redfin_setup_cells(node,"touch-size",size,2)) return ENXIO;
++	s->gcc = ml_io_map(r[0],r[1]);
++	s->se = ml_io_map(r[2],r[3]); /* Mapping does not read the still-gated SE. */
++	s->gic = ml_io_map(0x17a00000,0x10000);
++	vm_offset_t pages[4];
++	const uint64_t physical[] = {0xf508000,0xf920000,0xf928000,0xf92c000};
++	for (unsigned i = 0; i < 4; i++) {
++		pages[i] = ml_io_map(physical[i],0x4000);
++		if (!pages[i]) return ENOMEM;
++	}
++	if (!s->gcc || !s->se || !s->gic) return ENOMEM;
++	const unsigned page_index[] = {0,0,1,2,2,3,3};
++	const unsigned offset[] = {0,0x1000,0x3000,0x2000,0x3000,0,0x1000};
++	for (unsigned i = 0; i < 7; i++) s->pins[i] = (struct redfin_setup_pin){pages[page_index[i]],offset[i]};
++	return 0;
++}
++static bool
++redfin_setup_gic_masked(struct redfin_setup *s)
++{
++	return !(redfin_setup_rd(s->gic,0x14c) & (1u << 25)); /* INTID633, ISENABLER19. */
++}
++static int
++redfin_setup_clocks(struct redfin_setup *s)
++{
++	/* Source order: core votes, mAHB, sAHB, SE clock. Do NOT read SE with only AHB on. */
++	const uint32_t votes[] = {0x300,0x40,0x80,0x400};
++	for (unsigned i = 0; i < 4; i++) redfin_setup_update(s->gcc,0x52008,votes[i],votes[i]);
++	for (unsigned us = 0; us < 200; us++) {
++		uint32_t master = redfin_setup_rd(s->gcc,0x17004), slave = redfin_setup_rd(s->gcc,0x17008);
++		uint32_t serial = redfin_setup_rd(s->gcc,0x1700c);
++		uint32_t core = redfin_setup_rd(s->gcc,0x23000), core2x = redfin_setup_rd(s->gcc,0x23008);
++		/* Linux skips the S_AHB halt poll when its hardware clock gating bit1 is set. */
++		if (!((master | serial | core | core2x) & 0x80000000u) &&
++		    (!(slave & 0x80000000u) || (slave & 2))) return 0;
++		delay(1);
++	}
++	return ETIMEDOUT;
++}
++static int
++redfin_setup_idle(struct redfin_setup *s)
++{
++	if ((redfin_setup_rd(s->se,0x40) & 0x1001) ||
++	    (redfin_setup_rd(s->se,0x800) & 0xfffffff) ||
++	    (redfin_setup_rd(s->se,0x804) & 0x1ffffff) ||
++	    (redfin_setup_rd(s->se,0x258) & 1) || redfin_setup_rd(s->se,0xe18)) return EBUSY;
++	if (((redfin_setup_rd(s->se,0x68) >> 8) & 255) != 1 || (redfin_setup_rd(s->se,0x64) & 1) ||
++	    (redfin_setup_rd(s->se,0xe24) & 0x3f3f0000u) != ((32u << 24) | (16u << 16)) ||
++	    (redfin_setup_rd(s->se,0xe28) & 0x3f3f0000u) != ((32u << 24) | (16u << 16))) return ENOTSUP;
++	return 0;
++}
++static uint32_t
++redfin_setup_pin_value(uint32_t before, unsigned function, unsigned drive, bool output)
++{
++	uint32_t value = (before & ~0x3ffu) | (function << 2) | (drive << 6) | (output ? 0x200u : 0);
++	if (before & (1u << 11)) value |= 1u << 12; /* msm_pinmux_set_mux eGPIO rule. */
++	return value; /* bias-disable, preserve unrelated bits. */
++}
++static void
++redfin_setup_pin_config(struct redfin_setup_pin *p, unsigned function, unsigned drive, bool output)
++{
++	redfin_setup_wr(p->page,p->offset,redfin_setup_pin_value(redfin_setup_rd(p->page,p->offset),function,drive,output));
++}
++static int
++redfin_setup_xo(struct redfin_setup *s)
++{
++	/* Own idle host only: disable the generated serial clock before rate switching. */
++	redfin_setup_update(s->se,0x48,1,0);
++	redfin_setup_update(s->gcc,0x17024,1,0); /* Disable DFS, preserve other fields. */
++	if (redfin_setup_rd(s->gcc,0x17024) & 1) return EIO;
++	redfin_setup_update(s->gcc,0x17014,0x10371f,1); /* XO source0, HID1, integer, SW control. */
++	redfin_setup_update(s->gcc,0x17010,1,1);
++	for (unsigned us = 0; us < 500; us++) {
++		if (!(redfin_setup_rd(s->gcc,0x17010) & 1)) {
++			if ((redfin_setup_rd(s->gcc,0x17014) & 0x10371f) != 1 ||
++			    (redfin_setup_rd(s->gcc,0x17024) & 1)) return EIO;
++			redfin_setup_wr(s->se,0x7c,0);
++			redfin_setup_wr(s->se,0x48,0x141); /* 19.2MHz /20 =960kHz (maximum wire clock). */
++			return 0;
++		}
++		delay(1);
++	}
++	return ETIMEDOUT;
++}
++int
++redfin_touch_setup(bool rail_ready, bool host_exclusive)
++{
++	uint32_t mode = 0, setup = 0;
++	(void)PE_parse_boot_argn("redfintouch",&mode,sizeof(mode));
++	(void)PE_parse_boot_argn("redfintouchsetup",&setup,sizeof(setup));
++	if (mode != 2 || setup != 1 || !rail_ready || !host_exclusive || redfin_setup_attempted) return ENOTSUP;
++	redfin_setup_attempted = true;
++	struct redfin_setup s = {0};
++	int error = redfin_setup_map(&s);
++	if (error) return error;
++	if (!redfin_setup_gic_masked(&s)) return EBUSY;
++	/* Cold path only: no AP SE0 vote, no reset output/high, AP bus already physically low.
++	 * Do not seize a live SLPI route or pulse a running controller's reset. */
++	if (redfin_setup_rd(s.gcc,0x52008) & 0x400) return EBUSY;
++	for (unsigned i = 0; i < 7; i++) {
++		uint32_t cfg = redfin_setup_rd(s.pins[i].page,s.pins[i].offset);
++		unsigned mux = (cfg >> 2) & 15;
++		if ((i < 3 && (mux || (cfg & 0x200))) ||
++		    (i >= 3 && (mux > 1 || (!mux && (cfg & 0x200))))) return EBUSY;
++	}
++	if ((redfin_setup_rd(s.pins[0].page,s.pins[0].offset+4) & 1) ||
++	    (redfin_setup_rd(s.pins[2].page,s.pins[2].offset+4) & 1)) return EBUSY;
++	printf("REDFIN TOUCH SETUP: phase=clock-votes\n");
++	error = redfin_setup_clocks(&s);
++	if (error) return error;
++	printf("REDFIN TOUCH SETUP: phase=SE-idle-check\n");
++	error = redfin_setup_idle(&s); /* Foreign active/DMA/GSI => stop, never cancel/reset it. */
++	if (error || !redfin_setup_gic_masked(&s)) return error ? error : EBUSY;
++	redfin_setup_wr(s.se,0xe1c,0);
++	redfin_setup_wr(s.se,0x614,0);
++	redfin_setup_wr(s.se,0x644,0);
++	printf("REDFIN TOUCH SETUP: phase=XO-config\n");
++	error = redfin_setup_xo(&s);
++	if (error) return error;
++	if (redfin_setup_rd(s.gcc,0x1700c) & 0x80000000u) return EIO;
++	/* Linux GENI init and SPI mode3; no protocol/firmware RAM writes. */
++	printf("REDFIN TOUCH SETUP: phase=SPI-host-config\n");
++	redfin_setup_update(s.se,0x28,0x7f,0x7f);
++	redfin_setup_update(s.se,0xe30,0xf,0xf);
++	redfin_setup_update(s.se,0x224,1,1);
++	redfin_setup_update(s.se,0x230,4,4);
++	redfin_setup_update(s.se,0x22c,3,0);
++	redfin_setup_wr(s.se,0x250,0);
++	redfin_setup_update(s.se,0x24c,15,0);
++	redfin_setup_update(s.se,0x25c,1,0);
++	redfin_setup_wr(s.se,0x268,4);
++	redfin_setup_wr(s.se,0x278,0);
++	redfin_setup_wr(s.se,0x260,0x7f8fe);
++	redfin_setup_wr(s.se,0x264,0xffefe);
++	redfin_setup_wr(s.se,0x284,0x7f8fe);
++	redfin_setup_wr(s.se,0x288,0xffefe);
++	redfin_setup_wr(s.se,0x254,0);
++	redfin_setup_wr(s.se,0x24,0x7f);
++	redfin_setup_wr(s.se,0x20,1); /* GENI default IO levels, not an IC reset. */
++	redfin_setup_wr(s.se,0x618,0xffffffff);
++	redfin_setup_wr(s.se,0x648,0xffffffff);
++	/* AP bus select: LOW latch before OE; IRQ stays an input. */
++	printf("REDFIN TOUCH SETUP: phase=TLMM-config\n");
++	redfin_setup_update(s.pins[2].page,s.pins[2].offset+4,2,0);
++	redfin_setup_pin_config(&s.pins[2],0,0,true);
++	redfin_setup_pin_config(&s.pins[1],0,0,false);
++	for (unsigned i = 3; i < 7; i++) {
++		/* SPI pinctrl does not change GPIO OE; peripheral mux owns direction. */
++		bool oe = (redfin_setup_rd(s.pins[i].page,s.pins[i].offset) & 0x200) != 0;
++		redfin_setup_pin_config(&s.pins[i],1,2,oe);
++	}
++	if (redfin_setup_rd(s.pins[2].page,s.pins[2].offset+4) & 1) return EIO;
++	/* Single release of the observed already-low reset, no low write/pulse. */
++	printf("REDFIN TOUCH SETUP: phase=reset-release\n");
++	redfin_setup_update(s.pins[0].page,s.pins[0].offset+4,2,2);
++	redfin_setup_pin_config(&s.pins[0],0,0,true);
++	bool released = false;
++	for (unsigned us = 0; us < 1000; us++) {
++		if (redfin_setup_rd(s.pins[0].page,s.pins[0].offset+4) & 1) { released = true; break; }
++		delay(1);
++	}
++	if (!released) return EIO;
++	delay(70000); /* SEC source power-on readiness delay; bounded, no event consumption. */
++	if (!redfin_setup_gic_masked(&s)) return EBUSY;
++	error = redfin_setup_idle(&s);
++	if (error) return error;
++	printf("REDFIN TOUCH SETUP: XO19.2MHz/div20, mode3, AP bus, reset released; ID only\n");
++	return redfin_touch_spi_probe(s.se,960000,true);
++}
++#endif

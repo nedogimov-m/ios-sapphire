@@ -49,8 +49,15 @@ def xnu_return_proof(image):
             or [token for token in tokens if token.startswith("redfinreturn=")] != ["redfinreturn=1"]
             or [token for token in tokens if token.startswith("cpus=")] != ["cpus=1"]):
         raise ValueError("XNU recovery cycle requires a matching image manifest with redfinreturn=1 and cpus=1")
-    return {"sha256": checksum, "pmic_bootloader_return": True, "cpus": 1,
-            "root_device": manifest.get("root_device")}
+    proof = {"sha256": checksum, "pmic_bootloader_return": True, "cpus": 1,
+             "root_device": manifest.get("root_device")}
+    boot_ids = [token for token in tokens if token.startswith("redfinbootid")]
+    if boot_ids:
+        match = re.fullmatch(r"redfinbootid=0x([0-9a-f]{16})", boot_ids[0])
+        if len(boot_ids) != 1 or match is None or int(match[1], 16) == 0:
+            raise ValueError("redfinbootid requires exactly one nonzero 16-digit lowercase hexadecimal token")
+        proof["boot_id"] = match[1]
+    return proof
 
 
 def verify_recovery_mounts(data):
@@ -73,6 +80,31 @@ def extract_xnu(data):
         return b""
     end = data.find(b"--- BOOT HISTORY", start)
     return data[start:end if end >= 0 else len(data)]
+
+
+def boot_id_freshness(data, expected, authenticated=False):
+    """Bind one runtime marker to the authenticated capture, never to pstore."""
+    markers = re.findall(rb"^REDFIN BOOT ID:[^\r\n]*\r*$", extract_xnu(data), re.MULTILINE)
+    observed = []
+    for marker in markers:
+        match = re.fullmatch(rb"REDFIN BOOT ID: ([0-9a-f]{16})\r*", marker)
+        if match is not None and int(match[1], 16) != 0:
+            observed.append(match[1].decode("ascii"))
+    if not authenticated:
+        status = "unauthenticated"
+    elif not markers:
+        status = "missing"
+    elif len(markers) != 1:
+        status = "duplicate"
+    elif not observed:
+        status = "invalid"
+    elif observed[0] != expected:
+        status = "mismatch"
+    else:
+        status = "matched"
+    return {"status": "boot-id-" + status, "expected_boot_id": expected,
+            "capture_authenticated": bool(authenticated), "marker_count": len(markers),
+            "observed_boot_ids": observed[:8]}
 
 
 def userspace_evidence(data):
@@ -440,6 +472,10 @@ class Cycle:
         artifacts = self.raw_ramoops() if recovery or self.args.raw_ramoops else []
         if self.args.ramoops_key_dir:
             artifacts = self.keyed_ramoops(artifacts)
+        authenticated = self.manifest.get("ramoops_decryption", {}).get("status") == "authenticated"
+        # Keep the authenticated bytes separate: a later helper/pstore capture
+        # must not inherit the decryption result or supply its nonce/PID1 proof.
+        authenticated_capture = b"\n".join(data for _, data in artifacts) if authenticated else b""
         if self.args.ramoops_helper:
             remote = "/tmp/redfin-readramoops" if recovery else "/data/local/tmp/redfin-readramoops"
             code, _, _ = self.adb("push", str(self.args.ramoops_helper), remote)
@@ -470,14 +506,21 @@ class Cycle:
             if userspace_evidence(current)["pid1_alive"] or b"[REDFIN RAMLOG v1" in current or time.monotonic() >= deadline:
                 break
             time.sleep(2)
-        evidence = userspace_evidence(current)
+        expected_boot_id = self.manifest.get("xnu_return", {}).get("boot_id")
+        evidence_capture = current
+        if expected_boot_id:
+            evidence_capture = authenticated_capture if authenticated else current
+            freshness = boot_id_freshness(evidence_capture, expected_boot_id, authenticated)
+            self.manifest["log_freshness"] = freshness
+        evidence = userspace_evidence(evidence_capture)
+        if expected_boot_id and freshness["status"] != "boot-id-matched":
+            evidence["pid1_alive"] = False
         self.manifest["userspace"] = evidence
-        self.manifest["apple_userspace"] = apple_userspace_evidence(current,
-            authenticated=self.manifest.get("ramoops_decryption", {}).get("status") == "authenticated")
+        self.manifest["apple_userspace"] = apple_userspace_evidence(evidence_capture, authenticated=authenticated)
         self.manifest["status"] = ("userspace-alive" if evidence["pid1_alive"] else
                                      "logs-collected" if b"REDFIN" in current else "no-log")
         self.manifest["captured_bytes"] = len(current)
-        xnu = extract_xnu(current)
+        xnu = extract_xnu(evidence_capture)
         if xnu:
             self.save("xnu-console.txt", xnu)
 

@@ -1,0 +1,324 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -114,6 +114,7 @@
+ bsd/dev/sweet_i2c1.c			standard
+ bsd/dev/sweet_cpufreq.c			standard
+ bsd/dev/sweet_rpmh.c			standard
++bsd/dev/redfin_rpmh.c			standard
+ bsd/dev/sweet_spmi.c			standard
+ bsd/dev/sweet_usb.c			standard
+ bsd/dev/redfin_usb.c			standard
+diff --git a/bsd/dev/redfin_rpmh.h b/bsd/dev/redfin_rpmh.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_rpmh.h
+@@ -0,0 +1,123 @@
++/* Bounded, allocation-free CMD-DB reader. This header cannot send RPMh commands.
++ * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8:
++ * drivers/soc/qcom/cmd-db.c and include/soc/qcom/cmd-db.h.
++ */
++#ifndef REDFIN_RPMH_H
++#define REDFIN_RPMH_H
++#include <stdint.h>
++#include <stddef.h>
++
++#define RF_CMDDB_BYTES 0x20000u
++#define RF_CMDDB_HEADER 144u
++#define RF_CMDDB_ENTRY 24u
++#define RF_CMDDB_MAX_ENTRIES ((RF_CMDDB_BYTES - RF_CMDDB_HEADER) / RF_CMDDB_ENTRY)
++#define RF_CMDDB_MAX_LEVELS 16u
++#ifdef __cplusplus
++#define RF_CMDDB_ZERO {}
++#else
++#define RF_CMDDB_ZERO {0}
++#endif
++enum rf_cmddb_type { RF_CMDDB_ARC = 3, RF_CMDDB_VRM = 4, RF_CMDDB_BCM = 5 };
++enum rf_cmddb_status {
++ RF_CMDDB_OK, RF_CMDDB_LENGTH, RF_CMDDB_HEADER_BAD, RF_CMDDB_RANGE,
++ RF_CMDDB_TYPE, RF_CMDDB_MISSING, RF_CMDDB_DUPLICATE, RF_CMDDB_AUX
++};
++struct rf_cmddb_resource {
++ uint32_t address, priority[2];
++ uint16_t type, aux_version, aux_bytes, levels[RF_CMDDB_MAX_LEVELS];
++ unsigned level_count;
++};
++
++static inline uint16_t
++rf_cmddb_u16(const volatile uint8_t *p)
++{ return (uint16_t)((uint16_t)p[0] | (uint16_t)p[1] << 8); }
++static inline uint32_t
++rf_cmddb_u32(const volatile uint8_t *p)
++{ return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
++static inline int
++rf_cmddb_range(uint32_t offset, uint32_t count, size_t bytes)
++{ return offset <= bytes && count <= bytes - offset; }
++
++static inline enum rf_cmddb_status
++rf_cmddb_validate(const volatile uint8_t *db, size_t bytes)
++{
++ if (!db || bytes != RF_CMDDB_BYTES) return RF_CMDDB_LENGTH;
++ /* Checksum at 136 is unused by Linux. It is not an authentication check. */
++ if (rf_cmddb_u32(db) != 1 || rf_cmddb_u32(db + 4) != 0x0c0330dbu ||
++     (rf_cmddb_u32(db + 140) & 1)) return RF_CMDDB_HEADER_BAD;
++ for (unsigned i = 0; i < 8; i++) {
++  const volatile uint8_t *h = db + 8 + i * 16;
++  unsigned type = rf_cmddb_u16(h), count = rf_cmddb_u16(h + 6);
++  if (!type) break; /* Linux: the first zero slave header terminates the directory. */
++  uint32_t entries = RF_CMDDB_HEADER + rf_cmddb_u16(h + 2);
++  uint32_t aux = RF_CMDDB_HEADER + rf_cmddb_u16(h + 4);
++  if (count > RF_CMDDB_MAX_ENTRIES ||
++      !rf_cmddb_range(entries, count * RF_CMDDB_ENTRY, bytes) ||
++      !rf_cmddb_range(aux, 0, bytes)) return RF_CMDDB_RANGE;
++  for (unsigned j = 0; j < count; j++) {
++   const volatile uint8_t *e = db + entries + j * RF_CMDDB_ENTRY;
++   uint32_t at = aux + rf_cmddb_u16(e + 22);
++   if (!rf_cmddb_range(at, rf_cmddb_u16(e + 20), bytes)) return RF_CMDDB_RANGE;
++  }
++ }
++ return RF_CMDDB_OK;
++}
++
++/* key is exactly eight bytes, zero-padded for shorter resource names.
++ * ARC auxiliary words are reported raw, including zero padding. Choosing a
++ * level or sending a vote requires a separate policy and inherited floor.
++ */
++static inline enum rf_cmddb_status
++rf_cmddb_lookup(const volatile uint8_t *db, size_t bytes, const uint8_t key[8],
++ unsigned expected_type, struct rf_cmddb_resource *out)
++{
++ if (!out || !key) return RF_CMDDB_LENGTH;
++ struct rf_cmddb_resource empty = RF_CMDDB_ZERO;
++ *out = empty;
++ enum rf_cmddb_status status = rf_cmddb_validate(db, bytes);
++ if (status != RF_CMDDB_OK) return status;
++ if (expected_type < RF_CMDDB_ARC || expected_type > RF_CMDDB_BCM) return RF_CMDDB_TYPE;
++ unsigned matches = 0;
++ struct rf_cmddb_resource found = RF_CMDDB_ZERO;
++ for (unsigned i = 0; i < 8; i++) {
++  const volatile uint8_t *h = db + 8 + i * 16;
++  unsigned type = rf_cmddb_u16(h), count = rf_cmddb_u16(h + 6);
++  if (!type) break;
++  uint32_t entries = RF_CMDDB_HEADER + rf_cmddb_u16(h + 2);
++  uint32_t aux = RF_CMDDB_HEADER + rf_cmddb_u16(h + 4);
++  /* Recheck locally copied bounds: this is volatile shared firmware RAM,
++   * so validation above must not authorize a later, changed count/offset. */
++  if (count > RF_CMDDB_MAX_ENTRIES ||
++      !rf_cmddb_range(entries, count * RF_CMDDB_ENTRY, bytes) ||
++      !rf_cmddb_range(aux, 0, bytes)) return RF_CMDDB_RANGE;
++  for (unsigned j = 0; j < count; j++) {
++   const volatile uint8_t *e = db + entries + j * RF_CMDDB_ENTRY;
++   unsigned same = 1;
++   for (unsigned k = 0; k < 8; k++) same &= e[k] == key[k];
++   if (!same) continue;
++   if (++matches > 1) return RF_CMDDB_DUPLICATE;
++   found.address = rf_cmddb_u32(e + 16);
++   /* cmd_db_read_slave_id(): only bits 18:16 encode the accelerator type.
++    * Upper address bits are meaningful; neither directory IDs nor address
++    * alignment are a global validity contract for unrelated resources. */
++   found.type = (uint16_t)((found.address >> 16) & 7u);
++   if (found.type != expected_type) return RF_CMDDB_TYPE;
++   found.priority[0] = rf_cmddb_u32(e + 8);
++   found.priority[1] = rf_cmddb_u32(e + 12);
++   found.aux_version = rf_cmddb_u16(h + 8);
++   found.aux_bytes = rf_cmddb_u16(e + 20);
++   uint32_t at = aux + rf_cmddb_u16(e + 22);
++   if (!rf_cmddb_range(at, found.aux_bytes, bytes)) return RF_CMDDB_RANGE;
++   if (found.type == RF_CMDDB_ARC) {
++    if ((found.aux_bytes & 1) || found.aux_bytes > 2 * RF_CMDDB_MAX_LEVELS) return RF_CMDDB_AUX;
++    found.level_count = found.aux_bytes / 2;
++    for (unsigned k = 0; k < found.level_count; k++)
++     found.levels[k] = rf_cmddb_u16(db + at + 2 * k);
++   }
++  }
++ }
++ if (!matches) return RF_CMDDB_MISSING;
++ *out = found;
++ return RF_CMDDB_OK;
++}
++#endif
+diff --git a/bsd/dev/redfin_rpmh.c b/bsd/dev/redfin_rpmh.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_rpmh.c
+@@ -0,0 +1,180 @@
++/* Redfin RPMh stage 1: CMD-DB, DRV2 and IRQ observation only. No TCS writes.
++ * Source: Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8,
++ * drivers/soc/qcom/{cmd-db,rpmh-rsc}.c; qcom DT
++ * afc98e2bb0716a57bf4f8d2b6191378dd7123ce4/qcom/lito.dtsi.
++ * Saved Redfin FDT: DRV2 0x18220000, TCS+d00, ACTIVE0..1, SLEEP2..4,
++ * WAKE5..7; CONTROL is not an allocatable normal TCS. No ownership acquired.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include "redfin_rpmh.h"
++
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
++extern int redfin_spmi_return_ready(void);
++int redfin_rpmh_probe(void);
++
++#define RF_RSC_PA 0x18220000u
++#define RF_RSC_BYTES 0x10000u
++#define RF_DB_PA 0x80860000u
++#define RF_GIC_PA 0x17a00000u
++#define RF_TCS(i) (0xd00u + 0x2a0u * (i))
++#define RF_SPI37 (1u << 5)
++static const struct { uint8_t key[8]; unsigned type; } rf_resources[] = {
++ {"ldoa17", RF_CMDDB_VRM}, {"xo.lvl", RF_CMDDB_ARC},
++ {"cx.lvl", RF_CMDDB_ARC}, {"mx.lvl", RF_CMDDB_ARC},
++ {"gfx.lvl", RF_CMDDB_ARC}, {"ldoa5", RF_CMDDB_VRM},
++ {"ldoa12", RF_CMDDB_VRM}, {"ldoa2", RF_CMDDB_VRM},
++};
++#define RF_NRESOURCES (sizeof(rf_resources) / sizeof(rf_resources[0]))
++
++static uint32_t
++rf_rpmh_read(vm_offset_t base, unsigned offset)
++{
++ uint32_t value = *(const volatile uint32_t *)(base + offset);
++ __asm__ volatile("dmb oshld" ::: "memory");
++ return value;
++}
++
++static bool
++rf_rpmh_dt_data(DTEntry entry, const char *key, void *out, unsigned bytes)
++{
++ const void *raw = NULL;
++ unsigned size = 0;
++ if (SecureDTGetProperty(entry, key, &raw, &size) != kSuccess || !raw || size != bytes) return false;
++ memcpy(out, raw, bytes);
++ return true;
++}
++
++static bool
++rf_rpmh_platform(void)
++{
++ DTEntry root, chosen;
++ const char *list = NULL;
++ unsigned size = 0;
++ bool redfin = false, lito = false;
++ uint64_t base = 0, bytes = 0;
++ if (SecureDTLookupEntry(NULL, "/", &root) != kSuccess ||
++     SecureDTGetProperty(root, "compatible", (const void **)&list, &size) != kSuccess ||
++     !list || !size || size > 256 || list[size - 1]) return false;
++ for (unsigned at = 0; at < size;) {
++  unsigned end = at;
++  while (end < size && list[end]) end++;
++  if (end == size || end == at) return false;
++  if (end - at == sizeof("google,redfin") - 1 && !memcmp(list + at, "google,redfin", sizeof("google,redfin") - 1)) redfin = true;
++  if (end - at == sizeof("qcom,sm7250") - 1 && !memcmp(list + at, "qcom,sm7250", sizeof("qcom,sm7250") - 1)) lito = true;
++  at = end + 1;
++ }
++ if (!redfin || !lito || SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
++     !rf_rpmh_dt_data(chosen, "dram-base", &base, sizeof(base)) ||
++     !rf_rpmh_dt_data(chosen, "dram-size", &bytes, sizeof(bytes)) ||
++     !base || !bytes || ((base | bytes) & 0x3fffULL) ||
++     base > (1ULL << 36) || bytes > (1ULL << 36) - base) return false;
++ const uint64_t regions[][2] = {{RF_DB_PA, RF_CMDDB_BYTES}, {RF_RSC_PA, RF_RSC_BYTES}, {RF_GIC_PA, 0x4000}};
++ for (unsigned i = 0; i < sizeof(regions) / sizeof(regions[0]); i++)
++  if (base < regions[i][0] + regions[i][1] && regions[i][0] < base + bytes) return false;
++ return true;
++}
++
++int
++redfin_rpmh_probe(void)
++{
++ uint32_t mode = 0, cpus = 0;
++ (void)PE_parse_boot_argn("redfinrpmh", &mode, sizeof(mode));
++ if (mode != 1) return ENOTSUP;
++ if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
++     !redfin_spmi_return_ready() || !rf_rpmh_platform()) return ENXIO;
++ static uint32_t attempted;
++ if (__atomic_exchange_n(&attempted, 1, __ATOMIC_RELAXED)) return EBUSY;
++ /* CMD-DB is reserved RAM outside XNU's WB window. Normal-WC permits the
++  * byte loads in its little-endian reader. All accesses remain const reads. */
++ vm_offset_t db_map = ml_io_map_wcomb(RF_DB_PA, RF_CMDDB_BYTES);
++ if (!db_map) return ENOMEM;
++ const volatile uint8_t *db = (const volatile uint8_t *)db_map;
++ enum rf_cmddb_status valid = rf_cmddb_validate(db, RF_CMDDB_BYTES);
++ printf("REDFIN RPMH: CMD-DB version=%#x magic=%#x flags=%#x status=%u\n",
++     rf_cmddb_u32(db), rf_cmddb_u32(db + 4), rf_cmddb_u32(db + 140), (unsigned)valid);
++ if (valid != RF_CMDDB_OK) {
++  /* Header-only metadata: every read stays inside the fixed 144-byte header,
++   * including when a directory offset/count itself failed validation. */
++  for (unsigned i = 0; i < 8; i++) {
++   const volatile uint8_t *h = db + 8 + i * 16;
++   unsigned type = rf_cmddb_u16(h);
++   printf("REDFIN RPMH: rejected CMD-DB dir%u slv=%u entries=%#x aux=%#x count=%u version=%#x\n",
++       i, type, rf_cmddb_u16(h + 2), rf_cmddb_u16(h + 4), rf_cmddb_u16(h + 6), rf_cmddb_u16(h + 8));
++   if (!type) break;
++  }
++  return EINVAL;
++ }
++ struct rf_cmddb_resource resources[RF_NRESOURCES];
++ enum rf_cmddb_status found[RF_NRESOURCES];
++ for (unsigned i = 0; i < RF_NRESOURCES; i++) {
++  found[i] = rf_cmddb_lookup(db, RF_CMDDB_BYTES, rf_resources[i].key, rf_resources[i].type, &resources[i]);
++  printf("REDFIN RPMH: resource %.8s status=%u type=%u addr=%#x priority=%#x:%#x aux-v=%#x aux-bytes=%u\n",
++      rf_resources[i].key, (unsigned)found[i], resources[i].type, resources[i].address,
++      resources[i].priority[0], resources[i].priority[1], resources[i].aux_version, resources[i].aux_bytes);
++  if (found[i] == RF_CMDDB_OK && resources[i].level_count) {
++   char raw[128];
++   unsigned used = 0;
++   raw[0] = 0;
++   for (unsigned k = 0; k < resources[i].level_count; k++) {
++    int n = snprintf(raw + used, sizeof(raw) - used, "%s%u", k ? "," : "", resources[i].levels[k]);
++    if (n < 0 || (unsigned)n >= sizeof(raw) - used) return EIO;
++    used += (unsigned)n;
++   }
++   printf("REDFIN RPMH: %.8s raw-ARC-aux=[%s] (not a voltage reading)\n", rf_resources[i].key, raw);
++  }
++ }
++ vm_offset_t rsc = ml_io_map(RF_RSC_PA, RF_RSC_BYTES);
++ if (!rsc) return ENOMEM;
++ uint32_t id = rf_rpmh_read(rsc, 0), config = rf_rpmh_read(rsc, 0xc);
++ unsigned major = (id >> 16) & 255, count = (config >> 12) & 63, commands = (config >> 27) & 31;
++ printf("REDFIN RPMH: DRV2 id=%#x config=%#x major=%u TCS-count=%u NCPT=%u\n", id, config, major, count, commands);
++ if ((major != 1 && major != 2) || config == 0xffffffffu ||
++     count < 8 || count > 9 || !commands || commands > 16) return ENOTSUP;
++ vm_offset_t gic = ml_io_map(RF_GIC_PA, 0x4000);
++ if (!gic) return ENOMEM;
++ uint32_t en = rf_rpmh_read(gic, 0x104), pend = rf_rpmh_read(gic, 0x204), active = rf_rpmh_read(gic, 0x304);
++ uint32_t irq_en = rf_rpmh_read(rsc, 0xd00), irq = rf_rpmh_read(rsc, 0xd04);
++ printf("REDFIN RPMH: IRQ37 GIC-enabled=%u pending=%u active=%u RSC-enable=%#x status=%#x\n",
++     !!(en & RF_SPI37), !!(pend & RF_SPI37), !!(active & RF_SPI37), irq_en, irq);
++ if (en == 0xffffffffu || pend == 0xffffffffu || active == 0xffffffffu ||
++     irq_en == 0xffffffffu || irq == 0xffffffffu) return EIO;
++ unsigned empty = 0;
++ bool changed = false;
++ for (unsigned t = 0; t < 8; t++) {
++  unsigned at = RF_TCS(t);
++  uint32_t idle = rf_rpmh_read(rsc, at + 0x18), control = rf_rpmh_read(rsc, at + 0x14);
++  uint32_t enabled = rf_rpmh_read(rsc, at + 0x1c), wait = rf_rpmh_read(rsc, at + 0x10);
++  if (idle == 0xffffffffu || control == 0xffffffffu || wait == 0xffffffffu ||
++      (enabled & ~((1u << commands) - 1u))) return EIO;
++  bool free = idle && !control && !enabled && !wait && !(irq & (1u << t));
++  printf("REDFIN RPMH: TCS%u %s idle=%#x control=%#x enable=%#x wait=%#x empty-observed=%u\n",
++      t, t < 2 ? "ACTIVE" : t < 5 ? "SLEEP" : "WAKE", idle, control, enabled, wait, free);
++  if (t < 2 && free) empty |= 1u << t;
++  for (unsigned c = 0; c < commands; c++) {
++   if (!(enabled & (1u << c))) continue;
++   unsigned cmd = at + 0x30 + 0x14 * c;
++   uint32_t address = rf_rpmh_read(rsc, cmd + 4);
++   for (unsigned i = 0; i < RF_NRESOURCES; i++) {
++    if (found[i] != RF_CMDDB_OK) continue;
++    unsigned mask = resources[i].type == RF_CMDDB_VRM ? 15 : 3;
++    if ((address & ~mask) != resources[i].address) continue;
++    printf("REDFIN RPMH: inherited TCS%u cmd%u %.8s+%u data=%#x msgid=%#x status=%#x\n",
++        t, c, rf_resources[i].key, address - resources[i].address,
++        rf_rpmh_read(rsc, cmd + 8), rf_rpmh_read(rsc, cmd), rf_rpmh_read(rsc, cmd + 12));
++   }
++  }
++  changed |= idle != rf_rpmh_read(rsc, at + 0x18) || control != rf_rpmh_read(rsc, at + 0x14) ||
++      enabled != rf_rpmh_read(rsc, at + 0x1c) || wait != rf_rpmh_read(rsc, at + 0x10);
++ }
++ changed |= irq_en != rf_rpmh_read(rsc, 0xd00) || irq != rf_rpmh_read(rsc, 0xd04);
++ printf("REDFIN RPMH: read-only done stable=%u ACTIVE-empty-mask=%#x; no ownership/votes/IRQ changes\n", !changed, empty);
++ return changed ? EAGAIN : 0;
++}
++#endif

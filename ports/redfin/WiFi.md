@@ -44,9 +44,17 @@ exact Redfin IDs are not yet inventoried; the vendor WLAN config is
 ## Stage 1: inspect the transport without touching hardware registers
 
 `wifi_smem.h` is a bounded, allocation-free C parser. `wifi-probe.patch` embeds
-an exact copy and adds a one-shot kernel observer before UFS probing; device
-execution remains unverified. `wifi-smem.c` is the host-only CLI for an exact
-regular 2 MiB snapshot:
+an exact copy and adds a one-shot kernel observer before UFS probing. V3
+execution returned `status=5 version=0xc0000`. Its `partitions=0` was not
+evidence of an empty table: the old parser copied only the version to its
+report before the failing return. V4 preserved failure metadata and identified
+the TOC's own `ffff/ffff` reservation. The parser now selects APPS/private
+and global heaps before validating their extents, following Linux host
+selection; it never maps foreign-host entries. V5 validated the real layout:
+14 entries, APPS/MODEM at `0xfb000+0x7c000`, no uncached items or GLINK
+descriptor/FIFOs. This does not prove a live remote processor; firmware
+startup and transport creation are still required. `wifi-smem.c`
+is the host-only CLI for an exact regular 2 MiB snapshot:
 
 ```sh
 cc -std=c11 -Wall -Wextra -Werror ports/redfin/wifi-smem.c -o /tmp/redfin-wifi-smem
@@ -77,6 +85,50 @@ Observer status codes: 0 valid layout, 1 bad length, 2 SBL-uninitialized,
 3 unsupported SMEM version, 4 bad table, 5 bad partition, 6 bad item,
 7 invalid GLINK geometry/indices, 8 allocator headers changed during reading.
 These classify the observed RAM layout, not the remote processor's power state.
+
+### Partition diagnostics for the next observation
+
+Google's pinned `smem.c:158` defines 48-byte TOC entries after a 32-byte TOC
+header. Each entry has offset/size at 0/4, host0/host1 at 12/14 and cacheline
+at 16; the partition header is also 32 bytes. The existing parser uses this
+stride correctly. Linux APPS enumeration (`smem.c:945`) skips non-APPS hosts
+and entries whose offset **or** size is zero. It validates the chosen host
+membership without requiring the same order in the TOC and header. Linux
+also handles a separate global partition with hosts `0xfffe/0xfffe`.
+
+Our observer deliberately remains stricter: it checks every active range,
+rejects partial zero entries and overlaps, and requires the selected
+APPS/MODEM header host order to match its TOC entry. These differences are
+possible rejection causes, not a diagnosis of V3. No condition was relaxed
+to accept unseen firmware data.
+
+For rejected observations the kernel emits two extra bounded metadata lines:
+`reject detail=... entry=... offset=... bytes=... hosts=... cacheline=... peer=...`
+and `peer_offset=... peer_bytes=... header=... magic=... hosts=... size=... free_u=... free_c=...`.
+Entry and peer indices are zero-based; `0xffffffff` means no entry/peer.
+`header=1` means the complete header was in a validated range before reading
+its metadata. `header=0` leaves its fields zero and performs no header read.
+The header belongs to the diagnostic entry, which can differ from an earlier
+selected MODEM partition if a later table entry fails. No item identifiers,
+FIFO payloads, firmware identities or network credentials are added to logs.
+
+| `detail` | Rejection |
+| --- | --- |
+| 0 | No partition-specific detail; use the main status |
+| 1 | Exactly one of entry offset/size is zero |
+| 2 | Entry range does not fit below the TOC or cannot contain its header |
+| 3 | Entry overlaps `peer`; both bounds are retained |
+| 4 | Duplicate APPS/MODEM entry; `peer` is the first |
+| 5 | Selected partition header magic differs from `$PRT` |
+| 6 | Selected header host order differs from its TOC entry |
+| 7 | Selected header size differs from its TOC entry |
+| 8 | Uncached/cached free pointers fail existing bounds |
+
+Thirteen host tests compile the actual C parser and C++ observer. They cover
+48-byte strides, global/unused slots, every partition rejection detail,
+preserved metadata, unchanged input bytes, bounded log formatting, mapping
+cleanup/gates and exact equality of the embedded header. Passing these tests
+does not establish that the observed allocator is live or usable by QMI.
 
 ## Stage 2: firmware identity, then association and actual packets
 

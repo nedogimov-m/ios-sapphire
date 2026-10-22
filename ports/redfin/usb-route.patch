@@ -1,0 +1,97 @@
+diff --git a/bsd/dev/redfin_usb.c b/bsd/dev/redfin_usb.c
+--- a/bsd/dev/redfin_usb.c
++++ b/bsd/dev/redfin_usb.c
+@@ -82,13 +82,82 @@
+ 	return true;
+ }
+ 
++/* Standard SMMUv2 configuration only; no fault/test/ECATS or table access.
++ * Redfin apps-SMMU has no explicit clock/supply in DT. This opt-in experiment
++ * requires the checked warm USB handoff, halted DMA and bootloader return.
++ * It does not claim that USB GDSC controls SMMU power or authorize DMA.
++ */
++static void
++redfin_usb_route_snapshot(uint32_t dctl, uint32_t dsts, uint32_t event_size)
++{
++ if ((dctl & 0x80000000u) || !(dsts & 0x00400000u) ||
++     event_size != 0x80001000u) {
++  printf("REDFIN USB ROUTE: controller not halted/masked; configuration read skipped\n");
++  return;
++ }
++ DTEntry entry;
++ const void *data = NULL;
++ unsigned bytes = 0;
++ uint64_t ranges[2];
++ uint32_t sid = 0;
++ if (SecureDTLookupEntry(NULL, "/redfin-usb-route", &entry) != kSuccess ||
++     SecureDTGetProperty(entry, "reg", &data, &bytes) != kSuccess || !data ||
++     bytes != sizeof(ranges)) return;
++ memcpy(ranges, data, sizeof(ranges));
++ if (ranges[0] != 0x15000000u || ranges[1] != 0x100000u ||
++     SecureDTGetProperty(entry, "stream-id", &data, &bytes) != kSuccess || !data ||
++     bytes != sizeof(sid)) return;
++ memcpy(&sid, data, sizeof(sid));
++ if (sid != 0xe0) return;
++ printf("REDFIN USB ROUTE: before standard apps-SMMU config reads; no bus/clock writes\n");
++ vm_offset_t gr0 = ml_io_map(ranges[0], 0x10000);
++ if (!gr0) { printf("REDFIN USB ROUTE: config mapping failed\n"); return; }
++ uint32_t id0 = redfin_usb_rd(gr0, 0x20), id1 = redfin_usb_rd(gr0, 0x24);
++ uint32_t id2 = redfin_usb_rd(gr0, 0x28), cr0 = redfin_usb_rd(gr0, 0);
++ unsigned groups = id0 & 0xffu;
++ printf("REDFIN USB ROUTE: ID0=%#x ID1=%#x ID2=%#x CR0=%#x groups=%u tables16K=%u\n",
++     id0, id1, id2, cr0, groups, !!(id2 & (1u << 13)));
++ if (!(id0 & (1u << 27)) || !(id0 & ((1u << 30) | (1u << 29))) ||
++     (id0 & (1u << 8)) || (cr0 & (1u << 3)) || !groups || groups > 128) {
++  printf("REDFIN USB ROUTE: unsupported stream-matching format; no stream array reads\n");
++  return;
++ }
++ unsigned matches = 0;
++ uint32_t observed_smr[128], observed_s2cr[128];
++ for (unsigned i = 0; i < groups; i++) {
++  uint32_t smr = redfin_usb_rd(gr0, 0x800 + i * 4);
++  observed_smr[i] = smr; observed_s2cr[i] = 0;
++  uint32_t mask = (smr >> 16) & 0x7fffu;
++  if (!(smr & 0x80000000u) || ((sid ^ (smr & 0xffffu)) & ~mask)) continue;
++  uint32_t s2cr = redfin_usb_rd(gr0, 0xc00 + i * 4);
++  matches++; observed_s2cr[i] = s2cr;
++  printf("REDFIN USB ROUTE: SID=e0 match=%u SMR=%#x S2CR=%#x type=%u context=%u\n",
++      i, smr, s2cr, (s2cr >> 16) & 3, s2cr & 0xff);
++ }
++ bool stable = redfin_usb_rd(gr0, 0x20) == id0 && redfin_usb_rd(gr0, 0x24) == id1 &&
++     redfin_usb_rd(gr0, 0x28) == id2 && redfin_usb_rd(gr0, 0) == cr0;
++ /* Recheck every SMR: a nonmatch becoming a match invalidates uniqueness.
++  * Read each slot even after detecting change; the pass remains bounded.
++  */
++ for (unsigned i = 0; i < groups; i++) {
++  uint32_t now = redfin_usb_rd(gr0, 0x800 + i * 4), smr = observed_smr[i];
++  if (now != smr) stable = false;
++  uint32_t mask = (smr >> 16) & 0x7fffu;
++  if ((smr & 0x80000000u) && !((sid ^ (smr & 0xffffu)) & ~mask)) {
++   if (redfin_usb_rd(gr0, 0xc00 + i * 4) != observed_s2cr[i]) stable = false;
++  }
++ }
++ printf("REDFIN USB ROUTE: matches=%u stable=%u; no context/table reads or DMA authorization\n",
++     matches, stable);
++}
++
+ void
+ redfin_usb_probe(void)
+ {
+ 	uint32_t mode = 0;
+ 	(void)PE_parse_boot_argn("redfinusb", &mode, sizeof(mode));
+ 	if (!mode) return;
+-	if (mode != 1 || !redfin_usb_platform()) {
++	if ((mode != 1 && mode != 2) || !redfin_usb_platform()) {
+ 		printf("REDFIN USB: rejected mode/platform; no MMIO\n");
+ 		return;
+ 	}
+@@ -132,6 +201,8 @@
+ 	printf("REDFIN USB: GEVNTADR=%08x%08x GEVNTSIZ=%#x GEVNTCOUNT=%#x\n",
+ 	    redfin_usb_rd(dwc, 0xc404), redfin_usb_rd(dwc, 0xc400),
+ 	    redfin_usb_rd(dwc, 0xc408), redfin_usb_rd(dwc, 0xc40c));
+-	printf("REDFIN USB: read-only done; PHY/SMMU/DMA untouched\n");
++	printf("REDFIN USB: core observation done; no PHY, DMA or MMIO writes\n");
++	if (mode == 2) redfin_usb_route_snapshot(redfin_usb_rd(dwc, 0xc704),
++	    redfin_usb_rd(dwc, 0xc70c), redfin_usb_rd(dwc, 0xc408));
+ }
+ #endif /* ARM64_BOARD_CONFIG_SWEET */

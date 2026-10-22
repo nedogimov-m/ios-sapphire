@@ -62,6 +62,8 @@ def main():
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
     p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
     p.add_argument('--usb-probe', action='store_true', help='observe DWC3 handoff without PHY or DMA changes')
+    p.add_argument('--usb-route-probe', action='store_true', help='observe halted DWC3 and standard SMMU routing without writes')
+    p.add_argument('--rpmh-probe', action='store_true', help='inspect CMD-DB and RPMh TCS handoff without commands')
     p.add_argument('--gpu-probe', action='store_true', help='observe Adreno 620 clock handoff; requires --display')
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -78,7 +80,7 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
-    if (a.touch_probe or a.usb_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
+    if (a.touch_probe or a.usb_probe or a.usb_route_probe or a.rpmh_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
         p.error('peripheral observers require --kernel')
     if a.gpu_probe and not a.display:
         p.error('--gpu-probe requires --display')
@@ -154,7 +156,8 @@ def main():
         from peripherals import add_observers
         try:
             add_observers(tree, nodes, touch=a.touch_probe, usb=a.usb_probe,
-                          gpu=a.gpu_probe, wifi=a.wifi_probe)
+                          gpu=a.gpu_probe, wifi=a.wifi_probe,
+                          usb_route=a.usb_route_probe, rpmh=a.rpmh_probe)
         except ValueError as error:
             p.error(str(error))
         if a.spmi_probe:
@@ -247,16 +250,21 @@ def main():
             command_line += f' redfinshutdown={a.shutdown_seconds}'
         if a.userspace_stacks:
             command_line += ' redfinstacks=1'
-        for enabled, name in ((a.touch_probe, 'redfintouch'), (a.usb_probe, 'redfinusb'),
-                              (a.gpu_probe, 'redfingpu'), (a.wifi_probe, 'redfinwifi')):
-            if enabled:
-                command_line += f' {name}=1'
+        usb_mode = 2 if a.usb_route_probe else int(a.usb_probe)
+        for mode, name in ((int(a.touch_probe), 'redfintouch'), (usb_mode, 'redfinusb'),
+                           (int(a.gpu_probe), 'redfingpu'), (int(a.wifi_probe), 'redfinwifi'),
+                           (int(a.rpmh_probe), 'redfinrpmh')):
+            if mode:
+                command_line += f' {name}={mode}'
         if ufs_mode:
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:
             command_line += ' redfinspmi=1'
         if a.return_bootloader:
             command_line += ' redfinreturn=1'
+        # A per-image nonce binds authenticated RAM logs to this build.
+        boot_id = int.from_bytes(os.urandom(8), 'big') or 1
+        command_line += f' redfinbootid=0x{boot_id:016x}'
         if a.ufs_root_probe or a.ufs_root:
             writable = int(a.ufs_rw)
             command_line += f' redfinroot=1 ufsroot=userdata ufsrw={writable} rootrw={writable} sweetlog=0'

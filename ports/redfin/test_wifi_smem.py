@@ -11,7 +11,11 @@ HERE = Path(__file__).resolve().parent
 SIZE, TOC, PART, PART_SIZE = 0x200000, 0x1ff000, 0x10000, 0x10000
 FIELDS = ('version', 'partitions', 'modem_partition', 'partition_offset', 'partition_bytes',
           'uncached_items', 'cached_uninspected', 'descriptor', 'tx_bytes', 'rx_bytes',
-          'tx_tail', 'tx_head', 'rx_tail', 'rx_head', 'tx_pending', 'rx_pending')
+          'tx_tail', 'tx_head', 'rx_tail', 'rx_head', 'tx_pending', 'rx_pending',
+          'failure_detail', 'toc_version', 'entry_index', 'entry_offset', 'entry_bytes',
+          'entry_host0', 'entry_host1', 'entry_cacheline', 'other_index', 'other_offset', 'other_bytes',
+          'header_present', 'header_magic', 'header_host0', 'header_host1', 'header_bytes',
+          'free_uncached', 'free_cached')
 
 
 class Report(ctypes.Structure):
@@ -106,6 +110,95 @@ class WifiSmemTests(unittest.TestCase):
         struct.pack_into('<I', data, TOC + 80, PART + PART_SIZE)
         self.assertEqual(self.inspect(data)[0], 5)  # duplicate APPS/MODEM partition
 
+    def test_48_byte_entries_global_partition_and_unused_slots(self):
+        data = fixture()
+        modem_entry = data[TOC + 32:TOC + 80]
+        struct.pack_into('<I', data, TOC + 8, 64)
+        data[TOC + 32:TOC + 80] = bytes(48)
+        struct.pack_into('<IIIHHI', data, TOC + 32, 0x1000, PART - 0x1000, 0,
+                         0xfffe, 0xfffe, 32)
+        # An unused slot may retain host/reserved metadata; stride remains 48.
+        struct.pack_into('<HH', data, TOC + 80 + 12, 9, 10)
+        struct.pack_into('<I', data, TOC + 80 + 44, 0xffffffff)
+        data[TOC + 128:TOC + 176] = modem_entry
+        status, report = self.inspect(data)
+        self.assertEqual((status, report.partitions, report.entry_index), (0, 64, 2))
+        self.assertEqual((report.entry_host0, report.entry_host1, report.entry_cacheline), (0, 1, 32))
+
+    def test_partition_rejection_preserves_bounds_and_host_metadata(self):
+        for offset, size, detail in [(0, PART_SIZE, 1), (PART, 0, 1),
+                                     (0xfffffff0, 0x100, 2), (TOC - 16, 32, 2)]:
+            with self.subTest(offset=offset, size=size):
+                data = fixture()
+                struct.pack_into('<II', data, TOC + 32, offset, size)
+                status, report = self.inspect(data)
+                self.assertEqual((status, report.failure_detail, report.partitions), (5, detail, 1))
+                self.assertEqual((report.version, report.toc_version, report.entry_index), (12 << 16, 1, 0))
+                self.assertEqual((report.entry_offset, report.entry_bytes), (offset, size))
+                self.assertEqual((report.entry_host0, report.entry_host1), (0, 1))
+                self.assertEqual((report.header_present, report.header_magic), (0, 0))
+                self.assertEqual(report.other_index, 0xffffffff)
+
+    def test_non_apps_entries_are_not_interpreted_as_apps_heaps(self):
+        # Device V4 lists the TOC itself first, with no APPS owner. Linux
+        # filters by host before mapping a private partition (smem.c:965).
+        for offset, size, host0, host1 in ((TOC, 0x1000, 0xffff, 0xffff),
+                                          (0xfffffff0, 0xffffffff, 2, 3)):
+            with self.subTest(offset=offset, host0=host0):
+                data = fixture()
+                modem_entry = data[TOC + 32:TOC + 80]
+                struct.pack_into('<I', data, TOC + 8, 2)
+                data[TOC + 80:TOC + 128] = modem_entry
+                struct.pack_into('<IIIHHI', data, TOC + 32, offset, size, 0, host0, host1, 0)
+                status, report = self.inspect(data)
+                self.assertEqual((status, report.modem_partition, report.entry_index), (0, 1, 1))
+                self.assertEqual((report.descriptor, report.tx_bytes, report.rx_bytes), (1, 0x4000, 0x4000))
+                # The same invalid extent becomes an error if APPS owns it.
+                struct.pack_into('<HH', data, TOC + 44, 0, host1)
+                self.assertEqual(self.inspect(data)[0], 5)
+
+    def test_partition_header_rejection_identifies_exact_field(self):
+        cases = [(PART, 0, 5), (PART + 4, 0x00020000, 6),
+                 (PART + 8, PART_SIZE - 1, 7), (PART + 12, 31, 8),
+                 (PART + 12, PART_SIZE + 1, 8), (PART + 16, 32, 8)]
+        for offset, value, detail in cases:
+            with self.subTest(offset=offset, value=value):
+                data = fixture()
+                struct.pack_into('<I', data, offset, value)
+                status, report = self.inspect(data)
+                self.assertEqual((status, report.failure_detail, report.partitions), (5, detail, 1))
+                self.assertEqual((report.entry_index, report.modem_partition, report.header_present), (0, 1, 1))
+                self.assertEqual(report.header_magic, struct.unpack_from('<I', data, PART)[0])
+                self.assertEqual((report.header_host0, report.header_host1),
+                                 struct.unpack_from('<HH', data, PART + 4))
+                self.assertEqual((report.header_bytes, report.free_uncached, report.free_cached),
+                                 struct.unpack_from('<III', data, PART + 8))
+        # Google permits either host order; our existing exact-order rule stays strict.
+        data = fixture()
+        struct.pack_into('<HH', data, PART + 4, 1, 0)
+        self.assertEqual(self.inspect(data)[1].failure_detail, 6)
+        struct.pack_into('<HH', data, TOC + 44, 1, 0)
+        self.assertEqual(self.inspect(data)[0], 0)
+
+    def test_overlap_and_duplicate_report_both_entry_bounds(self):
+        for second_offset, detail in [(PART + 32, 3), (PART + PART_SIZE, 4)]:
+            data = fixture(False)
+            struct.pack_into('<I', data, TOC + 8, 2)
+            data[TOC + 80:TOC + 128] = data[TOC + 32:TOC + 80]
+            struct.pack_into('<I', data, TOC + 80, second_offset)
+            status, report = self.inspect(data)
+            self.assertEqual((status, report.failure_detail, report.partitions), (5, detail, 2))
+            self.assertEqual((report.entry_index, report.entry_offset, report.entry_bytes),
+                             (1, second_offset, PART_SIZE))
+            self.assertEqual((report.other_index, report.other_offset, report.other_bytes),
+                             (0, PART, PART_SIZE))
+
+    def test_embedded_header_is_exact_copy(self):
+        first = (HERE / 'wifi-probe.patch').read_text().split('\ndiff --git ', 1)[0]
+        embedded = '\n'.join(line[1:] for line in first.splitlines()
+                             if line.startswith('+') and not line.startswith('+++')) + '\n'
+        self.assertEqual(embedded, (HERE / 'wifi_smem.h').read_text())
+
     def test_private_item_bounds_and_duplicate_descriptor(self):
         for offset, fmt, value in [(PART + 32, '<H', 0), (PART + 36, '<I', 0xffffffff),
                                    (PART + 40, '<H', 32), (PART + 42, '<H', 0xffff)]:
@@ -149,6 +242,7 @@ class WifiSmemTests(unittest.TestCase):
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include "wifi_smem.h"
@@ -156,6 +250,8 @@ typedef void *DTEntry;
 enum {kSuccess=0,kIODirectionIn=1,kIOMapReadOnly=2,kIOMapWriteCombineCache=4};
 static int mode, maps, allocations, releases, violations, logs;
 static uint8_t snapshot[REDFIN_SMEM_BYTES];
+static char output[2048];
+static unsigned output_bytes;
 static bool PE_parse_boot_argn(const char *key,void *out,unsigned bytes) {
     uint32_t value = !strcmp(key,"redfinwifi") ? (mode==1 ? 0 : 1) : (mode==5 ? 2 : 1);
     if(bytes!=4) violations++;
@@ -177,7 +273,15 @@ static int SecureDTGetProperty(DTEntry,const char *key,const void **out,unsigned
     else return 1;
     return 0;
 }
-static void IOLog(const char *,...) {++logs;}
+static void IOLog(const char *format,...) {
+    char line[256];
+    va_list args;va_start(args,format);
+    int n=vsnprintf(line,sizeof(line),format,args);va_end(args);
+    if(n<0 || (unsigned)n>=sizeof(line) || output_bytes+((unsigned)n)>=sizeof(output)){
+        ++violations;return;
+    }
+    memcpy(output+output_bytes,line,(unsigned)n+1);output_bytes+=(unsigned)n;++logs;
+}
 class IOMemoryMap {
 public:
     uint64_t getLength(){return REDFIN_SMEM_BYTES;}
@@ -202,12 +306,27 @@ public:
 int main(int argc,char **argv){
     if(argc!=2)return 9;
     mode=atoi(argv[1]);
+    if(mode==9 || mode==10){
+        uint32_t v=12u<<16;memcpy(snapshot+0x5c,&v,4);
+        v=1;memcpy(snapshot+0xc0,&v,4);
+        unsigned toc=REDFIN_SMEM_BYTES-0x1000u;
+        memcpy(snapshot+toc,"$TOC",4);memcpy(snapshot+toc+4,&v,4);memcpy(snapshot+toc+8,&v,4);
+        v=mode==9 ? 0xfffffff0u : 0x10000u;memcpy(snapshot+toc+32,&v,4);
+        v=0x10000u;memcpy(snapshot+toc+36,&v,4);memcpy(snapshot+toc+44,&v,4);
+        if(mode==10)memset(snapshot+0x10000,0xff,32);
+    }
     redfin_wifi_observe();redfin_wifi_observe();
     if(violations)return 10;
     if(mode>=1 && mode<=6)return allocations || maps || releases ? 11 : 0;
     if(mode==7)return allocations!=1 || maps!=1 || releases!=1 ? 12 : 0;
     if(mode==8)return allocations!=1 || maps!=0 || releases!=0 ? 13 : 0;
-    return allocations!=1 || maps!=1 || releases!=2 || logs!=3 ? 14 : 0;
+    if(mode==9 && (!strstr(output,"partitions=1") ||
+        !strstr(output,"reject detail=2 entry=0 offset=0xfffffff0") ||
+        !strstr(output,"hosts=0/1") || !strstr(output,"header=0 magic=0")))return 15;
+    if(mode==10 && (!strstr(output,"reject detail=5 entry=0") ||
+        !strstr(output,"header=1 magic=0xffffffff hosts=65535/65535") ||
+        !strstr(output,"size=0xffffffff free_u=0xffffffff free_c=0xffffffff")))return 16;
+    return allocations!=1 || maps!=1 || releases!=2 || logs!=5 ? 14 : 0;
 }
 '''
         with tempfile.TemporaryDirectory() as directory:
@@ -215,7 +334,7 @@ int main(int argc,char **argv){
             source.write_text(harness + helper + main)
             subprocess.run([shutil.which('c++'), '-std=c++17', '-Wall', '-Wextra', '-Werror',
                             '-I', str(HERE), str(source), '-o', str(executable)], check=True)
-            for mode in range(9):
+            for mode in range(11):
                 with self.subTest(mode=mode):
                     self.assertEqual(subprocess.run([str(executable), str(mode)]).returncode, 0)
 

@@ -1,5 +1,76 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN RPMh/SMEM corrected and image-bound logs V5 — 2026-10-22
+
+Build research/redfin-build/build-20261022-152410.log passed; kernel SHA256
+423f87c3f624939ff01abd524dc98fcd50a3c5aa61a8a62f12023849c83fc940.
+Image ports/redfin/out/peripherals-v5-ram/redfin-xnu.img SHA256
+52edd29694a673aa6883b3ed78f7d1e2b2b212093339afe743d82a2aed2c467d.
+Args are V4's exact md0 args plus `redfinbootid=0xc2fdb59fe388b4b6`.
+Image/kernel manifests retained beside output. Automatic cycle finished with
+authenticated capture, exactly one matching image ID, PID1/11 heartbeats,
+public metadata re-primed and verified fastboot. No UFS writes enabled.
+Logs logs/redfin/peripherals-v5-ram/. 304 host tests pass, including draft
+event tests (logs/redfin/peripherals-host-tests-v6.txt).
+
+New XNU images get a nonzero random 64-bit image ID; startup emits it once.
+The collector only accepts PID1 success for these images from authenticated
+bytes with exactly one matching marker, and preserves failed/mismatched
+captures. Helper/pstore data cannot inherit authentication. The ID binds an
+image, not individual executions if the identical image is reused; create
+a fresh image or capture a baseline when distinguishing such repeats.
+
+CMD-DB correction follows pinned Linux: directory terminates at its first
+zero ID; unrelated nonzero IDs/addresses do not impose target type/alignment
+policy; requested type is address bits18:16, preserving higher bits. Bounds
+remain strict. V5 CMD-DB status0: ldoa17 VRM address41300, xo300a0,
+cx30000, mx30010, gfx30050, ldoa5 40b00, ldoa12 42000, ldoa2 40f00.
+DRV2 id20005/config800c8104: major2, 8 TCS,16 commands/TCS. IRQ37 masked,
+not pending/active; all TCS idle with enable/wait/control zero; stable1,
+ACTIVE-empty-mask3. This is observation, not acquired ownership or a vote.
+
+Wi-Fi now validates the actual SMEM layout:14 partitions, APPS/MODEM
+fb000+7c000, zero uncached items, no GLINK descriptor/TX/RX. A native MPSS
+firmware/GLINK bring-up remains necessary; no radio readiness demonstrated.
+USB route remains unmatched/fault (stable, CR0=290406). No SMMU writes/DMA.
+Next: read-only PMIC rail evidence, controlled L17 preparation then real SEC
+ID/events; a separately owned USB route; MPSS/QMI and A620 power/GMU backend.
+
+## REDFIN RAM peripheral diagnostics V4 — 2026-10-22
+
+Actual ARM64 build passed: research/redfin-build/build-20261022-151051.log,
+kernel SHA256 a31f5a1ab5e90841c1b5a652ae120e7a918f1a101a3c0e42e1843fcd55db6f59.
+277 integrated host tests passed (logs/redfin/peripherals-host-tests-v5.txt).
+Image ports/redfin/out/peripherals-v4-ram/redfin-xnu.img SHA256
+6e60a312f08698559e946c0d8f0fc20374c991c25add322ef40a2f02acc482fa;
+exact build manifest and kernel-build.json retained beside it.
+Args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=2 redfinwifi=1 redfinrpmh=1 redfinspmi=1 redfinreturn=1`.
+No UFS/root writes enabled. Automatic cycle authenticated RAM logs, observed
+static PID1 and 11 heartbeats, re-primed public metadata, left verified fastboot.
+Logs: logs/redfin/peripherals-v4-ram/. No pre-boot log baseline was captured;
+authentication alone does not establish freshness. These diagnostic lines
+and the recorded image/kernel fingerprint are consistent with this build.
+
+USB apps-SMMU read succeeded: ID0=4c017e51, ID1=6000003e,
+ID2=5111, CR0=2c0406, 81 groups; zero SIDe0 matches, all stable.
+CLIENTPD=0/USFCFG=1 means unmatched streams fault. No DMA route was proved;
+the inherited a244a000 event-ring address cannot authorize DMA. SMMU supports
+4KiB/64KiB tables, not 16KiB; XNU allocations can back separate 4KiB tables.
+No context/table, PHY or MMIO writes by these observers.
+
+Wi-Fi status5 now identifies TOC entry0 as ffff/ffff,1ff000+1000: the
+table's own reservation, not an APPS heap. Corrected host selection to match
+pinned Linux smem.c before bounds/mapping; APPS and global fffe/fffe heaps
+retain bounds/overlap checks. 14 parser/observer tests pass, including the
+observed sentinel, foreign invalid extents and corrupt APPS equivalents.
+The corrected parser has not yet run on the device.
+RPMh CMD-DB header is valid but parser status4 (TYPE); source-backed address
+slave-ID mask/directory validation correction is being prepared.
+
+Compiled touch cold-setup and ID transport remain uncalled. Physical L17
+3,304,000uV/enable/VREG_READY proof is still required before reset release.
+No physical touch, Wi-Fi association, USB data or GPU acceleration claimed.
+
 ## REDFIN peripheral bring-up and upstream review — 2026-10-22
 
 User requested real touch, Wi-Fi, USB and GPU. Native read-only recovery

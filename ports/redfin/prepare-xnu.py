@@ -165,7 +165,9 @@ def main(argv=None):
              'trace-gate.patch', 'shutdown.patch', 'display.patch',
              'muted-log.patch', 'screen-capture.patch', 'final-frame.patch',
              'quiet-display.patch', 'userspace-stacks.patch',
-             'touch.patch', 'usb-probe.patch', 'gpu-probe.patch', 'wifi-probe.patch', 'peripheral-start.patch')]
+             'touch.patch', 'usb-probe.patch', 'gpu-probe.patch', 'wifi-probe.patch',
+             'rpmh-probe.patch', 'usb-route.patch',
+             'touch-spi.patch', 'touch-setup.patch', 'peripheral-start.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

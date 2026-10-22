@@ -115,6 +115,118 @@ class UserspaceTests(unittest.TestCase):
         self.assertFalse(result["pid1_alive"])
 
 
+class BootIdTests(unittest.TestCase):
+    boot_id = "0123456789abcdef"
+    alive = b"REDFIN userspace: init running as PID 1\nREDFIN init: still alive\n"
+
+    def console(self, markers=(), body=None):
+        return (b"[REDFIN RAMLOG v1]\n" +
+                b"".join(b"REDFIN BOOT ID: " + marker + b"\r\r\n" for marker in markers) +
+                (self.alive if body is None else body))
+
+    def test_return_proof_strict_nonce_and_unchanged_legacy_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "xnu.img"
+            image.write_bytes(b"XNU")
+            manifest = {"sha256": {"redfin-xnu.img": hashlib.sha256(b"XNU").hexdigest()},
+                        "boot_args": "cpus=1 redfinreturn=1"}
+            path = image.with_name("manifest.json")
+            path.write_text(json.dumps(manifest))
+            legacy = cycle.xnu_return_proof(image)
+            self.assertNotIn("boot_id", legacy)
+            manifest["boot_args"] += " redfinbootid=0x" + self.boot_id
+            path.write_text(json.dumps(manifest))
+            self.assertEqual(cycle.xnu_return_proof(image), dict(legacy, boot_id=self.boot_id))
+            for token in ("redfinbootid", "redfinbootid=1", "redfinbootid=0x0000000000000000",
+                          "redfinbootid=0x0123456789abcde", "redfinbootid=0x0123456789abcdef0",
+                          "redfinbootid=0x0123456789abcdeF", "redfinbootid=0X0123456789abcdef",
+                          "redfinbootid=0x0123456789abcdef redfinbootid=0x0123456789abcdef"):
+                manifest["boot_args"] = "cpus=1 redfinreturn=1 " + token
+                path.write_text(json.dumps(manifest))
+                with self.subTest(token=token), self.assertRaisesRegex(ValueError, "redfinbootid"):
+                    cycle.xnu_return_proof(image)
+
+    def test_marker_requires_exact_single_authenticated_runtime_line(self):
+        cases = [((), True, "missing"), ((self.boot_id.encode(),), True, "matched"),
+                 ((b"fedcba9876543210",), True, "mismatch"),
+                 ((self.boot_id.encode(), self.boot_id.encode()), True, "duplicate"),
+                 ((self.boot_id.encode(), b"malformed"), True, "duplicate"),
+                 ((b"0000000000000000",), True, "invalid"),
+                 ((b"0123456789abcdeF",), True, "invalid"),
+                 ((self.boot_id.encode(),), False, "unauthenticated")]
+        for markers, authenticated, status in cases:
+            with self.subTest(markers=markers, authenticated=authenticated):
+                result = cycle.boot_id_freshness(self.console(markers), self.boot_id, authenticated)
+                self.assertEqual(result["status"], "boot-id-" + status)
+                self.assertEqual(result["marker_count"], len(markers))
+                self.assertEqual(result["capture_authenticated"], authenticated)
+        data = (b"boot args: REDFIN BOOT ID: " + self.boot_id.encode() + b"\n" +
+                self.console((self.boot_id.encode(),)) +
+                b"--- BOOT HISTORY ---\nREDFIN BOOT ID: fedcba9876543210\n")
+        self.assertEqual(cycle.boot_id_freshness(data, self.boot_id, True)["status"], "boot-id-matched")
+
+    def recover(self, console, authenticated, expected=True, pstore=None):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        out = Path(temporary.name)
+        runner = cycle.Cycle(argparse.Namespace(out=out, serial=None, raw_ramoops=True,
+            ramoops_key_dir=out if authenticated else None))
+        if expected:
+            runner.manifest["xnu_return"] = {"boot_id": self.boot_id}
+        def capture():
+            runner.save("after/redfin-console.txt", console)
+            return [("after/redfin-console.txt", console)]
+        def authenticate(artifacts):
+            runner.manifest["ramoops_decryption"] = {"status": "authenticated"}
+            return artifacts
+        def capture_pstore(stage):
+            self.assertEqual(stage, "after")
+            if pstore is None:
+                return []
+            runner.save("after/console-ramoops-0", pstore)
+            return [("after/console-ramoops-0", pstore)]
+        with mock.patch.object(runner, "verify_android"), \
+                mock.patch.object(runner, "raw_ramoops", side_effect=capture), \
+                mock.patch.object(runner, "keyed_ramoops", side_effect=authenticate), \
+                mock.patch.object(runner, "pstore", side_effect=capture_pstore):
+            runner.recover()
+        self.assertEqual((out / "xnu-console.txt").read_bytes(), console)
+        self.assertEqual((out / "after/redfin-console.txt").read_bytes(), console)
+        if pstore is not None:
+            self.assertEqual((out / "after/console-ramoops-0").read_bytes(), pstore)
+        return runner.manifest
+
+    def test_recover_matches_authenticated_nonce_and_rejects_other_outcomes(self):
+        for markers, authenticated, expected_status in (
+                ((self.boot_id.encode(),), True, "matched"),
+                ((b"fedcba9876543210",), True, "mismatch"),
+                ((self.boot_id.encode(), self.boot_id.encode()), True, "duplicate"),
+                ((), True, "missing"),
+                ((self.boot_id.encode(),), False, "unauthenticated")):
+            with self.subTest(markers=markers, authenticated=authenticated):
+                result = self.recover(self.console(markers), authenticated)
+                self.assertEqual(result["log_freshness"]["status"], "boot-id-" + expected_status)
+                success = expected_status == "matched"
+                self.assertEqual(result["userspace"]["pid1_alive"], success)
+                self.assertEqual(result["status"], "userspace-alive" if success else "logs-collected")
+
+    def test_unauthenticated_pstore_cannot_supply_nonce_or_pid1_proof(self):
+        pstore = self.console((self.boot_id.encode(),))
+        result = self.recover(self.console((b"fedcba9876543210",)), True, pstore=pstore)
+        self.assertEqual(result["log_freshness"]["status"], "boot-id-mismatch")
+        self.assertFalse(result["userspace"]["pid1_alive"])
+        result = self.recover(self.console((self.boot_id.encode(),), body=b"kernel only\n"),
+                              True, pstore=pstore)
+        self.assertEqual(result["log_freshness"]["status"], "boot-id-matched")
+        self.assertFalse(result["userspace"]["pid1_alive"])
+        self.assertEqual(result["status"], "logs-collected")
+
+    def test_legacy_recover_keeps_existing_no_baseline_behavior(self):
+        result = self.recover(self.console(), False, expected=False)
+        self.assertEqual(result["log_freshness"]["status"], "unproven")
+        self.assertEqual(result["status"], "userspace-alive")
+
+
 class AppleUserspaceTests(unittest.TestCase):
     def evidence(self, body, authenticated=True):
         return cycle.apple_userspace_evidence(b"[REDFIN RAMLOG v1]\n" + body, authenticated)
