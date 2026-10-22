@@ -97,9 +97,9 @@ also cover zero initialization, allocation failure, idempotence, legacy mode
 without an allocation, and the service-size limit. C11 AddressSanitizer and
 UndefinedBehaviorSanitizer also exercise 200 deterministic cases with read-only
 source mappings immediately before guard pages. These checks do not establish
-device copy performance or physical camera alignment. The next device test
-is a temporary GUI8 `redfinfit=2` image with the existing 180-second graceful
-shutdown and authenticated framebuffer/touch capture.
+device copy performance or physical camera alignment. A temporary GUI8
+`redfinfit=2` test with the existing 180-second graceful shutdown now passes
+the authenticated RAM check below.
 
 Automatic RAM capture check
 --------------------------
@@ -134,3 +134,11 @@ coordinates. Five host tests cover these checks and negative cases.
 This confirms the recorded RAM viewport, camera exclusion and rendered
 content without physical input. Physical camera alignment, panel corners,
 touch delivery and copy throughput need their own evidence.
+
+On 2026-10-23, `gui8-cutout-v1` passes on all eight CPUs with local ARM64
+build040928. Three authenticated, image/nonce-matched captures at presents
+1,5,14 have every3515 margin sample black; the final capture contains the
+iOS lock screen inside the viewport. Both services report1017x2204 at31,136.
+The timed shutdown leaves HFSX clean/unmounted and returns to verified
+fastboot. No physical gestures or panel alignment measurement were made;
+14 presentations during a static-screen test are not an FPS measurement.

@@ -18,8 +18,11 @@ userspace with touch. The user reports a large speed improvement over one core.
 The user confirms physical iOS display and touch-driven UI response. A fresh
 eight-core capture records 72 physical SEC contacts and 72 releases;
 multitouch remains unverified. CPU copies are capped at 10 Hz in that run;
-the user reports smoother UI at a 60 Hz copy limit. A touch queue overflow
-stopped input in that comparison; queue recovery is being validated. Timed
+the user reports smoother UI at a 60 Hz copy limit. A repeat with queue
+recovery runs114 contacts/releases without a stop; the hardware clear itself
+is covered by host tests. Full-canvas scaling below Redfin's front camera
+passes an autonomous eight-core run and authenticated lock-screen captures.
+Timed
 process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
 The minimal MobileGestalt Wi-Fi identity fix is validated on the device.

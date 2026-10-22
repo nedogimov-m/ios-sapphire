@@ -15,7 +15,9 @@ to physical taps/swipes; a fresh log records 41 SEC contacts and HID dispatch.
 Bounded md0 USB tests pass ARP, ICMP and fresh UDP logging through native
 macOS CDC-ECM. USB with UFS/GUI, multitouch, the home screen, Wi-Fi and GPU
 acceleration remain unverified. The overlay disables inherited Xiaomi
-hardware drivers and supports one CPU; rendering remains slow.
+hardware drivers. A separate bounded eight-core GUI/touch profile is
+validated; rendering uses the CPU. The cutout-fit profile also passes
+authenticated automatic lock-screen captures and clean timed shutdown.
 
 `--touch-probe --usb-probe --wifi-probe --gpu-probe` adds read-only peripheral
 observers. Common startup requires confirmed PMIC/IMEM bootloader return

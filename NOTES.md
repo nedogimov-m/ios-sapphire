@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN automatic cutout GUI capture passes — 2026-10-23
+
+Source integration `6afc7d8` and geometry `6074350`/checker`7be93bd`.
+Local ARM64 build `build-20261023-040928.log`, kernel
+`4dc8591629151472438fc8f94ff7b2d089f32f106d5299264f3c3fa6526d2384`;
+image `gui8-cutout-v1` SHA256
+`ac428885d06d4a49362757288625e0b83ece1666c8a4a690f07b2aa75db660be`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=1 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0c92c3566fe971d1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Authenticated/image-matched `logs/redfin/gui8-cutout-v1/`:8/8 CPUs, Apple
+userspace, exact FB/HID inverse viewport31,136/1017x2204. Three CRC-checked
+captures at presents1,5,14; all3515 camera/side-margin samples black in each.
+Final thumbnail visibly contains the iOS lock screen inside the viewport.
+Touch worker finishes error0,1463batches/0contacts/0releases/0overflows; user
+was asleep, so physical touch/calibration and throughput were not tested.
+No panic;180s graceful shutdown, journaled HFSX clean_unmounted=true and
+inconsistent=false, authenticated metadata priming, verified fastboot return.
+The capture validates RAM placement/exclusion, not physical panel corners or
+measured FPS. GPU acceleration and physical90Hz remain unfinished.
+Next: source-backed reset-held GMU probe and native read-only AOP/SMEM/CMD-DB
+Wi-Fi prerequisites. Source milestones be1f813/f8647a4 pass70focusedWi-Fitests;
+full host suitev39 ran925tests with924PASS and one transient header/overlay
+comment-parity failure while Wi-Fi files were edited; the70focusedrerun
+includes that corrected parity check and passes.
+
 ## REDFIN CX power passes hardware; fitted GUI capture running — 2026-10-23
 
 The new separate CPU0/md0 CX experiment passes authenticated image-matched
