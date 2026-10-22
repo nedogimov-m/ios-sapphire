@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native Wi-Fi prerequisite hardware proof; GMU chain integrated — 2026-10-23
+
+Native AOP/platform source `be1f813`, read-only observer `f8647a4`, root
+startup mode2 integrated separately from the legacy SMEM observer. Local
+ARM64 build `build-20261023-042051.log` succeeds; kernel
+`f415d7bfc871f61829945abf6e89c20ac79c6f7d9004b4de0ffa228094eae9f3`, image `wifi-native-v1`
+`ada57c8232e0f41fbd63bc03683029429f49b5ee5ec65f521289cd3099ad3a7e`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x87e3064b3486920f`.
+Authenticated/image/nonce-matched `logs/redfin/wifi-native-v1/`:
+AOP magic0x4d41494c/version1/features0/reserved0; ucore link0xffff,
+ack/channel/channel-ack0xffff0000, box0xc0/104bytes; mcore all four link/
+channel words0xffff0000, box0x128/728bytes. Stable observation succeeds,
+TX/RX lengths0; no channel open, messages or notifications. SMEM has14
+partitions, modem partition0xfb000+0x7c000,0uncached items/GLINK0.
+Fresh CMD-DB type3/version0x1000/32-byte tables: xo.lvl address0x300a0,
+levels[0,32,80,128] followed by12zeros; cx.lvl address0x30000,
+[0,16,64,128,192,256,384,416] followed by8zeros; mss.lvl address0x30060,
+[0,64,128,192,256,320,384] followed by9zeros. TURBO384 selects6 for CX and MSS. The native AOP
+channel matches the coherent-cold handshake expected by the transport.
+All maps read-only; no PAS, power, IPCC, SMEM or media writes. Static PID1
+has11heartbeats, no panic; authenticated metadata priming and fastboot return
+pass. This does not establish modem startup or Wi-Fi scan/association/data.
+
+GMU adapter `ab1f463` now integrated after held CX proof, with its exact
+live-FDT/ADT/CPU0/md0/IRQ/return contract checked before any parent power
+write. Child receives original frozen args/context and synchronous held-parent
+callback; failures or late changes block entry. Four actual-parent glue tests
+PASS;61GMUtests include firmware/TCM/adapter/FDT, private actual-XNU ARM64
+-Werror compile and ASan/UBSan. Root native build is running; no physical
+GMU clock/counter/TCM result or new GMU boot args yet. Full host suitev40
+passes962tests (`peripherals-host-tests-v40.txt`), including corrected Wi-Fi
+header parity. Next: temporary isolated GMU test and native Wi-Fi retained
+CX7/MSS6/XO3/AOP transport stage; no firmware/authentication started yet.
+
 ## REDFIN automatic cutout GUI capture passes — 2026-10-23
 
 Source integration `6afc7d8` and geometry `6074350`/checker`7be93bd`.

@@ -87,7 +87,9 @@ def main():
     p.add_argument('--rpmh-probe', action='store_true', help='inspect CMD-DB and RPMh TCS handoff without commands')
     p.add_argument('--gpu-probe', action='store_true', help='observe Adreno 620 clock handoff; requires --display')
     p.add_argument('--gpu-power-probe', action='store_true', help='isolated md0/UP CX parent/ARC/GDSC test; requires verified bootloader return')
+    p.add_argument('--gmu-tcm-probe', action='store_true', help='isolated md0/UP held-CX plus reset-held GMU clock/counter/TCM test')
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
+    p.add_argument('--wifi-native-probe', action='store_true', help='isolated md0/UP read-only AOP/SMEM/CMD-DB prerequisite snapshot')
     p.add_argument('--shutdown-seconds', type=int, default=0,
         help='gracefully stop iOS after 5..300 seconds; requires --ufs-root and --return-bootloader')
     p.add_argument('--spmi-probe', action='store_true', help='read PM8150 subtype and reboot-reason spare through the SPMI observer')
@@ -104,14 +106,25 @@ def main():
     a = p.parse_args()
     if a.display_fit and not a.smp_gui:
         p.error('--display-fit requires the strict --smp-gui profile')
-    if a.gpu_power_probe:
+    if a.gmu_tcm_probe:
+        a.gpu_power_probe = True
+    if a.wifi_native_probe:
         if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
-            p.error('--gpu-power-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+            p.error('--wifi-native-probe requires kernel, live DTB, CPU0 and --return-bootloader')
         competing = ('display', 'splash', 'touch_events', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
                      'capture_screen', 'userspace_stacks', 'trace_syscalls', 'smp_gui', 'shim_early_return')
         if (any(getattr(a, name) for name in competing) or
-                any(value for name, value in vars(a).items() if name.endswith('_probe') and name != 'gpu_power_probe')):
-            p.error('--gpu-power-probe requires its separate RAM-only profile')
+                any(value for name, value in vars(a).items() if name.endswith('_probe') and name != 'wifi_native_probe')):
+            p.error('--wifi-native-probe requires its separate RAM-only profile')
+    if a.gpu_power_probe:
+        label = '--gmu-tcm-probe' if a.gmu_tcm_probe else '--gpu-power-probe'
+        if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
+            p.error(f'{label} requires kernel, live DTB, CPU0 and --return-bootloader')
+        competing = ('display', 'splash', 'touch_events', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
+                     'capture_screen', 'userspace_stacks', 'trace_syscalls', 'smp_gui', 'shim_early_return')
+        if (any(getattr(a, name) for name in competing) or
+                any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('gpu_power_probe', 'gmu_tcm_probe'))):
+            p.error(f'{label} requires its separate RAM-only profile')
         a.rpmh_probe = True
     if a.smp_cpus is not None and not (a.smp_probe or a.smp_gui):
         p.error('--smp-cpus requires --smp-probe or --smp-gui')
@@ -301,7 +314,7 @@ def main():
         from peripherals import add_observers
         try:
             add_observers(tree, nodes, touch=a.touch_probe or a.touch_id_probe or a.touch_events, usb=a.usb_probe,
-                          gpu=a.gpu_probe or a.gpu_power_probe, wifi=a.wifi_probe,
+                          gpu=a.gpu_probe or a.gpu_power_probe, wifi=a.wifi_probe or a.wifi_native_probe,
                           usb_route=a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe,
                           usb_bypass=a.usb_bypass_probe, rpmh=a.rpmh_probe)
         except ValueError as error:
@@ -310,6 +323,18 @@ def main():
             from gpu_power import add_contract
             try:
                 add_contract(tree, nodes)
+            except ValueError as error:
+                p.error(str(error))
+        if a.gmu_tcm_probe:
+            from gmu_probe import add_contract
+            try:
+                add_contract(tree, nodes)
+            except ValueError as error:
+                p.error(str(error))
+        if a.wifi_native_probe:
+            from wifi_platform import add_probe_contract
+            try:
+                add_probe_contract(tree, nodes)
             except ValueError as error:
                 p.error(str(error))
         if a.spmi_probe or a.smp_probe or a.smp_gui:
@@ -420,12 +445,17 @@ def main():
         usb_mode = 3 if a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe else 2 if a.usb_route_probe else int(a.usb_probe)
         touch_mode = 2 if a.touch_id_probe or a.touch_events else int(a.touch_probe)
         for mode, name in ((touch_mode, 'redfintouch'), (usb_mode, 'redfinusb'),
-                           (2 if a.gpu_power_probe else int(a.gpu_probe), 'redfingpu'), (int(a.wifi_probe), 'redfinwifi'),
+                           (2 if a.gpu_power_probe else int(a.gpu_probe), 'redfingpu'),
+                           (2 if a.wifi_native_probe else int(a.wifi_probe), 'redfinwifi'),
                            (int(a.rpmh_probe), 'redfinrpmh'), (int(a.touch_rail_probe), 'redfinrail')):
             if mode:
                 command_line += f' {name}={mode}'
         if a.gpu_power_probe:
             command_line += ' redfingpupower=1'
+        if a.gmu_tcm_probe:
+            command_line += ' redfingmu=1'
+        if a.wifi_native_probe:
+            command_line += ' redfinwifinative=1'
         if a.touch_id_probe or a.touch_events:
             command_line += ' redfintouchsetup=1 redfinrpmhtouch=1'
         if a.touch_scan_probe:
@@ -543,6 +573,10 @@ def main():
         manifest['sha256']['config.h'] = hashlib.sha256((out / 'config.h').read_bytes()).hexdigest()
     if a.gpu_power_probe:
         manifest['gpu_power_probe'] = True
+    if a.gmu_tcm_probe:
+        manifest['gmu_tcm_probe'] = True
+    if a.wifi_native_probe:
+        manifest['wifi_native_probe'] = True
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')
     print(f'{out}/init: static arm64 Darwin PID1')

@@ -1,0 +1,57 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -120,6 +120,7 @@
+ bsd/dev/sweet_rpmh.c			standard
+ bsd/dev/redfin_rpmh.c			standard
+ bsd/dev/redfin_gpu_power.c			standard
++bsd/dev/redfin_wifi_aop.c			standard
+ bsd/dev/redfin_rpmh_touch.c			standard
+ bsd/dev/sweet_spmi.c			standard
+ bsd/dev/sweet_usb.c			standard
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -115,6 +115,7 @@
+ void redfin_usb_probe(void);
+ int redfin_gpu_probe(void);
+ int redfin_gpu_power_probe(void);
++void redfin_wifi_native_observe(void);
+ int redfin_rpmh_probe(void);
+ int redfin_touch_rail_observe(void);
+ int redfin_touch_start_initial(void);
+@@ -176,7 +177,7 @@
+  for (unsigned i = 0; i < 6; i++) {
+   (void)PE_parse_boot_argn(names[i], &modes[i], sizeof(modes[i]));
+   if (modes[i] > 1 && !((i == 0 && modes[i] == 2) ||
+-      (i == 1 && (modes[i] == 2 || modes[i] == 3)) || (i == 3 && modes[i] == 2))) {
++      (i == 1 && (modes[i] == 2 || modes[i] == 3)) || ((i == 2 || i == 3) && modes[i] == 2))) {
+    IOLog("REDFIN PERIPHERALS: unsupported mode; observers skipped\n");
+    return;
+   }
+@@ -193,6 +194,14 @@
+  static uint32_t attempted;
+  if (__atomic_exchange_n(&attempted, 1, __ATOMIC_RELAXED)) return;
+  IOLog("REDFIN PERIPHERALS: bootloader return verified before observers\n");
++ if (modes[2] == 2) {
++  if (modes[0] || modes[1] || modes[3] || modes[4] || modes[5]) {
++   IOLog("REDFIN WIFI NATIVE: refused competing observers\n");
++   return;
++  }
++  redfin_wifi_native_observe();
++  return;
++ }
+  if (modes[3] == 2) {
+   IOLog("REDFIN GPU POWER: beginning separate CX-only experiment\n");
+   IOLog("REDFIN GPU POWER: experiment result=%d\n", redfin_gpu_power_probe());
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -13,6 +13,7 @@
+ iokit/Kernel/arm/TopazModem.cpp                                  optional iokitcpp
+ iokit/Kernel/arm/SweetBusy.cpp                                   optional iokitcpp
+ iokit/Kernel/arm/SapphireGpu.cpp                                 optional iokitcpp
++iokit/Kernel/arm/RedfinWiFiProbe.cpp                              optional iokitcpp
+ iokit/Kernel/arm/SweetEntitlements.cpp                           optional iokitcpp
+ iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitcpp
+ iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp

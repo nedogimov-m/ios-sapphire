@@ -36,6 +36,33 @@ class BuildFlagTests(unittest.TestCase):
             with self.subTest(option=option):
                 self.refused([*base, option], '--gpu-power-probe requires its separate RAM-only profile')
 
+    def test_native_wifi_observation_requires_its_isolated_cpu0_ram_profile(self):
+        self.refused(['--wifi-native-probe'],
+                     '--wifi-native-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+        base = ['--wifi-native-probe', '--kernel', '/missing-kernel',
+                '--dtb', '/missing-dtb', '--return-bootloader']
+        self.refused([*base, '--boot-mpidr', '0x600'],
+                     '--wifi-native-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+        for option in ('--display', '--splash', '--touch-events', '--ufs-root',
+                       '--smp-gui', '--smp-probe', '--shim-early-return', '--usb-probe',
+                       '--wifi-probe', '--gpu-power-probe', '--rpmh-probe'):
+            with self.subTest(option=option):
+                self.refused([*base, option], '--wifi-native-probe requires its separate RAM-only profile')
+
+    def test_gmu_tcm_requires_held_parent_profile_without_competing_writers(self):
+        self.refused(['--gmu-tcm-probe'],
+                     '--gmu-tcm-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+        base = ['--gmu-tcm-probe', '--kernel', '/missing-kernel',
+                '--dtb', '/missing-dtb', '--return-bootloader']
+        self.refused([*base, '--boot-mpidr', '0x700'],
+                     '--gmu-tcm-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+        for option in ('--display', '--splash', '--touch-events', '--ufs-root',
+                       '--smp-gui', '--smp-probe', '--shim-early-return', '--usb-probe',
+                       '--wifi-native-probe', '--rpmh-probe'):
+            with self.subTest(option=option):
+                expected = '--wifi-native-probe' if option == '--wifi-native-probe' else '--gmu-tcm-probe'
+                self.refused([*base, option], expected + ' requires its separate RAM-only profile')
+
     def test_cpu_capability_probe_requires_runtime_return_and_cpu0(self):
         self.refused(['--cpu-capability-probe'],
                      '--cpu-capability-probe requires --kernel, --dtb and --return-bootloader')

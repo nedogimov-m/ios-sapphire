@@ -1,0 +1,69 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -120,6 +120,7 @@
+ bsd/dev/sweet_rpmh.c			standard
+ bsd/dev/redfin_rpmh.c			standard
+ bsd/dev/redfin_gpu_power.c			standard
++bsd/dev/redfin_gmu_probe.c			standard
+ bsd/dev/redfin_wifi_aop.c			standard
+ bsd/dev/redfin_rpmh_touch.c			standard
+ bsd/dev/sweet_spmi.c			standard
+diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
+--- a/bsd/dev/redfin_gpu_power.c
++++ b/bsd/dev/redfin_gpu_power.c
+@@ -9,6 +9,7 @@
+ #include <pexpert/device_tree.h>
+ #include <machine/machine_routines.h>
+ #include "redfin_gpu_power.h"
++#include "redfin_gmu_probe.h"
+ extern int redfin_spmi_return_ready(void);
+ extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
+ extern vm_offset_t ml_io_map_wcomb(vm_offset_t,vm_size_t);
+@@ -17,6 +18,7 @@
+ struct gp_context {vm_offset_t base[4],db;char args[608];unsigned bytes;};
+ static struct gp_context gp;
+ static struct rf_gp_report gp_report;
++static bool gp_gmu_mode;
+ static bool gp_word(const char *p,unsigned n,const char *s)
+ {return strlen(s)==n && !memcmp(p,s,n);}
+ static bool gp_flags(const char *args,unsigned bytes)
+@@ -55,6 +57,11 @@
+   __builtin_arm_rsr64("CurrentEL")==4 && !(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) &&
+   redfin_spmi_return_ready()==1;
+ }
++static bool gp_held_valid(void *context)
++{
++ return gp_valid(context) && gp_report.stage==RF_GP_OK &&
++  gp_report.parent_held && gp_report.cx_on;
++}
+ static uint32_t gp_read(void *context,unsigned unit,unsigned at)
+ {
+  struct gp_context *c=context;
+@@ -88,8 +95,12 @@
+  const char *args=PE_boot_args();unsigned bytes=0;
+  if(!args)return EINVAL;
+  while(bytes<sizeof(gp.args) && args[bytes])bytes++;
+- if(bytes==sizeof(gp.args) || !gp_flags(args,bytes+1))return ENOTSUP;
++ if(bytes==sizeof(gp.args))return ENOTSUP;
++ gp_gmu_mode=redfin_gmu_args_valid(args,bytes+1);
++ if(!gp_gmu_mode && !gp_flags(args,bytes+1))return ENOTSUP;
+  memcpy(gp.args,args,bytes+1);gp.bytes=bytes+1;
++ /* Validate the complete child mode before the parent's first ARC/GDSC write. */
++ if(gp_gmu_mode && redfin_gmu_probe_contract(gp.args,gp.bytes))return ENXIO;
+  const uint64_t memory_base=0x180000000ULL,memory_size=0x80000000ULL;
+  const uint64_t ranges[]={0x03d9106c,4,0x03d91540,4,0x18220000,0x10000,0x80860000,0x20000};
+  const uint32_t parent[]={0x30000,64,65535,7,416},chip=0x06020001;
+@@ -110,6 +121,11 @@
+  printf("REDFIN GPU POWER: result=%d stage=%u ARC-selector=%u corner=%u held=%u writes=%u polls=%u IRQ=%#x CMD=%#x CX=%#x/%#x HW=%#x on=%u; GX/GMU/SMMU/DMA untouched\n",
+   result,gp_report.stage,gp_report.selector,gp_report.corner,gp_report.parent_held,gp_report.write_issued,
+   gp_report.polls,gp_report.irq,gp_report.status,gp_report.cx_before,gp_report.cx_after,gp_report.cx_hw,gp_report.cx_on);
+- return result?EIO:0;
++ if(result)return EIO;
++ if(gp_gmu_mode) {
++  if(!gp_held_valid(&gp))return EPERM;
++  return redfin_gmu_probe(gp.args,gp.bytes,&gp,gp_held_valid);
++ }
++ return 0;
+ }
+ #endif

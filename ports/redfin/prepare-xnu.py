@@ -184,7 +184,8 @@ def main(argv=None):
              'early-return.patch', 'early-return-start.patch',
              'smp-log.patch', 'smp-return.patch', 'smp.patch', 'early-bootid.patch',
          'smp-eight.patch', 'smp-gui.patch', 'touch-overflow.patch', 'gpu-power.patch',
-         'display-fit.patch')]
+         'display-fit.patch', 'wifi-aop.patch', 'wifi-native-probe.patch',
+         'wifi-native-start.patch', 'gmu-probe.patch', 'gmu-start.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)
