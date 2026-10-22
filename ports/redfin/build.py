@@ -61,6 +61,7 @@ def main():
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
     p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
+    p.add_argument('--touch-rail-probe', action='store_true', help='read fixed PMIC identity and candidate LDO states without PMIC writes')
     p.add_argument('--usb-probe', action='store_true', help='observe DWC3 handoff without PHY or DMA changes')
     p.add_argument('--usb-route-probe', action='store_true', help='observe halted DWC3 and standard SMMU routing without writes')
     p.add_argument('--rpmh-probe', action='store_true', help='inspect CMD-DB and RPMh TCS handoff without commands')
@@ -80,7 +81,7 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
-    if (a.touch_probe or a.usb_probe or a.usb_route_probe or a.rpmh_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
+    if (a.touch_probe or a.touch_rail_probe or a.usb_probe or a.usb_route_probe or a.rpmh_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
         p.error('peripheral observers require --kernel')
     if a.gpu_probe and not a.display:
         p.error('--gpu-probe requires --display')
@@ -100,7 +101,7 @@ def main():
         p.error('--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')
     if a.userspace_stacks and not a.shutdown_seconds:
         p.error('--userspace-stacks requires --shutdown-seconds')
-    if a.return_bootloader:
+    if a.return_bootloader or a.touch_rail_probe:
         a.spmi_probe = True
     ufs_mode = 3 if a.ufs_wake_probe or a.ufs_root_probe or a.ufs_root else 2 if a.ufs_read_probe else int(a.ufs_probe)
     if (a.apple_adt or ufs_mode or a.spmi_probe) and not a.kernel:
@@ -253,7 +254,7 @@ def main():
         usb_mode = 2 if a.usb_route_probe else int(a.usb_probe)
         for mode, name in ((int(a.touch_probe), 'redfintouch'), (usb_mode, 'redfinusb'),
                            (int(a.gpu_probe), 'redfingpu'), (int(a.wifi_probe), 'redfinwifi'),
-                           (int(a.rpmh_probe), 'redfinrpmh')):
+                           (int(a.rpmh_probe), 'redfinrpmh'), (int(a.touch_rail_probe), 'redfinrail')):
             if mode:
                 command_line += f' {name}={mode}'
         if ufs_mode:

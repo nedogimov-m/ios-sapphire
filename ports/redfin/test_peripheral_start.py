@@ -22,10 +22,10 @@ class PeripheralStartupTests(unittest.TestCase):
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
-static uint32_t modes[5],cpus;
+static uint32_t modes[6],cpus;
 static uint64_t boot_id;
 static unsigned boot_logs;
-static int ready,calls[5];
+static int ready,calls[6];
 static int IOLog(const char *format,...) {
  if(!strncmp(format,"REDFIN BOOT ID:",15)) {
   if(strcmp(format,"REDFIN BOOT ID: %016llx\n"))abort();
@@ -40,9 +40,9 @@ static int PE_parse_boot_argn(const char *s,void *out,unsigned n) {
   if(n!=8)abort();memcpy(out,&boot_id,8);return boot_id!=0;
  }
  if(n!=4)abort();
- const char *names[]={"redfintouch","redfinusb","redfinwifi","redfingpu","redfinrpmh"};
+ const char *names[]={"redfintouch","redfinusb","redfinwifi","redfingpu","redfinrpmh","redfinrail"};
  if(!strcmp(s,"cpus")){memcpy(out,&cpus,4);return 1;}
- for(unsigned i=0;i<5;i++)if(!strcmp(s,names[i])){memcpy(out,&modes[i],4);return 1;}
+ for(unsigned i=0;i<6;i++)if(!strcmp(s,names[i])){memcpy(out,&modes[i],4);return 1;}
  return 0;
 }
 static int redfin_spmi_return_ready(void){return ready;}
@@ -51,16 +51,17 @@ static void redfin_usb_probe(void){calls[1]++;}
 static void redfin_wifi_observe(void){calls[2]++;}
 static int redfin_gpu_probe(void){calls[3]++;return 0;}
 static int redfin_rpmh_probe(void){calls[4]++;return 0;}
+static int redfin_touch_rail_observe(void){calls[5]++;return 0;}
 '''
         suffix = r'''
 int main(int argc,char **argv){
- if(argc!=8 && argc!=9)return 2;
- for(unsigned i=0;i<5;i++)modes[i]=(uint32_t)strtoul(argv[i+1],NULL,0);
- ready=atoi(argv[6]);cpus=(uint32_t)strtoul(argv[7],NULL,0);
- if(argc==9)boot_id=strtoull(argv[8],NULL,0);
+ if(argc!=9 && argc!=10)return 2;
+ for(unsigned i=0;i<6;i++)modes[i]=(uint32_t)strtoul(argv[i+1],NULL,0);
+ ready=atoi(argv[7]);cpus=(uint32_t)strtoul(argv[8],NULL,0);
+ if(argc==10)boot_id=strtoull(argv[9],NULL,0);
  for(int i=0;i<3;i++)redfin_peripherals_observe();
  if(boot_logs!=(boot_id ? 1u : 0u))return 3;
- printf("%d %d %d %d %d\n",calls[0],calls[1],calls[2],calls[3],calls[4]);return 0;
+ printf("%d %d %d %d %d %d\n",calls[0],calls[1],calls[2],calls[3],calls[4],calls[5]);return 0;
 }
 '''
         (root/'start.cpp').write_text(prefix+actual+suffix)
@@ -78,28 +79,28 @@ int main(int argc,char **argv){
         return tuple(map(int, output.split()))
 
     def test_default_off(self):
-        self.assertEqual(self.run_case((0, 0, 0, 0, 0), ready=0), (0, 0, 0, 0, 0))
+        self.assertEqual(self.run_case((0, 0, 0, 0, 0, 0), ready=0), (0, 0, 0, 0, 0, 0))
 
     def test_boot_id_printed_once_even_without_observers(self):
         for boot_id in (1, 0x0123456789abcdef, 0xffffffffffffffff):
-            self.assertEqual(self.run_case((0, 0, 0, 0, 0), ready=0, boot_id=boot_id), (0, 0, 0, 0, 0))
+            self.assertEqual(self.run_case((0, 0, 0, 0, 0, 0), ready=0, boot_id=boot_id), (0, 0, 0, 0, 0, 0))
 
     def test_unverified_return_or_smp_never_dispatches(self):
         for ready, cpus in ((0, 1), (1, 0), (1, 2), (1, 8)):
-            self.assertEqual(self.run_case((1, 1, 1, 1, 1), ready, cpus), (0, 0, 0, 0, 0))
+            self.assertEqual(self.run_case((1, 1, 1, 1, 1, 1), ready, cpus), (0, 0, 0, 0, 0, 0))
 
     def test_unknown_mode_refuses_entire_group(self):
-        for i in range(5):
-            modes = [1] * 5
+        for i in range(6):
+            modes = [1] * 6
             modes[i] = 3 if i == 1 else 2
-            self.assertEqual(self.run_case(modes), (0, 0, 0, 0, 0))
+            self.assertEqual(self.run_case(modes), (0, 0, 0, 0, 0, 0))
 
     def test_explicit_usb_route_mode_dispatches_usb_once(self):
-        self.assertEqual(self.run_case((0, 2, 0, 0, 0)), (0, 1, 0, 0, 0))
+        self.assertEqual(self.run_case((0, 2, 0, 0, 0, 0)), (0, 1, 0, 0, 0, 0))
 
     def test_only_requested_observers_run_once(self):
-        for mask in range(32):
-            modes = tuple((mask >> bit) & 1 for bit in range(5))
+        for mask in range(64):
+            modes = tuple((mask >> bit) & 1 for bit in range(6))
             self.assertEqual(self.run_case(modes), modes)
 
 

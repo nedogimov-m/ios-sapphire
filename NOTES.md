@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN physical PMIC observations and compiled touch events — 2026-10-22
+
+V6 RAM image2a13c0dc21fcd2451e8f84281794843b66c578ca85d2d706a4c170386226afa9,
+kernel d485c0f0b5ec48a023b18acfc29828661d4986f844a6a28528e7beeca6917029,
+build research/redfin-build/build-20261022-153354.log. Exact args:
+`debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=1 redfinrpmh=1 redfinrail=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xec516f717dcc18f5`.
+Read-only PMIC observer authenticated the PM8150 model (SID0 REVID511e)
+and all18 contiguous SID1 LDO pages4000..5100, APID85..102, owner4/type4,
+stable. Candidate5000 has subtype7d, not the initially considered HT35;
+unknown-layout gate correctly kept V6 header-only. No PMIC/GPIO writes.
+
+V7 uses the pinned Qualcomm generic LDO driver's explicit unified-layout
+branch (type4/subtype>=30) to allow only the observed7d in addition to the
+older known types. This permits raw reads, without claiming a voltage policy.
+Image19a92afcf8663dc2d3b327997e7f0b6ffc539260bd060d4c124013d7cd8b73ad,
+kernel786d41910f244c198001bf1f1c198858519a22b9d0c81a9607b6689c9c220c45,
+build research/redfin-build/build-20261022-154344.log. Exact args are V6's
+with `redfintouch=1 redfinrpmh=1` removed and image ID6c2e206d85238990.
+All18 pages remained stable. Physical5000: configuredVSET3304mV,MODE7,
+ENABLE0,STATUS3/VREG_READY0. Physical4900:3000mV,MODE7,ENABLE0,STATUS3.
+This proves the candidate rail is disabled; it does not authorize reset
+release. V6/V7 automatically authenticated and matched their unique image
+IDs, re-primed public metadata, and left verified fastboot. No UFS enabled.
+Captures logs/redfin/peripherals-v6-rail/ and peripherals-v7-rail/.
+
+The source ordinal chain plus the observed18 LDOs attributes L17 to5000:
+Qualcomm commonbase4000/stride100, ascending peripheral enumeration,
+driver index=(base-firstbase)/stride, enumL17=16; Linux PM8150 list1..18.
+Exact references/limits are in TOUCH-RAIL.md. PMIC5 PLDO range is1504..3544mV;
+3304mV is this board's DT target, not the hardware maximum. A future ready
+proof must also read the valid voltage42/43 while enabled, beyond configured
+VSET40/41. Controlled RPMh preparation remains unimplemented/unhooked.
+
+Touch event transport/worker and corrected Redfin HID geometry now compile
+in the actual ARM64 kernel, build153641/kernel
+cb0149c82c927219782d3262f76f6520d11664320d94233fabd8d1d6135b3cd7,
+also included in154344. They have no startup hook and have not run on device.
+Worker waits for a real HID callback, discards stale initial events, validates
+whole batches, suppresses unknown MOVE/palm/grip and releases contacts on
+error/expiry. Fixed HID internal UP state being retained if allocation fails;
+actual-method fault tests cover all10 contacts. Peer review passed.
+313 integrated tests passed before the extra7d regression; the affected rail
+suite now has9 passing tests. Next: source-backed PMIC5 power/readiness,
+real SEC ID, then event/HID activation; isolated USB manager/gadget drafts.
+
 ## REDFIN RPMh/SMEM corrected and image-bound logs V5 — 2026-10-22
 
 Build research/redfin-build/build-20261022-152410.log passed; kernel SHA256

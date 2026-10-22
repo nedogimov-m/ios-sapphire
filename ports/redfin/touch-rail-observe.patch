@@ -1,0 +1,185 @@
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -231,4 +231,181 @@
+  out:
+ 	return error;
+ }
++
++/* Redfin physical-PMIC evidence only; append inside redfin_spmi.c.
++ * No rail-ready API, indexed-L17 claim, PMIC writes or new mappings.
++ * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8:
++ * spmi-pmic-arb.c v5 observer, qcom-spmi-pmic.c REVID0104/0105,
++ * qpnp-revid.h PM8150 subtype1e.
++ * Qualcomm firmware 20bb8ae36c93fc16bbadda0e0a83f930c0c8a271:
++ * QcomPkg/Settings/PMIC/pm_config_common.c common LDO4000/stride100;
++ * PmicLib/drivers/{ldo,pwr}: unified VSET40/41 LE mV, MODE45, EN46,
++ * STATUS08. The common map is a candidate map, not a PM8150 target table.
++ */
++struct redfin_rail_target { unsigned ppid, apid, owner; uint32_t mapping; };
++struct redfin_rail_sample { uint16_t header, millivolts, mode_enable, status; };
++static bool redfin_rail_attempted;
++
++static bool
++redfin_rail_platform(void)
++{
++ DTEntry root;
++ const char *list = NULL;
++ unsigned bytes = 0;
++ bool redfin = false, lito = false;
++ if (SecureDTLookupEntry(NULL, "/", &root) != kSuccess ||
++     SecureDTGetProperty(root, "compatible", (const void **)&list, &bytes) != kSuccess ||
++     !list || !bytes || bytes > 256 || list[bytes - 1]) return false;
++ for (unsigned at = 0; at < bytes;) {
++  unsigned end = at;
++  while (end < bytes && list[end]) end++;
++  if (end == bytes || end == at) return false;
++  if (end - at == sizeof("google,redfin") - 1 && !memcmp(list + at, "google,redfin", sizeof("google,redfin") - 1)) redfin = true;
++  if (end - at == sizeof("qcom,sm7250") - 1 && !memcmp(list + at, "qcom,sm7250", sizeof("qcom,sm7250") - 1)) lito = true;
++  at = end + 1;
++ }
++ return redfin && lito;
++}
++
++static bool
++redfin_rail_mapping(const struct redfin_rail_target *t)
++{
++ if (!t || t->apid >= 512 || !t->mapping ||
++     ((t->mapping >> 8) & 0xfff) != t->ppid) return false;
++ return redfin_spmi_rd(redfin_spmi_proof.core, 0) == redfin_spmi_proof.version &&
++     redfin_spmi_rd(redfin_spmi_proof.core, 0x900 + t->apid * 4) == t->mapping &&
++     (redfin_spmi_rd(redfin_spmi_proof.config, 0x700 + t->apid * 4) & 7) == t->owner;
++}
++
++/* APID determines SID/peripheral on v5; an address alone does not select it.
++ * Fixed REVID and candidate-LDO read allowlist; opcode can only be EXT_READL.
++ */
++static int
++redfin_rail_read(const struct redfin_rail_target *t, unsigned address, unsigned count, uint16_t *out)
++{
++ bool model = t && t->ppid == 0x001 && address == 0x0104 && count == 2;
++ bool candidate = t && t->ppid >= 0x140 && t->ppid <= 0x151 &&
++     (address >> 8) == (t->ppid & 255) &&
++     (((address & 255) == 4 && count == 2) || ((address & 255) == 8 && count == 1) ||
++      ((address & 255) == 0x40 && count == 2) || ((address & 255) == 0x45 && count == 2));
++ if (!out || (!model && !candidate) || !redfin_rail_mapping(t)) return EINVAL;
++ unsigned channel = t->apid * 0x80;
++ uint32_t command = (1u << 27) | ((address & 255u) << 4) | (count - 1u);
++ __asm__ volatile("dmb oshst" ::: "memory");
++ *(volatile uint32_t *)(redfin_spmi_proof.observer + channel) = command;
++ __asm__ volatile("dsb osh" ::: "memory");
++ for (unsigned us = 0; us < 1000; us++) {
++  uint32_t status = redfin_spmi_rd(redfin_spmi_proof.observer, channel + 8);
++  if (status & 1) {
++   if (status & 0x0e) return EIO;
++   uint32_t data = redfin_spmi_rd(redfin_spmi_proof.observer, channel + 0x18);
++   if (!redfin_rail_mapping(t)) return EAGAIN;
++   *out = (uint16_t)(data & (count == 1 ? 255u : 65535u));
++   return 0;
++  }
++  delay(1);
++ }
++ return ETIMEDOUT; /* Caller stops every observer transaction; no reuse/retry. */
++}
++
++static bool
++redfin_rail_unified(uint16_t header)
++{
++ if ((header & 255) != 4) return false;
++ /* Known unified LDO subtypes in Linux v6.12 qcom_spmi-regulator.c, plus the
++  * exact7d observed on this PM8150. Qualcomm pm_ldo_driver_init explicitly
++  * selects unified VSET/MODE/STATUS for typeLDO and subtype>=HT_N300_STEPPER
++  * (30), which includes7d. This permits raw observation, not voltage policy.
++  * Other unlisted subtypes remain header-only. */
++ switch (header >> 8) {
++ case 0x30: case 0x31: case 0x32: case 0x35: case 0x3b: case 0x3c: case 0x3d: case 0x7d: return true;
++ default: return false;
++ }
++}
++
++static int
++redfin_rail_sample(const struct redfin_rail_target *t, struct redfin_rail_sample *s)
++{
++ unsigned base = (t->ppid & 255) << 8;
++ int error = redfin_rail_read(t, base + 4, 2, &s->header);
++ if (error || !redfin_rail_unified(s->header)) return error;
++ error = redfin_rail_read(t, base + 0x40, 2, &s->millivolts);
++ if (!error) error = redfin_rail_read(t, base + 0x45, 2, &s->mode_enable);
++ if (!error) error = redfin_rail_read(t, base + 8, 1, &s->status);
++ return error;
++}
++
++int redfin_touch_rail_observe(void);
++int
++redfin_touch_rail_observe(void)
++{
++ uint32_t mode = 0, cpus = 0;
++ (void)PE_parse_boot_argn("redfinrail", &mode, sizeof(mode));
++ if (mode != 1) return ENOTSUP;
++ if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
++     !redfin_spmi_return_ready() || !redfin_spmi_proof.ready ||
++     !redfin_spmi_proof.core || !redfin_spmi_proof.observer || !redfin_spmi_proof.config ||
++     redfin_spmi_proof.version < 0x50000000 || redfin_spmi_proof.version >= 0x70000000 ||
++     !redfin_rail_platform()) return ENXIO;
++ if (__atomic_exchange_n(&redfin_rail_attempted, true, __ATOMIC_RELAXED)) return EBUSY;
++ if (redfin_spmi_rd(redfin_spmi_proof.core, 0) != redfin_spmi_proof.version) return ENXIO;
++ struct redfin_rail_target targets[19];
++ for (unsigned i = 0; i < 19; i++)
++  targets[i] = (struct redfin_rail_target){i ? 0x13f + i : 0x001, 512, 0, 0};
++ /* Same v5 APID selection as Linux: first match, with EE0 mappings preferred.
++  * The table may omit physical peripherals, so absence does not prove no LDO. */
++ for (unsigned apid = 0; apid < 512; apid++) {
++  uint32_t mapping = redfin_spmi_rd(redfin_spmi_proof.core, 0x900 + 4 * apid);
++  unsigned ppid = (mapping >> 8) & 0xfff;
++  if (!mapping || (ppid != 0x001 && (ppid < 0x140 || ppid > 0x151))) continue;
++  unsigned index = ppid == 0x001 ? 0 : ppid - 0x13f;
++  unsigned owner = redfin_spmi_rd(redfin_spmi_proof.config, 0x700 + 4 * apid) & 7;
++  if (targets[index].apid == 512 || owner == 0)
++   targets[index] = (struct redfin_rail_target){ppid, apid, owner, mapping};
++ }
++ if (targets[0].apid == 512) return ENXIO;
++ uint16_t model = 0;
++ int error = redfin_rail_read(&targets[0], 0x0104, 2, &model);
++ printf("REDFIN RAIL: SID0 REVID type=%#x subtype=%#x result=%d\n", model & 255, model >> 8, error);
++ if (error) return error;
++ if (model != 0x1e51) return ENOTSUP;
++ unsigned present = 0, unified = 0, holes = 0;
++ bool changed = false;
++ for (unsigned i = 1; i < 19; i++) {
++  const struct redfin_rail_target *t = &targets[i];
++  unsigned base = (t->ppid & 255) << 8;
++  if (t->apid == 512) {
++   holes++;
++   printf("REDFIN RAIL: candidate SID1 page=%#x has no APID; physical absence unproven\n", base);
++   continue;
++  }
++  struct redfin_rail_sample a = {0}, b = {0};
++  error = redfin_rail_sample(t, &a);
++  if (!error) { delay(100); error = redfin_rail_sample(t, &b); }
++  if (error) {
++   printf("REDFIN RAIL: candidate SID1 page=%#x APID=%u read-error=%d; stopped, no retry\n", base, t->apid, error);
++   return error;
++  }
++  present++;
++  bool stable = a.header == b.header && a.millivolts == b.millivolts &&
++      a.mode_enable == b.mode_enable && a.status == b.status;
++  changed |= !stable;
++  printf("REDFIN RAIL: candidate SID1 page=%#x APID=%u write-owner=%u type=%#x subtype=%#x stable=%u\n",
++      base, t->apid, t->owner, a.header & 255, a.header >> 8, stable);
++  if (redfin_rail_unified(a.header)) {
++   unified++;
++   printf("REDFIN RAIL: candidate page=%#x raw VSET-mV=%u MODE=%#x ENABLE=%#x STATUS=%#x VREG_READY-bit=%u\n",
++       base, a.millivolts, a.mode_enable & 255, a.mode_enable >> 8, a.status, !!(a.status & 0x80));
++   if ((a.header >> 8) == 0x7d)
++    printf("REDFIN RAIL: candidate page=%#x subtype7d uses generic unified read layout; PMIC5 range/mode policy unproven, raw observation only\n", base);
++  }
++ }
++ uint16_t check = 0;
++ error = redfin_rail_read(&targets[0], 0x0104, 2, &check);
++ if (error) return error;
++ changed |= model != check;
++ printf("REDFIN RAIL: candidate observation done present=%u unified=%u holes=%u stable=%u; L17 index and AVDD readiness unproven, no PMIC writes\n",
++     present, unified, holes, !changed);
++ return changed ? EAGAIN : holes ? ENXIO : 0;
++}
+ #endif

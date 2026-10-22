@@ -1,7 +1,7 @@
 diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 --- a/iokit/bsddev/IOKitBSDInit.cpp
 +++ b/iokit/bsddev/IOKitBSDInit.cpp
-@@ -108,6 +108,54 @@
+@@ -108,6 +108,56 @@
  /* REDFIN_WIFI_OBSERVER_TEST_END */
  #endif
  
@@ -12,6 +12,7 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 +void redfin_usb_probe(void);
 +int redfin_gpu_probe(void);
 +int redfin_rpmh_probe(void);
++int redfin_touch_rail_observe(void);
 +}
 +
 +/* REDFIN_PERIPHERAL_START_TEST_BEGIN */
@@ -24,10 +25,10 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 +  if (PE_parse_boot_argn("redfinbootid", &boot_id, sizeof(boot_id)) && boot_id)
 +   IOLog("REDFIN BOOT ID: %016llx\n", (unsigned long long)boot_id);
 + }
-+ uint32_t modes[5] = {}, cpus = 0;
-+ const char *names[] = {"redfintouch", "redfinusb", "redfinwifi", "redfingpu", "redfinrpmh"};
++ uint32_t modes[6] = {}, cpus = 0;
++ const char *names[] = {"redfintouch", "redfinusb", "redfinwifi", "redfingpu", "redfinrpmh", "redfinrail"};
 + bool any = false;
-+ for (unsigned i = 0; i < 5; i++) {
++ for (unsigned i = 0; i < 6; i++) {
 +  (void)PE_parse_boot_argn(names[i], &modes[i], sizeof(modes[i]));
 +  if (modes[i] > 1 && !(i == 1 && modes[i] == 2)) {
 +   IOLog("REDFIN PERIPHERALS: unsupported mode; observers skipped\n");
@@ -44,6 +45,7 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
 + static uint32_t attempted;
 + if (__atomic_exchange_n(&attempted, 1, __ATOMIC_RELAXED)) return;
 + IOLog("REDFIN PERIPHERALS: bootloader return verified before observers\n");
++ if (modes[5]) IOLog("REDFIN RAIL: snapshot result=%d\n", redfin_touch_rail_observe());
 + if (modes[4]) IOLog("REDFIN RPMH: snapshot result=%d\n", redfin_rpmh_probe());
 + if (modes[0]) IOLog("REDFIN TOUCH: host snapshot result=%d\n", redfin_touch_probe());
 + if (modes[1]) redfin_usb_probe();
@@ -56,7 +58,7 @@ diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
  extern "C" {
  #include <libkern/amfi/amfi.h>
  #include <sys/codesign.h>
-@@ -859,6 +907,7 @@
+@@ -859,6 +909,7 @@
  		int result = redfin_spmi_arm_return();
  		IOLog("REDFIN RETURN: arm result=%d\n", result);
  	}

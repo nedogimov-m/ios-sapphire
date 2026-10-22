@@ -39,7 +39,7 @@ class BuildFlagTests(unittest.TestCase):
         self.refused(['--userspace-stacks'], '--userspace-stacks requires --shutdown-seconds')
 
     def test_peripheral_observers_require_kernel(self):
-        for option in ('--touch-probe', '--usb-probe', '--usb-route-probe',
+        for option in ('--touch-probe', '--touch-rail-probe', '--usb-probe', '--usb-route-probe',
                        '--rpmh-probe', '--gpu-probe', '--wifi-probe'):
             self.refused([option], 'peripheral observers require --kernel')
 
