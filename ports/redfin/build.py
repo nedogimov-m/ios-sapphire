@@ -60,6 +60,10 @@ def main():
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
+    p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
+    p.add_argument('--usb-probe', action='store_true', help='observe DWC3 handoff without PHY or DMA changes')
+    p.add_argument('--gpu-probe', action='store_true', help='observe Adreno 620 clock handoff; requires --display')
+    p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
     p.add_argument('--shutdown-seconds', type=int, default=0,
         help='gracefully stop iOS after 5..300 seconds; requires --ufs-root and --return-bootloader')
     p.add_argument('--spmi-probe', action='store_true', help='read PM8150 subtype and reboot-reason spare through the SPMI observer')
@@ -74,6 +78,10 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if (a.touch_probe or a.usb_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
+        p.error('peripheral observers require --kernel')
+    if a.gpu_probe and not a.display:
+        p.error('--gpu-probe requires --display')
     if a.ufs_rw and not a.ufs_root:
         p.error('--ufs-rw requires --ufs-root')
     if a.display and not (a.kernel and a.apple_adt and a.splash):
@@ -143,6 +151,12 @@ def main():
             mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes())
         from memory import _tree
         nodes, _ = _tree(a.dtb.read_bytes())
+        from peripherals import add_observers
+        try:
+            add_observers(tree, nodes, touch=a.touch_probe, usb=a.usb_probe,
+                          gpu=a.gpu_probe, wifi=a.wifi_probe)
+        except ValueError as error:
+            p.error(str(error))
         if a.spmi_probe:
             spmi = nodes.get('/soc/qcom,spmi@c440000', {})
             names = spmi.get('reg-names', b'').rstrip(b'\0').split(b'\0')
@@ -233,6 +247,10 @@ def main():
             command_line += f' redfinshutdown={a.shutdown_seconds}'
         if a.userspace_stacks:
             command_line += ' redfinstacks=1'
+        for enabled, name in ((a.touch_probe, 'redfintouch'), (a.usb_probe, 'redfinusb'),
+                              (a.gpu_probe, 'redfingpu'), (a.wifi_probe, 'redfinwifi')):
+            if enabled:
+                command_line += f' {name}=1'
         if ufs_mode:
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:

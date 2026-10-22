@@ -1,0 +1,228 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -109,2 +109,3 @@
++bsd/dev/redfin_touch.c			standard
+ bsd/dev/sweet_sample.c			standard
+ bsd/dev/sweet_keys.c			standard
+diff --git a/bsd/dev/redfin_touch_protocol.h b/bsd/dev/redfin_touch_protocol.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_touch_protocol.h
+@@ -0,0 +1,79 @@
++/* SEC S6SY79x SPI wire format; no MMIO or controller writes.
++ * Google kernel/msm-modules/sec_touch 0701b191882dc408104ad8af9e2f5eb2bf34c297:
++ * sec_ts.c sec_ts_read_internal/sec_ts_handle_coord_event; sec_ts.h events.
++ */
++#ifndef REDFIN_TOUCH_PROTOCOL_H
++#define REDFIN_TOUCH_PROTOCOL_H
++#include <stddef.h>
++#include <stdint.h>
++struct redfin_touch_contact {
++	unsigned finger, action, x, y, type, remaining;
++};
++/* Only documented read requests. Reading events consumes them.
++ * No reset, firmware, NVM or selftest opcode.
++ */
++static inline int
++redfin_touch_read_allowed(unsigned reg, unsigned count)
++{
++	return (reg == 0x22 && count == 5) || (reg == 0x55 && count == 1) ||
++	       (reg == 0x60 && count == 8) ||
++	       (reg == 0x61 && count >= 8 && count <= 31 * 8 && count % 8 == 0);
++}
++static inline unsigned
++redfin_touch_read_request(unsigned reg, unsigned count, uint8_t out[8])
++{
++	if (!out || !redfin_touch_read_allowed(reg, count)) return 0;
++	out[0] = 0xaa;
++	out[1] = 0;
++	out[2] = 1;
++	out[3] = (uint8_t)(count >> 8);
++	out[4] = (uint8_t)count;
++	out[5] = (uint8_t)reg;
++	out[6] = (uint8_t)(out[0] + out[1] + out[2] + out[3] + out[4] + out[5]);
++	out[7] = 0;
++	return 8; /* Deassert CS, >=100us delay, new CS assertion for RX. */
++}
++static inline unsigned
++redfin_touch_read_delay(unsigned reg)
++{
++	if (reg == 0x61) return 500;
++	return reg == 0x22 || reg == 0x55 || reg == 0x60 ? 100 : 0;
++}
++static inline unsigned
++redfin_touch_response_size(unsigned reg, unsigned count)
++{
++	if (!redfin_touch_read_allowed(reg, count)) return 0;
++	return (7u + count + 1u + 3u) & ~3u;
++}
++/* Apply upstream checks; byte6 status semantics are not assumed. */
++static inline int
++redfin_touch_response_valid(unsigned reg, unsigned count, const uint8_t *in,
++    unsigned bytes)
++{
++	unsigned expected = redfin_touch_response_size(reg, count);
++	if (!in || !expected || bytes != expected || in[0] != 0xaa || in[5] != reg) return 0;
++	uint8_t checksum = 0;
++	for (unsigned i = 0; i < 7u + count; i++) checksum = (uint8_t)(checksum + in[i]);
++	return checksum == in[7u + count];
++}
++/* 0 empty/non-coordinate, -1 invalid, 1 coordinate. Raw panel pixels,
++ * low 4 bits packed in byte3. No conversion to SweetHID's 1080x2400 yet.
++ */
++static inline int
++redfin_touch_decode(const uint8_t *in, unsigned bytes, struct redfin_touch_contact *out)
++{
++	if (!in || bytes != 8 || !out) return -1;
++	if (!in[0] || (in[0] & 3u) != 0) return 0;
++	unsigned tid = (in[0] >> 2) & 15u, action = in[0] >> 6;
++	unsigned x = ((unsigned)in[1] << 4) | (in[3] >> 4);
++	unsigned y = ((unsigned)in[2] << 4) | (in[3] & 15u);
++	if (!tid || tid > 10 || !action || x >= 1080 || y >= 2340 || (in[7] & 63u) > 31) return -1;
++	out->finger = tid - 1;
++	out->action = action; /* 1 press, 2 move, 3 release. */
++	out->x = x;
++	out->y = y;
++	out->type = ((unsigned)in[6] >> 6) * 4u + (in[7] >> 6);
++	out->remaining = in[7] & 63u;
++	return 1;
++}
++#endif
+diff --git a/bsd/dev/redfin_touch.c b/bsd/dev/redfin_touch.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_touch.c
+@@ -0,0 +1,132 @@
++/* Redfin SEC S6SY79x, QUPv3 wrapper0 SE0, SPI CS0/mode3/10MHz.
++ * redfintouch=1: bounded read-only snapshot; NO SPI transaction.
++ * Never changes clocks, pinmux, GPIOs, IRQs, firmware, reset or regulators.
++ * Hardware: captured Redfin DT. Register definitions/clock offsets:
++ * Google kernel/msm 500b3a2059c1eec0fec08ec56add06320ea901a8,
++ * drivers/{spi/spi-geni-qcom.c,clk/qcom/gcc-lito.c,pinctrl/qcom/pinctrl-lito.c},
++ * include/linux/qcom-geni-se.h. No FocalTech/Xiaomi hardware reused.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <stddef.h>
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++int redfin_touch_probe(void);
++static bool redfin_touch_attempted;
++static uint32_t
++redfin_touch_rd(vm_offset_t base, unsigned offset)
++{
++	uint32_t value = *(volatile const uint32_t *)(base + offset);
++	__asm__ volatile("dmb oshld" ::: "memory");
++	return value;
++}
++/* REDFIN_TOUCH_GUARD_TEST_BEGIN */
++static int
++redfin_touch_ranges(const uint64_t *reg, unsigned bytes)
++{
++	return reg && bytes == 6 * sizeof(uint64_t) &&
++	       reg[0] == 0x00100000 && reg[1] == 0x001f0000 &&
++	       reg[2] == 0x00880000 && reg[3] == 0x4000 &&
++	       reg[4] == 0x0f000000 && reg[5] == 0x01000000;
++}
++static int
++redfin_touch_clocks_ready(uint32_t master, uint32_t slave, uint32_t serial,
++    uint32_t core, uint32_t core2x)
++{
++	/* clk-branch.c: CBCR CLK_OFF bit31. A different voter may own enable. */
++	return ((master | slave | serial | core | core2x) & 0x80000000u) == 0;
++}
++/* REDFIN_TOUCH_GUARD_TEST_END */
++static int
++redfin_touch_cells(DTEntry node, const char *name, const uint32_t *wanted, unsigned count)
++{
++	const uint32_t *value = NULL;
++	unsigned bytes = 0;
++	if (SecureDTGetProperty(node, name, (const void **)&value, &bytes) != kSuccess ||
++	    bytes != count * sizeof(uint32_t)) return 0;
++	for (unsigned i = 0; i < count; i++) if (value[i] != wanted[i]) return 0;
++	return 1;
++}
++int
++redfin_touch_probe(void)
++{
++	uint32_t mode = 0;
++	(void)PE_parse_boot_argn("redfintouch", &mode, sizeof(mode));
++	if (mode != 1 || redfin_touch_attempted) return ENOTSUP;
++	redfin_touch_attempted = true;
++	DTEntry node;
++	const uint64_t *reg = NULL;
++	const char *compatible = NULL;
++	const char expected[] = "redfin,sec-touch";
++	const uint32_t spi_mode[] = {3}, cs[] = {0}, frequency[] = {10000000};
++	const uint32_t gpios[] = {8, 9, 35}, size[] = {1080, 2340};
++	unsigned bytes = 0;
++	if (SecureDTLookupEntry(NULL, "/redfin-touch", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "compatible", (const void **)&compatible, &bytes) != kSuccess ||
++	    bytes != sizeof(expected) || memcmp(compatible, expected, sizeof(expected)) ||
++	    SecureDTGetProperty(node, "reg", (const void **)&reg, &bytes) != kSuccess ||
++	    !redfin_touch_ranges(reg, bytes) ||
++	    !redfin_touch_cells(node, "spi-mode", spi_mode, 1) ||
++	    !redfin_touch_cells(node, "chip-select", cs, 1) ||
++	    !redfin_touch_cells(node, "spi-max-frequency", frequency, 1) ||
++	    !redfin_touch_cells(node, "touch-gpios", gpios, 3) ||
++	    !redfin_touch_cells(node, "touch-size", size, 2)) return ENXIO;
++	vm_offset_t gcc = ml_io_map(reg[0], reg[1]);
++	if (!gcc) return ENOMEM;
++	uint32_t master = redfin_touch_rd(gcc, 0x17004);
++	uint32_t slave = redfin_touch_rd(gcc, 0x17008);
++	uint32_t serial = redfin_touch_rd(gcc, 0x1700c);
++	uint32_t core = redfin_touch_rd(gcc, 0x23000), core2x = redfin_touch_rd(gcc, 0x23008);
++	printf("REDFIN TOUCH: GCC AHB-m=%#x AHB-s=%#x SE0=%#x vote=%#x\n",
++	    master, slave, serial, redfin_touch_rd(gcc, 0x52008));
++	printf("REDFIN TOUCH: GCC wrapper0 core=%#x core2x=%#x\n", core, core2x);
++	printf("REDFIN TOUCH: RCG cmd=%#x cfg=%#x m=%#x n=%#x d=%#x\n",
++	    redfin_touch_rd(gcc, 0x17010), redfin_touch_rd(gcc, 0x17014),
++	    redfin_touch_rd(gcc, 0x17018), redfin_touch_rd(gcc, 0x1701c), redfin_touch_rd(gcc, 0x17020));
++	/* Do not acknowledge GPIO interrupt status. */
++	/* The early I/O allocator cannot reserve the whole 16 MiB TLMM range.
++	 * Map only four source-verified 16 KiB pages and reuse adjacent pins.
++	 */
++	vm_offset_t tlmm = 0;
++	unsigned mapped_page = ~0u;
++	const unsigned pins[] = {8, 9, 35, 42, 43, 44, 45};
++	for (unsigned i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
++		unsigned pin = pins[i], tile = pin <= 9 ? 0x500000 : 0x900000;
++		unsigned offset = tile + pin * 0x1000;
++		unsigned page = offset & ~0x3fffu;
++		if (page != mapped_page) {
++			printf("REDFIN TOUCH: mapping TLMM page=%#llx bytes=0x4000\n", reg[4] + page);
++			tlmm = ml_io_map(reg[4] + page, 0x4000);
++			if (!tlmm) return ENOMEM;
++			mapped_page = page;
++		}
++		printf("REDFIN TOUCH: GPIO%u cfg=%#x io=%#x\n", pin,
++		    redfin_touch_rd(tlmm, offset - mapped_page), redfin_touch_rd(tlmm, offset - mapped_page + 4));
++	}
++	if (!redfin_touch_clocks_ready(master, slave, serial, core, core2x)) {
++		printf("REDFIN TOUCH: clocks off; SE0 mapping/read skipped\n");
++		return EAGAIN;
++	}
++	vm_offset_t se = ml_io_map(reg[2], reg[3]);
++	if (!se) return ENOMEM;
++	uint32_t firmware = redfin_touch_rd(se, 0x68);
++	uint32_t tx = redfin_touch_rd(se, 0xe24), rx = redfin_touch_rd(se, 0xe28);
++	printf("REDFIN TOUCH: SE0 fw=%#x protocol=%u fifo-disable=%#x status=%#x\n",
++	    firmware, (firmware >> 8) & 0xff, redfin_touch_rd(se, 0x64), redfin_touch_rd(se, 0x40));
++	printf("REDFIN TOUCH: FIFO tx=%#x rx=%#x txstatus=%#x rxstatus=%#x irq=%#x dma=%#x\n",
++	    tx, rx, redfin_touch_rd(se, 0x800), redfin_touch_rd(se, 0x804),
++	    redfin_touch_rd(se, 0x610), redfin_touch_rd(se, 0x258));
++	printf("REDFIN TOUCH: SPI cpha=%#x cpol=%#x cs=%#x csinv=%#x word=%#x trans=%#x delay=%#x\n",
++	    redfin_touch_rd(se, 0x224), redfin_touch_rd(se, 0x230), redfin_touch_rd(se, 0x250),
++	    redfin_touch_rd(se, 0x24c), redfin_touch_rd(se, 0x268), redfin_touch_rd(se, 0x25c),
++	    redfin_touch_rd(se, 0x278));
++	printf("REDFIN TOUCH: mclk=%#x clksel=%#x txpack=%#x/%#x rxpack=%#x/%#x; snapshot only\n",
++	    redfin_touch_rd(se, 0x48), redfin_touch_rd(se, 0x7c),
++	    redfin_touch_rd(se, 0x260), redfin_touch_rd(se, 0x264),
++	    redfin_touch_rd(se, 0x284), redfin_touch_rd(se, 0x288));
++	return ((firmware >> 8) & 0xff) == 1 ? 0 : ENOTSUP; /* SPI protocol=1. */
++}
++#endif

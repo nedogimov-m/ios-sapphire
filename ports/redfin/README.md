@@ -15,6 +15,15 @@ screen remain unverified. Physical touch, USB and display acceleration remain
 unported. The overlay disables inherited Xiaomi hardware drivers and supports
 one CPU.
 
+`--touch-probe --usb-probe --wifi-probe --gpu-probe` adds read-only peripheral
+observers. Common startup requires confirmed PMIC/IMEM bootloader return
+before dispatch; ordinary boot keeps them disabled. V3 hardware logs verified
+the GPIO/SPI state, warm DWC3 controller, reserved SMEM and collapsed GPU
+clock state, then iOS rendered its lock screen and cleanly unmounted HFS.
+These options do not enable functional touch, Wi-Fi, USB networking or GPU
+acceleration. Hardware contracts and next steps: [touch](TOUCH.md),
+[USB](USB.md), [Wi-Fi](WiFi.md), [GPU](GPU.md), [new upstream](UPSTREAM.md).
+
 ## Reproduce
 
 Capture from rooted Android; dumps remain ignored:

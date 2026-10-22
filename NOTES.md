@@ -1,5 +1,70 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN peripheral bring-up and upstream review — 2026-10-22
+
+User requested real touch, Wi-Fi, USB and GPU. Native read-only recovery
+snapshot research/redfin-peripherals-v1 confirms SEC S6SY79x SPI SE0
+(0x880000, mode3, CS0,10MHz), ICNSS/SNOC radio, and Adreno620v2 with GMU.
+No Android filesystems mounted. Exact FDT-gated opt-in observers, codecs
+and host tests are now staged; these are not functional peripheral drivers.
+Common dispatch runs only after verified PMIC+IMEM bootloader return, with
+UP/mode/one-shot checks. Independent review passed. SPI ID-only transport
+is a separate host-tested draft; no startup hook or clock/pin/power writes.
+
+Initial peripherals-v1 did not mount root; first recovery transfer failed
+transiently, retry captured a wholly FF bank (not valid ciphertext). AES
+GCM rejection was retained; no unverified plaintext accepted. The user
+identified a hung ADB server. Restarting it restored fastboot. After raw
+and metadata preservation, public metadata was re-primed; known-good V6
+control authenticated successfully, clean HFS/write_count387472, verified
+fastboot. Capture logs/redfin/peripherals-log-baseline/.
+
+Peripherals-v2 authenticated and returned fastboot, HFS unchanged/clean.
+It proved the common return guard and GCC observations, then panicked in
+kmem_alloc(16777216) during the full-TLMM mapping before GPIO reads. It did
+not prove a bus hang or wrong GPIO tile. Replaced this mapping with four
+16KiB pages: f508000/f920000/f928000/f92c000. Actual probe host model now
+rejects any other TLMM mapping and checks four pages, sharing adjacent pins.
+
+V3 build build-20261022-140202.log; kernel SHA256
+a317296a640811d1d01d0b1ccbb029e2995b5e4312334b0d8506ccf414f5dabb.
+Image ports/redfin/out/peripherals-v3/redfin-xnu.img SHA256
+2d331f74a30dc6aa1e3892f8985eaaed56d4b210bf23b98cd5ca1e56e7f88dbe.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinfb=1 sweetfb_noconsole=1 redfinscreen=1 redfinshutdown=120 redfinstacks=1 redfintouch=1 redfinusb=1 redfingpu=1 redfinwifi=1 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+V3 completed: all four observers logged with authenticated RAM capture,
+no panic; lock-screen final frame present12/CRC611f1077. HFS clean,
+inconsistent false, write_count392376, verified fastboot and public key
+re-primed. Logs logs/redfin/peripherals-v3/, timeout300,
+recovery-adb-only.img, leave-bootloader. 248 host tests pass.
+Touch GPIO reset8/bus-select35 remain input/low and QUP0 SE0 clock is off;
+SE registers correctly skipped. USB GDSC/clocks on, DWC3 0x5533330a,
+AWIDTH64, device mode, RUN_STOP clear and event ring a2448000/4KiB/masked.
+PHY/SMMU/DMA route still needs proof. SMEM parser returned PARTITION(5),
+not proof of radio absence/readiness. GPU CX/GX collapsed, clocks off.
+Next concrete work: RPMh resource/TCS snapshot, source-backed SEC cold
+setup/ID read, USB DMA-route handoff, and reusing selected upstream layers.
+
+New upstream source checkouts stay ignored, with no automatic patch import:
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab,
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772. Their Redwood/iOS16.5
+port has useful GENI, QMI/network and Mesa/DRM layers. A620/SEC/ICNSS need
+our hardware backend; private20F66 addresses/ABI must not be copied to
+20H392. USB there depends on a resident EFI loader, not an XNU DWC3 driver.
+See the new peripheral documents and UPSTREAM.md for details.
+
+## REDFIN workspace cleanup — 2026-10-22
+
+Removed 15 obsolete generated files (~119.4GiB by allocated-file counts)
+and 30 old boot-output directories: pre-install root variants/metadata
+clones, duplicate DMG views and incomplete IPSW download pieces. Retained
+complete Android rollback backup (~109GiB), intact verified IPSW/extracted
+mounts, source/build dependencies, current boot images and both post-keybag
+snapshots. Rehashed both retained16GiB snapshots against their independent
+saved SHA256 values before deletion; both matched. APFS shares clone blocks;
+immediate deletion free-space increase was23.45GiB, resulting free space
+282.15GiB. Private exact deletion inventory: research/cleanup-20261022.json.
+No device writes were performed by cleanup.
+
 ## REDFIN iOS lock screen rendered; MobileGestalt wait fixed — 2026-10-22
 
 V5 completed: HFS clean/write_count374738, authenticated logs and verified

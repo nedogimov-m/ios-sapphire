@@ -1,0 +1,58 @@
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -100,6 +100,46 @@
+ /* REDFIN_WIFI_OBSERVER_TEST_END */
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++extern "C" {
++int redfin_spmi_return_ready(void);
++int redfin_touch_probe(void);
++void redfin_usb_probe(void);
++int redfin_gpu_probe(void);
++}
++
++/* REDFIN_PERIPHERAL_START_TEST_BEGIN */
++static void
++redfin_peripherals_observe(void)
++{
++ uint32_t modes[4] = {}, cpus = 0;
++ const char *names[] = {"redfintouch", "redfinusb", "redfinwifi", "redfingpu"};
++ bool any = false;
++ for (unsigned i = 0; i < 4; i++) {
++  (void)PE_parse_boot_argn(names[i], &modes[i], sizeof(modes[i]));
++  if (modes[i] > 1) {
++   IOLog("REDFIN PERIPHERALS: unsupported mode; observers skipped\n");
++   return;
++  }
++  any |= modes[i] != 0;
++ }
++ if (!any) return;
++ if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
++     !redfin_spmi_return_ready()) {
++  IOLog("REDFIN PERIPHERALS: verified bootloader-return/UP policy unavailable; skipped\n");
++  return;
++ }
++ static uint32_t attempted;
++ if (__atomic_exchange_n(&attempted, 1, __ATOMIC_RELAXED)) return;
++ IOLog("REDFIN PERIPHERALS: bootloader return verified before observers\n");
++ if (modes[0]) IOLog("REDFIN TOUCH: host snapshot result=%d\n", redfin_touch_probe());
++ if (modes[1]) redfin_usb_probe();
++ if (modes[2]) redfin_wifi_observe();
++ if (modes[3]) IOLog("REDFIN GPU: clock snapshot result=%d\n", redfin_gpu_probe());
++}
++/* REDFIN_PERIPHERAL_START_TEST_END */
++#endif
++
+ extern "C" {
+ #include <libkern/amfi/amfi.h>
+ #include <sys/codesign.h>
+@@ -851,6 +891,7 @@
+ 		int result = redfin_spmi_arm_return();
+ 		IOLog("REDFIN RETURN: arm result=%d\n", result);
+ 	}
++	redfin_peripherals_observe();
+ 	uint32_t redfin_publish = 0;
+ 	if (PE_parse_boot_argn("redfinroot", &redfin_publish, sizeof(redfin_publish)) && redfin_publish == 1) {
+ 		extern int sweet_ufs_rootdev(dev_t *dev);

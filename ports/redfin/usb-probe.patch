@@ -1,0 +1,166 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -114,6 +114,7 @@
+ bsd/dev/sweet_rpmh.c			standard
+ bsd/dev/sweet_spmi.c			standard
+ bsd/dev/sweet_usb.c			standard
++bsd/dev/redfin_usb.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+ bsd/dev/unix_startup.c			standard
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -73,6 +73,9 @@
+ void
+ sweet_usb_probe(void)
+ {
++	/* Redfin owns USB separately, even if inherited sweetusb=2 is supplied. */
++	extern bool redfin_usb_platform(void);
++	if (redfin_usb_platform()) return;
+ 	int enabled = 0;
+ 	uint32_t gdscr, cbcr[sizeof(usb_cbcr) / sizeof(usb_cbcr[0])];
+ 	bool clocks_on = true;
+diff --git a/bsd/dev/redfin_usb.c b/bsd/dev/redfin_usb.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_usb.c
+@@ -0,0 +1,137 @@
++/*
++ * Redfin (SM7250/lito): opt-in read-only DWC3 handoff snapshot.
++ * Sources: Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8
++ * drivers/clk/qcom/gcc-lito.c; qcom DT afc98e2bb0716a57bf4f8d2b6191378dd7123ce4
++ * lito-usb.dtsi and lito-gdsc.dtsi. The saved Redfin FDT agrees.
++ *
++ * No PHY, QSCRATCH or SMMU access; no reset, clocks, event acknowledgement,
++ * endpoint commands or DMA. A valid snapshot does not authorize gadget DMA.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++bool redfin_usb_platform(void);
++void redfin_usb_probe(void);
++
++#define RF_USB_GCC_PA       0x00100000u
++#define RF_USB_GCC_SIZE     0x00010000u
++#define RF_USB_GDSCR        0x0000f004u
++#define RF_USB_BCR          0x0000f000u
++#define RF_USB_DWC_PA       0x0a600000u
++#define RF_USB_DWC_SIZE     0x0000cd00u
++#define RF_USB_CLK_OFF      (1u << 31)
++#define RF_USB_POWER_ON     (1u << 31)
++
++static const struct {
++	const char *name;
++	uint32_t off;
++} redfin_usb_clocks[] = {
++	{ "master", 0xf010 },
++	{ "cfg-noc-axi", 0xf07c },
++	{ "aggre-axi", 0xf080 },
++	{ "sleep", 0xf018 },
++	{ "mock-utmi", 0xf01c },
++};
++#define RF_USB_NCLOCKS (sizeof(redfin_usb_clocks) / sizeof(redfin_usb_clocks[0]))
++
++/* Root compatible is a bounded NUL-separated string list, not a substring. */
++bool
++redfin_usb_platform(void)
++{
++	DTEntry root;
++	const char *value = NULL;
++	unsigned size = 0;
++	if (SecureDTLookupEntry(NULL, "/", &root) != kSuccess ||
++	    SecureDTGetProperty(root, "compatible", (const void **)&value, &size) != kSuccess ||
++	    !value || !size || size > 256 || value[size - 1] != '\0') return false;
++	bool redfin = false, lito = false;
++	for (unsigned pos = 0; pos < size;) {
++		unsigned end = pos;
++		while (end < size && value[end]) end++;
++		if (end == size || end == pos) return false;
++		if (end - pos == sizeof("google,redfin") - 1 &&
++		    memcmp(value + pos, "google,redfin", sizeof("google,redfin") - 1) == 0) redfin = true;
++		if (end - pos == sizeof("qcom,sm7250") - 1 &&
++		    memcmp(value + pos, "qcom,sm7250", sizeof("qcom,sm7250") - 1) == 0) lito = true;
++		pos = end + 1;
++	}
++	return redfin && lito;
++}
++
++static uint32_t
++redfin_usb_rd(vm_offset_t base, uint32_t off)
++{
++	uint32_t value = *(volatile const uint32_t *)(base + off);
++	__asm__ volatile ("dmb oshld" ::: "memory");
++	return value;
++}
++
++static bool
++redfin_usb_clocks_ready(uint32_t gdsc, uint32_t reset, const uint32_t *clocks)
++{
++	/* GDSC PWR_ON=31, SW_COLLAPSE=0; BCR block reset=0. */
++	if (!(gdsc & RF_USB_POWER_ON) || (gdsc & 1) || (reset & 1)) return false;
++	for (unsigned i = 0; i < RF_USB_NCLOCKS; i++) {
++		/* Reject zero/unknown CBCR values as well as explicitly halted clocks. */
++		if (!(clocks[i] & 1) || (clocks[i] & RF_USB_CLK_OFF)) return false;
++	}
++	return true;
++}
++
++void
++redfin_usb_probe(void)
++{
++	uint32_t mode = 0;
++	(void)PE_parse_boot_argn("redfinusb", &mode, sizeof(mode));
++	if (!mode) return;
++	if (mode != 1 || !redfin_usb_platform()) {
++		printf("REDFIN USB: rejected mode/platform; no MMIO\n");
++		return;
++	}
++	vm_offset_t gcc = ml_io_map(RF_USB_GCC_PA, RF_USB_GCC_SIZE);
++	if (!gcc) { printf("REDFIN USB: GCC map failed\n"); return; }
++	uint32_t gdsc = redfin_usb_rd(gcc, RF_USB_GDSCR);
++	uint32_t reset = redfin_usb_rd(gcc, RF_USB_BCR);
++	uint32_t clocks[RF_USB_NCLOCKS];
++	printf("REDFIN USB: read-only begin GDSCR=%#x BCR=%#x\n", gdsc, reset);
++	for (unsigned i = 0; i < RF_USB_NCLOCKS; i++) {
++		clocks[i] = redfin_usb_rd(gcc, redfin_usb_clocks[i].off);
++		printf("REDFIN USB: clock %s off=%#x CBCR=%#x\n",
++		    redfin_usb_clocks[i].name, redfin_usb_clocks[i].off, clocks[i]);
++	}
++	if (!redfin_usb_clocks_ready(gdsc, reset, clocks)) {
++		printf("REDFIN USB: gated/reset/unpowered; DWC3 not mapped\n");
++		return;
++	}
++	vm_offset_t dwc = ml_io_map(RF_USB_DWC_PA, RF_USB_DWC_SIZE);
++	if (!dwc) { printf("REDFIN USB: DWC3 map failed\n"); return; }
++	uint32_t id = redfin_usb_rd(dwc, 0xc120);
++	printf("REDFIN USB: GSNPSID=%#x\n", id);
++	if ((id & 0xffff0000u) != 0x55330000u) {
++		printf("REDFIN USB: unsupported core ID; snapshot stopped\n");
++		return;
++	}
++	uint32_t gctl = redfin_usb_rd(dwc, 0xc110);
++	uint32_t hw0 = redfin_usb_rd(dwc, 0xc140);
++	printf("REDFIN USB: GCTL=%#x GSTS=%#x GUSB2PHYCFG=%#x GUSB3PIPECTL=%#x\n",
++	    gctl, redfin_usb_rd(dwc, 0xc118), redfin_usb_rd(dwc, 0xc200),
++	    redfin_usb_rd(dwc, 0xc2c0));
++	printf("REDFIN USB: GHWPARAMS0=%#x MDWIDTH=%u AWIDTH=%u GHWPARAMS1=%#x GHWPARAMS3=%#x\n",
++	    hw0, (hw0 >> 8) & 0xff, hw0 >> 24, redfin_usb_rd(dwc, 0xc144), redfin_usb_rd(dwc, 0xc14c));
++	if (((gctl >> 12) & 3) != 2) {
++		printf("REDFIN USB: not device mode; device registers not read\n");
++		return;
++	}
++	printf("REDFIN USB: DCFG=%#x DCTL=%#x DEVTEN=%#x DSTS=%#x DALEPENA=%#x\n",
++	    redfin_usb_rd(dwc, 0xc700), redfin_usb_rd(dwc, 0xc704),
++	    redfin_usb_rd(dwc, 0xc708), redfin_usb_rd(dwc, 0xc70c), redfin_usb_rd(dwc, 0xc720));
++	printf("REDFIN USB: GEVNTADR=%08x%08x GEVNTSIZ=%#x GEVNTCOUNT=%#x\n",
++	    redfin_usb_rd(dwc, 0xc404), redfin_usb_rd(dwc, 0xc400),
++	    redfin_usb_rd(dwc, 0xc408), redfin_usb_rd(dwc, 0xc40c));
++	printf("REDFIN USB: read-only done; PHY/SMMU/DMA untouched\n");
++}
++#endif /* ARM64_BOARD_CONFIG_SWEET */

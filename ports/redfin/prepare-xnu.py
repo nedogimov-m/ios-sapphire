@@ -164,7 +164,8 @@ def main(argv=None):
              'ufs-raw-read.patch', 'spmi-probe.patch', 'spmi-return.patch', 'ufs-root-rw.patch',
              'trace-gate.patch', 'shutdown.patch', 'display.patch',
              'muted-log.patch', 'screen-capture.patch', 'final-frame.patch',
-             'quiet-display.patch', 'userspace-stacks.patch')]
+             'quiet-display.patch', 'userspace-stacks.patch',
+             'touch.patch', 'usb-probe.patch', 'gpu-probe.patch', 'wifi-probe.patch', 'peripheral-start.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

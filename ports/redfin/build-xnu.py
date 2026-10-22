@@ -207,7 +207,8 @@ def main(argv=None):
             for rank, name in enumerate(('trace-gate.patch', 'shutdown.patch', 'display.patch',
                                          'muted-log.patch', 'screen-capture.patch',
                                          'final-frame.patch', 'quiet-display.patch',
-                                         'userspace-stacks.patch'), 21):
+                                         'userspace-stacks.patch', 'touch.patch',
+                                         'usb-probe.patch', 'gpu-probe.patch', 'wifi-probe.patch', 'peripheral-start.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

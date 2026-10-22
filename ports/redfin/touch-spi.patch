@@ -1,0 +1,203 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -109,2 +109,3 @@
++bsd/dev/redfin_touch_spi.c			standard
+ bsd/dev/redfin_touch.c			standard
+ bsd/dev/sweet_sample.c			standard
+diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_touch_spi.c
+@@ -0,0 +1,191 @@
++/* DRAFT: SEC ID-only SPI transport; not hooked into startup.
++ * Caller must first prove clocks/pins/power and source frequency from stage1.
++ * No clock, pin, regulator, reset, firmware, NVM or controller-write command.
++ * Sources: Google kernel/msm 500b3a2059c1eec0fec08ec56add06320ea901a8,
++ * drivers/spi/spi-geni-qcom.c setup_fifo_xfer/geni_spi_handle_{tx,rx},
++ * drivers/platform/msm/qcom-geni-se.c geni_setup_m_cmd/se_config_packing.
++ * Cancel/abort affect the GENI host transaction, not the touch IC reset.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <pexpert/pexpert.h>
++#include "redfin_touch_protocol.h"
++int redfin_touch_spi_probe(vm_offset_t se, unsigned verified_speed_hz, bool gic_irq_masked);
++
++#define RF_SPI_DONE 1u
++#define RF_SPI_EVENTS ((1u << 0) | (1u << 26) | (1u << 27) | (1u << 30))
++#define RF_SPI_ERRORS (0x3eu | (0x1fu << 9) | (3u << 24) | (3u << 28))
++#define RF_SPI_PACK0 0x0007f8feu
++#define RF_SPI_PACK1 0x000ffefeu
++struct redfin_spi { vm_offset_t se; unsigned tx_depth, rx_depth; bool dead, command_owned; };
++static bool redfin_spi_attempted;
++
++static uint32_t
++redfin_spi_rd(struct redfin_spi *s, unsigned offset)
++{
++	uint32_t value = *(volatile const uint32_t *)(s->se + offset);
++	__asm__ volatile("dmb oshld" ::: "memory");
++	return value;
++}
++static void
++redfin_spi_wr(struct redfin_spi *s, unsigned offset, uint32_t value)
++{
++	__asm__ volatile("dmb oshst" ::: "memory");
++	*(volatile uint32_t *)(s->se + offset) = value;
++	__asm__ volatile("dsb osh" ::: "memory");
++}
++
++static int
++redfin_spi_failed(struct redfin_spi *s, int error)
++{
++	s->dead = true;
++	/* Bound CS recovery. Never retry this SEC request after an error. */
++	if (s->command_owned && (redfin_spi_rd(s, 0x40) & 1)) {
++		for (unsigned attempt = 0; attempt < 2; attempt++) {
++			redfin_spi_wr(s, 0x604, attempt == 0 ? 4 : 2);
++			for (unsigned n = 0; n < 1000; n++) {
++				uint32_t irq = redfin_spi_rd(s, 0x610);
++				if (!(redfin_spi_rd(s, 0x40) & 1)) {
++					redfin_spi_wr(s, 0x618, irq & (RF_SPI_EVENTS | RF_SPI_ERRORS));
++					goto stopped;
++				}
++				delay(1);
++			}
++		}
++		printf("REDFIN TOUCH SPI: cancel/abort timed out; host left unavailable\n");
++	}
++stopped:
++	redfin_spi_wr(s, 0xe1c, 0);
++	redfin_spi_wr(s, 0x614, 0);
++	return error;
++}
++
++static int
++redfin_spi_prepare(struct redfin_spi *s)
++{
++	uint32_t tx = redfin_spi_rd(s, 0xe24), rx = redfin_spi_rd(s, 0xe28);
++	s->tx_depth = (tx >> 16) & 63;
++	s->rx_depth = (rx >> 16) & 63;
++	/* Deliberately accept only the FIFO layout observed in Redfin Linux. */
++	if (((redfin_spi_rd(s, 0x68) >> 8) & 255) != 1 ||
++	    (redfin_spi_rd(s, 0x64) & 1) || (redfin_spi_rd(s, 0x258) & 1) ||
++	    redfin_spi_rd(s, 0xe18) || (redfin_spi_rd(s, 0x40) & 0x1001) ||
++	    (redfin_spi_rd(s, 0x800) & 0x0fffffff) ||
++	    (redfin_spi_rd(s, 0x804) & 0x01ffffff) ||
++	    s->tx_depth != 16 || s->rx_depth != 16 ||
++	    ((tx >> 24) & 63) != 32 || ((rx >> 24) & 63) != 32 ||
++	    (redfin_spi_rd(s, 0x224) & 1) != 1 || (redfin_spi_rd(s, 0x230) & 4) != 4 ||
++	    (redfin_spi_rd(s, 0x22c) & 3) || (redfin_spi_rd(s, 0x250) & 15) ||
++	    (redfin_spi_rd(s, 0x24c) & 1) || (redfin_spi_rd(s, 0x268) & 1023) != 4 ||
++	    redfin_spi_rd(s, 0x260) != RF_SPI_PACK0 || redfin_spi_rd(s, 0x264) != RF_SPI_PACK1 ||
++	    redfin_spi_rd(s, 0x284) != RF_SPI_PACK0 || redfin_spi_rd(s, 0x288) != RF_SPI_PACK1 ||
++	    redfin_spi_rd(s, 0x254) || (redfin_spi_rd(s, 0x24) & 127) != 127 ||
++	    !(redfin_spi_rd(s, 0x48) & 1)) return ENOTSUP;
++	uint32_t irq = redfin_spi_rd(s, 0x610);
++	if (irq & ~RF_SPI_EVENTS) return EIO;
++	/* Local routing must be enabled for polled DONE/WM status. Caller has
++	 * proved GIC INTID633 masked; masking CPU IRQs alone is insufficient. */
++	redfin_spi_wr(s, 0xe1c, 0);
++	redfin_spi_wr(s, 0x618, irq);
++	redfin_spi_wr(s, 0x614, RF_SPI_EVENTS | RF_SPI_ERRORS);
++	redfin_spi_wr(s, 0xe1c, 0xf); /* Linux FIFO init: master/slave/DMA local routes. */
++	redfin_spi_wr(s, 0x80c, 0);
++	redfin_spi_wr(s, 0x810, 0);
++	redfin_spi_wr(s, 0x814, s->rx_depth - 2);
++	redfin_spi_wr(s, 0x25c, redfin_spi_rd(s, 0x25c) & ~1u);
++	return 0;
++}
++
++/* One standalone message: no FRAGMENTATION parameter, so CS deasserts at end.
++ * SEC request is 8 bytes; response is a multiple of four, at most 256 bytes.
++ */
++static int
++redfin_spi_transfer(struct redfin_spi *s, const uint8_t *tx, uint8_t *rx, unsigned count)
++{
++	if (s->dead || (!tx == !rx) || !count || count % 4 || count > 256 || (tx && count != 8)) return EINVAL;
++	if ((redfin_spi_rd(s, 0x40) & 0x1001) ||
++	    (redfin_spi_rd(s, 0x800) & 0x0fffffff) ||
++	    (redfin_spi_rd(s, 0x804) & 0x01ffffff)) return redfin_spi_failed(s, EBUSY);
++	uint32_t irq = redfin_spi_rd(s, 0x610);
++	if (irq & ~RF_SPI_EVENTS) return redfin_spi_failed(s, EIO);
++	redfin_spi_wr(s, 0x618, irq);
++	redfin_spi_wr(s, tx ? 0x26c : 0x270, count); /* 8 bits per SPI word. */
++	s->command_owned = true;
++	redfin_spi_wr(s, 0x600, (tx ? 1u : 2u) << 27);
++	unsigned received = 0;
++	if (tx) {
++		for (unsigned i = 0; i < count; i += 4) {
++			uint32_t word = (uint32_t)tx[i] | ((uint32_t)tx[i+1] << 8) |
++			    ((uint32_t)tx[i+2] << 16) | ((uint32_t)tx[i+3] << 24);
++			redfin_spi_wr(s, 0x700, word);
++		}
++	}
++	for (unsigned us = 0; us < 10000; us++) {
++		irq = redfin_spi_rd(s, 0x610);
++		if (irq & ~RF_SPI_EVENTS) return redfin_spi_failed(s, EIO);
++		uint32_t fifo = redfin_spi_rd(s, 0x804);
++		unsigned words = fifo & 0x01ffffff;
++		unsigned valid = (fifo >> 28) & 7;
++		if (words > s->rx_depth || (tx && words) ||
++		    (rx && words > (count - received) / 4) ||
++		    ((fifo & 0x80000000u) && valid != 0 && valid != 4)) return redfin_spi_failed(s, EIO);
++		for (unsigned w = 0; w < words; w++) {
++			uint32_t word = redfin_spi_rd(s, 0x780);
++			for (unsigned b = 0; b < 4; b++) rx[received++] = (uint8_t)(word >> (8 * b));
++		}
++		redfin_spi_wr(s, 0x618, irq & RF_SPI_EVENTS);
++		if (irq & RF_SPI_DONE) {
++			if ((redfin_spi_rd(s, 0x40) & 1) ||
++			    (redfin_spi_rd(s, 0x800) & 0x0fffffff) ||
++			    (rx && received != count)) return redfin_spi_failed(s, EIO);
++			s->command_owned = false;
++			return 0;
++		}
++		delay(1);
++	}
++	return redfin_spi_failed(s, ETIMEDOUT);
++}
++
++static int
++redfin_spi_read(struct redfin_spi *s, unsigned reg, unsigned count, uint8_t *out)
++{
++	uint8_t request[8], response[256];
++	unsigned bytes = redfin_touch_response_size(reg, count);
++	if (!out || !bytes || !redfin_touch_read_request(reg, count, request)) return EINVAL;
++	int error = redfin_spi_transfer(s, request, NULL, sizeof(request));
++	if (error) return error;
++	delay(redfin_touch_read_delay(reg));
++	error = redfin_spi_transfer(s, NULL, response, bytes);
++	if (error) return error;
++	if (!redfin_touch_response_valid(reg, count, response, bytes)) return redfin_spi_failed(s, EIO);
++	memcpy(out, response + 7, count);
++	return 0;
++}
++
++int
++redfin_touch_spi_probe(vm_offset_t se, unsigned verified_speed_hz, bool gic_irq_masked)
++{
++	uint32_t mode = 0;
++	(void)PE_parse_boot_argn("redfintouch", &mode, sizeof(mode));
++	/* The caller must read GICD0x17a00000+0x14c bit25 as zero, and retain
++	 * exclusive ownership of that interrupt and GENI for this transaction. */
++	if (mode != 2 || redfin_spi_attempted || !se || !gic_irq_masked ||
++	    !verified_speed_hz || verified_speed_hz > 10000000) return ENOTSUP;
++	redfin_spi_attempted = true;
++	struct redfin_spi context = {se, 0, 0, false, false};
++	int error = redfin_spi_prepare(&context);
++	if (error) return error;
++	uint8_t id[5] = {0};
++	error = redfin_spi_read(&context, 0x22, sizeof(id), id);
++	printf("REDFIN TOUCH SPI: ID-only result=%d id=%02x:%02x:%02x:%02x:%02x speed=%u\n",
++	    error, id[0], id[1], id[2], id[3], id[4], verified_speed_hz);
++	redfin_spi_wr(&context, 0xe1c, 0);
++	redfin_spi_wr(&context, 0x614, 0);
++	if (error) return error;
++	const uint8_t expected[] = {0x53,0x45,0x37,0x91,0x00};
++	return memcmp(id, expected, sizeof(id)) == 0 ? 0 : ENXIO;
++}
++#endif

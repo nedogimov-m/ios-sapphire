@@ -38,6 +38,10 @@ class BuildFlagTests(unittest.TestCase):
     def test_userspace_stacks_need_timed_shutdown(self):
         self.refused(['--userspace-stacks'], '--userspace-stacks requires --shutdown-seconds')
 
+    def test_peripheral_observers_require_kernel(self):
+        for option in ('--touch-probe', '--usb-probe', '--gpu-probe', '--wifi-probe'):
+            self.refused([option], 'peripheral observers require --kernel')
+
 
 if __name__ == '__main__':
     unittest.main()

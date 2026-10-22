@@ -1,0 +1,91 @@
+diff --git a/bsd/dev/redfin_gpu.c b/bsd/dev/redfin_gpu.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gpu.c
+@@ -0,0 +1,75 @@
++/* Pixel 5 clock handoff observer. No GPU/GMU/SMMU access or writes.
++ * Sources pinned in ports/redfin/GPU.md. This is not acceleration.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <stdint.h>
++#include <string.h>
++#include <sys/errno.h>
++#include <sys/systm.h>
++#include <mach/mach_types.h>
++#include <arm/machine_routines.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++
++static uint32_t
++redfin_gpu_read(vm_offset_t base, uint32_t offset)
++{
++ uint32_t value = *(const volatile uint32_t *)(base + offset);
++ __asm__ volatile("dsb sy" ::: "memory");
++ return value;
++}
++
++int redfin_gpu_probe(void);
++int
++redfin_gpu_probe(void)
++{
++ uint32_t mode = 0;
++ if (!PE_parse_boot_argn("redfingpu", &mode, sizeof(mode)) || mode != 1)
++  return ENOTSUP;
++ DTEntry entry;
++ const void *raw = NULL;
++ unsigned bytes = 0;
++ uint64_t ranges[4];
++ uint32_t chip = 0;
++ if (SecureDTLookupEntry(NULL, "/redfin-gpu", &entry) != kSuccess ||
++     SecureDTGetProperty(entry, "reg", &raw, &bytes) != kSuccess ||
++     !raw || bytes != sizeof(ranges)) return EINVAL;
++ memcpy(ranges, raw, sizeof(ranges));
++ if (ranges[0] != 0x00100000ULL || ranges[1] != 0x001f0000ULL ||
++     ranges[2] != 0x03d90000ULL || ranges[3] != 0x00009000ULL ||
++     SecureDTGetProperty(entry, "chip-id", &raw, &bytes) != kSuccess ||
++     !raw || bytes != sizeof(chip)) return EINVAL;
++ memcpy(&chip, raw, sizeof(chip));
++ if (chip != 0x06020001) return EINVAL;
++
++ vm_offset_t gcc = ml_io_map(ranges[0], ranges[1]);
++ if (!gcc) return ENOMEM;
++ uint32_t cfg = redfin_gpu_read(gcc, 0x71004);
++ uint32_t mem = redfin_gpu_read(gcc, 0x7100c);
++ uint32_t dvm = redfin_gpu_read(gcc, 0x71018);
++ printf("REDFIN GPU: Adreno620v2 clock observer cfg=%#x memnoc=%#x snoc_dvm=%#x\n",
++     cfg, mem, dvm);
++ /* GPUCC requires its upstream config AHB. CLK_OFF is bit31, EN bit0.
++  * Neither read a collapsed GPU nor attempt the A610 GMU-wrapper sequence.
++  */
++ if ((cfg & 0x80000001U) != 1) {
++  printf("REDFIN GPU: config clock off; GPUCC/GPU/GMU/SMMU untouched\n");
++  return EAGAIN;
++ }
++ vm_offset_t gpucc = ml_io_map(ranges[2], ranges[3]);
++ if (!gpucc) return ENOMEM;
++ static const struct { const char *name; uint32_t offset; } regs[] = {
++  {"cx_gdsc",0x106c}, {"gx_gdsc",0x100c}, {"ahb",0x1078},
++  {"cx_apb",0x1088}, {"cx_gmu",0x1098}, {"cx_snoc_dvm",0x108c},
++  {"cxo",0x109c}, {"gx_gmu",0x1064}, {"gmu_rcg",0x1120},
++  {"gmu_cfg",0x1124}, {"smmu_vote",0x5000},
++ };
++ for (unsigned i = 0; i < sizeof(regs)/sizeof(regs[0]); i++)
++  printf("REDFIN GPU: GPUCC %s[%#x]=%#x\n", regs[i].name,
++      regs[i].offset, redfin_gpu_read(gpucc, regs[i].offset));
++ printf("REDFIN GPU: clocks observed; GPU/GMU/SMMU/firmware untouched\n");
++ return 0;
++}
++#endif
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -106,6 +106,7 @@
+ bsd/dev/memdev.c			standard
+ bsd/dev/sweet_ufs.c			standard
+ bsd/dev/redfin_spmi.c			standard
++bsd/dev/redfin_gpu.c			standard
+ bsd/dev/redfin_touch.c			standard
+ bsd/dev/sweet_sample.c			standard
+ bsd/dev/sweet_keys.c			standard

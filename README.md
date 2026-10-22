@@ -13,6 +13,9 @@ Fresh physical panel scanout and the home screen remain unverified; physical
 touch is unported. Timed process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
 The minimal MobileGestalt Wi-Fi identity fix is validated on the device.
+Authenticated peripheral observers now cover SEC SPI/GPIO, warm DWC3,
+SMEM and Adreno 620 clocks; functional touch, radio, USB networking and GPU
+acceleration are still in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
