@@ -435,3 +435,65 @@ tree; maximum frame is 1152 bytes (`peer`), allocator 160 and heap parser 816.
 `wifi-smp2p.patch` contains the exact source/header without startup or source-list
 changes. No SMEM, TCSR or SMP2P IPCC write has run on the device. PAS/SCM proof,
 native power binding, GLINK/WLFW and Wi-Fi association/data remain unfinished.
+
+## Guarded retained-power/AOP phase prepared — 2026-10-23
+
+The coordinator's authenticated `wifi-native-v1` device cycle established the
+closed AOP negotiation state and exact `xo.lvl`, `cx.lvl`, `mss.lvl` resources
+used below. That read-only run completed PID1 heartbeats and verified fastboot
+return. It did not prove a Wi-Fi power vote, modem start or radio operation.
+
+The existing `RedfinWiFiProbe.cpp` now has a separate `redfinwifipower=1` path.
+Its exact command-line contract is the native-v1 CPU0/md0 profile plus that
+single flag and a fresh nonzero 16-digit boot ID:
+
+```text
+debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwifipower=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x<FRESH_16_HEX_DIGITS>
+```
+
+Only optional `-enable_kprintf_spam` is additionally admitted. Duplicate/unknown
+arguments and competing RPMh, GPU, AOP, GUI or root modes fail before mapping.
+The native lease binds the sole attempt to the current thread, physical CPU0,
+EL1, unchanged command line, exact mappings and actual cached PMIC/IMEM return
+proof. Ownership failure is sticky. The old path remains read-only when the
+new flag is absent.
+
+`wifi_platform.add_power_contract(tree, nodes)` emits an additional
+`redfin-wifi-power` ADT leaf after validating the live GIC/GCC/DRV2 topology and
+inherited interrupt parents. `reg` is native u64 pairs for AOP
+`0x0c300000+0x1000`, IPCC `0x00408000+0x1000`, DRV2 `0x18220000+0x10000`, GCC
+`0x00100000+0x1f0000`, GICD `0x17a00000+0x4000`, CMD-DB
+`0x80860000+0x20000`. `live-fdt-verified` is u32(1); `source-contract` is
+u32(1,2,0,1,37,261,0x71004,0x30000,7,416,0x30060,6,384,0x300a0,3,0).
+The existing native observer leaf is also mandatory. Kernel RAM must be the
+proven `0x180000000+0x80000000` window. Only AOP/IPCC/DRV2 map writable;
+GCC/GIC/CMD-DB stay read-only.
+
+Before writing, the probe checks exact complete ARC tables, both empty ACTIVE
+TCSs, all inherited SLEEP/WAKE templates, idle DRV2, the enabled inherited CBCR,
+masked/inactive RSC/IPCC interrupts and a usable empty AOP handoff. It then
+performs source-backed ACTIVE transactions for CX selector7/corner416, MSS
+selector6/level384 and XO data3. These highest legal votes preserve every
+validated inherited resource floor; unsupported/illegal inherited votes fail.
+Every typed write rechecks resource metadata, its own staged command and the
+untouched inherited slots. Completion requires IRQ, idle and issued/completed
+command status. No GIC or inherited template write is made.
+
+Only after all three acknowledgements does the existing native QMP transport
+open/adopt the channel and send the exact modem-on load-state packet through
+IPCC client0/signal0. The probe retains all votes and AOP state until platform
+reset. Failures quarantine the session without unvote, channel rollback, off
+message or retry; uncertain message length remains intact. This phase never
+calls SCM/PAS, allocates SMEM, writes TCSR, loads firmware or accesses media.
+
+Observation: all 106 focused Wi-Fi tests pass. The actual native CPP adapter
+runs against bounded fake IOKit/MMIO, exercising successful retained votes and
+QMP, every one of 39 RSC and 25 AOP/IPCC stores/notifications failing, malformed
+tables/ADT, mapping cleanup, illegal inherited floors, ownership loss and
+bounded completion/ACK timeouts. The real saved live FDT passes the power
+validator. Actual XNU ARM64 compilation in a private tree reports no source
+diagnostics; maximum entry frame896 bytes and power snapshot336 bytes. The
+existing overlay exports this code with no new source-list entry. No Wi-Fi
+power/AOP write has run on hardware. Device testing is currently unavailable;
+SCM capability proof, PAS4 start, bandwidth/remaining proxy integration,
+SMP2P hardware operation, GLINK/WLFW, association and data remain unfinished.

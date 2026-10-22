@@ -29,7 +29,13 @@ HARNESS = r'''
 #define kSuccess 0
 typedef uintptr_t DTEntry;
 typedef uint64_t IOOptionBits;
-enum {kIODirectionIn=1, kIOMapReadOnly=0x100, kIOMapInhibitCache=0x200, kIOMapWriteCombineCache=0x400};
+enum {kIODirectionIn=1, kIODirectionInOut=3, kIOMapReadOnly=0x100, kIOMapInhibitCache=0x200, kIOMapWriteCombineCache=0x400};
+typedef void *thread_t;
+static thread_t current_thread(void){return (thread_t)1;}
+static const char *PE_boot_args(void){return "";}
+static uint64_t wf_test_register(const char *key){return !strcmp(key,"CurrentEL") ? 4 : 0;}
+#define __builtin_arm_rsr64 wf_test_register
+static void IODelay(uint32_t){}
 alignas(16) static uint8_t aop[0x1000],smem[REDFIN_SMEM_BYTES],db[RF_CMDDB_BYTES];
 static uint64_t ranges[6],ram_base,ram_bytes,boot_id;
 static uint32_t witness[12],marker;

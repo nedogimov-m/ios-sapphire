@@ -18,6 +18,13 @@ PROBE_RANGES = ((0x0c300000, 0x1000), (0x80900000, 0x200000), (0x80860000, 0x200
 # ABI version, PAS, CX/MSS consumer levels, XO ARC data, inbound/outbound SMP2P
 # IDs, remote PID, AOP/MPSS notification IDs, ready bit and stop-ack bit.
 WITNESS = (1, 4, 384, 384, 3, 435, 428, 1, 0, 0x00020002, 1, 3)
+# Optional retained-power experiment: AOP/IPCC/DRV2 write mappings, followed by
+# read-only GCC/GICD/CMD-DB. Version, DRV, ACTIVE pair, IRQs, inherited CBCR,
+# CX/MSS/XO addresses/selectors and consumer levels, AOP packed notification.
+POWER_RANGES = ((0x0c300000, 0x1000), (0x00408000, 0x1000), (0x18220000, 0x10000),
+                (0x00100000, 0x1f0000), (0x17a00000, 0x4000), (0x80860000, 0x20000))
+POWER_WITNESS = (1, 2, 0, 1, 37, 261, 0x71004, 0x30000, 7, 416,
+                 0x30060, 6, 384, 0x300a0, 3, 0)
 
 
 def contract(nodes):
@@ -143,6 +150,57 @@ def live_contract(blob, xnu_base, xnu_bytes):
     return result
 
 
+def power_contract(nodes):
+    result = contract(nodes)
+    words = lambda *values: struct.pack('>' + 'I' * len(values), *values)
+
+    def need(path, key, value):
+        if nodes.get(path, {}).get(key) != value:
+            raise ValueError(f'native MPSS power FDT mismatch: {path} {key}')
+
+    gic = '/soc/interrupt-controller@17a00000'
+    gcc = '/soc/qcom,gcc@100000'
+    rsc = '/soc/rsc@18200000'
+    for path in (gic, gcc):
+        if nodes.get(path, {}).get('status', b'okay\0') not in (b'okay\0', b'ok\0'):
+            raise ValueError('native MPSS power prerequisite is disabled')
+    need(gic, 'compatible', b'arm,gic-v3\0')
+    need(gic, '#interrupt-cells', words(3))
+    need(gic, 'reg', words(0x17a00000, 0x10000, 0x17a60000, 0x100000))
+    need(gcc, 'compatible', b'qcom,gcc-lito\0syscon\0')
+    need(gcc, 'reg', words(0x00100000, 0x1f0000))
+    need(rsc, 'reg-names', b'drv-0\0drv-1\0drv-2\0')
+    need(rsc, 'interrupts', words(0, 3, 4, 0, 4, 4, 0, 5, 4))
+    gic_handle = nodes[gic].get('phandle', nodes[gic].get('linux,phandle', b''))
+    if len(gic_handle) != 4:
+        raise ValueError('native MPSS power requires the actual GIC phandle')
+
+    def parent(path):
+        while True:
+            if 'interrupt-parent' in nodes.get(path, {}):
+                return nodes[path]['interrupt-parent']
+            if path == '/':
+                return None
+            path = path.rsplit('/', 1)[0] or '/'
+
+    for path in (rsc, '/soc/qcom,ipcc@408000'):
+        if parent(path) != gic_handle:
+            raise ValueError('native MPSS power interrupt route does not select GIC')
+    result['power_probe'] = {'ranges': POWER_RANGES, 'witness': POWER_WITNESS,
+                             'retained_selectors': {'cx': 7, 'mss': 6, 'xo': 3},
+                             'pas_calls': False, 'smem_writes': False}
+    return result
+
+
+def live_power_contract(blob, xnu_base, xnu_bytes):
+    if (xnu_base, xnu_bytes) != (0x180000000, 0x80000000):
+        raise ValueError('native MPSS power requires the proven CPU0/md0 RAM window')
+    excluded = live_layout(blob, xnu_base, xnu_bytes)
+    result = power_contract(_tree(blob)[0])
+    result['excluded'] = excluded
+    return result
+
+
 def add_probe_contract(tree, nodes):
     contract(nodes)
     if any(child.name == 'redfin-wifi-native' for child in tree.children):
@@ -153,15 +211,27 @@ def add_probe_contract(tree, nodes):
         ('source-contract', mkadt.u32(*WITNESS))]))
 
 
+def add_power_contract(tree, nodes):
+    power_contract(nodes)
+    if any(child.name == 'redfin-wifi-power' for child in tree.children):
+        raise ValueError('duplicate native Wi-Fi power contract')
+    tree.children.append(mkadt.node('redfin-wifi-power', [
+        ('reg', mkadt.u64(*(value for pair in POWER_RANGES for value in pair))),
+        ('live-fdt-verified', mkadt.u32(1)),
+        ('source-contract', mkadt.u32(*POWER_WITNESS))]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dtb', required=True, type=Path)
     parser.add_argument('--xnu-base', required=True, type=lambda text: int(text, 0))
     parser.add_argument('--xnu-bytes', required=True, type=lambda text: int(text, 0))
+    parser.add_argument('--power', action='store_true', help='validate the optional retained-power contract')
     args = parser.parse_args()
     try:
-        print(json.dumps(live_contract(read_regular(args.dtb, 16 * 1024 * 1024),
-                                       args.xnu_base, args.xnu_bytes), indent=2))
+        validate = live_power_contract if args.power else live_contract
+        print(json.dumps(validate(read_regular(args.dtb, 16 * 1024 * 1024),
+                                   args.xnu_base, args.xnu_bytes), indent=2))
     except (OSError, ValueError) as error:
         parser.error(str(error))
 

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT
- * Optional md0-only AOP/SMEM/CMD-DB observer; no driver startup is installed.
+ * Optional md0-only prerequisite observer. redfinwifipower=1 selects a separate
+ * native retained ARC/AOP lease. Neither path starts MPSS or writes media.
  */
 #ifndef REDFIN_WIFI_NATIVE_PROBE_H
 #define REDFIN_WIFI_NATIVE_PROBE_H

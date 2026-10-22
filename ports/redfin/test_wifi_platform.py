@@ -59,6 +59,19 @@ def fixture(changes=None):
     return fdt(changes=attributes, extra=extra)
 
 
+def power_nodes():
+    nodes = _tree(fixture())[0]
+    nodes['/']['interrupt-parent'] = words(40)
+    nodes['/soc/interrupt-controller@17a00000'] = {
+        'compatible': b'arm,gic-v3\0', '#interrupt-cells': words(3), 'phandle': words(40),
+        'reg': words(0x17a00000, 0x10000, 0x17a60000, 0x100000)}
+    nodes['/soc/qcom,gcc@100000'] = {
+        'compatible': b'qcom,gcc-lito\0syscon\0', 'reg': words(0x100000, 0x1f0000)}
+    nodes['/soc/rsc@18200000'].update({
+        'reg-names': b'drv-0\0drv-1\0drv-2\0', 'interrupts': words(0, 3, 4, 0, 4, 4, 0, 5, 4)})
+    return nodes
+
+
 class WifiPlatformTests(unittest.TestCase):
     def test_native_contract_resolves_actual_roles_without_fixed_phandle_numbers(self):
         result = P.live_contract(fixture(), 0x180000000, 0x80000000)
@@ -143,6 +156,48 @@ class WifiPlatformTests(unittest.TestCase):
         self.assertEqual(properties['live-fdt-verified'], P.mkadt.u32(1))
         with self.assertRaises(ValueError):
             P.add_probe_contract(root, nodes)
+
+    def test_optional_power_contract_binds_gic_gcc_drv2_and_actual_interrupt_parents(self):
+        nodes = power_nodes()
+        result = P.power_contract(nodes)
+        self.assertEqual(result['power_probe']['ranges'], P.POWER_RANGES)
+        self.assertEqual(result['power_probe']['retained_selectors'], {'cx': 7, 'mss': 6, 'xo': 3})
+        self.assertFalse(result['power_proven'])
+        # A dynamic GIC phandle and an explicit inherited parent are equivalent.
+        nodes['/soc/interrupt-controller@17a00000']['phandle'] = words(41)
+        nodes['/']['interrupt-parent'] = words(41)
+        nodes['/soc/rsc@18200000']['interrupt-parent'] = words(41)
+        P.power_contract(nodes)
+        for path, key in [('/soc/rsc@18200000', 'interrupts'), ('/soc/rsc@18200000', 'reg-names'),
+                          ('/soc/qcom,gcc@100000', 'reg'), ('/soc/qcom,gcc@100000', 'compatible'),
+                          ('/soc/interrupt-controller@17a00000', 'reg'),
+                          ('/soc/interrupt-controller@17a00000', '#interrupt-cells')]:
+            for bit in range(len(nodes[path][key]) * 8):
+                changed = copy.deepcopy(nodes)
+                value = bytearray(changed[path][key]); value[bit // 8] ^= 1 << (bit % 8)
+                changed[path][key] = bytes(value)
+                with self.subTest(path=path, key=key, bit=bit), self.assertRaises(ValueError):
+                    P.power_contract(changed)
+        for path in ('/', '/soc/rsc@18200000', '/soc/qcom,ipcc@408000'):
+            changed = copy.deepcopy(nodes)
+            changed[path]['interrupt-parent'] = words(12)
+            with self.subTest(parent=path), self.assertRaises(ValueError):
+                P.power_contract(changed)
+
+    def test_power_adt_has_separate_exact_properties_and_rejects_duplicates(self):
+        root = P.mkadt.node('/', [])
+        nodes = power_nodes()
+        P.add_probe_contract(root, nodes)
+        P.add_power_contract(root, nodes)
+        self.assertEqual([child.name for child in root.children], ['redfin-wifi-native', 'redfin-wifi-power'])
+        properties = {name: value for name, _flags, value in root.children[1].props}
+        self.assertEqual(properties['reg'], P.mkadt.u64(*(value for pair in P.POWER_RANGES for value in pair)))
+        self.assertEqual(properties['source-contract'], P.mkadt.u32(*P.POWER_WITNESS))
+        self.assertEqual(properties['live-fdt-verified'], P.mkadt.u32(1))
+        with self.assertRaises(ValueError):
+            P.add_power_contract(root, nodes)
+        with self.assertRaises(ValueError):
+            P.live_power_contract(fixture(), 0x180000000, 0x4000)
 
 
 if __name__ == '__main__':

@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: MIT
- * Redfin native Wi-Fi prerequisite observation. No writable mappings, TCSR,
- * IPCC, RSC, PAS, firmware loading, UFS access or background worker.
- * Source topology is checked by wifi_platform.py before emitting this ADT
- * leaf; the kernel independently enforces the exact ABI and md0/UP/return
- * gates. This leaf grants observation only, never a hardware-write lease.
+ * Redfin native Wi-Fi prerequisites and separately gated retained power/AOP
+ * experiment. The default path maps read-only. redfinwifipower=1 additionally
+ * requires its exact native lease, live source contract and cold DRV2 handoff.
+ * Neither path invokes PAS, loads firmware, writes SMEM or accesses media.
  */
 #include <pexpert/arm64/board_config.h>
 #if defined(ARM64_BOARD_CONFIG_SWEET)
@@ -12,6 +11,7 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
 #include <sys/errno.h>
+#include <kern/thread.h>
 #include "redfin_wifi_native_probe.h"
 #include "../../../bsd/dev/redfin_wifi_aop.h"
 #include "../../../bsd/dev/redfin_rpmh.h"
@@ -131,6 +131,412 @@ static int wf_selector(const rf_cmddb_resource *resource, uint32_t wanted)
     return selected;
 }
 
+/* Native DRV2 ACTIVE transaction/ARC selector design follows the reviewed
+ * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 rpmh-rsc.c,
+ * rpmh-regulator.c, clk-rpmh.c and the existing Redfin CX experiment. No
+ * SW_COLLAPSE, GPU/GMU register, TCSR, PAS or firmware operation is included.
+ * Highest legal selectors preserve every validated inherited resource floor.
+ * Votes and AOP on remain held until platform reset, including partial failure.
+ */
+enum { WFP_AOP, WFP_IPCC, WFP_RSC, WFP_GCC, WFP_GIC, WFP_DB, WFP_MAPS };
+enum { WFP_MAPPING = 1, WFP_PREFLIGHT, WFP_ARC, WFP_AOP_ON, WFP_FINISHED };
+static const uint64_t wf_power_ranges[12] = {
+    RF_WIFI_AOP_PHYSICAL, RF_WIFI_AOP_BYTES, RF_WIFI_AOP_IPCC_PHYSICAL, 0x1000,
+    UINT64_C(0x18220000), 0x10000, UINT64_C(0x00100000), 0x1f0000,
+    UINT64_C(0x17a00000), 0x4000, UINT64_C(0x80860000), RF_CMDDB_BYTES};
+static const uint32_t wf_power_witness[16] = {
+    1, 2, 0, 1, 37, 261, 0x71004, 0x30000, 7, 416, 0x30060, 6, 384, 0x300a0, 3, 0};
+static const uint32_t wf_arc_address[3] = {0x30000, 0x30060, 0x300a0};
+static const uint32_t wf_arc_selector[3] = {7, 6, 3};
+struct wf_slot {
+    uint32_t idle, control, enabled, wait;
+    uint32_t command[16][3];
+};
+struct wf_power_context {
+    wf_map maps[WFP_MAPS];
+    uintptr_t base[WFP_MAPS];
+    char args[608];
+    unsigned arg_bytes;
+    thread_t owner;
+    bool active, poisoned;
+    unsigned phase, stores, notifications, held, target, step, polls;
+    uint32_t id, config, commands, irq_enable, irq, command_status;
+    wf_slot inherited[8];
+    uint32_t own_control, own_enabled, own_wait, own_command[3];
+    rf_cmddb_resource resource[3];
+    rf_wifi_aop_session aop;
+};
+static wf_power_context wf_power;
+
+static bool wf_power_args(const char *args, unsigned bytes)
+{
+    static const char *const required[] = {
+        "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
+        "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
+        "modem=0", "wifi=0", "gpu=0", "redfinwifi=2", "redfinwifinative=1",
+        "redfinwifipower=1", "redfinspmi=1", "redfinreturn=1"};
+    uint32_t seen = 0;
+    bool nonce_seen = false, trace_seen = false;
+    if (!args || !bytes || bytes > sizeof(wf_power.args) || args[bytes - 1]) return false;
+    for (unsigned at = 0; at < bytes - 1;) {
+        if (args[at] == ' ') { ++at; continue; }
+        unsigned first = at;
+        while (at < bytes - 1 && args[at] != ' ') {
+            if ((unsigned char)args[at] < 33 || (unsigned char)args[at] > 126) return false;
+            ++at;
+        }
+        unsigned length = at - first;
+        bool known = false;
+        for (unsigned i = 0; i < sizeof(required) / sizeof(required[0]); ++i) {
+            if (strlen(required[i]) != length || memcmp(args + first, required[i], length)) continue;
+            if (seen & (1u << i)) return false;
+            seen |= 1u << i; known = true; break;
+        }
+        if (known) continue;
+        if (length == sizeof("-enable_kprintf_spam") - 1 &&
+            !memcmp(args + first, "-enable_kprintf_spam", length)) {
+            if (trace_seen) return false;
+            trace_seen = true; continue;
+        }
+        if (length != 31 || memcmp(args + first, "redfinbootid=0x", 15) || nonce_seen) return false;
+        uint64_t nonce = 0;
+        for (unsigned i = 15; i < 31; ++i) {
+            unsigned digit = (unsigned)(args[first + i] - '0');
+            if (digit > 9) {
+                if (args[first + i] < 'a' || args[first + i] > 'f') return false;
+                digit = (unsigned)(args[first + i] - 'a' + 10);
+            }
+            nonce = (nonce << 4) | digit;
+        }
+        if (!nonce) return false;
+        nonce_seen = true;
+    }
+    return seen == ((1u << (sizeof(required) / sizeof(required[0]))) - 1u) && nonce_seen;
+}
+
+static bool wf_power_platform(void)
+{
+    uint64_t observed[12] = {}, ram_base = 0, ram_bytes = 0;
+    uint32_t witness[16] = {}, verified = 0;
+    DTEntry entry, chosen;
+    return SecureDTLookupEntry(NULL, "/redfin-wifi-power", &entry) == kSuccess &&
+        wf_property(entry, "reg", observed, sizeof(observed)) &&
+        !memcmp(observed, wf_power_ranges, sizeof(observed)) &&
+        wf_property(entry, "source-contract", witness, sizeof(witness)) &&
+        !memcmp(witness, wf_power_witness, sizeof(witness)) &&
+        wf_property(entry, "live-fdt-verified", &verified, sizeof(verified)) && verified == 1 &&
+        SecureDTLookupEntry(NULL, "/chosen", &chosen) == kSuccess &&
+        wf_property(chosen, "dram-base", &ram_base, sizeof(ram_base)) && ram_base == UINT64_C(0x180000000) &&
+        wf_property(chosen, "dram-size", &ram_bytes, sizeof(ram_bytes)) && ram_bytes == UINT64_C(0x80000000);
+}
+
+static int wf_power_check(void *opaque)
+{
+    wf_power_context *context = (wf_power_context *)opaque;
+    const char *args = PE_boot_args();
+    bool valid = context == &wf_power && context->active && !context->poisoned &&
+        context->owner && current_thread() == context->owner && context->arg_bytes && args &&
+        !memcmp(args, context->args, context->arg_bytes) &&
+        __builtin_arm_rsr64("CurrentEL") == 4 &&
+        !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
+        redfin_spmi_return_ready() == 1;
+    if (valid) for (unsigned i = 0; i < WFP_MAPS; ++i) {
+        if (!context->maps[i].mapping || !context->base[i] ||
+            context->maps[i].mapping->getVirtualAddress() != context->base[i] ||
+            context->maps[i].mapping->getLength() != wf_power_ranges[2u * i + 1u]) { valid = false; break; }
+    }
+    if (!valid && context == &wf_power) context->poisoned = true;
+    return valid ? 0 : EPERM;
+}
+
+static int wf_power_read(wf_power_context *context, unsigned unit, uint32_t offset, uint32_t *out)
+{
+    if (!out || unit >= WFP_MAPS || unit == WFP_IPCC || offset % 4u ||
+        offset > wf_power_ranges[2u * unit + 1u] - 4u || wf_power_check(context)) return EINVAL;
+    *out = *(const volatile uint32_t *)(context->base[unit] + offset);
+#if defined(__aarch64__) || defined(__arm64__)
+    __asm__ volatile("dmb oshld" ::: "memory");
+#else
+    __asm__ volatile("" ::: "memory");
+#endif
+    return 0;
+}
+
+static uint32_t wf_power_word(wf_power_context *context, unsigned unit, uint32_t offset)
+{
+    uint32_t value = UINT32_MAX;
+    if (wf_power_read(context, unit, offset, &value)) context->poisoned = true;
+    return value;
+}
+
+static bool wf_power_tables(wf_power_context *context, bool capture)
+{
+    static const uint8_t names[3][8] = {"cx.lvl", "mss.lvl", "xo.lvl"};
+    static const uint16_t levels[3][16] = {
+        {0, 16, 64, 128, 192, 256, 384, 416},
+        {0, 64, 128, 192, 256, 320, 384}, {0, 32, 80, 128}};
+    if (wf_power_check(context)) return false;
+    for (unsigned i = 0; i < 3; ++i) {
+        rf_cmddb_resource resource = {};
+        if (rf_cmddb_lookup((const volatile uint8_t *)context->base[WFP_DB], RF_CMDDB_BYTES,
+            names[i], RF_CMDDB_ARC, &resource) != RF_CMDDB_OK || resource.type != RF_CMDDB_ARC ||
+            resource.address != wf_arc_address[i] || resource.aux_version != 0x1000 ||
+            resource.aux_bytes != 32 || resource.level_count != 16 ||
+            memcmp(resource.levels, levels[i], sizeof(levels[i]))) return false;
+        if (capture) context->resource[i] = resource;
+        else if (resource.priority[0] != context->resource[i].priority[0] ||
+            resource.priority[1] != context->resource[i].priority[1]) return false;
+    }
+    return !wf_power_check(context);
+}
+
+static bool wf_power_irqs(wf_power_context *context, bool initial)
+{
+    const unsigned irq[2] = {37, 261};
+    for (unsigned i = 0; i < 2; ++i) {
+        unsigned bank = 4u * (irq[i] / 32u);
+        uint32_t mask = 1u << (irq[i] % 32u);
+        uint32_t enabled = wf_power_word(context, WFP_GIC, 0x100u + bank);
+        uint32_t pending = wf_power_word(context, WFP_GIC, 0x200u + bank);
+        uint32_t active = wf_power_word(context, WFP_GIC, 0x300u + bank);
+        if (enabled == UINT32_MAX || pending == UINT32_MAX || active == UINT32_MAX ||
+            ((enabled | active | (initial && i == 0 ? pending : 0u)) & mask)) return false;
+    }
+    return !wf_power_check(context);
+}
+
+static bool wf_power_snapshot(wf_power_context *context, bool compare, bool skip_own)
+{
+    for (unsigned tcs = skip_own ? 1u : 0u; tcs < 8; ++tcs) {
+        unsigned at = 0xd00u + 0x2a0u * tcs;
+        wf_slot current = {};
+        current.idle = wf_power_word(context, WFP_RSC, at + 0x18u);
+        current.control = wf_power_word(context, WFP_RSC, at + 0x14u);
+        current.enabled = wf_power_word(context, WFP_RSC, at + 0x1cu);
+        current.wait = wf_power_word(context, WFP_RSC, at + 0x10u);
+        if (!current.idle || current.idle == UINT32_MAX || current.control == UINT32_MAX ||
+            ((current.enabled | current.wait) & ~((1u << context->commands) - 1u)) ||
+            (tcs < 2 && (current.control || current.enabled || current.wait))) return false;
+        for (unsigned command = 0; command < context->commands; ++command) {
+            if (!(current.enabled & (1u << command))) continue;
+            for (unsigned word = 0; word < 3; ++word)
+                current.command[command][word] = wf_power_word(context, WFP_RSC, at + 0x30u + 0x14u * command + 4u * word);
+            uint32_t message = current.command[command][0], address = current.command[command][1];
+            uint32_t data = current.command[command][2];
+            for (unsigned resource = 0; resource < 3; ++resource) {
+                if ((address & ~3u) == wf_arc_address[resource] &&
+                    (address != wf_arc_address[resource] || !(message & (1u << 16)) || data > wf_arc_selector[resource]))
+                    return false;
+            }
+        }
+        if (compare && memcmp(&current, &context->inherited[tcs], sizeof(current))) return false;
+        if (!compare) context->inherited[tcs] = current;
+    }
+    return !wf_power_check(context);
+}
+
+static bool wf_power_rsc_guard(wf_power_context *context)
+{
+    uint32_t irq = wf_power_word(context, WFP_RSC, 0xd04u);
+    return !wf_power_check(context) && wf_power_irqs(context, false) &&
+        wf_power_word(context, WFP_RSC, 0) == context->id &&
+        wf_power_word(context, WFP_RSC, 0xcu) == context->config &&
+        wf_power_word(context, WFP_RSC, 0xd00u) == context->irq_enable &&
+        irq != UINT32_MAX && !(irq & ~1u) &&
+        ((context->phase == WFP_ARC && context->step >= 8 && context->step < 13) || !irq) &&
+        (wf_power_word(context, WFP_GCC, 0x71004u) & 0x80000001u) == 1 &&
+        wf_power_snapshot(context, true, true) &&
+        wf_power_word(context, WFP_RSC, 0xd14u) == context->own_control &&
+        wf_power_word(context, WFP_RSC, 0xd1cu) == context->own_enabled &&
+        wf_power_word(context, WFP_RSC, 0xd10u) == context->own_wait &&
+        wf_power_word(context, WFP_RSC, 0xd30u) == context->own_command[0] &&
+        wf_power_word(context, WFP_RSC, 0xd34u) == context->own_command[1] &&
+        wf_power_word(context, WFP_RSC, 0xd38u) == context->own_command[2] && !wf_power_check(context);
+}
+
+static int wf_power_store(wf_power_context *context, unsigned unit, uint32_t offset, uint32_t value)
+{
+    if (unit >= WFP_MAPS || offset % 4u || offset > wf_power_ranges[2u * unit + 1u] - 4u ||
+        wf_power_check(context) || !wf_power_rsc_guard(context) || !wf_power_tables(context, false)) return EPERM;
+    if (unit == WFP_RSC) {
+        if (context->phase != WFP_ARC || context->target >= 3 || context->step >= 13) return EPERM;
+        static const uint32_t offsets[13] = {
+            0xd30, 0xd34, 0xd38, 0xd10, 0xd1c, 0xd14, 0xd14, 0xd14, 0xd14, 0xd14, 0xd1c, 0xd10, 0xd08};
+        const uint32_t values[13] = {0x10108, wf_arc_address[context->target], wf_arc_selector[context->target],
+            1, 1, 0, 1u << 16, (1u << 16) | (1u << 24), 1u << 16, 0, 0, 0, 1};
+        if (offset != offsets[context->step] || value != values[context->step]) return EPERM;
+    } else {
+        if (context->phase != WFP_AOP_ON || context->held != 7 || !wf_power_tables(context, false)) return EPERM;
+        if (unit == WFP_IPCC) {
+            if (offset != RF_WIFI_AOP_IPCC_SEND || value != RF_WIFI_AOP_IPCC_ID) return EPERM;
+        } else if (unit == WFP_AOP) {
+            uint32_t box = context->aop.baseline.word[14];
+            bool control = (offset == 0x10 || offset == 0x18 || offset == 0x24 || offset == 0x2c) && value == RF_WIFI_AOP_UP;
+            bool payload = context->aop.open && box >= 64 && box <= RF_WIFI_AOP_BYTES - 68u &&
+                ((offset == box && value == RF_WIFI_AOP_MESSAGE_BYTES) || (offset > box && offset < box + 68u));
+            if (!control && !payload) return EPERM;
+        } else return EPERM;
+    }
+    ++context->stores;
+#if defined(__aarch64__) || defined(__arm64__)
+    __asm__ volatile("dmb oshst" ::: "memory");
+#endif
+    *(volatile uint32_t *)(context->base[unit] + offset) = value;
+#if defined(__aarch64__) || defined(__arm64__)
+    __asm__ volatile("dsb osh" ::: "memory");
+#else
+    __asm__ volatile("" ::: "memory");
+#endif
+    if (unit == WFP_RSC) {
+        if (offset == 0xd14) context->own_control = value;
+        if (offset == 0xd1c) context->own_enabled = value;
+        if (offset == 0xd10) context->own_wait = value;
+        if (offset >= 0xd30 && offset <= 0xd38) context->own_command[(offset - 0xd30) / 4u] = value;
+        ++context->step;
+    }
+    if (unit == WFP_IPCC) ++context->notifications;
+    return 0;
+}
+
+static int wf_power_pause(void *opaque, uint32_t microseconds)
+{
+    wf_power_context *context = (wf_power_context *)opaque;
+    if (!microseconds || microseconds > 1000 || wf_power_check(context) || !wf_power_rsc_guard(context)) return EPERM;
+    IODelay(microseconds);
+    return wf_power_check(context);
+}
+
+static bool wf_power_sync(wf_power_context *context, uint32_t offset, uint32_t value)
+{
+    if (wf_power_store(context, WFP_RSC, offset, value)) return false;
+    for (unsigned poll = 0; poll < 100; ++poll) {
+        if (wf_power_check(context)) return false;
+        if (wf_power_word(context, WFP_RSC, offset) == value) return true;
+        /* A failed readback may not authorize another typed write or retry. */
+        IODelay(1);
+    }
+    return false;
+}
+
+static int wf_power_vote(wf_power_context *context, unsigned target)
+{
+    if (target >= 3 || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
+        wf_power_word(context, WFP_RSC, 0xd04u) || !wf_power_word(context, WFP_RSC, 0xd18u)) return EBUSY;
+    context->target = target; context->step = 0;
+    if (!wf_power_sync(context, 0xd30, 0x10108) || !wf_power_sync(context, 0xd34, wf_arc_address[target]) ||
+        !wf_power_sync(context, 0xd38, wf_arc_selector[target]) || !wf_power_sync(context, 0xd10, 1) ||
+        !wf_power_sync(context, 0xd1c, 1) || !wf_power_sync(context, 0xd14, 0) ||
+        !wf_power_sync(context, 0xd14, 1u << 16) ||
+        wf_power_store(context, WFP_RSC, 0xd14, (1u << 16) | (1u << 24))) return EIO;
+    bool complete = false;
+    for (unsigned poll = 0; poll <= 1000; ++poll) {
+        if (!wf_power_rsc_guard(context)) return EBUSY;
+        context->irq = wf_power_word(context, WFP_RSC, 0xd04u);
+        context->command_status = wf_power_word(context, WFP_RSC, 0xd3cu);
+        uint32_t idle = wf_power_word(context, WFP_RSC, 0xd18u);
+        ++context->polls;
+        if (context->irq == UINT32_MAX || context->command_status == UINT32_MAX || idle == UINT32_MAX) return EIO;
+        if ((context->irq & 1u) && idle && (context->command_status & 0x10100u) == 0x10100u) { complete = true; break; }
+        if (poll == 1000 || wf_power_pause(context, 100)) break;
+    }
+    if (!complete) return ETIMEDOUT;
+    context->held |= 1u << target;
+    IOLog("REDFIN WIFI POWER: ARC address=%#x selector=%u held=1 polls=%u IRQ=%#x CMD=%#x\n",
+        wf_arc_address[target], wf_arc_selector[target], context->polls, context->irq, context->command_status);
+    if (!wf_power_sync(context, 0xd14, 1u << 16) || !wf_power_sync(context, 0xd14, 0) ||
+        !wf_power_sync(context, 0xd1c, 0) || !wf_power_sync(context, 0xd10, 0) ||
+        wf_power_store(context, WFP_RSC, 0xd08, 1) || wf_power_word(context, WFP_RSC, 0xd04u) ||
+        !wf_power_rsc_guard(context) || !wf_power_tables(context, false)) return EIO;
+    return 0;
+}
+
+static int wf_power_aop_read(void *opaque, uint32_t offset, uint32_t *out)
+{ return wf_power_read((wf_power_context *)opaque, WFP_AOP, offset, out); }
+static int wf_power_aop_write(void *opaque, uint32_t offset, uint32_t value)
+{ return wf_power_store((wf_power_context *)opaque, WFP_AOP, offset, value); }
+static int wf_power_aop_notify(void *opaque)
+{ return wf_power_store((wf_power_context *)opaque, WFP_IPCC, RF_WIFI_AOP_IPCC_SEND, RF_WIFI_AOP_IPCC_ID); }
+
+static int wf_power_run(wf_power_context *context)
+{
+    context->phase = WFP_PREFLIGHT;
+    if (!wf_power_tables(context, true)) return ENXIO;
+    if ((wf_power_word(context, WFP_GCC, 0x71004u) & 0x80000001u) != 1 || !wf_power_irqs(context, true)) return EBUSY;
+    context->id = wf_power_word(context, WFP_RSC, 0);
+    context->config = wf_power_word(context, WFP_RSC, 0xcu);
+    context->commands = (context->config >> 27) & 31u;
+    unsigned major = (context->id >> 16) & 255u, tcs_count = (context->config >> 12) & 63u;
+    context->irq_enable = wf_power_word(context, WFP_RSC, 0xd00u);
+    IOLog("REDFIN WIFI POWER: DRV2 id=%#x config=%#x commands=%u TCS=%u IRQ_enable=%#x\n",
+        context->id, context->config, context->commands, tcs_count, context->irq_enable);
+    if ((major != 1 && major != 2) || context->config == UINT32_MAX || tcs_count < 8 || tcs_count > 9 ||
+        !context->commands || context->commands > 16 || context->irq_enable == UINT32_MAX ||
+        !(context->irq_enable & 1u) || wf_power_word(context, WFP_RSC, 0xd04u) ||
+        !wf_power_snapshot(context, false, false) || !wf_power_snapshot(context, true, false)) return EBUSY;
+    context->own_control = context->inherited[0].control;
+    context->own_enabled = context->inherited[0].enabled; context->own_wait = context->inherited[0].wait;
+    for (unsigned word = 0; word < 3; ++word)
+        context->own_command[word] = wf_power_word(context, WFP_RSC, 0xd30u + 4u * word);
+    const rf_wifi_aop_ops operations = {context, wf_power_check, wf_power_aop_read,
+        wf_power_aop_write, wf_power_aop_notify, wf_power_pause};
+    rf_wifi_aop_snapshot aop = {};
+    int error = rf_wifi_aop_observe(&operations, &aop);
+    if (error || aop.tx_length || aop.rx_length || aop.word[3] != RF_WIFI_AOP_UP) return EBUSY;
+    bool opened = true, closed = true;
+    static const uint8_t all[8] = {3, 4, 5, 6, 9, 10, 11, 12}, cold[6] = {5, 6, 9, 10, 11, 12};
+    for (unsigned i = 0; i < sizeof(all); ++i) opened &= aop.word[all[i]] == RF_WIFI_AOP_UP;
+    for (unsigned i = 0; i < sizeof(cold); ++i) closed &= aop.word[cold[i]] == RF_WIFI_AOP_DOWN;
+    if ((!opened && !closed) || !wf_power_tables(context, false) || !wf_power_rsc_guard(context)) return EBUSY;
+    context->phase = WFP_ARC;
+    for (unsigned i = 0; i < 3; ++i) {
+        error = wf_power_vote(context, i);
+        if (error) return error;
+    }
+    context->phase = WFP_AOP_ON;
+    error = rf_wifi_aop_open(&context->aop, &operations);
+    if (!error) error = rf_wifi_aop_load_state(&context->aop, &operations, 1);
+    IOLog("REDFIN WIFI POWER: AOP status=%d open=%u load_state=%u stores=%u notifications=%u pending=%u\n",
+        error, context->aop.open, context->aop.load_state, context->aop.stores,
+        context->aop.notifications, wf_power_word(context, WFP_AOP, aop.word[14]));
+    if (!error && (!wf_power_rsc_guard(context) || !wf_power_tables(context, false))) error = EBUSY;
+    return error;
+}
+
+static void wf_power_probe(void)
+{
+    wf_power_context *context = &wf_power;
+    const char *args = PE_boot_args();
+    unsigned bytes = 0;
+    if (args) while (bytes < sizeof(context->args) && args[bytes]) ++bytes;
+    if (!args || bytes == sizeof(context->args) || !wf_power_args(args, bytes + 1u) || !wf_power_platform()) {
+        IOLog("REDFIN WIFI POWER: refused exact args/live-FDT/RAM contract before mapping\n"); return;
+    }
+    memcpy(context->args, args, bytes + 1u); context->arg_bytes = bytes + 1u;
+    context->owner = current_thread(); context->phase = WFP_MAPPING;
+    bool mapped = true;
+    for (unsigned i = 0; i < WFP_MAPS; ++i) {
+        bool writable = i == WFP_AOP || i == WFP_IPCC || i == WFP_RSC;
+        context->maps[i].memory = IOMemoryDescriptor::withPhysicalAddress(wf_power_ranges[2u * i],
+            wf_power_ranges[2u * i + 1u], writable ? kIODirectionInOut : kIODirectionIn);
+        IOOptionBits options = (writable ? 0 : kIOMapReadOnly) |
+            (i == WFP_DB ? kIOMapWriteCombineCache : kIOMapInhibitCache);
+        context->maps[i].mapping = context->maps[i].memory ? context->maps[i].memory->map(options) : NULL;
+        if (!context->maps[i].mapping || !context->maps[i].mapping->getVirtualAddress() ||
+            context->maps[i].mapping->getLength() != wf_power_ranges[2u * i + 1u]) { mapped = false; break; }
+        context->base[i] = (uintptr_t)context->maps[i].mapping->getVirtualAddress();
+    }
+    context->active = mapped;
+    int error = mapped && !wf_power_check(context) ? wf_power_run(context) : ENXIO;
+    if (error) context->poisoned = true;
+    IOLog("REDFIN WIFI POWER: result=%d phase=%u held_mask=%#x writes=%u kicks=%u quarantined=%u; retained until reset; PAS/SMEM/firmware untouched\n",
+        error, context->phase, context->held, context->stores, context->notifications, context->poisoned);
+    context->active = false; context->phase = WFP_FINISHED;
+    for (unsigned i = 0; i < WFP_MAPS; ++i) {
+        OSSafeReleaseNULL(context->maps[i].mapping);
+        OSSafeReleaseNULL(context->maps[i].memory);
+    }
+}
+
 extern "C" void redfin_wifi_native_observe(void)
 {
     int enabled = 0;
@@ -140,6 +546,12 @@ extern "C" void redfin_wifi_native_observe(void)
     uint64_t ranges[6] = {};
     if (!wf_platform(ranges)) {
         IOLog("REDFIN WIFI NATIVE: refused md0/UP/identity/return/live-FDT contract\n");
+        return;
+    }
+    int power = 0;
+    if (PE_parse_boot_argn("redfinwifipower", &power, sizeof(power)) && power) {
+        if (power != 1) IOLog("REDFIN WIFI POWER: refused unsupported power mode\n");
+        else wf_power_probe();
         return;
     }
     wf_map maps[3] = {};
