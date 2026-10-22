@@ -16,11 +16,12 @@ process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
 The minimal MobileGestalt Wi-Fi identity fix is validated on the device.
 Authenticated peripheral observers now cover SEC SPI/GPIO, warm DWC3,
-SMEM and Adreno 620 clocks. Guarded DWC3 DMA and high-speed USB enumeration
-are observed on the host with the opt-in AArch64 context profile;
-macOS also configures CDC-ECM and creates its native Ethernet interface;
-packet exchange remains unverified. Physical touch delivery, radio, USB networking and GPU
-acceleration are still in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
+SMEM and Adreno 620 clocks. Guarded DWC3 DMA, high-speed USB enumeration,
+ARP, nonce-bearing ICMP and fresh UDP kernel logs are observed through
+macOS's native CDC-ECM driver with the opt-in AArch64 context profile.
+USB is validated in bounded md0 tests; integration with UFS/GUI remains
+unverified. Physical touch delivery, radio and GPU acceleration are still
+in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata

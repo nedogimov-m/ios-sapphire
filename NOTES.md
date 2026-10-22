@@ -1,5 +1,61 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN USB V7: ARP, ICMP and fresh live kernel logs work — 2026-10-22
+
+Native macOS `usb-native.py` uses typed nonpromiscuous libpcap, exact
+Darwin ABI, same-port live ECM ancestry/descriptor-MAC proof, and bounded
+transient registry reads. It handles the observed masked ifconfig MAC as
+reporting only; wire packets/BPF use expected02:00:5e:77:ee:01. Shared
+direct-USB Protocol is unchanged. No detach, reset, host IP or permission
+change. 27 new tests and independent review PASS; full631 PASS
+(`logs/redfin/peripherals-host-tests-v27.txt`). Source SHA256
+`be2da58986807ae4b67b127191fb21feb6a65dc86a31ea8b0df346203e497556`.
+Same ARM64 kernel7da40f41/build214311 as V5; V7 image SHA256
+`5fb561bf61a16c207fa6a346902d8d1b427b6f6c23f55e13575f5bd22fbc27b0`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xcad70162e6f4d65a`.
+`logs/redfin/usb-net-v7-host-native/`: link-ready; ARP and solicited
+current-nonce ICMP reply true, 14380 validated UDP log bytes, boot-ID
+freshness matched, rejected/truncated/overflow0. Interface en9 on original
+Google USB port; reported MAC masked, wire/descriptor MAC expected.
+Independent `logs/redfin/usb-net-v7/` recovery capture authenticated and
+image-matched, md0 PID1 alive/11 heartbeats, no panic, metadata primed,
+fastboot return verified. Packet nonce evidence itself is not cryptographic
+authentication. This proves bounded md0 USB networking/live logs, not USB
+with Apple userspace/UFS. Source/README/USB guide updated; captures private.
+User requested touch next: prepare a fresh UFS/GUI/touch-events image with
+the same kernel, 120s graceful shutdown and RAM screenshot; require actual
+finger input before judging physical contacts. Radio/GPU still unproved.
+
+## REDFIN USB V6: live Skywalk interface MAC differs — 2026-10-22
+
+Commit `b61d354` records V5 native binding. Initial native libpcap probe
+passed 20 tests including an actual Darwin SDK ABI check: Apple's
+pcap_pkthdr is 280 bytes (256-byte comment extension); caplen/len offsets
+16/20. USB subset190 PASS (`usb-native-host-tests-v1.txt`). Independent
+review fixed dictionary/list plist roots, bounded transient registry reads,
+and revalidation before first packet injection. No kernel changes.
+V6 uses the same build214311/kernel7da40f41 as V5; image SHA256
+`d7b4dcdbc9e64b44e32eb86a51f4a92ff221b84bf66ae168f13f50f2f13d93df`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xeabb7e61e8cdf3af`.
+`logs/redfin/usb-net-v6/`: authenticated/image-matched md0 PID1 alive,
+11 heartbeats, no panic, metadata primed and fastboot return verified.
+The repaired private observer captures the complete native driver tree:
+AppleUserECM -> IOSkywalkLegacyEthernet -> EthernetInterface en9, and
+AppleUserECMData with data alternate1. IOMACAddress on the first two
+ancestors is expected02:00:5e:77:ee:01. However live ifconfig en9 reports
+02:00:00:00:00:00, UP/RUNNING and active; IPv6 link-local then self-assigned
+IPv4 appear. This explains why the earlier MAC-only watcher missed en9.
+Native probe correctly refuses the mismatch before opening pcap or sending
+ARP; UDP listener remains empty. Follow-up host audit finds all 15 Ethernet
+MAC reports equal02:00:00:00:00:00. Public XNU dlil_ifaddr_bytes returns
+exactly that mask when mac_system_check_info denies net.link.addr; this
+supports privacy redaction rather than a changed wire MAC. The exact host
+policy decision has not been observed. Next: require the expected MAC on
+the same live ECM ancestor and explicitly recognize the masked ifconfig
+report. Wire packets/BPF must continue using the descriptor MAC, never the
+masked report. Packet exchange will independently test that choice.
+No host IP/permissions/driver changes and no flash or Android boot.
+
 ## REDFIN USB V5: native macOS ECM binding confirmed — 2026-10-22
 
 Commit `9fdeafc` records the direct probe and restored descriptor build.

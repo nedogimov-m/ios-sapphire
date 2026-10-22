@@ -1,5 +1,38 @@
 # Redfin USB handoff probe
 
+## Native macOS ECM packet probe
+
+V7 validated ARP, a solicited ICMP reply and 14380 bytes of UDP kernel logs
+with the current image's boot ID. This applies to the bounded md0 profile.
+
+The opt-in md0 `--usb-network-probe --usb-live-log` image now enumerates
+and binds to macOS AppleUserECM. That driver owns the data interface
+exclusively; libusb ACCESS on claim is expected while it is bound.
+ARP, ICMP and live-log validation use the native Ethernet interface:
+
+```sh
+# Start while the phone is still in fastboot, before the temporary boot.
+python3 ports/redfin/usb-native.py \
+  --image-manifest ports/redfin/out/usb-net-v6/manifest.json \
+  --seconds 120 --out logs/redfin/NEW-native-capture
+```
+
+The probe pins the pre-boot Google USB location, requires 1209:0001 there,
+finds the Ethernet interface in its live driver subtree and requires its
+expected MAC on the same ECM ancestor before opening nonpromiscuous libpcap.
+The known masked ifconfig report is recorded separately; wire packets use
+the descriptor MAC. Existing read/write BPF access
+is required; the tool does not change permissions, host IP settings or
+driver ownership. It injects only fixed-peer ARP and a boot-nonce ICMP
+request, answers matching ARP, and retains validated UDP5140 payloads.
+`link-ready` requires ARP and a solicited echo carrying this image's nonce.
+UDP logging is reported separately and needs nonempty data with matching
+boot-ID freshness. Native packet evidence is not cryptographically
+authenticated; the independent recovery collector authenticates ramoops.
+Private output is capped at 8 MiB. The image still uses a bounded 30-second
+lease, CPU1, md0 and the verified return to bootloader; UFS/GUI with USB
+remains unvalidated. Historical read-only handoff diagnostics follow.
+
 `usb-probe.patch` adds a separate `bsd/dev/redfin_usb.c` and calls it from
 `IOKitBSDInit.cpp`, after verified bootloader return and before UFS. It also prevents
 `sweet_usb_probe()` from accessing Sapphire registers on a Redfin ADT.
