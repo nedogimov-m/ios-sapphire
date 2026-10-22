@@ -115,5 +115,38 @@ device array; it is not a portable Redfin fix. There is no new XNU DWC3
 driver in these snapshots: loader/UEFI USB transport does not replace the
 Redfin PHY, clock and DMA work in [USB.md](USB.md).
 
+## Display fit and camera geometry review — 2026-10-23
+
+Rechecked both pinned HEADs in the table above. Kernel
+`iokit/Kernel/MiniIOMobileFramebuffer.cpp:583`, `:603` and `:723` implement
+pixel-center bilinear sampling, checked source rectangles and projection of
+the complete logical canvas onto the physical panel. Redfin's older CPU path
+instead cropped at source 20,48 and ignored source rectangle dimensions.
+`display-fit.patch` now applies the reviewed scaling policy to Redfin's
+existing SweetSurface and 20H392 swap record. It does not import the upstream
+MiniIOSurface/IOFramebuffer ABI, injection code or a different device identity.
+
+A case-insensitive search for `notch`, `cutout` and `safe.?area` in the pinned
+kernel's `xnu/files` and userland's `userland/src` found no dedicated override.
+The full-canvas scaler is published; a dedicated camera-cutout fix has not
+been identified in these public snapshots.
+
+The physical front-camera exclusion is independently source-backed by
+Google's [Redfin Android overlay](https://android.googlesource.com/device/google/redfin/+/62df7438508565dfc05fab923e84f0704f5a0f07/redfin/overlay/frameworks/base/core/res/res/values/config.xml#208),
+reviewed at commit `62df7438508565dfc05fab923e84f0704f5a0f07`.
+The Apache-2.0 resource specifies a radius-40 circle centered at 81,77 and
+the conservative rectangle `[0,145) × [0,136)`, anchored to the left edge.
+Its portrait status-bar height is also 136px. `redfinfit=2` therefore fits the
+complete 1125×2436 iPhone X canvas into 1017×2204 pixels at 31,136 and paints
+the margins black. `redfinfit=1` fits into the complete panel without the
+camera exclusion. Both modes inverse-map SEC touch through the same checked
+viewport. The default remains the legacy crop.
+
+Eight host tests pass, including actual patched presentation/HID methods,
+independent bilinear pixels, immutable guarded source memory, clipping,
+malformed extents, margin gestures and ASan/UBSan. Physical alignment,
+rounded corners and on-device scaling throughput remain unverified;
+[DISPLAY.md](DISPLAY.md) records the exact contract and next bounded test.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772
