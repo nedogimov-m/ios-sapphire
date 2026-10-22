@@ -306,11 +306,17 @@ class ADB:
                                         'iflag=count_bytes', 'conv=fsync'],
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             checksum, total = hashlib.sha256(), 0
+            last_progress, last_percent = 0, -10
             try:
                 for chunk in iter(lambda: source.read(4*MIB), b''):
                     require(total + len(chunk) <= IMAGE_BYTES, 'image grew during streaming')
                     process.stdin.write(chunk)
                     checksum.update(chunk); total += len(chunk)
+                    now, percent = time.monotonic(), total * 100 / IMAGE_BYTES
+                    if percent - last_percent >= 10 or now - last_progress >= 60:
+                        print(f'userdata: writing {percent:.1f}% ({total / 1024**3:.2f}/16 GiB)',
+                              file=sys.stderr, flush=True)
+                        last_progress, last_percent = now, percent
                 process.stdin.close(); process.stdin = None
                 output, error = process.communicate(timeout=3600)
             except BaseException as error:
@@ -323,6 +329,7 @@ class ADB:
             require(checksum.hexdigest() == expected['sha256'], 'image changed during streaming; written data needs repair')
 
     def readback(self):
+        print('userdata: verifying full 16 GiB SHA256', file=sys.stderr, flush=True)
         output = self.command(f'set -o pipefail; dd if={RAW} bs={MIB} count={IMAGE_BYTES} iflag=count_bytes status=none | sha256sum', timeout=3600)
         checksum = output.decode().split()[0]
         require(re.fullmatch('[0-9a-f]{64}', checksum), 'invalid full readback SHA256')

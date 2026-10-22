@@ -15,6 +15,17 @@ Full offline backup running at `backup/redfin/pre-ios-full-20261022/` using
 streams next with exact count_bytes; independent full device/host SHA follows.
 Raw snapshots are0600; host writes fsync/F_FULLFSYNC before acceptance.
 Binary dd transport was independently verified on tmpfs with16MiB+13 bytes.
+Full offline backup finished successfully: userdata117155278848B plus
+metadata16777216B, durable host files and both independent device SHA256 values
+matched. Exact hashes and private GPT/state evidence stay in ignored backup.json.
+Authorized installation has now started with --erase-userdata; final success
+requires the written16GiB SHA256 and unchanged GPT captures.
+Installation transfer completed with fsync. Host ADB37 stopped responding during
+readback; restarting its server restored recovery. No second write was made.
+`logs/redfin/install-apple-root-20261022/verification.json` independently verifies
+the full16GiB installed SHA2561c7ab7f21b4075d23ed70f9f2a418f7ae2993d7857c844e7854d3cc076de7478
+and identical primary/tail GPT captures. First Apple RO root boot is now running.
+Android userdata is now replaced; never boot Android without restoring backup.
 Installer now accepts aged recovery only when its live return timer is stopped;
 all storage/GPT/timer proofs are repeated before the write.
 New Apple boot image `0f127227e2c3998985acc3c5b864255377069992a75d009da76f04c5f0508371` at
