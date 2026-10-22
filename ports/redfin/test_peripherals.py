@@ -56,6 +56,32 @@ class PeripheralContracts(unittest.TestCase):
         add_observers(root, {})
         self.assertEqual(mkadt.adt.serialize(root), before)
 
+    def test_bypass_context_contract_requires_native_nonstatic_ns_usb(self):
+        nodes = fixture()
+        host, apps = '/soc/ssusb@a600000', '/soc/apps-smmu@15000000'
+        nodes[host]['qcom,iommu-dma'] = b'atomic\0'
+        root = self.root()
+        add_observers(root, nodes, usb_bypass=True)
+        route = next(child for child in root.children if child.name == 'redfin-usb-route')
+        self.assertEqual(route.prop('ns-context-allocator'), mkadt.u32(1))
+        root = self.root()
+        add_observers(root, nodes, usb_route=True)
+        route = next(child for child in root.children if child.name == 'redfin-usb-route')
+        self.assertIsNone(route.prop('ns-context-allocator'))
+        for path, key, value in ((host, 'qcom,iommu-dma', b'dynamic\0'),
+                                 (host, 'qcom,iommu-vmid', cells(1)),
+                                 (apps, 'qcom,enable-static-cb', b''),
+                                 (apps, 'calxeda,smmu-secure-config-access', b''),
+                                 (apps, 'qcom,secure-cfg-access', b'')):
+            with self.subTest(key=key):
+                changed = {path: props.copy() for path, props in nodes.items()}
+                changed[path][key] = value
+                root = self.root()
+                before = mkadt.adt.serialize(root)
+                with self.assertRaises(ValueError):
+                    add_observers(root, changed, usb_bypass=True)
+                self.assertEqual(mkadt.adt.serialize(root), before)
+
     def test_verified_buses_produce_only_requested_contracts(self):
         root = self.root()
         add_observers(root, fixture(), touch=True, usb=True, gpu=True)

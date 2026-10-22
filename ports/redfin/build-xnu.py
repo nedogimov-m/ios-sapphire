@@ -219,7 +219,7 @@ def main(argv=None):
                                          'usb-owned-route.patch', 'usb-owned-diag.patch',
                                          'usb-owned-build.patch',
                                          'usb-gadget.patch', 'usb-start.patch',
-                                         'usb-context-probe.patch',
+                                         'usb-context-probe.patch', 'usb-bypass-context.patch',
                                          'peripheral-start.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))

@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN dedicated USB bypass context works on hardware — 2026-10-22
+
+Commit2c4b625 records successful physical SEC identity and RX-status handling.
+New usb-bypass-context overlay uses the source-validated ordinary NS bitmap
+allocator, excluding all active/latent TRANS refs, configured GR1, M1 and
+actual FSR_FAULT banks. It permanently leases first-fit4 and invalid slot4;
+only4 ordered stores: owned SCTLR0, CBAR10000, S2CR304, SMR800000e0.
+Two initial complete stable imports plus all-bank/all-stream proof at every
+boundary preserve nonowned state. Failed writes/proofs quarantine without
+rollback/retry/DMA. Builder attests ns-context-allocator only for verified
+nonstatic/nonsecure apps and atomic USB FDT contract; captured actual DT PASS.
+Review found and fixed inherited DSTSallones accepted as HALT using its cached
+read, with regression for all routes.62 USB tests/independent review PASS;
+full suite475 PASS (logs/redfin/peripherals-host-tests-v17.txt).
+Local ARM64 build research/redfin-build/build-20261022-192241.log passed;
+kernel d5284b9b186fd465f091fd65c2fdd1cebb4c63da9a9f994d52c2536b00ad13f0.
+Actual kernel rf_usb_bypass_hw_store disassembly is dmb/add/strw2,[x8]/dsb/ret;
+zero uses a general register, avoiding the pinned Qualcomm WZR-store trap.
+Image ports/redfin/out/usb-bypass-v1/redfin-xnu.img SHA256
+7827db6ecb77e510ea58f7e55f05e54966df099550200834831cd41ceb11a79e.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xbe40805b3b96e127`.
+Authenticated/image-matched logs/redfin/usb-bypass-v1/ reached PID1, no panic,
+metadata primed and verified fastboot. Lease bank4/slot4, all4 stores accepted,
+SIDe0 TRANS through SCTLR0/CBAR10000 retained; claim0 and strict revalidate0.
+This proves the warm USB SMMU route, not device DMA or enumeration. No gadget
+or controller writes ran. Next: hook guarded enumeration-only DWC3 with the
+same caller/lease, separate active route proof and safe quiesce policy.
+
 ## REDFIN V8: SEC identity read succeeds — 2026-10-22
 
 Commit69dda92 contains the DFS correction; the first TX is now operational.

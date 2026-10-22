@@ -1,0 +1,260 @@
+diff --git a/bsd/dev/redfin_usb_owned.c b/bsd/dev/redfin_usb_owned.c
+--- a/bsd/dev/redfin_usb_owned.c
++++ b/bsd/dev/redfin_usb_owned.c
+@@ -21,7 +21,7 @@
+ #define RF_USB_SID 0xe0u
+ #define RF_USB_VALID 0x80000000u
+ #define RF_USB_BYPASS 0x00010300u /* type=BYPASS, NSH, default privilege. */
+-enum rf_usb_owner_state { RF_USB_UNREGISTERED, RF_USB_REGISTERED, RF_USB_ROUTED, RF_USB_QUARANTINED, RF_USB_OBSERVED };
++enum rf_usb_owner_state { RF_USB_UNREGISTERED, RF_USB_REGISTERED, RF_USB_ROUTED, RF_USB_QUARANTINED, RF_USB_OBSERVED, RF_USB_CONTEXT_ROUTED };
+ struct rf_usb_snapshot {
+  uint32_t id0,id1,id2,cr0,smr[RF_USB_GROUPS],s2cr[RF_USB_GROUPS];
+  unsigned groups;
+@@ -141,7 +141,7 @@
+  uint32_t dsts=rf_usb_rd(dwc,0x70c);
+  out->ring_lo=rf_usb_rd(dwc,0x400);out->ring_hi=rf_usb_rd(dwc,0x404);
+  out->ring_size=rf_usb_rd(dwc,0x408);out->ring_count=rf_usb_rd(dwc,0x40c);
+- if ((out->dctl&0xe0000000u) || !(dsts&0x00400000u) ||
++ if (dsts==0xffffffffu || (out->dctl&0xe0000000u) || !(dsts&0x00400000u) ||
+      out->ring_size!=0x80001000u || out->ring_count ||
+      (out->ring_lo&0xfff) || out->ring_hi>15 ||
+      !(out->ring_lo|out->ring_hi)) return EBUSY;
+@@ -421,4 +421,192 @@
+  lck_mtx_unlock(&rf_usb_lock);
+  return error;
+ }
++
++/* Dedicated NS bypass context, explicit md0 experiment only.
++ * Pinned Lito arm-smmu.c:1158/4988 allocates a non-static NS CB from a
++ * software bitmap, excluding handoff (:5007). DT attestation binds that
++ * contract to this image; no per-bank secure grant is used by that path.
++ * Linux v6.12 arm-smmu-qcom.c:313..333/377..395 emulates firmware-quirked
++ * BYPASS with SCTLR=0, CBAR=S1_TRANS_S2_BYPASS and S2CR TYPE_TRANS.
++ * Whole SCTLR zero is NOT the native allocation predicate. Only M is
++ * consulted before initialization; all other inherited CBs stay exact.
++ */
++#define RF_USB_CONTEXT_FAULT 0xc00001feu
++static struct {
++ vm_offset_t cb;
++ uint64_t base,bytes,offset;
++ unsigned banks,shift,s2only,bank,stores;
++ bool lease;
++ bool reserved[RF_USB_CONTEXTS];
++ struct rf_usb_context_image expected;
++} rf_usb_bypass;
++
++static bool
++rf_usb_bypass_contract(uint64_t *base,uint64_t *bytes)
++{
++ DTEntry node;
++ const void *raw=NULL;
++ unsigned size=0;
++ uint32_t marker=0;
++ if (!rf_usb_flag("redfinusbbypass",1,true) || !rf_usb_flag("redfinusbcontexts",0,false) ||
++     !rf_usb_policy() || !rf_usb_platform() || !rf_usb_context_route(base,bytes) ||
++     SecureDTLookupEntry(NULL,"/redfin-usb-route",&node)!=kSuccess ||
++     SecureDTGetProperty(node,"ns-context-allocator",&raw,&size)!=kSuccess ||
++     !raw || size!=sizeof(marker)) return false;
++ memcpy(&marker,raw,sizeof(marker));
++ return marker==1;
++}
++static int
++rf_usb_bypass_verify(void)
++{
++ uint64_t base=0,bytes=0;
++ if (!rf_usb_bypass.lease || !rf_usb_bypass_contract(&base,&bytes) ||
++     base!=rf_usb_bypass.base || bytes!=rf_usb_bypass.bytes) return EPERM;
++ struct rf_usb_core_state core;
++ int error=rf_usb_core_snapshot(&core);
++ if (error) return error;
++ if (memcmp(&core,&rf_usb_owner.core,sizeof(core))) return EAGAIN;
++ error=rf_usb_context_snapshot(&rf_usb_context_images[0],rf_usb_bypass.cb,
++     rf_usb_bypass.banks,rf_usb_bypass.shift,"bypass-revalidate");
++ if (error) return error;
++ if (memcmp(&rf_usb_context_images[0],&rf_usb_bypass.expected,sizeof(rf_usb_bypass.expected))) return EAGAIN;
++ return 0;
++}
++static __attribute__((noinline)) void
++rf_usb_bypass_hw_store(vm_offset_t base,unsigned offset,uint32_t value)
++{
++ __asm__ volatile("dmb oshst" ::: "memory");
++ /* Plain r (never rZ) forces a GPR even for zero: pinned Qualcomm r31 trap bug. */
++ __asm__ volatile("str %w0, [%1]" : : "r"(value), "r"(base+offset) : "memory");
++ __asm__ volatile("dsb osh" ::: "memory");
++}
++static int
++rf_usb_bypass_store(unsigned step)
++{
++ if (!rf_usb_bypass.lease || step!=rf_usb_bypass.stores || step>=4 ||
++     rf_usb_bypass.bank>=rf_usb_bypass.banks ||
++     rf_usb_owner.slot>=rf_usb_bypass.expected.streams.groups) return EINVAL;
++ vm_offset_t base=rf_usb_owner.smmu;
++ unsigned offset=0,bank=rf_usb_bypass.bank,slot=rf_usb_owner.slot;
++ uint32_t value=0,observed=0;
++ switch (step) {
++ case 0:base=rf_usb_bypass.cb;offset=bank<<rf_usb_bypass.shift;value=0;break;
++ case 1:offset=0x1000+4*bank;value=0x10000;break;
++ case 2:offset=0xc00+4*slot;value=0x300|bank;break; /* pinned NSH, TYPE_TRANS/default privilege */
++ case 3:offset=0x800+4*slot;value=RF_USB_VALID|RF_USB_SID;break;
++ }
++ rf_usb_bypass.stores++;
++ rf_usb_owner.diag_stores++;
++ rf_usb_bypass_hw_store(base,offset,value);
++ bool accepted=false;
++ for (unsigned us=0;us<1000;us++) {
++  observed=rf_usb_rd(base,offset);
++  if (observed==value) { accepted=true;break; }
++  delay(1);
++ }
++ if (!accepted) {
++  printf("REDFIN USB BYPASS: write-readback error=%d step=%u bank=%u slot=%u offset=%#x expected=%#x observed=%#x polls=1000\n",
++      EIO,step,bank,slot,offset,value,observed);
++  return EIO;
++ }
++ switch (step) {
++ case 0:rf_usb_bypass.expected.bank[bank].sctlr=value;break;
++ case 1:rf_usb_bypass.expected.bank[bank].cbar=value;break;
++ case 2:rf_usb_bypass.expected.streams.s2cr[slot]=value;break;
++ case 3:rf_usb_bypass.expected.streams.smr[slot]=value;break;
++ }
++ return 0;
++}
++
++int
++redfin_usb_owned_claim_bypass(const void *caller_id)
++{
++ lck_mtx_lock(&rf_usb_lock);
++ int error=0;
++ uint64_t base=0,bytes=0;
++ if (!caller_id || caller_id!=rf_usb_owner.caller) { error=EPERM;goto done; }
++ if (rf_usb_owner.state!=RF_USB_REGISTERED) { error=EBUSY;goto done; }
++ /* Sticky consumption before mapping or writes; no release/retry, even prewrite. */
++ rf_usb_owner.state=RF_USB_QUARANTINED;
++ if (!rf_usb_bypass_contract(&base,&bytes)) { error=EPERM;goto failed; }
++ rf_usb_owner.gcc=ml_io_map(0x10c000,0x4000);
++ rf_usb_owner.dwc=ml_io_map(0xa60c000,0x4000);
++ if (!rf_usb_owner.gcc || !rf_usb_owner.dwc) { error=ENOMEM;goto failed; }
++ error=rf_usb_core_snapshot(&rf_usb_owner.core);if (error) goto failed;
++ rf_usb_owner.smmu=ml_io_map((vm_offset_t)base,0x4000);
++ if (!rf_usb_owner.smmu) { error=ENOMEM;goto failed; }
++ uint32_t id0=rf_usb_rd(rf_usb_owner.smmu,0x20),id1=rf_usb_rd(rf_usb_owner.smmu,0x24);
++ uint32_t id2=rf_usb_rd(rf_usb_owner.smmu,0x28),cr0=rf_usb_rd(rf_usb_owner.smmu,0);
++ if (id0!=0x4c017e51u || id1!=0x6000003eu || id2!=0x5111u || (cr0&9u) || !(cr0&0x400u)) {
++  error=ENOTSUP;goto failed;
++ }
++ unsigned shift=(id1&0x80000000u)?16:12,banks=id1&255u,s2only=(id1>>16)&255u;
++ uint64_t offset=1ULL<<(((id1>>28)&7u)+1+shift),span=(uint64_t)banks<<shift;
++ if (!banks || banks>RF_USB_CONTEXTS || s2only>banks || offset!=bytes/2 ||
++     offset>bytes || span>bytes-offset || 0x1800ULL+4*banks>0x4000) { error=EINVAL;goto failed; }
++ vm_offset_t cb=ml_io_map((vm_offset_t)(base+offset),(vm_size_t)span);
++ if (!cb) { error=ENOMEM;goto failed; }
++ memset(rf_usb_context_images,0,sizeof(rf_usb_context_images));
++ error=rf_usb_context_snapshot(&rf_usb_context_images[0],cb,banks,shift,"bypass-first");
++ if (error) goto failed;
++ uint64_t again_base=0,again_bytes=0;
++ struct rf_usb_core_state core;
++ if (!rf_usb_bypass_contract(&again_base,&again_bytes) || again_base!=base || again_bytes!=bytes) { error=EPERM;goto failed; }
++ error=rf_usb_core_snapshot(&core);if (error) goto failed;
++ if (memcmp(&core,&rf_usb_owner.core,sizeof(core))) { error=EAGAIN;goto failed; }
++ error=rf_usb_context_snapshot(&rf_usb_context_images[1],cb,banks,shift,"bypass-second");
++ if (error) goto failed;
++ if (memcmp(&rf_usb_context_images[0],&rf_usb_context_images[1],sizeof(rf_usb_context_images[0]))) {
++  error=EAGAIN;goto failed;
++ }
++ rf_usb_bypass.base=base;rf_usb_bypass.bytes=bytes;rf_usb_bypass.offset=offset;
++ rf_usb_bypass.cb=cb;rf_usb_bypass.banks=banks;rf_usb_bypass.shift=shift;rf_usb_bypass.s2only=s2only;
++ rf_usb_bypass.expected=rf_usb_context_images[1];
++ const struct rf_usb_context_image *image=&rf_usb_bypass.expected;
++ for (unsigned i=0;i<banks;i++) {
++  const struct rf_usb_context_bank *b=&image->bank[i];
++  rf_usb_bypass.reserved[i]=i<s2only || (b->sctlr&1u) || b->cbar || b->cba2r || (b->fsr&RF_USB_CONTEXT_FAULT);
++ }
++ unsigned slot=RF_USB_GROUPS;
++ for (unsigned i=0;i<image->streams.groups;i++) {
++  uint32_t smr=image->streams.smr[i],s2cr=image->streams.s2cr[i];
++  unsigned type=(s2cr>>16)&3u,index=s2cr&255u;
++  if (rf_usb_matches(smr)) { error=EEXIST;goto failed; }
++  if (!(smr&RF_USB_VALID) && slot==RF_USB_GROUPS) slot=i;
++  if (type==3 || (type==0 && index>=banks)) { error=ENOTSUP;goto failed; }
++  if (type==0) rf_usb_bypass.reserved[index]=true; /* Includes latent invalid-SMR references. */
++ }
++ if (slot==RF_USB_GROUPS) { error=ENOSPC;goto failed; }
++ unsigned bank=s2only;
++ while (bank<banks && rf_usb_bypass.reserved[bank]) bank++;
++ if (bank==banks) { error=ENOSPC;goto failed; }
++ rf_usb_bypass.reserved[bank]=true; /* Permanent software bitmap lease, never released. */
++ rf_usb_bypass.bank=bank;rf_usb_bypass.lease=true;rf_usb_owner.slot=slot;
++ printf("REDFIN USB BYPASS: leased bank=%u slot=%u inherited-SCTLR=%#x first-fit NS allocator; no DMA\n",
++     bank,slot,image->bank[bank].sctlr);
++ for (unsigned step=0;step<4;step++) {
++  error=rf_usb_bypass_verify();if (error) goto failed;
++  error=rf_usb_bypass_store(step);if (error) goto failed;
++ }
++ error=rf_usb_bypass_verify();if (error) goto failed;
++ rf_usb_owner.state=RF_USB_CONTEXT_ROUTED;
++ printf("REDFIN USB BYPASS: retained SID=e0 slot=%u TRANS bank=%u SCTLR=0 CBAR=10000 stores=4; no gadget or DMA\n",slot,bank);
++ goto done;
++failed:
++ error=rf_usb_quarantine(error);
++done:
++ lck_mtx_unlock(&rf_usb_lock);
++ return error;
++}
++int
++redfin_usb_owned_revalidate_bypass(const void *caller_id)
++{
++ lck_mtx_lock(&rf_usb_lock);
++ int error=0;
++ if (!caller_id || caller_id!=rf_usb_owner.caller) error=EPERM;
++ else if (rf_usb_owner.state!=RF_USB_CONTEXT_ROUTED) error=EBUSY;
++ else { error=rf_usb_bypass_verify();if (error) error=rf_usb_quarantine(error); }
++ lck_mtx_unlock(&rf_usb_lock);
++ return error;
++}
+ #endif
+diff --git a/bsd/dev/redfin_usb_owned.h b/bsd/dev/redfin_usb_owned.h
+--- a/bsd/dev/redfin_usb_owned.h
++++ b/bsd/dev/redfin_usb_owned.h
+@@ -16,6 +16,9 @@
+ int redfin_usb_owned_claim(const void *caller_id);
+ /* One-shot RO context evidence; consumes owner, never reserves a CB/routes/DMA. */
+ int redfin_usb_owned_observe_contexts(const void *caller_id);
++/* Explicit sole-NS-allocator bypass-CB experiment; no gadget or DMA authority. */
++int redfin_usb_owned_claim_bypass(const void *caller_id);
++int redfin_usb_owned_revalidate_bypass(const void *caller_id);
+ /* Retained route evidence only. No API here authorizes or starts DMA. */
+ int redfin_usb_owned_revalidate(const void *caller_id);
+ /* Active gadget may have changed core/ring state; all SMMU proofs still apply.
+diff --git a/bsd/dev/redfin_usb_start.c b/bsd/dev/redfin_usb_start.c
+--- a/bsd/dev/redfin_usb_start.c
++++ b/bsd/dev/redfin_usb_start.c
+@@ -62,9 +62,10 @@
+ static bool
+ redfin_initial_usb_gates(void)
+ {
+- uint32_t contexts=0;
++ uint32_t contexts=0,bypass=0;
+  (void)PE_parse_boot_argn("redfinusbcontexts",&contexts,sizeof(contexts));
+- if (contexts>1) return false;
++ (void)PE_parse_boot_argn("redfinusbbypass",&bypass,sizeof(bypass));
++ if (contexts>1 || bypass>1 || (contexts && bypass)) return false;
+  if (!redfin_usb_platform() || redfin_spmi_return_ready()!=1 ||
+      !redfin_initial_usb_arg("redfinusb",3,true) ||
+      !redfin_initial_usb_arg("redfinusbowned",1,true) ||
+@@ -115,6 +116,16 @@
+   printf("REDFIN USB START: RO contexts result=%d; no CB lease, route writes or DMA\n",error);
+   return error;
+  }
++ uint32_t bypass=0;
++ (void)PE_parse_boot_argn("redfinusbbypass",&bypass,sizeof(bypass));
++ if (bypass==1) {
++  error=redfin_usb_owned_claim_bypass(&redfin_initial_usb_caller);
++  printf("REDFIN USB START: bypass-CB claim result=%d\n",error);
++  if (error) return error;
++  error=redfin_usb_owned_revalidate_bypass(&redfin_initial_usb_caller);
++  printf("REDFIN USB START: bypass-CB revalidate result=%d; no gadget or DMA\n",error);
++  return error;
++ }
+  error=redfin_usb_owned_claim(&redfin_initial_usb_caller);
+  printf("REDFIN USB START: sole-owner claim result=%d\n",error);
+  if (error) return error;

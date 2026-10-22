@@ -4,7 +4,9 @@ from ports.redfin import mkadt
 
 
 def add_observers(root, nodes, *, touch=False, usb=False, gpu=False, wifi=False,
-                  usb_route=False, rpmh=False):
+                  usb_route=False, usb_bypass=False, rpmh=False):
+    if usb_bypass:
+        usb_route = True
     if not (touch or usb or gpu or wifi or usb_route or rpmh):
         return
 
@@ -36,9 +38,19 @@ def add_observers(root, nodes, *, touch=False, usb=False, gpu=False, wifi=False,
             raise ValueError('peripheral SMMU phandle missing')
         require(host, 'iommus', phandle + struct.pack('>II', 0xe0, 0))
         require(host, 'qcom,iommu-dma-addr-pool', struct.pack('>II', 0x90000000, 0x60000000))
-        pending.append(mkadt.node('redfin-usb-route', [
+        route_properties = [
             ('reg', mkadt.u64(0x15000000, 0x100000)), ('stream-id', mkadt.u32(0xe0)),
-        ]))
+        ]
+        if usb_bypass:
+            # Pinned Lito's ordinary NS allocator, not STATIC_CB/secure setup.
+            for key in ('qcom,enable-static-cb', 'calxeda,smmu-secure-config-access'):
+                if key in nodes[apps]:
+                    raise ValueError(f'peripheral NS context allocator unsupported: {key}')
+            require(host, 'qcom,iommu-dma', b'atomic\0')
+            if 'qcom,iommu-vmid' in nodes[host]:
+                raise ValueError('peripheral USB secure VMID unsupported')
+            route_properties.append(('ns-context-allocator', mkadt.u32(1)))
+        pending.append(mkadt.node('redfin-usb-route', route_properties))
     if rpmh:
         db = '/reserved-memory/reserved-memory@80860000'
         rsc = '/soc/rsc@18200000'

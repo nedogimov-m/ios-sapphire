@@ -193,5 +193,47 @@ This is evidence for a future allocator audit, not a CB lease or DMA authority.
 
 Ten actual-C probe tests cover these guards, derived bounds, reference counts,
 one-shot behavior, zero writes/delays and unchanged legacy behavior. All 52
-focused context/owner/caller/diagnostic tests pass. Hardware context evidence
-and ownership remain to be established before any bypass-bank implementation.
+focused context/owner/caller/diagnostic tests pass. The subsequent context
+capture and controlled implementation are described below.
+
+## Controlled dedicated NS context implementation — 2026-10-22
+
+The authenticated context capture found stable banks 0–2 referenced by TRANS
+streams and bank 3 configured despite no references. Banks 4–61 had M clear,
+CBAR/CBA2R/FSR zero and varying nonzero SCTLR fields. FSR `0x400` on banks
+0–3 is the FORMAT field, outside the native fault mask `0xc00001fe`.
+
+The actual DT selects ordinary non-static NS allocation: `qcom,qsmmu-v500`
+with `qcom,skip-init`, no static/secure-alias property, USB SID `0xe0`/mask 0,
+`qcom,iommu-dma="atomic"` and no secure VMID. Pinned `arm-smmu.c:4988`
+allocates the first clear software bitmap bit in `[NUMS2CB, NUMCB)` after
+handoff import. It does not require whole SCTLR zero or an additional secure
+grant. Consequently raw-zero classification from the observer is not the
+allocation contract, and no interpretation of every other SCTLR bit as
+reset-UNKNOWN is needed.
+
+`usb-bypass-context.patch` requires explicit `redfinusbbypass=1` and exact
+`ns-context-allocator=1` DT attestation, mutually exclusive with context
+observation. Its permanent bitmap additionally excludes latent TRANS
+references, GR1 configuration, M set and actual FSR faults. First-fit bank 4
+is available in the observed fixture after preserving banks 0–3. Two fresh
+imports precede its software lease. The only four hardware stores are owned
+SCTLR=0, CBAR=`0x10000`, S2CR=NSH/TRANS/selected bank (`0x304` for bank 4),
+then SMR=`0x800000e0`. Each has strict readback; complete core/global/stream/CB
+proof is repeated at every boundary. Failure permanently quarantines the
+lease without rollback, reset or retry. No gadget or DMA starts.
+
+The new route state and CB-aware revalidation are separate from the original
+direct BYPASS API. A reproduced shared warm-proof bug now explicitly rejects
+DSTS all-ones using its existing read. The zero-value MMIO store forces a GPR
+because pinned Qualcomm code documents a WZR trap defect; ARM64 assembly
+shows `mov w8,#0; dmb oshst; str w8,[x0]; dsb osh`. All 62 focused USB tests
+and independent source review pass. The actual built kernel additionally
+disassembles to `dmb/add/str w2,[x8]/dsb/ret`, with no WZR store.
+
+The authenticated image-matched `usb-bypass-v1` hardware cycle reached PID1
+and returned automatically to verified fastboot. First-fit bank4 and slot4
+were leased, all four exact stores accepted, and both claim and strict
+revalidation returned0. The dedicated warm identity route for SIDe0 is now
+proved. Device DMA, gadget/controller writes and USB enumeration were not
+invoked; the next stage needs an active route proof and guarded gadget hook.

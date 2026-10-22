@@ -67,6 +67,7 @@ def main():
     p.add_argument('--usb-route-probe', action='store_true', help='observe halted DWC3 and standard SMMU routing without writes')
     p.add_argument('--usb-owned-probe', action='store_true', help='claim only the USB SMMU stream in the initial RAM experiment; no gadget or DMA')
     p.add_argument('--usb-context-probe', action='store_true', help='read inherited SMMU context banks only; RAM root and bootloader return required')
+    p.add_argument('--usb-bypass-probe', action='store_true', help='claim a dedicated NS bypass context and USB route only; no gadget or DMA')
     p.add_argument('--rpmh-probe', action='store_true', help='inspect CMD-DB and RPMh TCS handoff without commands')
     p.add_argument('--gpu-probe', action='store_true', help='observe Adreno 620 clock handoff; requires --display')
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
@@ -86,7 +87,7 @@ def main():
     a = p.parse_args()
     if a.touch_id_probe:
         a.touch_rail_probe = True
-    if (a.touch_probe or a.touch_rail_probe or a.usb_probe or a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe or a.rpmh_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
+    if (a.touch_probe or a.touch_rail_probe or a.usb_probe or a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe or a.rpmh_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
         p.error('peripheral observers require --kernel')
     if a.gpu_probe and not a.display:
         p.error('--gpu-probe requires --display')
@@ -100,6 +101,10 @@ def main():
         p.error('--usb-context-probe requires --return-bootloader')
     if a.usb_context_probe and (a.usb_owned_probe or a.touch_id_probe):
         p.error('USB context observation must run separately from touch ID and owned USB experiments')
+    if a.usb_bypass_probe and not a.return_bootloader:
+        p.error('--usb-bypass-probe requires --return-bootloader')
+    if a.usb_bypass_probe and (a.usb_owned_probe or a.usb_context_probe or a.touch_id_probe):
+        p.error('USB bypass experiment must run separately from touch ID, direct claim and context observation')
     if a.ufs_rw and not a.ufs_root:
         p.error('--ufs-rw requires --ufs-root')
     if a.display and not (a.kernel and a.apple_adt and a.splash):
@@ -125,6 +130,8 @@ def main():
         p.error('--usb-owned-probe requires the initial RAM root without UFS')
     if a.usb_context_probe and ufs_mode:
         p.error('--usb-context-probe requires the initial RAM root without UFS')
+    if a.usb_bypass_probe and ufs_mode:
+        p.error('--usb-bypass-probe requires the initial RAM root without UFS')
     if (a.apple_adt or ufs_mode or a.spmi_probe) and not a.kernel:
         p.error('Apple identity and UFS probes require --kernel')
     if a.ufs_root and not a.apple_adt:
@@ -179,7 +186,8 @@ def main():
         try:
             add_observers(tree, nodes, touch=a.touch_probe or a.touch_id_probe, usb=a.usb_probe,
                           gpu=a.gpu_probe, wifi=a.wifi_probe,
-                          usb_route=a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe, rpmh=a.rpmh_probe)
+                          usb_route=a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe,
+                          usb_bypass=a.usb_bypass_probe, rpmh=a.rpmh_probe)
         except ValueError as error:
             p.error(str(error))
         if a.spmi_probe:
@@ -272,7 +280,7 @@ def main():
             command_line += f' redfinshutdown={a.shutdown_seconds}'
         if a.userspace_stacks:
             command_line += ' redfinstacks=1'
-        usb_mode = 3 if a.usb_owned_probe or a.usb_context_probe else 2 if a.usb_route_probe else int(a.usb_probe)
+        usb_mode = 3 if a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe else 2 if a.usb_route_probe else int(a.usb_probe)
         touch_mode = 2 if a.touch_id_probe else int(a.touch_probe)
         for mode, name in ((touch_mode, 'redfintouch'), (usb_mode, 'redfinusb'),
                            (int(a.gpu_probe), 'redfingpu'), (int(a.wifi_probe), 'redfinwifi'),
@@ -281,10 +289,12 @@ def main():
                 command_line += f' {name}={mode}'
         if a.touch_id_probe:
             command_line += ' redfintouchsetup=1 redfinrpmhtouch=1'
-        if a.usb_owned_probe or a.usb_context_probe:
+        if a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe:
             command_line += ' redfinusbowned=1'
         if a.usb_context_probe:
             command_line += ' redfinusbcontexts=1'
+        if a.usb_bypass_probe:
+            command_line += ' redfinusbbypass=1'
         if ufs_mode:
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:
