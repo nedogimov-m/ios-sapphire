@@ -12,7 +12,7 @@ class Report(ctypes.Structure):
     _fields_ = [(name, ctypes.c_uint32) for name in (
         'stage', 'error', 'reads', 'writes', 'polls',
         'pll_mode', 'pll_l', 'pll_user', 'pll_alpha',
-        'pll_vote_before', 'feed_before', 'misc', 'cx', 'gx',
+        'pll_vote_before', 'feed_before', 'misc', 'cx', 'cx_hw', 'gx',
         'rcg_before', 'source_before', 'gmu_clock_before',
         'reset_before', 'result_before', 'hfi_before',
         'reset_after', 'source_after', 'gmu_clock_after',
@@ -51,6 +51,7 @@ static bool valid(void *ctx) {
  if(h->dtcm_writes==1 && h->scenario==22) h->gmu[0x14000/4]=0;
  if(h->dtcm_writes==1 && h->scenario==23) h->gcc[4/4]=32;
  if(h->dtcm_writes==1 && h->scenario==24) h->gpucc[0x106c/4]=1;
+ if(h->dtcm_writes==1 && h->scenario==28) h->gpucc[0x1540/4]=0;
  return !h->lost;
 }
 static void access(unsigned unit,uint32_t at,bool writing) {
@@ -136,7 +137,7 @@ int host_run(uint32_t chip,unsigned scenario,unsigned variant,
  h->gcc[0xc/4]=0x20000107;h->gcc[0x40/4]=0x4000;h->gcc[0x71028/4]=0xabc00003;
  h->gcc[0x52010/4]=0x40000000;h->gcc[0x52000/4]=0x8000;
  h->gcc[0x71154/4]=h->gcc[0x7100c/4]=h->gcc[0x71018/4]=0x80000200;
- h->gpucc[0x106c/4]=0x8000a000;h->gpucc[0x100c/4]=0x17;
+ h->gpucc[0x106c/4]=0x222000;h->gpucc[0x1540/4]=0x80000000;h->gpucc[0x100c/4]=0x17;
  h->gpucc[0x1064/4]=0x80000020;h->gpucc[0x1098/4]=0x8000a000;
  h->gpucc[0x109c/4]=0x80000040;h->gpucc[0x1078/4]=0x80000002;
  h->gpucc[0x5000/4]=0x80000020;
@@ -158,6 +159,7 @@ int host_run(uint32_t chip,unsigned scenario,unsigned variant,
  case 25:h->gmu[0x14000/4]=variant==2?2:0;
   h->gmu[0x14070/4]=variant==0?0x100:0;
   h->gmu[0x14600/4]=variant==1?1:0;break;
+ case 27:h->gpucc[0x1540/4]=0;break;
  default:break;
  }
  struct rf_gt_ops ops={h,valid,read_reg,write_reg,delay_us};
@@ -261,6 +263,15 @@ class RedfinGMUTCMTests(unittest.TestCase):
             self.assertEqual(result, errno.EBUSY)
             self.assertEqual(metrics[2], 0)
 
+    def test_cx_uses_live_hardware_status_instead_of_control_bit31(self):
+        result, r, _, _ = self.run_leaf()
+        self.assertEqual(result, 0)
+        self.assertEqual(r.cx, 0x222000)
+        self.assertEqual(r.cx_hw, 0x80000000)
+        result, _, metrics, _ = self.run_leaf(27)
+        self.assertEqual(result, errno.EBUSY)
+        self.assertEqual(metrics[2], 0)
+
     def test_inherited_firmware_or_ambiguous_reset_is_not_modified(self):
         for variant in range(3):
             result, r, metrics, final = self.run_leaf(25, variant)
@@ -316,7 +327,7 @@ class RedfinGMUTCMTests(unittest.TestCase):
         self.assertEqual(metrics[4], 4)
 
     def test_changed_clock_reset_source_or_domain_stops_before_second_pattern(self):
-        for scenario in (21, 22, 23, 24):
+        for scenario in (21, 22, 23, 24, 28):
             result, r, metrics, _ = self.run_leaf(scenario)
             self.assertEqual(result, errno.EAGAIN)
             self.assertTrue(r.dtcm_dirty)
@@ -352,7 +363,7 @@ class RedfinGMUTCMTests(unittest.TestCase):
 
     def test_allowlist_excludes_firmware_start_gx_smmu_and_debug_mux_writes(self):
         for unit, at in ((0, 0), (0, 4), (0, 0x40), (0, 0x71028), (0, 0x62000),
-                          (0, 0x4300C), (1, 0x100C), (1, 0x106C), (1, 0x1568),
+                          (0, 0x4300C), (1, 0x100C), (1, 0x106C), (1, 0x1540), (1, 0x1568),
                           (2, 0), (2, 0x3000), (2, 0x14070), (2, 0x14618),
                           (2, 0x7008), (3, 0)):
             self.assertEqual(self.lib.host_allowed(unit, at, 1), 0)

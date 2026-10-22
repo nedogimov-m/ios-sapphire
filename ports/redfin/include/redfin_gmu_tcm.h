@@ -35,7 +35,7 @@ struct rf_gt_ops {
 struct rf_gt_report {
     uint32_t stage, error, reads, writes, polls;
     uint32_t pll_mode, pll_l, pll_user, pll_alpha;
-    uint32_t pll_vote_before, feed_before, misc, cx, gx;
+    uint32_t pll_vote_before, feed_before, misc, cx, cx_hw, gx;
     uint32_t rcg_before, source_before, gmu_clock_before;
     uint32_t reset_before, result_before, hfi_before;
     uint32_t reset_after, source_after, gmu_clock_after;
@@ -61,7 +61,7 @@ rf_gt_allowed(unsigned unit, uint32_t at, bool writing)
         switch (at) {
         case 0x1078: case 0x109c: case 0x5000: case 0x1120: case 0x1124: case 0x1098:
             return true;
-        case 0x106c: case 0x100c: case 0x1064:
+        case 0x106c: case 0x1540: case 0x100c: case 0x1064:
             return !writing;
         default: return false;
         }
@@ -161,23 +161,23 @@ rf_gt_pll_identity(uint32_t mode, uint32_t l, uint32_t user, uint32_t alpha)
 static inline int
 rf_gt_source_live(const struct rf_gt_ops *ops, struct rf_gt_report *r, bool running)
 {
-    uint32_t v[14];
-    static const struct { unsigned unit; uint32_t at; } registers[14] = {
+    uint32_t v[15];
+    static const struct { unsigned unit; uint32_t at; } registers[15] = {
         {RF_GT_GCC, 0x71004}, {RF_GT_GPUCC, 0x106c},
         {RF_GT_GCC, 0}, {RF_GT_GCC, 4}, {RF_GT_GCC, 0xc}, {RF_GT_GCC, 0x40},
         {RF_GT_GCC, 0x52010}, {RF_GT_GCC, 0x52000},
         {RF_GT_GPUCC, 0x1124}, {RF_GT_GPUCC, 0x1120},
         {RF_GT_GPUCC, 0x1098}, {RF_GT_GPUCC, 0x109c},
-        {RF_GT_GPUCC, 0x100c}, {RF_GT_GPUCC, 0x1064}
+        {RF_GT_GPUCC, 0x100c}, {RF_GT_GPUCC, 0x1064}, {RF_GT_GPUCC, 0x1540}
     };
     unsigned i;
     int error;
-    for (i = 0; i < 14; i++) {
+    for (i = 0; i < 15; i++) {
         error = rf_gt_rd(ops, r, registers[i].unit, registers[i].at, &v[i]);
         if (error)
             return error;
     }
-    if ((v[0] & 0x80000001u) != 1 || (v[1] & 0x80000001u) != 0x80000000u ||
+    if ((v[0] & 0x80000001u) != 1 || (v[1] & 3u) || !(v[14] & 0x80000000u) ||
         !rf_gt_pll_identity(v[2], v[3], v[4], v[5]) ||
         !(v[6] & 1) || !(v[7] & 0x10000u) || (v[11] & 0x80000001u) != 1 ||
         (v[12] & 0x80000001u) != 1 ||
@@ -264,10 +264,11 @@ rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *outpu
     RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 0x71004, &value));
     if ((value & 0x80000001u) != 1) { error = EAGAIN; goto done; }
     RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x106c, &r.cx));
+    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1540, &r.cx_hw));
     RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x100c, &r.gx));
     RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1064, &gmu_gx));
     RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1098, &r.gmu_clock_before));
-    if ((r.cx & 0x80000001u) != 0x80000000u ||
+    if ((r.cx & 3u) || !(r.cx_hw & 0x80000000u) ||
         (r.gx & 0x80000001u) != 1 ||
         (gmu_gx & 0x80000001u) != 0x80000000u ||
         (r.gmu_clock_before & 0x80000001u) != 0x80000000u) {

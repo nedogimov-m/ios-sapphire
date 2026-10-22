@@ -193,6 +193,11 @@ every access. A lost lease or failed MMIO stops access immediately; keep
 reset held and return through the bounded platform-reset path. The 19.2MHz
 counter is a crystal/bus liveness observation, not proof of the GMU core rate.
 
+CX readiness uses the DT's separate hardware-status register GPUCC `+0x1540`
+bit 31 plus software-control `+0x106c` bits 1:0 clear, matching
+`gdsc-regulator.c:poll_gdsc_status()`. A valid control value can remain
+`0x222000` without mirroring the hardware power bit.
+
 The callable leaf is [`include/redfin_gmu_tcm.h`](include/redfin_gmu_tcm.h):
 `rf_gt_run(ops, chip, report)`. The adapter provides guarded ordered 32-bit
 MMIO and a bounded busy wait. Callback units 0/1/2 mean GCC/GPUCC/GMU. It
@@ -213,7 +218,7 @@ and readback; a callback failure cannot trigger an unsafe cleanup sequence.
 `reset_held` records the last successful assertion/readback, not a new proof
 after a later ownership failure. No kernel/ADT adapter is enabled here.
 
-Run `python3 -m unittest ports/redfin/test_gmu_tcm.py`. The 17 host tests
+Run `python3 -m unittest ports/redfin/test_gmu_tcm.py`. The 18 host tests
 include each individual lost-lease/read-error/committed-write-error edge of
 the complete real leaf, source/owner/rate changes, bounded stuck polls,
 counter wrap, pattern/restore corruption, preserved unrelated clock votes,
