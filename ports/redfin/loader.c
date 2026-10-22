@@ -3,6 +3,7 @@
 #include "config.h"
 #include "watchdog.h"
 #include <stddef.h>
+#include "gui-profile.h"
 
 #if XNU_PAYLOAD_SIZE
 #define PAGE 0x4000ULL
@@ -108,6 +109,16 @@ static int adt_valid_up(const volatile unsigned char *b, uint64_t size,
 #else
 #define REDFIN_SMP_BUILD_READY 0
 #endif
+#ifndef REDFIN_SMP_GUI
+#define REDFIN_SMP_GUI 0
+#endif
+#if defined(SHIM_EARLY_RETURN) && SHIM_EARLY_RETURN == 1 && REDFIN_SMP_GUI == 1 && \
+    defined(REDFIN_SMP_CPUS) && REDFIN_SMP_CPUS == 8 && \
+    defined(REDFIN_SMP_PROBE) && REDFIN_SMP_PROBE == 0
+#define REDFIN_GUI_BUILD_READY 1
+#else
+#define REDFIN_GUI_BUILD_READY 0
+#endif
 #ifndef REDFIN_SMP_CPUS
 #define REDFIN_SMP_CPUS 2
 #endif
@@ -134,12 +145,15 @@ static int smp_requested(const char command[608])
         unsigned size = off - first;
         if (size >= 9 && smp_token(command + first, 9, "redfinsmp") &&
             (size == 9 || command[first + 9] == '=')) return 1;
+        if (size >= 9 && smp_token(command + first, 9, "redfingui") &&
+            (size == 9 || command[first + 9] == '=')) return 1;
     }
     return 0;
 }
 
 static int smp_command(const char command[608])
 {
+    if (REDFIN_GUI_BUILD_READY && redfin_gui_profile(command, 608, NULL)) return 1;
     static const char required[][24] = {
         "debug=0xc", "serial=3", REDFIN_SMP_CPU_TOKEN, "keepsyms=1", "-noprogress", "rd=md0",
         "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0",
@@ -212,12 +226,64 @@ static int smp_key_well_formed(const volatile unsigned char *p)
     return 1;
 }
 
-static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
+/* GUI-only leaves. A GUI tree is never admitted by the md0 command profile. */
+enum { RF_GUI_DISPLAY = 8, RF_GUI_TOUCH, RF_GUI_UFS, RF_GUI_FBCON };
+static int gui_property(unsigned kind, const volatile unsigned char *key,
+    const volatile unsigned char *value, unsigned len, unsigned *seen)
+{
+    unsigned bit = 0;
+    uint32_t expected = 0;
+    if (kind == RF_GUI_DISPLAY || kind == RF_GUI_FBCON) {
+        static const char keys[][24] = { "width", "height", "stride", "canvas-width",
+            "canvas-height", "redfin,abl-copy-only", "AAPL,phandle" };
+        uint32_t values[] = {1080, 2340, 4320, 1125, 2436, 1, 0x102};
+        unsigned n = 0, count = kind == RF_GUI_FBCON ? 3 : 7;
+        for (; n < count; n++) if (smp_key(key, keys[n])) break;
+        if (n < count) { bit = 1U << n; expected = values[n]; goto scalar; }
+        if (smp_key(key, kind == RF_GUI_FBCON ? "reg" : "redfin,framebuffer")) {
+            bit = 1U << 7;
+            if (len != 16 || quad(value) != 0xa0000000ULL || quad(value + 8) != 0x02300000ULL) return 0;
+        } else if (kind == RF_GUI_DISPLAY && smp_key(key, "device_type")) {
+            bit = 1U << 8; if (!smp_string(value, len, "display-subsystem")) return 0;
+        } else if (kind == RF_GUI_DISPLAY && smp_key(key, "compatible")) {
+            bit = 1U << 9; if (!smp_string(value, len, "sweet,display")) return 0;
+        } else if (kind == RF_GUI_DISPLAY && smp_key(key, "pixel-format")) {
+            bit = 1U << 10; if (!smp_string(value, len, "BGRA")) return 0;
+        } else return 0;
+    } else if (kind == RF_GUI_UFS) {
+        if (!smp_key(key, "reg") || len != 16 || quad(value) != 0x01d84000ULL || quad(value + 8) != 0x3000) return 0;
+        bit = 1;
+    } else if (kind == RF_GUI_TOUCH) {
+        if (smp_key(key, "compatible")) {
+            bit = 1; if (!smp_string(value, len, "redfin,sec-touch")) return 0;
+        } else if (smp_key(key, "reg")) {
+            uint64_t values[] = {0x100000, 0x1f0000, 0x880000, 0x4000, 0xf000000, 0x1000000};
+            bit = 2; if (len != sizeof(values)) return 0;
+            for (unsigned i = 0; i < 6; i++) if (quad(value + 8 * i) != values[i]) return 0;
+        } else if (smp_key(key, "spi-mode")) { bit = 4; expected = 3; goto scalar;
+        } else if (smp_key(key, "chip-select")) { bit = 8; expected = 0; goto scalar;
+        } else if (smp_key(key, "spi-max-frequency")) { bit = 16; expected = 10000000; goto scalar;
+        } else if (smp_key(key, "touch-gpios")) {
+            bit = 32; if (len != 12 || word(value, 0) != 8 || word(value + 4, 0) != 9 || word(value + 8, 0) != 35) return 0;
+        } else if (smp_key(key, "touch-size")) {
+            bit = 64; if (len != 8 || word(value, 0) != 1080 || word(value + 4, 0) != 2340) return 0;
+        } else return 0;
+    } else return 0;
+    goto finish;
+scalar:
+    if (len != 4 || word(value, 0) != expected) return 0;
+finish:
+    if (*seen & bit) return 0;
+    *seen |= bit; return 1;
+}
+
+static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, int gui)
 {
     enum { ROOT = 1, CHOSEN, CPUS, CPU, ARMIO, GIC, LEAF };
     static const char root_names[][24] = {
         "chosen", "cpus", "arm-io", "defaults", "product", "redfin-spmi",
-        "redfin-return", "redfin-log", "redfin-watchdog", "pram"
+        "redfin-return", "redfin-log", "redfin-watchdog", "pram",
+        "redfin-touch", "redfin-ufs", "sweet-fbcon"
     };
     static const char cpu_u32[][24] = {
         "reg", "cpu-id", "cluster-id", "cluster-type", "die-cluster-id",
@@ -226,7 +292,7 @@ static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
     };
     static const unsigned char cpu_compatible[] = "qcom,kryo475\0qcom,kryo470\0ARM,v8";
     uint32_t pending[32], kinds[32], handles[8] = {0};
-    unsigned depth = 0, cpus = 0, root_seen = 0, chosen_children = 0;
+    unsigned depth = 0, cpus = 0, root_seen = 0, chosen_children = 0, arm_seen = 0;
     uint64_t off = 0;
     pending[0] = 1; kinds[0] = 0;
     for (;;) {
@@ -236,6 +302,8 @@ static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
                 for (unsigned i = 0; i < REDFIN_SMP_CPUS; i++)
                     for (unsigned j = 0; j < i; j++) if (handles[i] == handles[j]) return 0;
                 return off == size && cpus == REDFIN_SMP_CPUS && (root_seen & 15) == 15 &&
+                    (!gui || root_seen == (1U << 13) - 1) &&
+                    arm_seen == (gui ? 3U : 1U) &&
                     (chosen_children & 1) && chosen_children <= 3;
             }
             depth--;
@@ -261,17 +329,20 @@ static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
                     kind = ROOT;
                 } else if (depth == 1 && kinds[depth] == ROOT) {
                     unsigned n = 0;
-                    for (; n < sizeof(root_names) / sizeof(root_names[0]); n++)
+                    unsigned count = gui ? 13 : 10;
+                    for (; n < count; n++)
                         if (smp_string(value, len, root_names[n])) break;
-                    if (n == sizeof(root_names) / sizeof(root_names[0]) || (root_seen & (1U << n))) return 0;
+                    if (n == count || (root_seen & (1U << n))) return 0;
                     root_seen |= 1U << n;
                     kind = n == 0 ? CHOSEN : n == 1 ? CPUS : n == 2 ? ARMIO : LEAF;
+                    if (gui && n >= 10) kind = n == 10 ? RF_GUI_TOUCH : n == 11 ? RF_GUI_UFS : RF_GUI_FBCON;
                 } else if (depth == 2 && kinds[depth] == CPUS) {
                     char name[5] = {'c', 'p', 'u', (char)('0' + cpus), 0};
                     if (cpus >= REDFIN_SMP_CPUS || !smp_string(value, len, name)) return 0;
                     cpu = cpus;
                     kind = CPU;
                 } else if (depth == 2 && kinds[depth] == ARMIO && smp_string(value, len, "gic")) kind = GIC;
+                else if (gui && depth == 2 && kinds[depth] == ARMIO && smp_string(value, len, "disp0")) kind = RF_GUI_DISPLAY;
                 else if (depth == 2 && kinds[depth] == CHOSEN) {
                     unsigned bit;
                     if (smp_string(value, len, "memory-map")) bit = 1;
@@ -280,12 +351,19 @@ static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
                     if (chosen_children & bit) return 0;
                     chosen_children |= bit; kind = LEAF;
                 } else return 0;
-                if ((kind == CPUS && children != REDFIN_SMP_CPUS) || (kind == ARMIO && children != 1) ||
+                if (kind == GIC || kind == RF_GUI_DISPLAY) {
+                    unsigned bit = kind == GIC ? 1 : 2;
+                    if (arm_seen & bit) return 0;
+                    arm_seen |= bit;
+                }
+                if ((kind == CPUS && children != REDFIN_SMP_CPUS) || (kind == ARMIO && children != (gui ? 2U : 1U)) ||
                     (kind == CHOSEN && (children < 1 || children > 2)) ||
-                    ((kind == CPU || kind == GIC || kind == LEAF) && children)) return 0;
+                    ((kind == CPU || kind == GIC || kind == LEAF || kind >= RF_GUI_DISPLAY) && children)) return 0;
             } else {
                 if (smp_key(key, "name")) return 0;
-                if (kind == CPU) {
+                if (kind >= RF_GUI_DISPLAY) {
+                    if (!gui_property(kind, key, value, len, &seen)) return 0;
+                } else if (kind == CPU) {
                     unsigned n = 0;
                     uint32_t physical = REDFIN_SMP_CPUS == 8 ? cpu << 8 : (cpu ? 0x600U : 0U);
                     uint32_t values[] = { physical, cpu, 0, 0, 0, cpu, cpu, 0, 0, 0, 19200000, 19200000 };
@@ -324,10 +402,15 @@ static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
             off += padded;
         }
         if ((kind == CPU && seen != 0xffff) || (kind == CPUS && seen != 7) || (kind == CHOSEN && seen != 3)) return 0;
+        if ((kind == RF_GUI_DISPLAY && seen != 0x7ff) || (kind == RF_GUI_TOUCH && seen != 127) ||
+            (kind == RF_GUI_UFS && seen != 1) || (kind == RF_GUI_FBCON && seen != 0x87)) return 0;
         if (kind == CPU) cpus++;
         depth++; pending[depth] = children; kinds[depth] = kind;
     }
 }
+
+static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
+{ return adt_valid_smp_mode(b, size, 0); }
 
 static const char *validate(const void *data, uint64_t size, uint64_t image,
     uint64_t image_end, uint64_t dtb, const struct hardware *hw, uint64_t mpidr, struct plan *q)
@@ -392,7 +475,8 @@ static const char *validate(const void *data, uint64_t size, uint64_t image,
     if (q->top > p->phys + p->memory) return "boot args outside RAM";
     q->entry = p->phys + (p->entry - p->virt);
     const volatile unsigned char *tree = (const volatile unsigned char *)data + p->adt_offset;
-    if (!(smp ? adt_valid_smp(tree, p->adt_size) :
+    int gui = REDFIN_GUI_BUILD_READY && redfin_gui_profile(p->command, sizeof(p->command), NULL);
+    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, 1) : adt_valid_smp(tree, p->adt_size)) :
         adt_valid_up(tree, p->adt_size, mpidr, p->phys, p->memory))) return "ADT CPU or RAM mismatch";
     return NULL;
 }

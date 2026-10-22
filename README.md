@@ -9,6 +9,8 @@ backboardd makes IOKit calls. The opt-in CPU framebuffer publishes AppleCLCD;
 backboardd opens it, allocates an iPhone X canvas and submits swaps. The earlier
 SpringBoard `main CADisplay` trap is absent in that test. Authenticated RAM
 captures show the Apple logo and lock screen rendered into the framebuffer.
+All eight redfin CPUs pass isolated XNU scheduling, timers and cross-IPIs;
+the bounded eight-core GUI/touch profile is integrated, with device validation pending.
 The user confirms physical iOS display and touch-driven UI response. A fresh
 capture records 41 physical SEC contacts and native HID DOWN/UP events;
 the home screen and multitouch remain unverified. Rendering is very slow

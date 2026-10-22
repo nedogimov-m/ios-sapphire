@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GUI8 integrated; device test next — 2026-10-23
+
+Extends proven SMP8 (`65c9682`) with a separate exact GUI8 contract:
+8 CPUs, 10Hz CPU display, touch, fenced RW HFS root and 180s graceful
+shutdown. The complete IRQ/timer/progress proof and CPU publication precede
+root/peripheral writes. CPU0 owns touch/RPMh/shutdown; the BSD root thread
+restores its previous affinity before Apple userspace. SMP's actual cached
+read-only PON/IMEM proof supplies rail observer mappings, without setting the
+old UP return latch. USB/Wi-Fi/GPU stay off. Loader/host cycle require their
+own compiled GUI/shim/count gates and known display/touch/UFS ADT leaves.
+Full810 host tests PASS (`peripherals-host-tests-v35.txt`); actual complete
+payload/ADT/liveFDT passes C loader and host return policy. Local full ARM64
+build `build-20261023-022643.log`, kernel SHA256 `ae14e146c388373ce7949b5973331183f902a703d1b479e33c75e8ae4455d31f`.
+Image `ports/redfin/out/gui8-v1/redfin-xnu.img` SHA256
+`9e8f2c8d24b5c443fe663cbf32e4832d6068c297ebfe1f6fc23a03e7e35729ab`. Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=10 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xba3e7592606a0f91 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Observation: host/build/loader validation only; eight-core Apple userspace,
+touch, performance, clean shutdown and TLB shootdowns remain unverified.
+Next: temporary GUI8 boot with authenticated recovery capture, then compare UI.
+
 ## REDFIN all8XNU cores pass isolated scheduling/IRQ test — 2026-10-23
 
 Eight-core extension preserves the working2-core profile and uses natural

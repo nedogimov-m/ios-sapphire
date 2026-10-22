@@ -1,0 +1,528 @@
+diff --git a/osfmk/arm64/redfin_smp.c b/osfmk/arm64/redfin_smp.c
+--- a/osfmk/arm64/redfin_smp.c
++++ b/osfmk/arm64/redfin_smp.c
+@@ -19,6 +19,8 @@
+ #include <mach/thread_act.h>
+ #include <pexpert/pexpert.h>
+ 
++#include "redfin_gui_profile.h"
++static uint32_t rf_gui_selected,rf_smp_proved,rf_smp_published,rf_gui_ready;
+ #define RF_SMP_ARGS 608u
+ #define RF_SMP_ROUNDS 32u
+ #define RF_SMP_POLLS 20000u
+@@ -121,6 +123,11 @@
+ /* A complete allowlist, deliberately narrower than normal UP bring-up. */
+ static bool rf_smp_flags(const char *args,unsigned bytes,uint64_t *boot_id)
+ {
++ if(redfin_gui_profile(args,bytes,boot_id)) {
++  __atomic_store_n(&rf_smp_cpu_count,8,__ATOMIC_RELEASE);
++  __atomic_store_n(&rf_gui_selected,1,__ATOMIC_RELEASE);
++  return true;
++ }
+  static const char *tokens[]={"debug=0xc","serial=3","cpus=2","keepsyms=1","-noprogress",
+   "rd=md0","sweettouch=0","sweetkeys=0","sweetusb=0","sweetcpufreq=0","sweetbattery=0",
+   "modem=0","wifi=0","gpu=0","redfinsmp=1","redfinshim=1","redfinspmi=0","redfinreturn=0"};
+@@ -320,7 +327,7 @@
+  thread_terminate(current_thread());
+ }
+ #include "redfin_smp_eight.h"
+-int redfin_smp_prove(void)
++static int rf_smp_prove_all(void)
+ {
+  if(rf_smp_count()==8) return rf_smp_prove_eight();
+  if(!rf_smp_unchanged() || __atomic_load_n(&rf_smp_started,__ATOMIC_ACQUIRE)!=2 ||
+@@ -368,4 +375,11 @@
+   (unsigned long long)__atomic_load_n(&rf_smp_ack[1],__ATOMIC_ACQUIRE));
+  return 0;
+ }
++int redfin_smp_prove(void)
++{
++ int result=rf_smp_prove_all();
++ if(!result) __atomic_store_n(&rf_smp_proved,1,__ATOMIC_RELEASE);
++ return result;
++}
++#include "redfin_gui_runtime.h"
+ #endif /* SWEET */
+diff --git a/osfmk/arm64/Makefile b/osfmk/arm64/Makefile
+--- a/osfmk/arm64/Makefile
++++ b/osfmk/arm64/Makefile
+@@ -32,6 +32,7 @@
+ # TODO: Is there a reason that machine_machdep.h is not in this list? If not, these lists can be consolidated.
+ # Headers used to compile xnu
+ EXPORT_MD_LIST = \
++	redfin_gui_profile.h \
+ 	hv_hvc.h \
+ 	lowglobals.h \
+ 	machine_cpuid.h \
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -466,6 +466,9 @@
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ /* REDFIN_SHUTDOWN_THREAD_TEST_BEGIN: opt-in, after root and PID1 exist. */
+ extern int redfin_spmi_return_ready(void);
++extern int redfin_gui_selected(void);
++extern int redfin_gui_ready(void);
++extern int redfin_gui_bind_worker(void);
+ extern int redfin_shutdown_watchdog_start(uint32_t seconds);
+ extern void redfin_shutdown_watchdog_tick(unsigned final);
+ extern void redfin_fb_capture_final(void);
+@@ -475,7 +478,8 @@
+ static void
+ redfin_shutdown_worker(__unused void *parameter, __unused wait_result_t result)
+ {
+-	if (!redfin_spmi_return_ready()) {
++	bool gui = redfin_gui_selected() && redfin_gui_bind_worker();
++	if (!gui && !redfin_spmi_return_ready()) {
+ 		printf("REDFIN SHUTDOWN: PMIC/IMEM return not verified; keeping original fallback\n");
+ 		(void)thread_terminate(current_thread());
+ 		__builtin_unreachable();
+@@ -514,9 +518,11 @@
+ {
+ 	uint32_t seconds = 0, cpus = 0, returning = 0;
+ 	if (!PE_parse_boot_argn("redfinshutdown", &seconds, sizeof(seconds))) return;
++	(void)PE_parse_boot_argn("cpus", &cpus, sizeof(cpus));
++	(void)PE_parse_boot_argn("redfinreturn", &returning, sizeof(returning));
++	bool gui = seconds == 180 && cpus == 8 && returning == 0 && redfin_gui_selected() && redfin_gui_ready();
+ 	if (seconds < 5 || seconds > 300 || initproc == PROC_NULL || rootvnode == NULLVP ||
+-	    !PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
+-	    !PE_parse_boot_argn("redfinreturn", &returning, sizeof(returning)) || returning != 1) {
++	    (!gui && (cpus != 1 || returning != 1))) {
+ 		printf("REDFIN SHUTDOWN: refused invalid deadline, root/PID1 or bootloader-return policy\n");
+ 		return;
+ 	}
+diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
+--- a/bsd/dev/redfin_touch_events.c
++++ b/bsd/dev/redfin_touch_events.c
+@@ -15,6 +15,8 @@
+ #include "redfin_rpmh_touch.h"
+ #include "redfin_touch_sensing.h"
+ extern bool redfin_touch_boot_lease_valid(unsigned);
++extern int redfin_gui_selected(void);
++extern int redfin_gui_bind_worker(void);
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern kern_return_t thread_terminate(thread_t);
+ extern bool redfin_touch_spi_identity_ready(void);
+@@ -72,6 +74,10 @@
+ redfin_events_worker(void *arg,wait_result_t wait)
+ {
+ 	(void)arg; (void)wait;
++	if (redfin_gui_selected() && !redfin_gui_bind_worker()) {
++		(void)thread_terminate(current_thread());
++		return;
++	}
+ 	struct redfin_events_state state = {0};
+ 	state.startup_reset = true;
+ 	redfin_events_delivery_failed = false;
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -14,6 +14,9 @@
+ #include <pexpert/device_tree.h>
+ #include <machine/machine_routines.h>
+ #include "redfin_early_return.h"
++#include <arm64/redfin_gui_profile.h>
++extern int redfin_smp_verified(void);
++extern int redfin_gui_cpu0(void);
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ 
+ static bool redfin_spmi_attempted;
+@@ -375,11 +378,13 @@
+ static unsigned rf_smr_expected_cpus=2;
+ static struct redfin_er_report rf_smr_report;
+ static struct redfin_er_target rf_smr_target;
++static struct redfin_er_io rf_smr_io;
+ static bool rf_smr_space(char c) { return c==' ' || c=='\t' || c=='\r' || c=='\n'; }
+ static bool rf_smr_word(const char *word,unsigned bytes,const char *wanted)
+ { return strlen(wanted)==bytes && !memcmp(word,wanted,bytes); }
+ static bool rf_smr_flags(const char *args,unsigned bytes,uint64_t *nonce)
+ {
++ if(redfin_gui_profile(args,bytes,nonce)) { rf_smr_expected_cpus=8; return true; }
+  static const char *required[]={"debug=0xc","serial=3","cpus=2","keepsyms=1","-noprogress","rd=md0",
+   "sweettouch=0","sweetkeys=0","sweetusb=0","sweetcpufreq=0","sweetbattery=0","modem=0","wifi=0","gpu=0",
+   "redfinsmp=1","redfinshim=1","redfinspmi=0","redfinreturn=0"};
+@@ -563,6 +568,7 @@
+     !redfin_er_base(io.config,0x26000) || !redfin_er_base(io.imem,4)) goto done;
+  bool irq_enabled=ml_set_interrupts_enabled(false);
+  error=rf_smr_live(&io);
++ if(!error) rf_smr_io=io;
+  (void)ml_set_interrupts_enabled(irq_enabled);
+ done:
+  __atomic_store_n(&rf_smr_state,error?2:3,__ATOMIC_RELEASE);
+@@ -572,6 +578,30 @@
+  return error?0:1;
+ }
+ /* REDFIN_SMP_RETURN_END */
++
++/* Publish only the already proved read mappings. UP return_ready stays false.
++ * CPU0 calls once after successful scheduling/IRQ proof and CPU publication. */
++int redfin_gui_publish_return(void);
++int redfin_gui_publish_return(void)
++{
++ uint64_t nonce=0;
++ if(!redfin_smp_verified() || rf_smr_expected_cpus!=8 ||
++    __atomic_load_n(&rf_smr_state,__ATOMIC_ACQUIRE)!=3 || !rf_smr_frozen_valid() ||
++    !redfin_gui_profile(rf_smr_frozen,rf_smr_bytes,&nonce) || nonce!=rf_smr_nonce ||
++    rf_smr_report.stage!=REDFIN_ER_DONE || rf_smr_report.subtype!=4 ||
++    rf_smr_report.imem!=0x77665500u || (rf_smr_report.before&0xfe)!=4 ||
++    rf_smr_report.before!=rf_smr_report.after || rf_smr_target.owner || rf_smr_target.apid>=512 ||
++    !rf_smr_io.core || !rf_smr_io.observer || !rf_smr_io.config) return 0;
++ redfin_spmi_proof.core=rf_smr_io.core;
++ redfin_spmi_proof.observer=rf_smr_io.observer;
++ redfin_spmi_proof.config=rf_smr_io.config;
++ redfin_spmi_proof.version=rf_smr_target.version;
++ redfin_spmi_proof.apid=rf_smr_target.apid;
++ redfin_spmi_proof.owner=rf_smr_target.owner;
++ redfin_spmi_proof.subtype=rf_smr_report.subtype;
++ redfin_spmi_proof.ready=true;
++ return 1;
++}
+ 
+ /* Redfin physical-PMIC evidence only; append inside redfin_spmi.c.
+  * No rail-ready API, indexed-L17 claim, PMIC writes or new mappings.
+@@ -695,8 +725,9 @@
+  uint32_t mode = 0, cpus = 0;
+  (void)PE_parse_boot_argn("redfinrail", &mode, sizeof(mode));
+  if (mode != 1) return ENOTSUP;
+- if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
+-     !redfin_spmi_return_ready() || !redfin_spmi_proof.ready ||
++ if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) ||
++     !((cpus == 1 && redfin_spmi_return_ready()) || (cpus == 8 && redfin_gui_cpu0())) ||
++     !redfin_spmi_proof.ready ||
+      !redfin_spmi_proof.core || !redfin_spmi_proof.observer || !redfin_spmi_proof.config ||
+      redfin_spmi_proof.version < 0x50000000 || redfin_spmi_proof.version >= 0x70000000 ||
+      !redfin_rail_platform()) return ENXIO;
+@@ -791,7 +822,8 @@
+  uint32_t mode = 0, cpus = 0;
+  (void)PE_parse_boot_argn("redfinrail", &mode, sizeof(mode));
+  (void)PE_parse_boot_argn("cpus", &cpus, sizeof(cpus));
+- if (mode != 1 || cpus != 1 || !redfin_spmi_return_ready() || !redfin_rail_platform()) return ENXIO;
++ if (mode != 1 || !((cpus == 1 && redfin_spmi_return_ready()) ||
++     (cpus == 8 && redfin_gui_cpu0())) || !redfin_rail_platform()) return ENXIO;
+  if (__atomic_exchange_n(&redfin_rail_snapshot_busy, 1, __ATOMIC_ACQUIRE)) return EBUSY;
+  int error = ENXIO;
+  uint16_t model = 0, model_end = 0, header = 0, header_end = 0;
+diff --git a/bsd/dev/redfin_touch_start.c b/bsd/dev/redfin_touch_start.c
+--- a/bsd/dev/redfin_touch_start.c
++++ b/bsd/dev/redfin_touch_start.c
+@@ -13,6 +13,7 @@
+ #include "redfin_touch_sensing.h"
+ extern bool redfin_usb_platform(void);
+ extern int redfin_spmi_return_ready(void);
++extern int redfin_gui_cpu0(void);
+ extern int redfin_touch_setup(bool, bool);
+ extern int redfin_touch_events_start(void);
+ int redfin_touch_start_initial(void);
+@@ -66,10 +67,12 @@
+ static bool
+ redfin_touch_boot_gates(unsigned mode)
+ {
+- if (mode > REDFIN_TOUCH_UFS_EVENTS || !redfin_usb_platform() || redfin_spmi_return_ready() != 1 ||
++ bool gui = mode == REDFIN_TOUCH_UFS_EVENTS && redfin_gui_cpu0();
++ if (!gui && (redfin_spmi_return_ready() != 1 ||
+      !redfin_initial_touch_arg("cpus", 1, true) ||
+      !redfin_initial_touch_arg("redfinreturn", 1, true) ||
+-     !redfin_initial_touch_arg("redfinspmi", 1, true) ||
++     !redfin_initial_touch_arg("redfinspmi", 1, true))) return false;
++ if (mode > REDFIN_TOUCH_UFS_EVENTS || !redfin_usb_platform() ||
+      !redfin_initial_touch_arg("redfintouch", 2, true) ||
+      !redfin_initial_touch_arg("redfintouchsetup", 1, true) ||
+      !redfin_initial_touch_arg("redfinrpmhtouch", 1, true) ||
+diff --git a/bsd/dev/redfin_rpmh_touch.c b/bsd/dev/redfin_rpmh_touch.c
+--- a/bsd/dev/redfin_rpmh_touch.c
++++ b/bsd/dev/redfin_rpmh_touch.c
+@@ -19,6 +19,7 @@
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
+ extern int redfin_spmi_return_ready(void);
++extern int redfin_gui_cpu0(void);
+ 
+ #define RT_BASE 0x41300u
+ #define RT_TCS(t) (0xd00u + 0x2a0u * (t))
+@@ -278,6 +279,7 @@
+  if (!rt_arg("redfintouchscan", mode == REDFIN_TOUCH_MD0_SCAN, mode == REDFIN_TOUCH_MD0_SCAN) ||
+      !rt_arg("redfintouchevents", mode == REDFIN_TOUCH_UFS_EVENTS, mode == REDFIN_TOUCH_UFS_EVENTS)) return false;
+  if (mode != REDFIN_TOUCH_INITIAL_MD0 &&
++     !(mode == REDFIN_TOUCH_UFS_EVENTS && redfin_gui_cpu0()) &&
+      (!rt_arg("redfinreturn", 1, true) || !rt_arg("redfinspmi", 1, true))) return false;
+  if (mode == REDFIN_TOUCH_UFS_EVENTS) {
+   uint32_t ufsrw = 0, rootrw = 0;
+@@ -301,7 +303,8 @@
+  (void)PE_parse_boot_argn("redfintouch", &touch, sizeof(touch));
+  (void)PE_parse_boot_argn("redfintouchsetup", &setup, sizeof(setup));
+  if (mode != 1 || touch != 2 || setup != 1 || !rt_boot_lease_valid(ops)) return ENOTSUP;
+- if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 || !redfin_spmi_return_ready() || !rt_platform()) return ENXIO;
++ if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) ||
++     !((cpus == 1 && redfin_spmi_return_ready()) || (cpus == 8 && redfin_gui_cpu0())) || !rt_platform()) return ENXIO;
+  const char *legacy[] = {"sweethw", "sweetkeys", "sweetbattery", "sweetusb", "modem", "wifi", "gpu",
+      "redfingpu", "redfinwifi", "redfinusb", "sweettouch", "sweetcpufreq",
+      "sweetusblog", "redfinusbowned", "redfinusbbypass", "redfinusbcontexts",
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -120,6 +120,9 @@
+ int redfin_usb_start_initial(void);
+ int redfin_early_return_probe(void);
+ int redfin_cpu_probe(void);
++int redfin_gui_cpu0(void);
++void *redfin_gui_root_enter(void);
++void redfin_gui_root_leave(void *);
+ }
+ 
+ /* REDFIN_PERIPHERAL_START_TEST_BEGIN */
+@@ -179,8 +182,10 @@
+   any |= modes[i] != 0;
+  }
+  if (!any) return;
+- if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
+-     !redfin_spmi_return_ready()) {
++ (void)PE_parse_boot_argn("cpus", &cpus, sizeof(cpus));
++ bool gui = cpus == 8 && redfin_gui_cpu0() && modes[0] == 2 && modes[5] == 1 &&
++     !modes[1] && !modes[2] && !modes[3] && !modes[4];
++ if (!gui && (cpus != 1 || !redfin_spmi_return_ready())) {
+   IOLog("REDFIN PERIPHERALS: verified bootloader-return/UP policy unavailable; skipped\n");
+   return;
+  }
+@@ -933,6 +938,7 @@
+ //
+ //	SWEET: root on a GPT partition of the internal UFS (bsd/dev/sweet_ufs.c)
+ //
++	void *redfin_root_binding = redfin_gui_root_enter();
+ 	uint32_t redfin_ufs_mode = 0;
+ 	if (PE_parse_boot_argn("redfinufs", &redfin_ufs_mode, sizeof(redfin_ufs_mode)) && (redfin_ufs_mode == 1 || redfin_ufs_mode == 2 || redfin_ufs_mode == 3)) {
+ 		extern void redfin_ufs_probe(void);
+@@ -965,11 +971,13 @@
+ 		if (ufs_error) {
+ 			panic("IOFindBSDRoot: SWEET UFS root %s unavailable: %d", rdBootVar, ufs_error);
+ 		}
++		redfin_gui_root_leave(redfin_root_binding);
+ 		strlcpy(rootName, rdBootVar, rootNameSize);
+ 		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
+ 		*oflags = 0;
+ 		goto iofrootx;
+ 	}
++	redfin_gui_root_leave(redfin_root_binding);
+ #endif
+ 
+ //
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -27,6 +27,7 @@
+ extern "C" void redfin_smp_prepare(void);
+ extern "C" int redfin_smp_start(unsigned, vm_offset_t);
+ extern "C" int redfin_smp_prove(void);
++extern "C" void redfin_smp_publish(void);
+ 
+ class SweetCPU;
+ static SweetCPU *sweet_cpus[MAX_CPUS];
+@@ -205,6 +206,7 @@
+ 	ml_set_max_cpus(topology->max_cpu_id + 1);
+ 	IOLog("SWEET CPU: %u/%u CPUs initialized, SGI1 verified\n",
+ 	    topology->num_cpus, topology->num_cpus);
++	if (redfin_smp_mode()) redfin_smp_publish();
+ 	thread_terminate(current_thread());
+ }
+ 
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -37,6 +37,8 @@
+ #include "SweetSurface.h"
+ 
+ extern "C" int sweet_console_muted;     /* osfmk/console/serial_console.c */
++extern "C" int redfin_gui_selected(void);
++extern "C" int redfin_smp_verified(void);
+ extern "C" void sweet_console_retarget(vm_offset_t va);   /* osfmk/console/video_console.c */
+ extern "C" void (*sweet_console_show_hook)(void);
+ extern "C" void topaz_modem_init(void);
+@@ -684,6 +686,10 @@
+ void
+ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ {
++	if (redfin_gui_selected() && !redfin_smp_verified()) {
++		sender->setTimeoutUS(SWEET_FB_VSYNC_US);
++		return;
++	}
+ 	AppleCLCD *fb = (AppleCLCD *)owner;
+ 	uint64_t now = mach_absolute_time();
+ 	uint64_t count = ++fb->fVsyncCount;
+diff --git a/osfmk/arm64/redfin_gui_profile.h b/osfmk/arm64/redfin_gui_profile.h
+new file mode 100644
+--- /dev/null
++++ b/osfmk/arm64/redfin_gui_profile.h
+@@ -0,0 +1,98 @@
++/* Exact bounded GUI8 profile shared by the relocatable shim and XNU.
++ * Display/touch geometry and the fenced HFS root are checked by their drivers.
++ * No allocation, libc, device access or absolute pointer tables here. */
++#ifndef REDFIN_GUI_PROFILE_H
++#define REDFIN_GUI_PROFILE_H
++#include <stdbool.h>
++#include <stdint.h>
++static inline bool redfin_gui_token(const char *p,unsigned bytes,const char *s)
++{
++ unsigned n=0;while(s[n]) { if(n>=bytes || p[n]!=s[n]) return false;n++; }
++ return n==bytes;
++}
++static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *boot_id)
++{
++ static const char required[][40]={
++  "debug=0xc",
++  "serial=3",
++  "cpus=8",
++  "keepsyms=1",
++  "-noprogress",
++  "rd=ufsroot0",
++  "sweettouch=0",
++  "sweetkeys=0",
++  "sweetusb=0",
++  "sweetcpufreq=0",
++  "sweetbattery=0",
++  "modem=0",
++  "wifi=0",
++  "gpu=0",
++  "unentitled_ios_sim_launch=1",
++  "ignition_level=1",
++  "wdt_test=no_user_checkin",
++  "launchd_unsecure_cache=1",
++  "wdt=-1",
++  "redfinfb=1",
++  "sweetfb_noconsole=1",
++  "sweetfb_hz=10",
++  "redfinshutdown=180",
++  "redfintouch=2",
++  "redfinrail=1",
++  "redfintouchsetup=1",
++  "redfinrpmhtouch=1",
++  "redfintouchevents=1",
++  "redfinufs=3",
++  "redfinspmi=0",
++  "redfinreturn=0",
++  "redfinroot=1",
++  "ufsroot=userdata",
++  "ufsrw=1",
++  "rootrw=1",
++  "sweetlog=0",
++  "redfinsmp=1",
++  "redfinshim=1",
++  "redfingui=1",
++ };
++ const unsigned count=sizeof(required)/sizeof(required[0]);
++ _Static_assert(sizeof(required)/sizeof(required[0])<64,"GUI argument bitmap");
++ if(!args || !bytes || bytes>608 || args[bytes-1]) return false;
++ unsigned length=0;while(length<bytes && args[length]) length++;
++ if(!length || length==bytes) return false;
++ for(unsigned tail=length;tail<bytes;tail++) if(args[tail]) return false;
++ uint64_t seen=0,nonce=0;
++ bool nonce_seen=false,trace_seen=false;
++ for(unsigned pos=0;pos<length;) {
++  if(args[pos]==' ') { pos++;continue; }
++  unsigned start=pos;
++  while(pos<length && args[pos]!=' ') {
++   if((unsigned char)args[pos]<33 || (unsigned char)args[pos]>126) return false;
++   pos++;
++  }
++  unsigned n=pos-start;
++  bool known=false;
++  for(unsigned i=0;i<count;i++) if(redfin_gui_token(args+start,n,required[i])) {
++   if(seen&(1ULL<<i)) return false;
++   seen|=1ULL<<i;known=true;break;
++  }
++  if(known) continue;
++  if(redfin_gui_token(args+start,n,"-enable_kprintf_spam")) {
++   if(trace_seen) return false;
++   trace_seen=true;continue;
++  }
++  if(n==31 && redfin_gui_token(args+start,15,"redfinbootid=0x")) {
++   if(nonce_seen) return false;
++   for(unsigned i=15;i<31;i++) {
++    unsigned digit=(unsigned)(args[start+i]-'0');
++    if(digit>9) { if(args[start+i]<'a' || args[start+i]>'f') return false;digit=(unsigned)(args[start+i]-'a'+10); }
++    nonce=(nonce<<4)|digit;
++   }
++   if(!nonce) return false;
++   nonce_seen=true;continue;
++  }
++  return false;
++ }
++ if(seen!=((1ULL<<count)-1) || !nonce_seen) return false;
++ if(boot_id) *boot_id=nonce;
++ return true;
++}
++#endif /* REDFIN_GUI_PROFILE_H */
+diff --git a/osfmk/arm64/redfin_gui_runtime.h b/osfmk/arm64/redfin_gui_runtime.h
+new file mode 100644
+--- /dev/null
++++ b/osfmk/arm64/redfin_gui_runtime.h
+@@ -0,0 +1,71 @@
++/* GUI8 starts hardware work only after the complete SMP proof and publication.
++ * IRQ/HID callers use cached acquire loads, never the CPU0-only return verifier.
++ * Included by redfin_smp.c after its proof and frozen-argument primitives. */
++#ifndef REDFIN_GUI_RUNTIME_H
++#define REDFIN_GUI_RUNTIME_H
++extern int redfin_gui_publish_return(void);
++int redfin_gui_selected(void);
++int redfin_smp_verified(void);
++int redfin_gui_ready(void);
++int redfin_gui_cpu0(void);
++int redfin_gui_bind_worker(void);
++void redfin_smp_publish(void);
++void *redfin_gui_root_enter(void);
++void redfin_gui_root_leave(void *);
++
++int redfin_gui_selected(void)
++{ return __atomic_load_n(&rf_gui_selected,__ATOMIC_ACQUIRE)==1; }
++int redfin_smp_verified(void)
++{ return __atomic_load_n(&rf_smp_published,__ATOMIC_ACQUIRE)==1; }
++int redfin_gui_ready(void)
++{ return __atomic_load_n(&rf_gui_ready,__ATOMIC_ACQUIRE)==1; }
++int redfin_gui_cpu0(void)
++{ return redfin_gui_ready() && rf_smp_local()==0; }
++
++void redfin_smp_publish(void)
++{
++ if(!__atomic_load_n(&rf_smp_proved,__ATOMIC_ACQUIRE) || !rf_smp_unchanged())
++  panic("REDFIN GUI: SMP publication before successful proof");
++ __atomic_store_n(&rf_smp_published,1,__ATOMIC_RELEASE);
++}
++static void rf_gui_wait(void)
++{
++ uint64_t wake;
++ clock_interval_to_deadline(1,NSEC_PER_MSEC,&wake);
++ if(assert_wait_deadline((event_t)&rf_smp_published,THREAD_UNINT,wake)==THREAD_WAITING)
++  thread_block(THREAD_CONTINUE_NULL);
++}
++void *redfin_gui_root_enter(void)
++{
++ if(!redfin_gui_selected()) return NULL;
++ uint64_t deadline;
++ nanoseconds_to_deadline(15*NSEC_PER_SEC,&deadline);
++ while(!redfin_smp_verified()) {
++  if(mach_absolute_time()>deadline) panic("REDFIN GUI: SMP completion timeout");
++  rf_gui_wait();
++ }
++ processor_t previous=thread_bind(cpu_to_processor(0));
++ thread_block(THREAD_CONTINUE_NULL);
++ uint64_t nonce=0;
++ if(rf_smp_count()!=8 || !rf_smp_unchanged() ||
++    !redfin_gui_profile(rf_smp_frozen,rf_smp_frozen_bytes,&nonce) || nonce!=rf_smp_boot_id ||
++    redfin_gui_publish_return()!=1) panic("REDFIN GUI: cached shim return unavailable");
++ __atomic_store_n(&rf_gui_ready,1,__ATOMIC_RELEASE);
++ kprintf("REDFIN GUI8: SMP verified; CPU0 owns root/touch; shim return cached\n");
++ return (void *)previous;
++}
++void redfin_gui_root_leave(void *previous)
++{
++ if(!redfin_gui_selected()) return;
++ if(!redfin_gui_cpu0()) panic("REDFIN GUI: root hardware owner changed");
++ thread_bind((processor_t)previous);
++ thread_block(THREAD_CONTINUE_NULL);
++}
++int redfin_gui_bind_worker(void)
++{
++ if(!redfin_gui_selected() || !redfin_gui_ready()) return 0;
++ thread_bind(cpu_to_processor(0));
++ thread_block(THREAD_CONTINUE_NULL);
++ return redfin_gui_cpu0();
++}
++#endif /* REDFIN_GUI_RUNTIME_H */

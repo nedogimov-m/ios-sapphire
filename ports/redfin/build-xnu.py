@@ -229,7 +229,7 @@ def main(argv=None):
                                          'cpu-probe.patch', 'cpu-probe-start.patch', 'cpu-target.patch',
                                          'early-return.patch', 'early-return-start.patch',
                                          'smp-log.patch', 'smp-return.patch', 'smp.patch',
-                                         'early-bootid.patch', 'smp-eight.patch'), 21):
+                                         'early-bootid.patch', 'smp-eight.patch', 'smp-gui.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

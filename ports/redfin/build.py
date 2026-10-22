@@ -13,6 +13,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import gui_profile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -62,6 +63,7 @@ def main():
     p.add_argument('--early-return-probe', action='store_true', help='rehearse the shared bootloader-return leaf after existing verified return; separate RAM-only CPU0 test')
     p.add_argument('--shim-early-return', action='store_true', help='prearm the same return leaf before payload validation; requires the isolated --early-return-probe rehearsal profile')
     p.add_argument('--smp-probe', action='store_true', help='isolated md0 CPU0+CPU6 XNU proof; requires compiled shim prearm and bootloader return')
+    p.add_argument('--smp-gui', action='store_true', help='bounded eight-core iOS, touch and RW-root profile; compiled shim owns return')
     p.add_argument('--smp-cpus', type=int, choices=(2, 8), help='CPU count for the isolated --smp-probe; default 2')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
     p.add_argument('--display-hz', type=int, help='software display copy cadence, 1..10 Hz; requires --display; omitted keeps kernel default')
@@ -98,15 +100,29 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
-    if a.smp_cpus is not None and not a.smp_probe:
-        p.error('--smp-cpus requires --smp-probe')
+    if a.smp_cpus is not None and not (a.smp_probe or a.smp_gui):
+        p.error('--smp-cpus requires --smp-probe or --smp-gui')
+    if a.smp_gui:
+        if a.smp_cpus not in (None, 8):
+            p.error('--smp-gui requires eight CPUs')
+        a.smp_cpus = 8
+        required = ('kernel', 'dtb', 'apple_adt', 'display', 'splash', 'touch_events',
+                    'ufs_root', 'ufs_rw', 'return_bootloader', 'shim_early_return')
+        if not all(getattr(a, name) for name in required):
+            p.error('--smp-gui requires kernel/DTB/Apple ADT, display/splash/touch, RW UFS root and compiled shim return')
+        if a.boot_mpidr or a.display_hz != 10 or a.shutdown_seconds != 180:
+            p.error('--smp-gui requires CPU0, --display-hz 10 and --shutdown-seconds 180')
+        if (any(value for name, value in vars(a).items() if name.endswith('_probe')) or
+                a.usb_aarch64_context or a.usb_live_log or a.userspace_stacks or
+                a.capture_screen or a.trace_syscalls):
+            p.error('--smp-gui excludes other probes and diagnostic writers')
     if a.cpu_capability_target is not None:
         if not a.cpu_capability_probe:
             p.error('--cpu-capability-target requires --cpu-capability-probe')
         if a.cpu_capability_target not in range(0x100, 0x800, 0x100):
             p.error('--cpu-capability-target must be 0x100..0x700 in steps of 0x100')
-    if a.shim_early_return and not (a.early_return_probe or a.smp_probe):
-        p.error('--shim-early-return requires --early-return-probe or --smp-probe')
+    if a.shim_early_return and not (a.early_return_probe or a.smp_probe or a.smp_gui):
+        p.error('--shim-early-return requires --early-return-probe, --smp-probe or --smp-gui')
     if a.smp_probe:
         if not (a.kernel and a.dtb and a.return_bootloader and a.shim_early_return):
             p.error('--smp-probe requires --kernel, --dtb, --return-bootloader and --shim-early-return')
@@ -207,7 +223,7 @@ def main():
         p.error('--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')
     if a.userspace_stacks and not a.shutdown_seconds:
         p.error('--userspace-stacks requires --shutdown-seconds')
-    if (a.return_bootloader and not a.smp_probe) or a.touch_rail_probe:
+    if not (a.smp_probe or a.smp_gui) and (a.return_bootloader or a.touch_rail_probe):
         a.spmi_probe = True
     ufs_mode = 3 if a.ufs_wake_probe or a.ufs_root_probe or a.ufs_root else 2 if a.ufs_read_probe else int(a.ufs_probe)
     if a.touch_id_probe and ufs_mode:
@@ -264,7 +280,7 @@ def main():
         from tools import adt
         validate_window(a.dtb.read_bytes(), a.memory_base, a.memory_size)
         tree = (mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr, smp=True, smp_cpus=a.smp_cpus or 2)
-                if a.smp_probe else mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr))
+                if a.smp_probe or a.smp_gui else mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr))
         if a.apple_adt:
             mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes())
         from memory import _tree
@@ -277,7 +293,7 @@ def main():
                           usb_bypass=a.usb_bypass_probe, rpmh=a.rpmh_probe)
         except ValueError as error:
             p.error(str(error))
-        if a.spmi_probe or a.smp_probe:
+        if a.spmi_probe or a.smp_probe or a.smp_gui:
             spmi = nodes.get('/soc/qcom,spmi@c440000', {})
             names = spmi.get('reg-names', b'').rstrip(b'\0').split(b'\0')
             ranges = []
@@ -365,9 +381,11 @@ def main():
             command_line += f' redfincputarget=0x{a.cpu_capability_target:03x}'
         if a.early_return_probe:
             command_line += ' redfinearlyreturn=1'
-        if a.smp_probe:
+        if a.smp_probe or a.smp_gui:
             command_line = command_line.replace('cpus=1', f'cpus={a.smp_cpus or 2}')
             command_line += ' redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0'
+        if a.smp_gui:
+            command_line += ' redfingui=1'
         if a.display:
             command_line += ' redfinfb=1 sweetfb_noconsole=1'
         if a.display_hz is not None:
@@ -409,7 +427,7 @@ def main():
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:
             command_line += ' redfinspmi=1'
-        if a.return_bootloader and not a.smp_probe:
+        if a.return_bootloader and not (a.smp_probe or a.smp_gui):
             command_line += ' redfinreturn=1'
         # A per-image nonce binds authenticated RAM logs to this build.
         boot_id = int.from_bytes(os.urandom(8), 'big') or 1
@@ -417,6 +435,8 @@ def main():
         if a.ufs_root_probe or a.ufs_root:
             writable = int(a.ufs_rw)
             command_line += f' redfinroot=1 ufsroot=userdata ufsrw={writable} rootrw={writable} sweetlog=0'
+        if a.smp_gui:
+            gui_profile.validate(command_line)
         run([sys.executable, ROOT / 'tools/mkpayload.py', a.kernel, out / 'redfin.adt',
             out / 'payload.bin', '--ramdisk', out / 'init', '--cmdline',
             command_line])
@@ -426,6 +446,7 @@ def main():
         f'#define WATCHDOG_SECONDS {a.watchdog_seconds}\n'
         f'#define SHIM_EARLY_RETURN {int(a.shim_early_return)}\n'
         f'#define REDFIN_SMP_PROBE {int(a.smp_probe)}\n'
+        f'#define REDFIN_SMP_GUI {int(a.smp_gui)}\n'
         f'#define REDFIN_SMP_CPUS {a.smp_cpus or 2}\n'
         f'#define XNU_PAYLOAD_SIZE {len(payload)}ULL\n')
     flags = ['-O2', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-pic',
@@ -489,6 +510,11 @@ def main():
     if a.smp_probe:
         manifest['smp_probe'] = True
         manifest['smp_cpus'] = a.smp_cpus or 2
+        manifest['sha256']['config.h'] = hashlib.sha256((out / 'config.h').read_bytes()).hexdigest()
+    if a.smp_gui:
+        manifest['smp_gui'] = True
+        manifest['smp_cpus'] = 8
+        manifest['touch_events'] = True
         manifest['sha256']['config.h'] = hashlib.sha256((out / 'config.h').read_bytes()).hexdigest()
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')

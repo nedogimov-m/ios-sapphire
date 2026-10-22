@@ -14,6 +14,7 @@ import time
 import struct
 import stat
 import zlib
+import gui_profile
 
 HERE = Path(__file__).resolve().parents[2]
 CONSOLE_OFFSET, CONSOLE_LENGTH = 0x280000, 0x100000
@@ -45,6 +46,8 @@ def xnu_return_proof(image):
     checksums = manifest.get("sha256")
     arguments = manifest.get("boot_args")
     tokens = arguments.split() if isinstance(arguments, str) else []
+    if isinstance(checksums, dict) and checksums.get("redfin-xnu.img") == checksum and manifest.get("smp_gui") is True:
+        return smp_gui_return_profile(image, manifest, arguments, checksum)
     if isinstance(checksums, dict) and checksums.get("redfin-xnu.img") == checksum and manifest.get("smp_probe") is True:
         return smp_return_profile(image, manifest, arguments, tokens, checksum)
     if (not isinstance(checksums, dict) or checksums.get("redfin-xnu.img") != checksum
@@ -60,6 +63,32 @@ def xnu_return_proof(image):
             raise ValueError("redfinbootid requires exactly one nonzero 16-digit lowercase hexadecimal token")
         proof["boot_id"] = match[1]
     return proof
+
+
+def smp_gui_return_profile(image, manifest, arguments, checksum):
+    """Require the separately compiled, bounded GUI8 contract and provenance."""
+    boot_id = gui_profile.validate(arguments)
+    required_true = ('shim_early_return', 'root_writable', 'cpu_copy_display',
+                     'splash_reservation_assumption', 'touch_events')
+    required_false = ('capture_screen', 'userspace_stacks', 'syscall_tracing')
+    if (any(manifest.get(name) is not True for name in required_true) or
+            any(manifest.get(name) is not False for name in required_false) or
+            manifest.get('smp_probe', False) is not False or
+            type(manifest.get('smp_cpus')) is not int or manifest['smp_cpus'] != 8 or
+            manifest.get('root_device') != 'ufsroot0' or
+            type(manifest.get('shutdown_seconds')) is not int or manifest['shutdown_seconds'] != 180 or
+            type(manifest.get('display_hz')) is not int or manifest['display_hz'] != 10):
+        raise ValueError('GUI8 manifest does not match its bounded root/touch/display profile')
+    config = image.with_name('config.h').read_bytes()
+    if (len(config) > 4096 or b'\0' in config or
+            hashlib.sha256(config).hexdigest() != manifest['sha256'].get('config.h')):
+        raise ValueError('GUI8 config checksum mismatch')
+    for name, value in (('SHIM_EARLY_RETURN', 1), ('REDFIN_SMP_PROBE', 0),
+                        ('REDFIN_SMP_GUI', 1), ('REDFIN_SMP_CPUS', 8)):
+        if re.findall(rb'^#define ' + name.encode() + rb'[^\n]*$', config, re.MULTILINE) != [f'#define {name} {value}'.encode()]:
+            raise ValueError('GUI8 requires exact compiled shim/GUI/eight-core gates')
+    return {'sha256': checksum, 'redfinreturn': 0, 'armed_by': 'shim',
+            'cpus': 8, 'root_device': 'ufsroot0', 'boot_id': boot_id}
 
 
 def smp_return_profile(image, manifest, arguments, tokens, checksum):

@@ -183,7 +183,7 @@ def main(argv=None):
              'cpu-probe.patch', 'cpu-probe-start.patch', 'cpu-target.patch',
              'early-return.patch', 'early-return-start.patch',
              'smp-log.patch', 'smp-return.patch', 'smp.patch', 'early-bootid.patch',
-             'smp-eight.patch')]
+         'smp-eight.patch', 'smp-gui.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)
