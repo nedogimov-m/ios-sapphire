@@ -18,7 +18,8 @@ The minimal MobileGestalt Wi-Fi identity fix is validated on the device.
 Authenticated peripheral observers now cover SEC SPI/GPIO, warm DWC3,
 SMEM and Adreno 620 clocks. Guarded DWC3 DMA and high-speed USB enumeration
 are observed on the host with the opt-in AArch64 context profile;
-physical touch delivery, radio, USB networking and GPU
+macOS also configures CDC-ECM and creates its native Ethernet interface;
+packet exchange remains unverified. Physical touch delivery, radio, USB networking and GPU
 acceleration are still in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

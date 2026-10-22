@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN USB V5: native macOS ECM binding confirmed — 2026-10-22
+
+Commit `9fdeafc` records the direct probe and restored descriptor build.
+Previously prepared V5 has now booted: image SHA256
+`d871edc7b7325c0d15405e4ebbbbde83d9b104bc5d3e36ac1915934f28e5d7aa`,
+kernel SHA256 `7da40f41a772c11bbcc3b5c1dd4dee7d987dca49aeb5fc0ecf05e844faf76fc9`,
+local ARM64 build `research/redfin-build/build-20261022-214311.log`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x2e8c9bed7d6abe6a`.
+Authenticated, image-matched `logs/redfin/usb-net-v5/`: md0 PID1 heartbeats,
+no panic, metadata primed, fastboot return verified. ue0 up0, gadget0;
+host sends SET_CONFIGURATION1, data SET_INTERFACE alt0 then alt1, MAC
+descriptor requests and SET_ETHERNET_PACKET_FILTER value0x000e (index0).
+The earlier summary calling the packet-filter value zero was incorrect.
+Host policy restriction is gone: libusb sees/opens the same-port gadget
+and reads configuration1. Claim interface1 returns ACCESS(-3).
+Private `usb-net-v5-ecm-driver-audit.txt` proves AppleUserECM holds exclusive
+access; native libusb maps Darwin ExclusiveAccess to ACCESS. Native
+AppleUserECMData/control drivers start; configd creates the Ethernet
+interface. Sanitized persistent preferences identify en9 and expected MAC
+02:00:5e:77:ee:01. This is native binding, not a privilege failure.
+The old class observer crashed on transient empty ioreg output and the
+MAC-only interface watcher missed the interface; their negative results
+are inconclusive. ARP/ICMP/live UDP are still unproved.
+Next: robust live driver/interface capture and native nonpromiscuous
+libpcap traffic through the system driver. Existing host access_bpf permits
+opening /dev/bpf read/write without sudo; no host IP edit is necessary for
+the bounded Ethernet probe. Keep the same kernel/SMMU profile and fresh
+image boot nonce. No Android boot or flash; phone remains in bootloader.
+
 ## REDFIN direct USB probe ready; macOS transport restriction confirmed — 2026-10-22
 
 Commit `c54d35d` records bounded ECM/log startup. New `usb-host.py` uses
