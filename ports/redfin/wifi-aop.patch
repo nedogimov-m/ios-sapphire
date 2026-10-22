@@ -2,7 +2,7 @@ diff --git a/bsd/dev/redfin_wifi_aop.h b/bsd/dev/redfin_wifi_aop.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_wifi_aop.h
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,74 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin AOP QMP transport for PAS4 modem load-state messages.
 + * No mapping, interrupt registration or startup hook is provided here.
@@ -41,7 +41,9 @@ new file mode 100644
 +
 +struct rf_wifi_aop_ops {
 +    void *context;
-+    /* The caller must hold a serialized, exclusive native AOP/QMP lease. It
++    /* Write entry points require a serialized, exclusive native AOP/QMP lease.
++     * The read-only observer instead requires a live read-only mapping lease;
++     * it never grants write ownership. The platform
 +     * validates live FDT/msgram/IPCC mappings, owner/generation and CPU/thread
 +     * binding, with other AOP clients quiesced. check() must remain failed after
 +     * ownership loss. A boot argument or host marker cannot establish a lease.

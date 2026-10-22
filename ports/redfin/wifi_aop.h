@@ -36,7 +36,9 @@ struct rf_wifi_aop_session {
 
 struct rf_wifi_aop_ops {
     void *context;
-    /* The caller must hold a serialized, exclusive native AOP/QMP lease. It
+    /* Write entry points require a serialized, exclusive native AOP/QMP lease.
+     * The read-only observer instead requires a live read-only mapping lease;
+     * it never grants write ownership. The platform
      * validates live FDT/msgram/IPCC mappings, owner/generation and CPU/thread
      * binding, with other AOP clients quiesced. check() must remain failed after
      * ownership loss. A boot argument or host marker cannot establish a lease.
