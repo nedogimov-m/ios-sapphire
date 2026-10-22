@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V6 proves GENI/GCC DFS mismatch; firmware assets inventoried — 2026-10-22
+
+Commit20bd079 records V5 clocks/pads, RO USB contexts and bounded liblp parser.
+New DFS overlay adds at most20 RO reads/six lines, no writes/delays;7 actual-C
+tests/independent review PASS,52 combined touch tests PASS. Full suite452 PASS
+(logs/redfin/peripherals-host-tests-v14.txt). Both builders include the overlay.
+Local ARM64 build research/redfin-build/build-20261022-185724.log passed;
+kernel 971118c2b9e8e40baf1a88ddda02e32a45cdce140dca8ca695ea46f5c9aefddb.
+Image ports/redfin/out/touch-id-v6/redfin-xnu.img SHA256
+36727ba6310a8d04a89acf42f8926c33394b08295991b7615127c937dd5b06ae.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x8cad7e5c26b9ff88`.
+Authenticated/image-matched logs/redfin/touch-id-v6/ reached PID1, no panic,
+metadata primed and verified fastboot. Before/failing first TX: SE_DFS_IF80
+301 (enabled1), GCCDFS20 (enabled0), protection70/74/780, DMA_GENERALf,
+CFG10833f/1090; wrapper HW20070000/AHB_M_CFG1/COMMON_CFG7. ID still timeout60.
+Thus mismatch is observed, not merely guessed; whether correcting it fixes
+TX remains unproved. Coreboot pinabf9c3b66c06c9f164388c2c72a31006385d3389
+qupv3_config.c52..65 pairs SE DFS enable with clock DFS configuration. Next:
+clear only SE80 bit0 before the existing GCC DFS-off/manual XO sequence,
+preserve other bits, refuse failed readback before GPIO/reset release.
+
+Targeted base-vendor capture completed with only4,509,696 data bytes plus
+8,667,136 before/after GPT/super verification bytes, no mounts/device writes
+or ramoops access, verified fastboot return.12 files/hashes independently
+reverified: a650 SQE31632,GMU41548; a620 zap MDT6860+b00/b01/b02;
+WLAN MBN3811096, both Redfin BDF26328, station config, modemuw and build.prop.
+The only optional listing error is absent /etc/firmware (manifest partial).
+Private report research/redfin-modem-inventory/vendor-assets-v1/host-inventory.json
+SHAb79f063cd34f2bf4ede2a30f992553f5280d7546eb10e58640fb22adebfea5f5.
+ZAP ELF32LE/Hexagon164/3PHDRs: b00 metadata148+b01 hash6712=MDT6860;
+only loadindex2 requires b02 payload1676. WLAN complete7PHDR bounds pass.
+WLAN versionWLAN.HL.3.3.1.c9-00516-QCAHLSWMTPLZ-1.38480.2; board variant
+selection/RF identity and exact MPSS compatibility are not proved. Base vendor
+contains mixed Android14 UP1A/2023patch and Android16 BP4A/SDK36/userdebug
+2026 fields; do not call it pristine stock/current snapshot. COW unresolved.
+No firmware loaded/authenticated or GPU/WLAN power/start attempted. Covered
+ext4 helper10 real-libext2fs tests+independent review PASS; host cache and
+firmware/tool outputs stay private. Generic liblp code alone is tracked.
+
 ## REDFIN V5 clocks/pads stable; USB context read-only inventory — 2026-10-22
 
 Commit1da638d records USB V2 BYPASS-to-FAULT evidence and cached diagnostics.

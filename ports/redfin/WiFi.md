@@ -229,4 +229,16 @@ means the base filesystem, not a proved current snapshot. Firmware inventory
 must preserve that distinction; reconcile base version, COW state and modem
 compatibility before loading any extracted assets. The firmware and per-device
 plans stay private. Targeted read-only filesystem requests can use the verified
-extent map without dumping the whole9.7GiB super partition.
+extent map without dumping the whole9.7GB super partition.
+
+The first targeted base-vendor pass extracted WLAN firmware, both Redfin board
+variants and the station configuration with a hash-verified sparse host cache.
+Only4,509,696 bytes of vendor data were requested, plus8,667,136 bytes for
+before/after GPT and super metadata verification. Safe recovery performed no
+mounts or disk writes and returned to verified fastboot. All artifacts remain
+under private `research/redfin-modem-inventory/vendor-assets-v1/`.
+The base identifies Redfin but contains mixed version properties: an Android14
+UP1A fingerprint/security patch alongside Android16/BP4A/SDK36/userdebug
+fields. It must not be described as a pristine stock or effective snapshot.
+COW/modem compatibility and native PAS/GLINK/WLFW startup remain unproved.
+No firmware was loaded.

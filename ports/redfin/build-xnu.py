@@ -214,6 +214,7 @@ def main(argv=None):
                                          'touch-events.patch', 'touch-rail-ready.patch',
                                          'rpmh-touch.patch', 'touch-start.patch',
                                          'touch-spi-diag.patch', 'touch-platform-diag.patch',
+                                         'touch-dfs-diag.patch',
                                          'usb-owned-route.patch', 'usb-owned-diag.patch',
                                          'usb-owned-build.patch',
                                          'usb-gadget.patch', 'usb-start.patch',

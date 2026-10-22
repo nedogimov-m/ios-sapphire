@@ -124,3 +124,26 @@ GIC mask returns before MMIO; cleanup must leave both local enables zero.
 `test_touch_spi_diag.py` additionally compares actual-C baseline/diagnostic
 write and delay traces, return values and FIFO consumption across success,
 preflight, timeout, cancel/abort, malformed-response and identity failures.
+
+V4's authenticated snapshot subsequently proves the first TX_ONLY opcode
+0x08000000 remains active, before RX: M_IRQ0, STATUS31, FIFO word count0.
+V5 adds unchanged physical GCC/RCG/DFS and GPIO evidence before/failing TX.
+AHBs2 to80000002 has HWCG enabled and does not by itself prove lost power.
+Word length, packing, mode3, master clock141 and the separate INIT8/FW101
+fields are consistent with pinned drivers; SCLK0 is not itself an omission.
+The reason the sequencer does not finish remains unresolved.
+
+`touch-platform-diag.patch` adds bounded snapshots from existing setup maps;
+`touch-dfs-diag.patch` additionally reads protection70/74/78, SE DFS_IF80,
+DMA_GENERALe30, sampling2b0/2b4 and wrapper version/AHB/common4/118/120.
+The latter maps only the source-pinned wrapper8c0000+2000 after final proof,
+with complete rounded-map RAM exclusion; map failure only skips evidence.
+It adds at most20 RO reads/six lines and no hardware writes/delays. This
+tests whether disabling GCC DFS left the separate SE DFS interface enabled.
+Readback evidence is required before changing either interface or firmware.
+
+V6 authenticated evidence confirms SE_DFS_IF80=301 (enabled1) while GCC
+DFS=20 (enabled0), unchanged across the TX timeout. Protection readbacks are0;
+wrapper version20070000/AHB1/COMMON7. A minimal source-backed correction must
+disable only the SE DFS enable before the existing manual XO configuration,
+preserve other bits and stop on failed readback. Its effect is still untested.

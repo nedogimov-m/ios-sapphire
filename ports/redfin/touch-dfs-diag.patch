@@ -1,0 +1,90 @@
+diff --git a/bsd/dev/redfin_touch_setup.c b/bsd/dev/redfin_touch_setup.c
+--- a/bsd/dev/redfin_touch_setup.c
++++ b/bsd/dev/redfin_touch_setup.c
+@@ -162,8 +162,50 @@
+ #define RF_TOUCH_PLATFORM_DIAG 1
+ static struct redfin_setup redfin_platform_diag_maps;
+ static bool redfin_platform_diag_published;
++/* Source-pinned RO DFS/wrapper evidence, never a clock/security policy write.
++ * Coreboot abf9c3b66c06c9f164388c2c72a31006385d3389:
++ * qup_se_handlers_common.h defines protection RO70/74/78 and DFS_IF80;
++ * qupv3_config.c:52..65 pairs DFS_IF bit0 with clock DFS configuration,
++ * and :242..252 reads wrapper118/120 for RMW. Vendor spi-geni-qcom.c
++ * :864..865 reads CFG108/109; qcom-geni-se.c:272 reads DMA_GENERALe30.
++ * DT afc98e2bb0716a57bf4f8d2b6191378dd7123ce4 qcom/lito-qupv3.dtsi
++ * :12..15 supplies wrapper0=8c0000+2000. No program RAM is sampled.
++ */
++#define RF_TOUCH_DFS_DIAG 1
++static vm_offset_t redfin_dfs_diag_wrapper;
++static bool redfin_dfs_diag_memory_safe;
++static const unsigned redfin_dfs_se_offsets[]={0x70,0x74,0x78,0x80,0xe30,0x2b0,0x2b4};
++static const unsigned redfin_dfs_wrapper_offsets[]={0x4,0x118,0x120};
++static uint32_t
++redfin_dfs_diag_rd(vm_offset_t base,unsigned offset)
++{
++ return redfin_setup_rd(base,offset);
++}
++static void
++redfin_dfs_diag_map(void)
++{
++ DTEntry chosen;
++ const void *raw=NULL;
++ unsigned bytes=0;
++ uint64_t ram=0,size=0;
++ if (SecureDTLookupEntry(NULL,"/chosen",&chosen)!=kSuccess ||
++     SecureDTGetProperty(chosen,"dram-base",&raw,&bytes)!=kSuccess || !raw || bytes!=sizeof(ram)) return;
++ memcpy(&ram,raw,sizeof(ram));
++ if (SecureDTGetProperty(chosen,"dram-size",&raw,&bytes)!=kSuccess || !raw || bytes!=sizeof(size)) return;
++ memcpy(&size,raw,sizeof(size));
++ if (!ram || !size || ((ram|size)&0x3fffULL) || ram>(1ULL<<36) || size>(1ULL<<36)-ram) return;
++ /* Check complete 16K mappings, including the rounded wrapper page. */
++ const uint64_t pages[]={0x880000,0x8c0000};
++ for (unsigned i=0;i<2;i++)
++  if (ram<pages[i]+0x4000 && pages[i]<ram+size) return;
++ redfin_dfs_diag_memory_safe=true;
++ redfin_dfs_diag_wrapper=ml_io_map(0x8c0000,0x2000);
++ /* A missing map skips wrapper evidence; the original SPI result is retained. */
++}
+ struct redfin_platform_snapshot {
+  uint32_t gcc[12],pins[7][2],seq_start;
++ uint32_t dfs_se[7],dfs_wrapper[3];
++ bool dfs_se_read,dfs_wrapper_read;
+  bool seq_read;
+ };
+ static struct redfin_platform_snapshot redfin_platform_snapshots[2];
+@@ -196,6 +238,14 @@
+      ((g[2]&2u) || !(g[2]&0x80000000u)) && !(g[3]&0x80000000u) &&
+      !(g[4]&0x80000000u) && !(g[5]&0x80000000u) && !(g[6]&0x80000000u);
+  if (clocks) { d->seq_start=redfin_platform_diag_rd(s->se,0x84);d->seq_read=true; }
++ if (clocks && redfin_dfs_diag_memory_safe) {
++  for (unsigned i=0;i<7;i++) d->dfs_se[i]=redfin_dfs_diag_rd(s->se,redfin_dfs_se_offsets[i]);
++  d->dfs_se_read=true;
++  if (redfin_dfs_diag_wrapper) {
++   for (unsigned i=0;i<3;i++) d->dfs_wrapper[i]=redfin_dfs_diag_rd(redfin_dfs_diag_wrapper,redfin_dfs_wrapper_offsets[i]);
++   d->dfs_wrapper_read=true;
++  }
++ }
+  __atomic_store_n(&redfin_platform_ready[phase],true,__ATOMIC_RELEASE);
+ }
+ void
+@@ -217,6 +267,12 @@
+      name,d->pins[3][0],d->pins[3][1],d->pins[4][0],d->pins[4][1],d->pins[5][0],d->pins[5][1],d->pins[6][0],d->pins[6][1]);
+  printf("REDFIN TOUCH PLATFORM: phase=%s SEQ_START-read=%u raw=%#x (read-only; skipped if clocks unavailable)\n",
+      name,d->seq_read,d->seq_start);
++ printf("REDFIN TOUCH DFS: phase=%s SE-read=%u LOCK_RO70=%#x/74=%#x/78=%#x DFS_IF80=%#x enable=%u\n",
++     name,d->dfs_se_read,d->dfs_se[0],d->dfs_se[1],d->dfs_se[2],d->dfs_se[3],d->dfs_se[3]&1u);
++ printf("REDFIN TOUCH DFS: phase=%s DMA_GENERALe30=%#x CFG1082b0=%#x CFG1092b4=%#x (raw; read-only)\n",
++     name,d->dfs_se[4],d->dfs_se[5],d->dfs_se[6]);
++ printf("REDFIN TOUCH DFS: phase=%s wrapper-read=%u HW_VER4=%#x AHB_M_CFG118=%#x COMMON_CFG120=%#x\n",
++     name,d->dfs_wrapper_read,d->dfs_wrapper[0],d->dfs_wrapper[1],d->dfs_wrapper[2]);
+ }
+ 
+ int
+@@ -304,6 +360,7 @@
+ 	printf("REDFIN TOUCH SETUP: XO19.2MHz/div20, mode3, AP bus, reset released; ID only\n");
+  /* Copy mappings, never retain the stack context. They remain mapped for boot. */
+  redfin_platform_diag_maps=s;
++ redfin_dfs_diag_map();
+  __atomic_store_n(&redfin_platform_diag_published,true,__ATOMIC_RELEASE);
+ 	return redfin_touch_spi_probe(s.se,960000,true);
+ }

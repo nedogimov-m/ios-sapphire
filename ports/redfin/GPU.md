@@ -42,3 +42,8 @@ checksummed liblp metadata; see [vendor inventory](WiFi.md#bounded-base-vendor-i
 The observed Virtual A/B COW entries leave the effective snapshot unproved.
 Inventory of a650 SQE/GMU and signed a620 zap assets is separate from GPU
 power-up or firmware loading, and all captured bytes remain private.
+
+The targeted base-vendor pass now has a650 SQE31,632 bytes, GMU41,548 bytes
+and a620 zap MDT plus original b00/b01/b02 blobs. Host hashes and filesystem
+read coverage are retained privately; no GPU power, SCM/PAS or firmware load
+was attempted. The source remains explicitly the raw vendor base view.
