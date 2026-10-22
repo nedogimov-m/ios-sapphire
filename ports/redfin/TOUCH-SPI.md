@@ -1,9 +1,15 @@
 # Stage 2 draft: SEC SPI identity
 
-`touch-spi.patch` adds an ID-only transport, with no startup hook. It is not
-enabled by stage 1 or the current build flags. Its `redfintouch=2` check is
-an additional guard, not integration. Do not infer hardware validation from
-the passing host model.
+`touch-spi.patch` adds an ID-only transport, with no startup hook of its own.
+The initial md0 caller now invokes it after verified power and cold setup.
+In the authenticated `touch-id-v3` run (2026-10-22), physical L17 power and
+every setup phase passed, but the ID exchange timed out with errno 60 and
+host cancel/abort also timed out. SEC identity remains unknown.
+
+The exchange begins with an 8-byte TX-only command; V3 did not log which
+opcode was pending on failure. Zero ID bytes do not prove that RX was never
+issued: the output is copied only after the complete response validates.
+The following diagnostic run must distinguish TX failure from RX failure.
 
 Before connecting `redfin_touch_spi_probe(se, verified_speed_hz, gic_irq_masked)`, prove the
 stage 1 ADT contract, all five clock branches, AP pin ownership, SEC reset
@@ -30,16 +36,17 @@ needs separate PLL frequency proof. GENI's serial divider is bits 15:4 of
 the wrapper HW version at `0x8c0000+4` before interpreting the wire rate.
 
 Captured DT power facts: `avdd-supply` resolves to PM8150 L17, RPMh resource
-`ldoa17`, 3.3 V, `regulator-always-on`. The SEC Linux driver only enables that
-supply; it does not upload firmware to obtain the observed device ID. The
-actual ABL power handoff remains unproved until an XNU transaction succeeds.
+`ldoa17`, exactly 3.304 V, `regulator-always-on`. The SEC Linux driver only
+enables that supply; it does not upload firmware to obtain the observed
+device ID. V3 proved an owned ACTIVE vote and fresh physical configured/VALID
+3304 mV, HPM7, enable `80`, STATUS `87`; this was not an enabled ABL handoff.
 
 The transport preflight requires the existing SE state to match the Linux
 configuration: idle, empty FIFOs, SPI mode 3, CS0 active low, 8-bit words,
 MSB-first packing, 16x32-bit FIFOs, FIFO interface available, DMA and GSI off,
 GENI output control enabled and serial clock enabled. If anything differs,
-it returns before writing. Configuration changes belong in a later,
-source-reviewed setup step after the live snapshot is assessed.
+it returns before writing. Configuration is supplied by the separately
+guarded setup described in [TOUCH-SETUP.md](TOUCH-SETUP.md).
 
 Only GENI host registers are written: local interrupt gating/status,
 watermarks, CS-toggle configuration, transfer lengths, command and FIFO.
@@ -68,6 +75,16 @@ not the different mainline implementation under `drivers/soc/qcom`.
 The host SPI source is linked in `TOUCH.md`. The draft follows
 `setup_fifo_xfer`, `geni_spi_handle_tx`, `geni_spi_handle_rx`,
 `geni_setup_m_cmd` and the SEC `sec_ts_read_internal` framing.
+
+`touch-spi-diag.patch`, applied after `touch-events.patch`, adds read-only
+evidence before the first command and before/after bounded error recovery.
+Each snapshot reads 41 fixed GENI configuration/status registers; the boot
+budget is at most 369 additional reads and 45 log lines. No FIFO data or
+IRQ-clear register is read, and no transport writes, explicit delays or
+polling budgets change. Failure snapshots are printed after recovery.
+The source audit preserves `GENI_CGC_CTRL` bits 8/9
+(`PROG_RAM_HCLK_OFF`/`PROG_RAM_SCLK_OFF`) as native `se_io_init` does;
+diagnostics observe them without speculative clock changes.
 
 After a live ID succeeds, events can use read `0x60` for one 8-byte event,
 then `0x61` for remaining events (`500 us` request-to-response delay for
@@ -104,3 +121,6 @@ fatal commands and bounded cancel/abort without retry. Its status model
 gates DONE/WM behind both local routing and master enables, with a response
 delivered in a watermark batch followed by a last/done batch. An unproved
 GIC mask returns before MMIO; cleanup must leave both local enables zero.
+`test_touch_spi_diag.py` additionally compares actual-C baseline/diagnostic
+write and delay traces, return values and FIFO consumption across success,
+preflight, timeout, cancel/abort, malformed-response and identity failures.

@@ -1,10 +1,16 @@
 # Cold SEC setup draft
 
-`touch-setup.patch` is unapplied and has no startup hook. It adds
+`touch-setup.patch` has no startup hook of its own. It adds
 `int redfin_touch_setup(bool rail_ready, bool host_exclusive)` on top of
-`touch.patch` and `touch-spi.patch`. Root integration remains separate.
+`touch.patch` and `touch-spi.patch`; the initial md0 caller now invokes it.
 The call requires `redfintouch=2 redfintouchsetup=1` and runs at most once
 per boot. Missing power/exclusivity proof returns before mapping hardware.
+
+Hardware result, 2026-10-22 (`touch-id-v3`): fresh physical power proof
+passed, followed by clock votes, idle-SE checks, XO configuration, SPI host
+configuration, TLMM configuration and reset release/settling. The subsequent
+ID exchange returned timeout 60; cancel/abort also timed out. Preparation is
+observed, while SEC identity and the failing TX/RX opcode remain unproved.
 
 `rail_ready` must represent the power backend's fresh, successful preparation
 of PM8150 L17 / `ldoa17` at the DT's exact 3,304,000 uV (`0x326a40`,
@@ -55,6 +61,8 @@ The implemented sequence is:
 4. Apply the source-defined GENI IO clock/default-output initialization,
    8-bit MSB-first packing and SPI mode 3, CS0 active low. No firmware RAM
    is written, no DMA is started, and no host command is issued here.
+   The `GENI_CGC_CTRL` mask is only `0x7f`, preserving bits 8/9
+   (`PROG_RAM_HCLK_OFF`/`PROG_RAM_SCLK_OFF`) like native `se_io_init`.
 5. Set switch 35's LOW latch before enabling GPIO output. Leave IRQ 9 an
    input. Configure SPI pins 42..45 as `qup00` function index 1, drive 6 mA,
    bias disabled, preserving GPIO OE and unrelated fields as pinctrl does.
@@ -87,4 +95,7 @@ The actual C is compiled with MMIO/DT models. Tests cover missing proofs,
 exact mappings, GPIO ownership, foreign active/DMA/GSI state, no unclocked SE
 reads, preservation of unrelated votes, finite clock/DFS/reset timeouts,
 latch-before-OE, absence of reset pulses, GIC becoming enabled mid-setup and
-exactly one ID call after settling. Hardware setup/identity remain unproved.
+exactly one ID call after settling. V3 observed hardware preparation; identity
+remains unknown. The bounded read-only GENI diagnostics in
+[TOUCH-SPI.md](TOUCH-SPI.md) will identify the pending command without changing
+transport writes, explicit delays or timeout budgets.

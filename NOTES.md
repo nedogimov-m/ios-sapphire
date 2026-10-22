@@ -1,5 +1,57 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V4 identifies the first SPI TX hang — 2026-10-22
+
+New touch-spi-diag overlay adds bounded read-only GENI snapshots:41 safe
+registers, at most369 additional reads/45 log lines per boot; no FIFO data
+or IRQ-clear reads, transport writes/delays/timeouts unchanged. Independent
+review and6 actual-C diagnostic tests PASS; full suite411 PASS
+(logs/redfin/peripherals-host-tests-v11.txt). Both builders include it.
+Local ARM64 build research/redfin-build/build-20261022-182229.log passed;
+kernel b5dfcf12db392c32a735a873d225fd13d63a6082d4f4ebf520f795555b38aa9c.
+Image ports/redfin/out/touch-id-v4/redfin-xnu.img SHA256
+c0715fc2348994aca16598e093bc7ba2d99e14a066772e9b299c4d63d3601026.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x2fb50bc1fbfe16b7`.
+Authenticated/image-matched capture logs/redfin/touch-id-v4/ observed PID1,
+no panic, re-primed metadata and verified fastboot return. L17/cold setup
+passed again. Before firstTX: INIT8/8,STATUS0,FW101/101,MCLK141,SCLK0,
+CLK_CTRL1,CGC7f,IRQ0,TX_LEN8,RX_LEN0,empty FIFOs. At failure:
+STATUS31,M_CMD08000000,TX_FIFO20000000,M_IRQ0; clock/config values unchanged.
+After cancel/abort: CTRL2,STATUS31,IRQ0,local routes disabled. This proves
+the first TX opcode is still active, before RX. FIFO low word-count bits
+are0; sequencer/clock failure cause is not yet established. No event worker
+or UFS ran. Next: pinned-source interpretation of this actual snapshot,
+then a minimal evidence-backed correction; USB cached EIO diagnostics.
+
+## REDFIN touch exchange timeout and first USB ownership result — 2026-10-22
+
+Commit ca0b0de contains the STATUS87 fix and initial USB owner caller.
+Touch V3 completed automatically: logs/redfin/touch-id-v3/, authenticated
+and matched image c81e1432db027e51, PID1/11 heartbeats, no panic, verified
+fastboot return. Build180523/kernel b10cfe0ba85d50d78f9d27c5a67478dd0567edaa3ee50caba71772abae8bd606;
+image cd092f49f6cfd64c3104cc866d5ac40c2efcf0a3e40e472e5e23a32175320919.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xc81e1432db027e51`.
+Physical L17 proof passed (configured+VALID3304mV,MODE7,ENABLE80,STATUS87).
+Cold setup reached reset release: XO19.2MHz/div20,mode3/AP bus. The ID
+exchange, starting with TX-only8B, timed out (errno60), as did cancel/abort.
+V3 does not identify which opcode hung: the ID is copied out only after a
+complete valid reply, so zero bytes do not prove that RX was never issued
+or that the touch controller is absent/wrong. Independent pinned-source
+audits found no demonstrated original TX omission.
+CGC bits8/9 are preserved by native setup too; do not clear them by name.
+Next: bounded read-only GENI snapshots before command and around recovery.
+
+USB owned V1 completed automatically: logs/redfin/usb-owned-v1/, authenticated
+and image-matched b99e5d6ced0b25e3, PID1 proof, no panic, verified fastboot.
+Build175738/kernel 9d9b9373af0c18538ffdffeb0df15ad0a52696f49094810b28f55c32fcbe1e0a;
+image 33d6a637bb68946137cba7cd7346ff5538c44881532e3a369daf0ce60cf7d638.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xb99e5d6ced0b25e3`.
+Caller registered0, ownership claim quarantined EIO5. Current logs cannot
+locate the failed check or establish whether either slot write occurred.
+No gadget/controller writes or DMA were invoked. Next: cached failure-stage
+diagnostics without relaxing guards or adding writes. Both runs used md0;
+UFS stayed disabled and Android must still not boot before userdata restore.
+
 ## REDFIN L17 physically enabled; STATUS87 guard corrected — 2026-10-22
 
 V2 cached diagnostics add no MMIO reads/writes or physical callbacks. Build

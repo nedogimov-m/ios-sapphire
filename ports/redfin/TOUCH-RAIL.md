@@ -205,4 +205,22 @@ voltage, MODE, ENABLE, fresh-sample and stability checks remain required.
 New actual-C regressions accept the observed `0x87`, prove that already-powered
 `0x87` needs no MMIO/vote, and reject `0x8f/0x97/0xa7/0xc7` before and after
 a vote. Transaction counts remain unchanged. All 41 backend/proof/start tests
-pass. Cold SPI setup and SEC chip ID still require a fresh device run.
+pass. V3 below supplies fresh power and hardware-preparation evidence;
+SEC chip ID remains unknown.
+
+## V3 proves power and cold preparation — 2026-10-22
+
+The authenticated `touch-id-v3` run passed power preparation: TCS completion
+after 16 polls, IRQ/IDLE `1`, command statuses `0x10101`, then two fresh
+configured/VALID 3304 mV, MODE `7`, ENABLE `80`, STATUS `87` samples. Clock
+votes, idle-SE checks, XO/SPI host setup, TLMM configuration and reset
+release/settling also passed. The ID exchange timed out with errno 60 and
+host cancel/abort failed to complete; no identity or touch events were proved.
+
+The exchange starts with TX-only 8 bytes, but V3 did not identify the pending
+opcode. Zero output bytes also occur after an RX failure. The next
+`touch-spi-diag.patch` snapshots 41 safe GENI registers before the first command
+and around recovery, bounded to 369 extra reads/45 log lines, with no added
+transport writes, explicit delays or changed polling limits. The native
+`GENI_CGC_CTRL` bits 8/9 remain preserved. These diagnostics address transport
+state; the physical power proof above remains a separate observation.

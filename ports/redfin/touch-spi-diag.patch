@@ -1,0 +1,131 @@
+diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
+--- a/bsd/dev/redfin_touch_spi.c
++++ b/bsd/dev/redfin_touch_spi.c
+@@ -47,9 +47,77 @@
+ 	__asm__ volatile("dsb osh" ::: "memory");
+ }
+ 
++/* Bounded read-only GENI evidence. Register offsets follow the pinned
++ * vendor qcom-geni-se.h and spi-geni-qcom.c. No FIFO data/IRQ-clear reads,
++ * no new register writes, delays, polling loops, retries or firmware uploads.
++ * Print failure evidence only after the original bounded recovery sequence.
++ */
++#define RF_SPI_DIAG_MAX_FAILURES 4u
++#define RF_SPI_DIAG_REGISTERS 41u
++static bool redfin_spi_diag_command_logged;
++static unsigned redfin_spi_diag_failures;
++struct redfin_spi_diag {
++ uint32_t value[RF_SPI_DIAG_REGISTERS];
++ bool owned,dead;
++};
++static const uint16_t redfin_spi_diag_offsets[RF_SPI_DIAG_REGISTERS]={
++ 0x000,0x004,0x040,0x068,0x06c,0x600,0x604,0x610,0x614,0x640,0x644,
++ 0x800,0x804,0x908,0x048,0x04c,0x060,0x07c,0x028,0x064,0x258,0xe18,0xe1c,
++ 0x80c,0x810,0x814,0x26c,0x270,0x268,0x224,0x230,0x25c,0x250,
++ 0x260,0x264,0x284,0x288,0xe24,0xe28,0x024,0x020
++};
++static void
++redfin_spi_diag_capture(struct redfin_spi *s,struct redfin_spi_diag *out)
++{
++ out->owned=s->command_owned;out->dead=s->dead;
++ for (unsigned i=0;i<RF_SPI_DIAG_REGISTERS;i++) out->value[i]=redfin_spi_rd(s,redfin_spi_diag_offsets[i]);
++}
++static void
++redfin_spi_diag_print(const char *phase,int error,const struct redfin_spi_diag *d)
++{
++ const uint32_t *v=d->value;
++ printf("REDFIN TOUCH SPI DIAG: phase=%s error=%d owned=%u dead=%u INIT=%#x/%#x STATUS=%#x FW=%#x/%#x M_CMD=%#x CTRL=%#x\n",
++     phase,error,d->owned,d->dead,v[0],v[1],v[2],v[3],v[4],v[5],v[6]);
++ printf("REDFIN TOUCH SPI DIAG: phase=%s M_IRQ=%#x EN=%#x S_IRQ=%#x EN=%#x TX_FIFO=%#x RX_FIFO=%#x IOS=%#x\n",
++     phase,v[7],v[8],v[9],v[10],v[11],v[12],v[13]);
++ printf("REDFIN TOUCH SPI DIAG: phase=%s MCLK=%#x SCLK=%#x CLK_CTRL=%#x CLKSEL=%#x CGC=%#x FIFO_DISABLE=%#x DMA=%#x GSI=%#x ROUTES=%#x\n",
++     phase,v[14],v[15],v[16],v[17],v[18],v[19],v[20],v[21],v[22]);
++ printf("REDFIN TOUCH SPI DIAG: phase=%s WM_TX=%#x WM_RX=%#x RFR=%#x TX_LEN=%#x RX_LEN=%#x WORD=%#x CPHA=%#x CPOL=%#x TRANS_CFG=%#x CS=%#x\n",
++     phase,v[23],v[24],v[25],v[26],v[27],v[28],v[29],v[30],v[31],v[32]);
++ printf("REDFIN TOUCH SPI DIAG: phase=%s TX_PACK=%#x/%#x RX_PACK=%#x/%#x HW_PARAM=%#x/%#x OUTPUT=%#x FORCE_DEFAULT=%#x\n",
++     phase,v[33],v[34],v[35],v[36],v[37],v[38],v[39],v[40]);
++}
++static bool
++redfin_spi_diag_failure_slot(void)
++{
++ unsigned n=__atomic_load_n(&redfin_spi_diag_failures,__ATOMIC_RELAXED);
++ /* A contended diagnostic may be dropped. Never spin or exceed the budget. */
++ return n<RF_SPI_DIAG_MAX_FAILURES && __atomic_compare_exchange_n(&redfin_spi_diag_failures,&n,n+1,false,
++     __ATOMIC_RELAXED,__ATOMIC_RELAXED);
++}
++static void
++redfin_spi_diag_once(struct redfin_spi *s,bool transmit)
++{
++ if (__atomic_exchange_n(&redfin_spi_diag_command_logged,true,__ATOMIC_RELAXED)) return;
++ struct redfin_spi_diag snapshot;
++ redfin_spi_diag_capture(s,&snapshot);
++ redfin_spi_diag_print(transmit?"before-first-tx":"before-first-rx",0,&snapshot);
++}
++static void
++redfin_spi_diag_error(struct redfin_spi *s,const char *phase,int error)
++{
++ if (!redfin_spi_diag_failure_slot()) return;
++ struct redfin_spi_diag snapshot;
++ redfin_spi_diag_capture(s,&snapshot);
++ redfin_spi_diag_print(phase,error,&snapshot);
++}
++
+ static int
+ redfin_spi_failed(struct redfin_spi *s, int error)
+ {
++ bool diagnostic=redfin_spi_diag_failure_slot();
++ struct redfin_spi_diag before,after;
++ if (diagnostic) redfin_spi_diag_capture(s,&before);
+ 	s->dead = true;
+ 	/* Bound CS recovery. Never retry this SEC request after an error. */
+ 	if (s->command_owned && (redfin_spi_rd(s, 0x40) & 1)) {
+@@ -69,6 +137,11 @@
+ stopped:
+ 	redfin_spi_wr(s, 0xe1c, 0);
+ 	redfin_spi_wr(s, 0x614, 0);
++ if (diagnostic) {
++  redfin_spi_diag_capture(s,&after);
++  redfin_spi_diag_print("failure-before-recovery",error,&before);
++  redfin_spi_diag_print("failure-after-recovery",error,&after);
++ }
+ 	return error;
+ }
+ 
+@@ -92,9 +165,15 @@
+ 	    redfin_spi_rd(s, 0x260) != RF_SPI_PACK0 || redfin_spi_rd(s, 0x264) != RF_SPI_PACK1 ||
+ 	    redfin_spi_rd(s, 0x284) != RF_SPI_PACK0 || redfin_spi_rd(s, 0x288) != RF_SPI_PACK1 ||
+ 	    redfin_spi_rd(s, 0x254) || (redfin_spi_rd(s, 0x24) & 127) != 127 ||
+-	    !(redfin_spi_rd(s, 0x48) & 1)) return ENOTSUP;
++	    !(redfin_spi_rd(s, 0x48) & 1)) {
++  redfin_spi_diag_error(s,"prepare-layout-error",ENOTSUP);
++  return ENOTSUP;
++ }
+ 	uint32_t irq = redfin_spi_rd(s, 0x610);
+-	if (irq & ~RF_SPI_EVENTS) return EIO;
++	if (irq & ~RF_SPI_EVENTS) {
++  redfin_spi_diag_error(s,"prepare-irq-error",EIO);
++  return EIO;
++ }
+ 	/* Local routing must be enabled for polled DONE/WM status. Caller has
+ 	 * proved GIC INTID633 masked; masking CPU IRQs alone is insufficient. */
+ 	redfin_spi_wr(s, 0xe1c, 0);
+@@ -122,6 +201,7 @@
+ 	if (irq & ~RF_SPI_EVENTS) return redfin_spi_failed(s, EIO);
+ 	redfin_spi_wr(s, 0x618, irq);
+ 	redfin_spi_wr(s, tx ? 0x26c : 0x270, count); /* 8 bits per SPI word. */
++ redfin_spi_diag_once(s,tx!=NULL);
+ 	s->command_owned = true;
+ 	redfin_spi_wr(s, 0x600, (tx ? 1u : 2u) << 27);
+ 	unsigned received = 0;
+@@ -195,7 +275,10 @@
+ 	redfin_spi_wr(&context, 0x614, 0);
+ 	if (error) return error;
+ 	const uint8_t expected[] = {0x53,0x45,0x37,0x91,0x00};
+-	if (memcmp(id, expected, sizeof(id))) return ENXIO;
++	if (memcmp(id, expected, sizeof(id))) {
++  redfin_spi_diag_error(&context,"identity-error",ENXIO);
++  return ENXIO;
++ }
+ 	redfin_spi_verified_se = se;
+ 	redfin_spi_verified_hz = verified_speed_hz;
+ 	return 0;
