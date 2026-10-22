@@ -203,7 +203,7 @@ class InstallerTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     INSTALL.build_record({**record, 'fsck': proof}, image, build)
 
-    def run_fixture(self, root, erase=False, fake=None):
+    def run_fixture(self, root, erase=False, fake=None, restart=False):
         primary, tail, state = root/'primary.bin', root/'backup.bin', root/'state.json'
         primary.write_bytes(self.primary); tail.write_bytes(self.backup)
         state.write_text(json.dumps({'state': self.state, 'primary_path': str(primary), 'backup_path': str(tail)}))
@@ -213,6 +213,8 @@ class InstallerTests(unittest.TestCase):
             args += ['--erase-userdata']
         else:
             args += ['--state-json', str(state)]
+        if restart:
+            args += ['--restart-adb-after-write']
         image = {'path': str(root/'image.img'), 'bytes': INSTALL.IMAGE_BYTES, 'sha256': 'a'*64, 'stat': [1, 2, 3, 4]}
         with patch.object(INSTALL, 'local_image', return_value=image), \
              patch.object(INSTALL, 'ADB', return_value=fake) as constructor, \
@@ -403,6 +405,230 @@ class InstallerTests(unittest.TestCase):
             INSTALL.main(['--image', 'x', '--build-manifest', 'b', '--expected-gpt', 'g',
                           '--out', 'o', '--state-json', 's', '--erase-userdata'])
         self.assertEqual(raised.exception.code, 2)
+
+    def test_adb_restart_is_explicitly_forbidden_in_live_check_and_offline_replay(self):
+        for mode in ([], ['--state-json', 'saved'], ['--state-json', 'saved', '--erase-userdata']):
+            with self.subTest(mode=mode), patch.object(INSTALL, 'ADB') as adb, \
+                    contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                INSTALL.main(['--image', 'x', '--build-manifest', 'b', '--expected-gpt', 'g',
+                              '--out', 'o', '--restart-adb-after-write', *mode])
+            self.assertEqual(raised.exception.code, 2)
+            adb.assert_not_called()
+
+    def test_host_server_restart_retains_selected_serial_and_waits_for_transport(self):
+        adb = INSTALL.ADB.__new__(INSTALL.ADB)
+        adb.serial = 'private-test-target'
+        success = INSTALL.subprocess.CompletedProcess([], 0, stdout=b'', stderr=b'')
+        offline = INSTALL.subprocess.CompletedProcess([], 1, stdout=b'', stderr=b'')
+        recovery = INSTALL.subprocess.CompletedProcess([], 0, stdout=b'recovery\n', stderr=b'')
+        with patch.object(INSTALL.subprocess, 'run', side_effect=[success, success, offline, recovery]) as run, \
+                patch.object(INSTALL.time, 'sleep'):
+            adb.restart_server()
+        self.assertEqual([call.args[0] for call in run.call_args_list],
+            [['adb', 'kill-server'], ['adb', 'start-server'],
+             ['adb', '-s', adb.serial, 'get-state'], ['adb', '-s', adb.serial, 'get-state']])
+        self.assertEqual(adb.serial, 'private-test-target')
+
+    def test_restart_fresh_evidence_is_required_before_readback(self):
+        primary, backup, state = self.primary, self.backup, self.state
+        failures = (None, 'uid', 'marker', 'product', 'mount', 'timer', 'dm',
+                    'primary_padding', 'tail_padding', 'gpt', 'restart', 'stream', 'sync', 'hash')
+        for failure in failures:
+            calls = []
+            class Fake:
+                def state(self):
+                    calls.append('state')
+                    result = {**state, 'timer': 'stopped'}
+                    if 'restart' in calls:
+                        changes = {'uid': ('uid', '2000'), 'marker': ('marker', '0'),
+                                   'product': ('product', 'bramble'), 'timer': ('timer', 'running'),
+                                   'dm': ('dm', 'dm-0')}
+                        if failure in changes:
+                            key, value = changes[failure]
+                            result[key] = value
+                        if failure == 'mount':
+                            result['mountinfo'] += '3 1 8:19 / /data rw - f2fs /dev/block/sda19 rw\n'
+                    return result
+                def gpt(self, unused):
+                    calls.append('gpt')
+                    current, tail = bytearray(primary), bytearray(backup)
+                    if 'restart' in calls:
+                        if failure == 'primary_padding':
+                            current[32] ^= 1
+                        if failure == 'tail_padding':
+                            tail[0] ^= 1
+                        if failure == 'gpt':
+                            current[4096] ^= 1
+                    return bytes(current), bytes(tail)
+                def stream(self, *unused):
+                    calls.append('WRITE_SIMULATED')
+                    if failure == 'stream':
+                        raise ValueError('stream/fsync failed')
+                    return {'ack_uncertain': True}
+                def restart_server(self):
+                    calls.append('restart')
+                    if failure == 'restart':
+                        raise ValueError('server start failed')
+                def readback(self):
+                    calls.append('readback')
+                    return ('b' if failure == 'hash' else 'a')*64
+                def sync(self):
+                    calls.append('sync')
+                    if failure == 'sync':
+                        raise ValueError('device sync failed')
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                code, report, unused = self.run_fixture(Path(directory), erase=True, fake=Fake(), restart=True)
+            self.assertEqual(code, 0 if failure is None else 1)
+            self.assertEqual('readback' in calls, failure in (None, 'hash'))
+            self.assertEqual('restart' in calls, failure != 'stream')
+            if 'restart' in calls:
+                self.assertLess(calls.index('WRITE_SIMULATED'), calls.index('restart'))
+            self.assertEqual(report['adb_server_restarted'], failure not in ('restart', 'stream'))
+            if failure is None:
+                self.assertTrue(report['write_ack_uncertain'])
+                self.assertTrue(report['device_sync_completed'])
+                self.assertTrue(report['post_restart_recovery_verified'])
+                self.assertLess(calls.index('restart'), calls.index('sync'))
+                self.assertLess(calls.index('sync'), calls.index('readback'))
+
+    def test_optional_eof_recovery_requires_all_source_bytes_and_exact_source_hash(self):
+        data = b'valid complete source'
+        class Process:
+            def __init__(self, timeout=True):
+                self.stdin = io.BytesIO()
+                self.returncode, self.killed, self.calls = 1, False, 0
+                self.timeout = timeout
+            def communicate(self, timeout=None):
+                self.calls += 1
+                if self.calls == 1 and self.timeout:
+                    raise INSTALL.subprocess.TimeoutExpired('adb', timeout)
+                return b'', b''
+            def kill(self):
+                self.killed = True
+        adb = INSTALL.ADB.__new__(INSTALL.ADB)
+        adb.serial = 'private-test-target'
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory)/'image'; image.write_bytes(data)
+            item = image.stat()
+            expected = {'stat': [item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns],
+                        'sha256': hashlib.sha256(data).hexdigest()}
+            for timeout in (True, False):
+                process = Process(timeout)
+                with patch.object(INSTALL, 'IMAGE_BYTES', len(data)), \
+                        patch.object(INSTALL.subprocess, 'Popen', return_value=process):
+                    result = adb.stream(image, expected, True)
+                self.assertTrue(result['ack_uncertain'])
+                self.assertEqual(process.killed, timeout)
+            for length, checksum in ((len(data)+1, expected['sha256']), (len(data), '0'*64)):
+                process = Process(False)
+                with patch.object(INSTALL, 'IMAGE_BYTES', length), \
+                        patch.object(INSTALL.subprocess, 'Popen', return_value=process), \
+                        self.assertRaisesRegex(ValueError, 'length/SHA256 changed'):
+                    adb.stream(image, {**expected, 'sha256': checksum}, True)
+
+    def test_restart_usb_fallback_only_runs_when_selected_transport_stays_offline(self):
+        adb = INSTALL.ADB.__new__(INSTALL.ADB)
+        adb.serial = 'private-test-target'
+        success = INSTALL.subprocess.CompletedProcess([], 0, stdout=b'', stderr=b'')
+        events = []
+        def control(command, **unused):
+            events.append(command[-1])
+            return success
+        with patch.object(INSTALL.subprocess, 'run', side_effect=control), \
+                patch.object(adb, 'wait_transport', side_effect=[False, True]) as wait, \
+                patch.object(INSTALL, 'reset_matching_usb', side_effect=lambda unused: events.append('USB')) as reset:
+            adb.restart_server()
+        reset.assert_called_once_with(adb.serial)
+        self.assertEqual([call.args for call in wait.call_args_list], [(20,), (60,)])
+        self.assertTrue(adb.usb_reset_performed)
+        self.assertEqual(events, ['kill-server', 'start-server', 'kill-server', 'USB', 'start-server'])
+        with patch.object(INSTALL.subprocess, 'run', return_value=success), \
+                patch.object(adb, 'wait_transport', return_value=False), \
+                patch.object(INSTALL, 'reset_matching_usb'), self.assertRaisesRegex(ValueError, 'did not return'):
+            adb.restart_server()
+        events.clear()
+        with patch.object(INSTALL.subprocess, 'run', side_effect=control), \
+                patch.object(adb, 'wait_transport', return_value=False), \
+                patch.object(INSTALL, 'reset_matching_usb', side_effect=ValueError('serial refused')), \
+                self.assertRaisesRegex(ValueError, 'serial refused'):
+            adb.restart_server()
+        self.assertEqual(events, ['kill-server', 'start-server', 'kill-server', 'start-server'])
+        self.assertFalse(adb.usb_reset_performed)
+
+    def test_usb_fallback_authenticates_exact_unique_serial_and_never_resets_others(self):
+        c = INSTALL.ctypes
+        class USB:
+            def __init__(self, devices):
+                self.devices, self.resets, self.closed = devices, [], []
+                self.freed, self.exited, self.reset_code = False, False, 0
+                self.array = (c.c_void_p*(len(devices)+1))(*range(1, len(devices)+1), None)
+            def libusb_init(self, pointer):
+                pointer._obj.value = 1
+                return 0
+            def libusb_exit(self, context):
+                self.exited = True
+            def libusb_get_device_list(self, context, pointer):
+                c.cast(pointer, c.POINTER(c.POINTER(c.c_void_p)))[0] = c.cast(self.array, c.POINTER(c.c_void_p))
+                return len(self.devices)
+            def libusb_free_device_list(self, devices, unref):
+                self.freed = True
+            def libusb_get_device_descriptor(self, device, pointer):
+                descriptor = pointer._obj
+                descriptor.length, descriptor.type, descriptor.serial = 18, 1, 3
+                descriptor.vendor, descriptor.product = self.devices[device-1][:2]
+                return 0
+            def libusb_open(self, device, pointer):
+                pointer._obj.value = device
+                return 0
+            def libusb_get_string_descriptor_ascii(self, handle, index, output, size):
+                serial = self.devices[handle.value-1][2]
+                if serial is None:
+                    return -1
+                c.memmove(output, serial, len(serial))
+                return len(serial)
+            def libusb_close(self, handle):
+                self.closed.append(handle.value)
+            def libusb_reset_device(self, handle):
+                self.resets.append(handle.value)
+                return self.reset_code
+        selected = (0x18d1, 0xd001, b'selected')
+        usb = USB([(1, 2, b'selected'), (0x18d1, 0xd001, b'other'), selected])
+        INSTALL.reset_matching_usb('selected', usb)
+        self.assertEqual(usb.resets, [3])
+        self.assertEqual(usb.closed, [2, 3])
+        self.assertTrue(usb.freed and usb.exited)
+        for devices in ([selected, selected], [(0x18d1, 0xd001, b'other')],
+                        [selected, (0x18d1, 0xd001, None)], [(1, 2, b'selected')]):
+            usb = USB(devices)
+            with self.subTest(devices=devices), self.assertRaises(ValueError):
+                INSTALL.reset_matching_usb('selected', usb)
+            self.assertEqual(usb.resets, [])
+            self.assertTrue(usb.freed and usb.exited)
+        usb = USB([selected])
+        usb.reset_code = -1
+        with self.assertRaisesRegex(ValueError, 'USB reset failed'):
+            INSTALL.reset_matching_usb('selected', usb)
+        self.assertEqual(usb.closed, [1])
+        self.assertTrue(usb.freed and usb.exited)
+
+    def test_default_write_never_restarts_host_server(self):
+        primary, backup, state = self.primary, self.backup, self.state
+        class Fake:
+            def state(self):
+                return {**state, 'timer': 'stopped'}
+            def gpt(self, unused):
+                return primary, backup
+            def stream(self, *unused):
+                pass
+            def readback(self):
+                return 'a'*64
+            def restart_server(self):
+                raise AssertionError('default write must not restart host ADB')
+        with tempfile.TemporaryDirectory() as directory:
+            code, report, unused = self.run_fixture(Path(directory), erase=True, fake=Fake())
+        self.assertEqual(code, 0)
+        self.assertFalse(report['adb_server_restart_attempted'])
+        self.assertFalse(report['adb_server_restarted'])
 
 
 if __name__ == '__main__':

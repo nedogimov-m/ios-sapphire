@@ -35,6 +35,7 @@ class RedfinADTTests(unittest.TestCase):
         for name, expected in original_hardware.items():
             self.assertEqual(mkadt.adt.serialize(child(root, name)), expected)
         chosen = child(root, 'chosen')
+        self.assertEqual(child(root, 'defaults').prop('no-effaceable-storage'), mkadt.u32(1))
         self.assertEqual(chosen.prop('dram-base'), mkadt.u64(self.BASE))
         self.assertEqual(chosen.prop('dram-size'), mkadt.u64(self.SIZE))
         self.assertEqual(child(root, 'product').prop('artwork-display-gamut'), b'sRGB\0')
@@ -53,6 +54,7 @@ class RedfinADTTests(unittest.TestCase):
         blob = mkadt.adt.serialize(mkadt.build(self.BASE, self.SIZE, 0x700, bytes(64)))
         root, end = mkadt.adt.parse(blob)
         self.assertEqual(end, len(blob))
+        self.assertEqual(child(root, 'defaults').prop('no-effaceable-storage'), mkadt.u32(1))
         self.assertEqual({item.name for item in root.children}, {'chosen', 'defaults', 'cpus', 'arm-io'})
         chosen = child(root, 'chosen')
         self.assertEqual(struct.unpack('<Q', chosen.prop('dram-base'))[0], self.BASE)

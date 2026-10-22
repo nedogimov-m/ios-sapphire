@@ -113,8 +113,8 @@ def build(memory_base, memory_size, boot_mpidr=0, seed=None):
         ('debug-enabled', u32(1)),
         ('firmware-version', cstr('redfin-shim-development')),
     ], [node('memory-map', [ph()])])
-    # pmap_compute_max_asids requires /defaults even with no overrides.
-    defaults = node('defaults', [ph()])
+    # keybagd reads the plain systembag.kb seeded by sweet-root-tweaks.py.
+    defaults = node('defaults', [ph(), ('no-effaceable-storage', u32(1))])
     cpu = node('cpu0', [
         ph(),
         ('device_type', cstr('cpu')),

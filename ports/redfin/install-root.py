@@ -7,6 +7,8 @@ offline and cannot enable writing. Obtain user consent before using the erase
 flag: installation destroys Android user data. Boot/recovery/GPT stay intact.
 """
 import argparse
+import ctypes
+import ctypes.util
 import hashlib
 import json
 import os
@@ -30,6 +32,73 @@ PSEUDO = {'rootfs', 'tmpfs', 'ramfs', 'proc', 'sysfs', 'devtmpfs', 'devpts',
           'cgroup', 'cgroup2', 'selinuxfs', 'tracefs', 'debugfs', 'binder',
           'binderfs', 'pstore', 'configfs', 'functionfs', 'securityfs', 'bpf',
           'fusectl', 'mqueue', 'nsfs'}
+
+
+class USBDescriptor(ctypes.Structure):
+    _fields_ = [('length', ctypes.c_uint8), ('type', ctypes.c_uint8),
+                ('usb', ctypes.c_uint16), ('device_class', ctypes.c_uint8),
+                ('subclass', ctypes.c_uint8), ('protocol', ctypes.c_uint8),
+                ('packet', ctypes.c_uint8), ('vendor', ctypes.c_uint16),
+                ('product', ctypes.c_uint16), ('device', ctypes.c_uint16),
+                ('manufacturer', ctypes.c_uint8), ('product_string', ctypes.c_uint8),
+                ('serial', ctypes.c_uint8), ('configurations', ctypes.c_uint8)]
+
+
+def reset_matching_usb(serial, library=None):
+    """Reset exactly one recovery USB device after reading its matching serial."""
+    try:
+        selected_serial = serial.encode('ascii')
+    except UnicodeError:
+        raise ValueError('selected USB serial must be ASCII') from None
+    require(bool(selected_serial), 'selected USB serial is empty')
+    if library is None:
+        name = ctypes.util.find_library('usb-1.0')
+        require(name, 'libusb-1.0 is required for the optional USB transport fallback')
+        library = ctypes.CDLL(name)
+        signatures = {
+            'libusb_init': ([ctypes.POINTER(ctypes.c_void_p)], ctypes.c_int),
+            'libusb_exit': ([ctypes.c_void_p], None),
+            'libusb_get_device_list': ([ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))], ctypes.c_ssize_t),
+            'libusb_free_device_list': ([ctypes.POINTER(ctypes.c_void_p), ctypes.c_int], None),
+            'libusb_get_device_descriptor': ([ctypes.c_void_p, ctypes.POINTER(USBDescriptor)], ctypes.c_int),
+            'libusb_open': ([ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)], ctypes.c_int),
+            'libusb_close': ([ctypes.c_void_p], None),
+            'libusb_get_string_descriptor_ascii': ([ctypes.c_void_p, ctypes.c_uint8, ctypes.c_void_p, ctypes.c_int], ctypes.c_int),
+            'libusb_reset_device': ([ctypes.c_void_p], ctypes.c_int)}
+        for name, (arguments, result) in signatures.items():
+            function = getattr(library, name)
+            function.argtypes, function.restype = arguments, result
+    context, devices = ctypes.c_void_p(), ctypes.POINTER(ctypes.c_void_p)()
+    handles, matches = [], []
+    require(library.libusb_init(ctypes.byref(context)) == 0, 'libusb initialization failed')
+    try:
+        count = library.libusb_get_device_list(context, ctypes.byref(devices))
+        require(count >= 0, 'USB device enumeration failed')
+        for index in range(count):
+            descriptor = USBDescriptor()
+            require(library.libusb_get_device_descriptor(devices[index], ctypes.byref(descriptor)) == 0,
+                    'USB descriptor read failed; no reset attempted')
+            if (descriptor.vendor, descriptor.product) != (0x18d1, 0xd001):
+                continue
+            require(descriptor.length == 18 and descriptor.type == 1 and descriptor.serial,
+                    'recovery USB descriptor lacks a verifiable serial')
+            handle = ctypes.c_void_p()
+            require(library.libusb_open(devices[index], ctypes.byref(handle)) == 0,
+                    'cannot open recovery USB device for serial verification')
+            handles.append(handle)
+            buffer = ctypes.create_string_buffer(256)
+            length = library.libusb_get_string_descriptor_ascii(handle, descriptor.serial, buffer, len(buffer))
+            require(0 < length < len(buffer), 'recovery USB serial could not be verified')
+            if buffer.raw[:length] == selected_serial:
+                matches.append(handle)
+        require(len(matches) == 1, 'exactly one matching recovery USB serial is required; no reset attempted')
+        require(library.libusb_reset_device(matches[0]) == 0, 'selected recovery USB reset failed')
+    finally:
+        for handle in handles:
+            library.libusb_close(handle)
+        if devices:
+            library.libusb_free_device_list(devices, 1)
+        library.libusb_exit(context)
 
 
 def require(condition, message):
@@ -296,7 +365,7 @@ class ADB:
             time.sleep(0.1)
         raise ValueError('recovery-return did not stop; no disk write was started')
 
-    def stream(self, image, expected):
+    def stream(self, image, expected, recover_ack=False):
         with image.open('rb') as source:
             item = os.fstat(source.fileno())
             require([item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns] == expected['stat'],
@@ -317,16 +386,31 @@ class ADB:
                         print(f'userdata: writing {percent:.1f}% ({total / 1024**3:.2f}/16 GiB)',
                               file=sys.stderr, flush=True)
                         last_progress, last_percent = now, percent
+                require(total == IMAGE_BYTES and checksum.hexdigest() == expected['sha256'],
+                        'image length/SHA256 changed during streaming; written data needs repair')
                 process.stdin.close(); process.stdin = None
-                output, error = process.communicate(timeout=3600)
+                try:
+                    output, error = process.communicate(timeout=20 if recover_ack else 3600)
+                except subprocess.TimeoutExpired:
+                    if not recover_ack:
+                        raise
+                    # All source bytes were handed off, but no completion or
+                    # fsync acknowledgement exists. Only independent device
+                    # sync plus full readback can establish a valid write.
+                    process.kill()
+                    process.communicate(timeout=5)
+                    return {'ack_uncertain': True, 'completion': 'client-timeout'}
             except BaseException as error:
                 process.kill(); process.communicate()
                 if isinstance(error, subprocess.TimeoutExpired):
                     raise ValueError('userdata streaming timed out; written data may be incomplete') from None
                 raise
+            if recover_ack and process.returncode != 0:
+                return {'ack_uncertain': True, 'completion': 'client-failed'}
             require(process.returncode == 0 and total == IMAGE_BYTES,
                     'raw userdata write failed or was short; Android data may be partially overwritten')
             require(checksum.hexdigest() == expected['sha256'], 'image changed during streaming; written data needs repair')
+            return {'ack_uncertain': False, 'completion': 'acknowledged'}
 
     def readback(self):
         print('userdata: verifying full 16 GiB SHA256', file=sys.stderr, flush=True)
@@ -334,6 +418,43 @@ class ADB:
         checksum = output.decode().split()[0]
         require(re.fullmatch('[0-9a-f]{64}', checksum), 'invalid full readback SHA256')
         return checksum
+
+    def wait_transport(self, timeout):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                result = subprocess.run(['adb', '-s', self.serial, 'get-state'],
+                                        capture_output=True, timeout=5)
+            except subprocess.TimeoutExpired:
+                continue
+            if result.returncode == 0 and result.stdout.strip() in (b'device', b'recovery'):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def restart_server(self):
+        """Opt-in host recovery, with serial-authenticated USB reset fallback."""
+        self.server_restarted, self.usb_reset_performed = False, False
+        def control(action):
+            result = subprocess.run(['adb', action], capture_output=True, timeout=30)
+            require(result.returncode == 0, 'host ADB server restart failed at ' + action)
+        for action in ('kill-server', 'start-server'):
+            control(action)
+        self.server_restarted = True
+        if self.wait_transport(20):
+            return
+        # Release the host ADB interface before libusb resets this exact USB
+        # device, and restore the server even if serial/reset verification fails.
+        control('kill-server')
+        try:
+            reset_matching_usb(self.serial)
+            self.usb_reset_performed = True
+        finally:
+            control('start-server')
+        require(self.wait_transport(60), 'selected ADB transport did not return after host/USB recovery')
+
+    def sync(self):
+        self.command('sync', timeout=120)
 
 
 def evidence(adb, expected_primary, expected_target):
@@ -353,11 +474,17 @@ def main(argv=None):
     parser.add_argument('--serial', help='ADB target; never stored in artifacts')
     parser.add_argument('--state-json', type=Path, help='offline evidence replay; cannot write')
     parser.add_argument('--erase-userdata', action='store_true', help='DESTROY Android user data; requires prior user consent')
+    parser.add_argument('--restart-adb-after-write', action='store_true',
+                        help='recover post-write ADB/USB transport after EOF; requires fresh recovery, sync and full readback')
     args = parser.parse_args(argv)
     if args.erase_userdata and args.state_json:
         parser.error('--state-json cannot be combined with --erase-userdata')
+    if args.restart_adb_after_write and (not args.erase_userdata or args.state_json):
+        parser.error('--restart-adb-after-write requires live --erase-userdata')
     report = {'success': False, 'mode': 'erase-userdata' if args.erase_userdata else 'check-only',
-              'disk_write_started': False, 'timer_stopped': False}
+              'disk_write_started': False, 'timer_stopped': False,
+              'adb_server_restart_attempted': False, 'adb_server_restarted': False,
+              'usb_reset_performed': False, 'write_ack_uncertain': None, 'device_sync_completed': False}
     created = False
     try:
         require(not args.out.exists(), 'choose a fresh --out directory')
@@ -403,7 +530,27 @@ def main(argv=None):
             # No block-device mutation is possible above this point.
             report['disk_write_started'] = True
             atomic(args.out/'check.json', report)
-            adb.stream(args.image, image)
+            completion = (adb.stream(args.image, image, True) if args.restart_adb_after_write
+                          else adb.stream(args.image, image)) or {}
+            report['write_ack_uncertain'] = completion.get('ack_uncertain', False)
+            if args.restart_adb_after_write:
+                report['adb_server_restart_attempted'] = True
+                try:
+                    adb.restart_server()
+                    report['adb_server_restarted'] = True
+                finally:
+                    report['adb_server_restarted'] |= bool(getattr(adb, 'server_restarted', False))
+                    report['usb_reset_performed'] = bool(getattr(adb, 'usb_reset_performed', False))
+                restarted, restart_primary, restart_tail, restart_backup = evidence(adb, expected, target)
+                require(restarted['timer'] == 'stopped', 'recovery timer changed after host ADB restart')
+                require(restart_primary == primary and restart_tail == tail and restart_backup == backup and
+                        hashlib.sha256(restart_primary).hexdigest() == report['primary_capture_before_sha256'],
+                        'full primary/secondary GPT capture changed after host ADB restart')
+                state = restarted
+                report['post_restart_recovery_verified'] = True
+                adb.sync()
+                report['device_sync_completed'] = True
+                atomic(args.out/'check.json', report)
             report['readback_sha256'] = adb.readback()
             require(report['readback_sha256'] == image['sha256'], 'full userdata readback SHA256 mismatch')
         report['success'] = True

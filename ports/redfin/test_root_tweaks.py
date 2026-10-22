@@ -5,6 +5,7 @@ import io
 import os
 from pathlib import Path
 import plistlib
+import shlex
 import stat
 import tempfile
 import unittest
@@ -76,6 +77,17 @@ class DeferredOwnershipTests(unittest.TestCase):
             self.assertEqual((root / new / 'Contents/payload').read_bytes(), b'plugin')
             self.assertEqual(metadata[new + '/Contents/payload']['gid'], 80)
             self.assertEqual(metadata['private/var/containers/Bundle']['uid'], 33)
+            keybag = 'private/var/keybags/systembag.kb'
+            canonical = SCRIPT.with_name('mkiosroot.sh').read_text()
+            start = canonical.index("printf '%s\\n' '<?xml")
+            command = canonical[start:canonical.index(' |\n', start)].replace('\\\n', '')
+            expected = ('\n'.join(shlex.split(command)[2:]) + '\n').encode()
+            self.assertEqual((root / keybag).read_bytes(), expected)
+            self.assertEqual(plistlib.loads((root / keybag).read_bytes()), {'KeyBagKeys': b'SWEET'})
+            self.assertEqual(metadata['private/var/keybags'],
+                             {'uid': 0, 'gid': 0, 'mode': 0o700, 'kind': stat.S_IFDIR})
+            self.assertEqual(metadata[keybag],
+                             {'uid': 0, 'gid': 0, 'mode': 0o600, 'kind': stat.S_IFREG})
             self.assertEqual(metadata['private/var/mobile/Library/Preferences/com.apple.springboard.plist'],
                              {'uid': 501, 'gid': 501, 'mode': 0o600, 'kind': stat.S_IFREG})
             ark = 'private/var/containers/Data/System/ABC/Library/internal/data_ark.plist'
@@ -85,6 +97,21 @@ class DeferredOwnershipTests(unittest.TestCase):
             for directory, folders, files in os.walk(root):
                 for name in folders + files:
                     self.assertIn(str((Path(directory) / name).relative_to(root)), metadata)
+
+    def test_keybag_keeps_existing_contents_with_deferred_root_ownership(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / 'private/var/keybags'
+            directory.mkdir(parents=True)
+            path = directory / 'systembag.kb'
+            path.write_bytes(b'existing keybag')
+            metadata = {}
+            with mock.patch.object(tweaks.os, 'chown', side_effect=AssertionError('host chown')):
+                tweaks.keybag(root, tweaks.RootEditor(root, metadata))
+            self.assertEqual(path.read_bytes(), b'existing keybag')
+            self.assertEqual(metadata['private/var/keybags']['mode'], 0o700)
+            self.assertEqual(metadata['private/var/keybags/systembag.kb'],
+                             {'uid': 0, 'gid': 0, 'mode': 0o600, 'kind': stat.S_IFREG})
 
 
 if __name__ == '__main__':

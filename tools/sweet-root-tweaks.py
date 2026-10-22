@@ -12,6 +12,8 @@ screen (image versions v8-v14 in NOTES.md):
   launchd.plist   _PanicOnCrash -> _PanicOnCrasX (a crashing daemon must not
                   panic the system); CommCenter jobs removed (no baseband: it
                   crash-loops and Setup blocks on its CoreTelephony XPC)
+  keybag         plain systembag.kb for the built-in unlocked AppleKeyStore
+                  (requires /defaults/no-effaceable-storage in the ADT)
   containers      /private/var/containers/{Bundle,Data/System,Shared/SystemGroup,Temp}
                   (on iOS they live on the data volume)
   migration       LastSystemVersion so DataMigration does not run for an hour
@@ -35,6 +37,12 @@ from pathlib import Path
 
 BUILD, VERSION = '20H392', '16.7.16'
 MOBILE = 501
+# Exact three-line plist from tools/mkiosroot.sh, including its final newline.
+SYSTEM_KEYBAG_PLIST = (
+    b'<?xml version="1.0" encoding="UTF-8"?>\n'
+    b'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+    b'<plist version="1.0"><dict><key>KeyBagKeys</key><data>U1dFRVQ=</data></dict></plist>\n'
+)
 
 
 class RootEditor:
@@ -147,6 +155,19 @@ def containers(root, editor):
             print('mkdir', d)
 
 
+def keybag(root, editor):
+    directory = Path(root).resolve() / 'private/var/keybags'
+    editor.mkdir(directory, 0, 0, 0o700)
+    editor.own(directory, 0, 0, 0o700)
+    path = directory / 'systembag.kb'
+    editor.key(path)
+    # Keep any existing bag; this seed belongs only to fresh bring-up roots.
+    if not path.exists():
+        path.write_bytes(SYSTEM_KEYBAG_PLIST)
+        print('created system keybag')
+    editor.own(path, 0, 0, 0o600)
+
+
 def find_container(root, kind, identifier):
     for meta in glob.glob(os.path.join(root, 'private/var/containers', kind, '*',
                                        '.com.apple.mobile_container_manager.metadata.plist')):
@@ -196,6 +217,7 @@ def apply(root, metadata=None):
     editor = RootEditor(root, metadata)
     launchd(root, editor)
     containers(root, editor)
+    keybag(root, editor)
     activation(root, editor)
     audio(root, editor)
     merge_pref(root, 'com.apple.migration', {

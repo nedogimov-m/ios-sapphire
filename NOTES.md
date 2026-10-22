@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected keybag root verified; automatic boot — 2026-10-22
+
+The corrected16GiB root transfer lost its ADB acknowledgement and failed the
+full readback. Independent1GiB hashes isolated exactly chunk12. Repaired only
+that range using sixteen64MiB RAM uploads, upload SHA checks, bounded raw dd
+from regular RAM files, fsync and per-range readback. Toybox0.8.12 does not
+support iflag=fullblock. No whole-image rewrite was needed.
+`logs/redfin/install-keybag-root-20261022/verification.json` now verifies full
+device SHA256 fe211754c7970611f6b94341243d5b7c0b930e57ae032626bd43f13031fea774,
+byte-identical primary/tail GPT and unchanged Android metadata SHA against
+the original verified backup. Original failed installation report is retained.
+Fresh root recovery, unmounted persistent storage and stopped return timer
+were checked before repair. A public-key-only ramoops prime and verified
+recovery-to-fastboot transition preceded temporary boot of
+`ports/redfin/out/ios-root-rw-keybag/redfin-xnu.img` (SHA762e9ea499de56d1b9613793aa09ad61b618f6c82dafc283b84d48c00634866b).
+Exact boot args equal the first RW args below; ADT now adds
+`/defaults/no-effaceable-storage=u32(1)`. Automatic recovery collection
+completed under `logs/redfin/apple-root-rw-keybag/`, timeout180, leave-bootloader.
+Authenticated actual log: keybag DONE; usermanagerd, dirs_cleaner and later
+boot tasks through launchd_cache_loader passed.330 exec events/154 unique names
+include logd, cfprefsd, containermanagerd, backboardd and SpringBoard.36 IOKit
+events from backboardd establish actual runtime activity. Kernel panic absent.
+SpringBoard SIGTRAP at PC/LR0x1d2d44ca8, backtrace and heap diagnostics retained;
+heap scan includes `failed to find the main CADisplay`. It is relaunched later.
+Redfin AppleCLCD::start remains disabled; GUI is not working. No unverified
+display-enabling change was made. driverkitd also received SIGKILL.
+Watchdog returned through recovery and authenticated host logs without user
+intervention. A subsequent fresh recovery reads primary HFSX attrs0x80002000:
+journaled, no inconsistent flag, but not cleanly unmounted (write_count186134).
+Do not retry the RW image until offline journal recovery or a verified reset
+to the clean test baseline. Never fake the clean-unmount bit. Future healthy
+tests need a sleepable worker calling reboot_kernel(0,NULL) before watchdog
+fallback; do not call vfs shutdown from the watchdog/console/IRQ path.
+19673 NAMEI trace lines also justify gating the old PID1 diagnostics next.
+Boot/GPT/modem/persist/EFS remain unmodified; never boot Android on this root.
+
+Installer transport recovery is opt-in. Exact source EOF/SHA followed by a
+lost ACK is uncertain, never success. Host restart and unique serial-matched
+Google recovery USB reset are followed by fresh identity/storage/timer proof,
+byte-identical GPT captures, sync, full16GiB SHA and final GPT validation.
+24 focused installer tests and independent review passed; default behavior
+does not reset USB. Full redfin host suite:173 tests passed. Final fresh
+recovery checks again verify unchanged primary/tail GPT and original Android
+metadata SHA; phone is left in verified fastboot. Device images, keys,
+backups and logs remain ignored.
+
 ## REDFIN Apple launchd executes; bounded RW first boot — 2026-10-22
 
 `logs/redfin/apple-root-ro-first/` authenticated the actual Apple PID1 boot:
@@ -20,7 +66,20 @@ SHA25699a4aa0dfc2fe1f2687003be2728f96fee53edf479bb98c0482c00ed649b56bd.
 Prepared first RW boot SHA256 `3461ab6eaa86d0fb7da3fbc8883183d54977e7a2229305f4cb8c123b96c51854`.
 Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
 This first RW boot is running; hardware writes and later boot tasks remain
-unconfirmed until its recovery log. Original Android full backup and metadata
+unconfirmed until its recovery log.
+RW hardware result now confirmed in logs/redfin/apple-root-rw-first/: HFS
+created hotfile B-tree, mount-phase-1/2 and FIPS passed. No post-ACTIVE UFS
+command failures/timeouts/poison. keybagd then hit FATAL KEYBAG ERROR kb_load
+because systembag.kb was absent. Graceful shutdown reached HFS unmount before
+platform Halt/Restart timeout; fresh recovery raw VH confirms persisted clean
+bit, journaled HFSX,4194304 blocks4096B and write_count161970.
+Missing canonical227B root-owned keybag and ADT no-effaceable-storage are now
+fixed in builders. New independently audited host image SHA256
+fe211754c7970611f6b94341243d5b7c0b930e57ae032626bd43f13031fea774,
+boot SHA256762e9ea499de56d1b9613793aa09ad61b618f6c82dafc283b84d48c00634866b.
+Updated clean root is being deployed within the same approved16GiB userdata
+installation; previous device state contained only our failed first-boot data.
+Original clean1c7 host image and verified original Android backups remain intact. Original Android full backup and metadata
 remain verified under ignored backup/redfin/pre-ios-full-20261022/.
 Boot partitions/GPT/modem/persist/EFS have not been written. Never boot Android
 without restoring the saved userdata image. Collector reports Apple runtime

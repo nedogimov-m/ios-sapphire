@@ -1,12 +1,19 @@
 # ios-redfin — Pixel 5 bring-up
 
-Pixel 5 boots XNU 8796 into a static Darwin PID1 from RAM. CPU0, IRQ/SGI,
-BSD/md0, console I/O and repeated PID1 heartbeats are observed. Kernel logs
-can be recovered through temporary Linux recovery and authenticated host
-decryption, without booting Android. Read-only UFS access is verified: PID1
-reads 4096 bytes and write-open returns `EROFS`. The full 16 GiB Apple root
-image is prepared and checked, but has not been installed; Apple launchd and
-SpringBoard have not run on redfin.
+Pixel 5 boots XNU 8796 and Apple's iOS 16.7.16 launchd from a journaled HFSX
+root in userdata. CPU0, IRQ/SGI, BSD, static Darwin PID1 heartbeats, bounded
+UFS read/write, Apple mount phases and FIPS checks are observed. Launchd
+passes keybag initialization and cache loading, starts system daemons, and
+backboardd makes IOKit calls. SpringBoard executes and crashes; its diagnostic
+heap scan includes `failed to find the main CADisplay`. The redfin display
+driver is still disabled, so a working graphical interface remains unfinished.
+
+Kernel logs are collected automatically through temporary Linux recovery and
+authenticated host decryption. The original Android userdata and metadata
+have complete, independently verified local backups. Android userdata has
+been replaced; restore the backup before booting Android. Boot partitions,
+GPT, modem, persist and EFS are preserved. Device images, backups and logs
+remain local and ignored by git.
 
 Before erasing Android userdata, save its credential-encrypted ramoops keypair
 on the host. Recovery receives only the public key, primes the next boot's
