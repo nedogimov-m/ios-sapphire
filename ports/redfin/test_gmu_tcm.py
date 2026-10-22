@@ -18,7 +18,7 @@ class Report(ctypes.Structure):
         'reset_after', 'source_after', 'gmu_clock_after',
         'counter_before', 'counter_after', 'counter_delta')]
     _fields_ += [('saved', ctypes.c_uint32 * 2), ('pattern_read', ctypes.c_uint32 * 2),
-                 ('restored', ctypes.c_uint32 * 2)]
+                 ('restored', ctypes.c_uint32 * 2), ('counter_elapsed_ns', ctypes.c_uint64)]
     _fields_ += [(name, ctypes.c_bool) for name in (
         'reset_held', 'source_200m', 'counter_live', 'dtcm_dirty', 'dtcm_restored')]
 
@@ -29,7 +29,7 @@ HARNESS = r'''
 #include "redfin_gmu_tcm.h"
 struct host {
  uint32_t gcc[0x80000/4], gpucc[0x9000/4], gmu[0x30000/4];
- unsigned scenario, variant, checks, accesses, reads, writes, us, dtcm_writes;
+ unsigned scenario, variant, checks, accesses, reads, writes, us, dtcm_writes, ns_reads;
  unsigned fail_valid, fail_read, fail_write, bad, after_loss;
  uint32_t counter;
  bool lost, ahb_requested;
@@ -69,7 +69,11 @@ static int read_reg(void *ctx,unsigned unit,uint32_t at,uint32_t *out) {
  (void)ctx;access(unit,at,false);h->reads++;
  if(h->fail_read==h->reads)return EIO;
  uint32_t *p=slot(unit,at);if(!p)return EINVAL;
- *out=unit==RF_GT_GMU && at==0x14220?h->counter:*p;
+ uint64_t ns=(uint64_t)h->us*1000+(h->scenario==29?(uint64_t)h->accesses*20000:0);
+ uint32_t ticks=(uint32_t)(ns*192/10000);
+ if(h->scenario==17)ticks=0;
+ if(h->scenario==18)ticks*=2;
+ *out=unit==RF_GT_GMU && at==0x14220?h->counter+ticks:*p;
  if(h->scenario==19 && unit==RF_GT_GMU && at==0x7000 && h->dtcm_writes==2)*out^=1;
  if(h->scenario==20 && unit==RF_GT_GMU && at==0x7000 && h->dtcm_writes==4)*out^=1;
  return 0;
@@ -123,10 +127,13 @@ static int write_reg(void *ctx,unsigned unit,uint32_t at,uint32_t value) {
 static void delay_us(void *ctx,unsigned us) {
  (void)ctx;
  h->us+=us;
- if((h->gpucc[0x1098/4]&0x80000001)==1) {
-  if(h->scenario!=17)h->counter+=(us*192u)/10u;
-  if(h->scenario==18)h->counter+=(us*192u)/10u;
- }
+}
+static uint64_t time_ns(void *ctx) {
+ (void)ctx;h->ns_reads++;
+ if(h->scenario==30)return 0;
+ if(h->scenario==31)return h->ns_reads==1?100000000:99000000;
+ if(h->scenario==32)return h->ns_reads==1?1:100000002;
+ return (uint64_t)h->us*1000+(h->scenario==29?(uint64_t)h->accesses*20000:0);
 }
 int host_run(uint32_t chip,unsigned scenario,unsigned variant,
  unsigned fail_valid,unsigned fail_read,unsigned fail_write,struct rf_gt_report *report) {
@@ -143,7 +150,7 @@ int host_run(uint32_t chip,unsigned scenario,unsigned variant,
  h->gpucc[0x5000/4]=0x80000020;
  h->gpucc[0x1120/4]=0x80000100;h->gpucc[0x1124/4]=0x42100000;
  h->gmu[0x7000/4]=0x12345678;h->gmu[0x7004/4]=0xfedcba98;
- h->counter=variant==2?0xffffff00:0x12340000;
+ h->counter=variant==2?0xfffff000:0x12340000;
  if(variant==1)h->gpucc[0x1120/4]=0x102;
  switch(scenario) {
  case 1:h->gcc[4/4]=32;break;
@@ -162,7 +169,7 @@ int host_run(uint32_t chip,unsigned scenario,unsigned variant,
  case 27:h->gpucc[0x1540/4]=0;break;
  default:break;
  }
- struct rf_gt_ops ops={h,valid,read_reg,write_reg,delay_us};
+ struct rf_gt_ops ops={h,valid,read_reg,write_reg,delay_us,time_ns};
  int result=rf_gt_run(&ops,chip,report);
  metrics[0]=h->checks;metrics[1]=h->reads;metrics[2]=h->writes;metrics[3]=h->us;
  metrics[4]=h->dtcm_writes;metrics[5]=h->bad;metrics[6]=h->after_loss;metrics[7]=h->accesses;
@@ -223,6 +230,7 @@ class RedfinGMUTCMTests(unittest.TestCase):
         self.assertTrue(r.reset_held and r.source_200m and r.counter_live and r.dtcm_restored)
         self.assertFalse(r.dtcm_dirty)
         self.assertEqual(r.counter_delta, 19200)
+        self.assertEqual(r.counter_elapsed_ns, 1000000)
         self.assertEqual(tuple(r.saved), (0x12345678, 0xFEDCBA98))
         self.assertEqual(tuple(r.restored), tuple(r.saved))
         self.assertEqual(final[:5], (1, 0x12345678, 0xFEDCBA98, 0x40000001, 0x18000))
@@ -239,6 +247,23 @@ class RedfinGMUTCMTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(final[5] & 2, 2 if variant == 1 else 0)
             self.assertEqual(r.counter_delta, 19200)
+            if variant == 2:
+                self.assertLess(r.counter_after, r.counter_before)
+
+    def test_counter_uses_elapsed_time_including_per_access_guard_cost(self):
+        result, r, _, _ = self.run_leaf(29)
+        self.assertEqual(result, 0)
+        self.assertGreater(r.counter_elapsed_ns, 1000000)
+        self.assertGreater(r.counter_delta, 23040)
+        expected = r.counter_elapsed_ns * 192 // 10000
+        self.assertLessEqual(abs(r.counter_delta-expected), 1)
+
+    def test_stopped_backward_or_excessive_cpu_window_rejects_tcm(self):
+        for scenario in (30, 31, 32):
+            result, r, metrics, _ = self.run_leaf(scenario)
+            self.assertEqual(result, errno.ETIMEDOUT)
+            self.assertEqual(r.stage, 6)
+            self.assertEqual(metrics[4], 0)
 
     def test_wrong_chip_is_rejected_before_any_callback(self):
         for chip in (0, 0x06010001, 0x06020000, 0x06030500, 0x06050001):

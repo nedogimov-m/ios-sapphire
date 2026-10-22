@@ -30,6 +30,8 @@ struct rf_gt_ops {
     int (*write)(void *, unsigned, uint32_t, uint32_t);
     /* Bounded busy wait in microseconds; no thread sleep or rescheduling. */
     void (*delay)(void *, unsigned);
+    /* CPU monotonic time; no Device MMIO or scheduling in this callback. */
+    uint64_t (*time_ns)(void *);
 };
 
 struct rf_gt_report {
@@ -41,6 +43,7 @@ struct rf_gt_report {
     uint32_t reset_after, source_after, gmu_clock_after;
     uint32_t counter_before, counter_after, counter_delta;
     uint32_t saved[2], pattern_read[2], restored[2];
+    uint64_t counter_elapsed_ns;
     bool reset_held, source_200m, counter_live, dtcm_dirty, dtcm_restored;
 };
 
@@ -250,6 +253,7 @@ rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *outpu
 {
     struct rf_gt_report r = {0};
     uint32_t value, gmu_gx, cfg, command, reset;
+    uint64_t time_before, time_after, expected_ticks;
     static const uint32_t pattern[2] = {0x62a00d01u, 0xa062f00du};
     unsigned i;
     int error = EINVAL, pattern_error = 0;
@@ -257,7 +261,7 @@ rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *outpu
     if (!output)
         return EINVAL;
     if (chip != 0x06020001u || !ops || !ops->valid || !ops->read ||
-        !ops->write || !ops->delay)
+        !ops->write || !ops->delay || !ops->time_ns)
         goto done;
     r.stage = RF_GT_PREFLIGHT;
 #define RF_GT_TRY(action) do { error = (action); if (error) goto done; } while (0)
@@ -331,10 +335,19 @@ rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *outpu
 
     r.stage = RF_GT_COUNTER;
     RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_before, true, true));
+    time_before = ops->time_ns(ops->context);
     RF_GT_TRY(rf_gt_delay(ops, 1000));
     RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_after, true, true));
+    time_after = ops->time_ns(ops->context);
     r.counter_delta = r.counter_after - r.counter_before;
-    if (r.counter_delta < 15360 || r.counter_delta > 23040) {
+    if (time_after <= time_before || time_after - time_before < 1000000 ||
+        time_after - time_before > 10000000) {
+        error = ETIMEDOUT; goto done;
+    }
+    r.counter_elapsed_ns = time_after - time_before;
+    expected_ticks = r.counter_elapsed_ns * 192u / 10000u;
+    if ((uint64_t)r.counter_delta * 5 < expected_ticks * 4 ||
+        (uint64_t)r.counter_delta * 5 > expected_ticks * 6) {
         error = ETIMEDOUT; goto done;
     }
     r.counter_live = true;

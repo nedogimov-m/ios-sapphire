@@ -200,13 +200,16 @@ bit 31 plus software-control `+0x106c` bits 1:0 clear, matching
 
 The callable leaf is [`include/redfin_gmu_tcm.h`](include/redfin_gmu_tcm.h):
 `rf_gt_run(ops, chip, report)`. The adapter provides guarded ordered 32-bit
-MMIO and a bounded busy wait. Callback units 0/1/2 mean GCC/GPUCC/GMU. It
+MMIO, a bounded busy wait and CPU monotonic nanoseconds. Callback units 0/1/2 mean GCC/GPUCC/GMU. It
 rejects an enabled inherited GMU/GX, mismatched PLL/GCC handoff, pending RCG
 configuration, nonzero firmware/HFI state or ambiguous reset. After enabling
 only native bus/crystal/AHB/SMMU clock votes, it examines GMU idle CSRs while
 the GMU core clock remains gated; reset 1 precedes the 200MHz core clock.
-It then requires 15,360–23,040 fresh crystal ticks over the adapter's 1ms
-busy wait before the two-word TCM test. Unsigned subtraction handles wrap.
+It then checks fresh crystal ticks against 19.2MHz with a 20% tolerance over
+the CPU-measured elapsed window, including per-access guards, before the
+two-word TCM test. The busy wait is 1ms and the accepted complete window is
+1–10ms. Unsigned subtraction handles counter wrap; a stopped, backward or
+excessive CPU measurement window fails before data writes.
 
 This leaf restores the two DTCM words and the RCG's original force-enable
 bit. It holds added clock votes and CM3 reset until the caller's bounded
@@ -218,7 +221,7 @@ and readback; a callback failure cannot trigger an unsafe cleanup sequence.
 `reset_held` records the last successful assertion/readback, not a new proof
 after a later ownership failure. No kernel/ADT adapter is enabled here.
 
-Run `python3 -m unittest ports/redfin/test_gmu_tcm.py`. The 18 host tests
+Run `python3 -m unittest ports/redfin/test_gmu_tcm.py`. The 20 host tests
 include each individual lost-lease/read-error/committed-write-error edge of
 the complete real leaf, source/owner/rate changes, bounded stuck polls,
 counter wrap, pattern/restore corruption, preserved unrelated clock votes,
@@ -227,6 +230,78 @@ GMU CSR access remains a Redfin hardware accessibility experiment: the native
 AHB branch uses a 10us completion delay, and no AOP QDSS/APB register is
 programmed by this reset-held stage. Complete native cold boot remains a
 separate boundary.
+
+## Kernel adapter and exact mode binding
+
+[`gmu-probe.c`](gmu-probe.c), [`gmu-probe.h`](gmu-probe.h) and the additive
+[`gmu-probe.patch`](gmu-probe.patch) supply the synchronous kernel adapter.
+The patch adds only `bsd/dev/redfin_gmu_probe.c`, `redfin_gmu_probe.h` and a
+byte-identical `redfin_gmu_tcm.h`. A separate integration change must compile
+the C source and connect it to the existing CX owner; this patch changes no
+startup, loader, root or legacy GPU path.
+
+The parent first calls read-only
+`redfin_gmu_probe_contract(frozen_args, args_bytes)` before its first ARC or
+GDSC write. After its own fresh `RF_GP_OK`, `parent_held` and `cx_on` result,
+it calls:
+
+```c
+redfin_gmu_probe(gp.args, gp.bytes, &gp, gp_held_cx_valid);
+```
+
+`gp_held_cx_valid(void *)` belongs to the existing power owner. It must check
+its exact context, successful held result and original frozen-argument/return
+lifetime. The adapter stores this capability only on its synchronous stack;
+it publishes no second global held-power proof. Its one-shot entry remains
+consumed after either success or refusal. The callbacks recheck both the
+original frozen bytes and current `PE_boot_args`, EL1/CPU0, the verified
+return path, parent validity, bound immutable ADT bytes and fresh CX hardware
+status. Ordered 32-bit Device accesses use `dmb`/`dsb` barriers; the timing
+callback converts `mach_absolute_time()` to monotonic nanoseconds.
+
+The exact args are the existing isolated UP/md0 CX profile plus exactly one
+`redfingmu=1`. `redfingpu=2`, `redfingpupower=1`, `redfinrpmh=1`,
+`redfinspmi=1`, `redfinreturn=1`, `cpus=1`, `rd=md0` and all eight legacy
+touch/key/USB/CPU-frequency/battery/modem/Wi-Fi/GPU zero flags remain required.
+The base debug/serial/keepsyms/progress words are exact; a unique nonzero
+16-digit lowercase hex `redfinbootid` is mandatory. Only a single optional
+`-enable_kprintf_spam` is admitted. Duplicate, unrecognized, GUI, UFS,
+alternate CPU-count and numeric-truncation variants fail before mapping.
+
+[`gmu_probe.py:add_contract()`](gmu_probe.py) runs after the matching
+`gpu_power.add_contract()`. It validates native GCC/GPUCC identities and
+ranges, full GMU/PDC ranges and names, IRQ types/parent, native clock names
+and phandle/ID sequence, A620 chip/GPU ranges, CX supply and complete native
+GIC ranges before appending `/redfin-gmu`. It never modifies the tree on a
+failed input. The emitted little-endian contract is:
+
+| Property | Exact values |
+| --- | --- |
+| `reg` (64-bit pairs) | `0x100000/0x1f0000`, `0x3d90000/0x9000`, `0x3d6a000/0x30000`, **`0x17a00000/0x4000`** |
+| `chip-id` | `0x06020001` |
+| `clock-policy` | `[200000000,31,0x4000,2,6,2]` |
+| `tcm-policy` | `[1,0x10004000,0x7000,2,1,1000]` |
+| `cx-parent` | `[0x30000,64,65535,7,416]` |
+| `interrupts` | `[336,337]`, native SPI 304/305 plus 32 |
+
+GICD registers `+0x128/+0x228/+0x328` bits 16/17 must remain disabled,
+not pending and inactive. The adapter makes no GIC write. GMU Device mapping
+occurs only after args/ADT/parent, the existing GCC config branch, fresh CX
+and those IRQ checks; it does not access a GMU CSR just by mapping the range.
+Its helper's narrow per-register allowlist additionally excludes GX/SMMU
+controller/PDC/RSC/debug-mux writes and CM3 reset release.
+
+Run `python3 -m unittest ports/redfin/test_gmu_probe.py`. The 19 adapter/FDT
+tests compile the actual C adapter and invoke the real leaf, including all
+1,280 ADT property bits, exact native-controller binding, missing-zero GICD
+regression, every parent-lifetime failure point, late args/ADT/IRQ changes,
+and complete reset-held TCM restoration with measured guard overhead.
+The local captured native FDT also passes the generator; no device operation
+or downloaded artifact is part of these tests. A private adapter copy also
+passes the real DEVELOPMENT_ARM64_SWEET BSD compiler flags and kernel
+headers. ASan/UBSan pass all adapter parent-lifetime edges/1,280 property
+mutations and all leaf guard/read/write edges. A full linked kernel and
+physical GMU observation remain the caller's next validation.
 
 ## Remaining full-boot and secure-GPU contracts
 

@@ -1,0 +1,749 @@
+diff --git a/bsd/dev/redfin_gmu_probe.c b/bsd/dev/redfin_gmu_probe.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_probe.c
+@@ -0,0 +1,240 @@
++/* SPDX-License-Identifier: MIT */
++/* Exact md0/UP adapter for the separately proved, held-CX GMU TCM leaf. */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include <machine/machine_routines.h>
++#include "redfin_gmu_probe.h"
++#include "redfin_gmu_tcm.h"
++
++extern int redfin_spmi_return_ready(void);
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++static bool gm_attempted;
++
++struct gm_binding { const void *live, *expected; unsigned bytes; };
++struct gm_context {
++    vm_offset_t base[3], gic;
++    const char *parent_args;
++    void *parent_context;
++    redfin_gmu_parent_valid_fn parent_valid;
++    unsigned args_bytes;
++    char args[608];
++    struct gm_binding bindings[8];
++    unsigned binding_count;
++    bool active;
++};
++
++static const uint64_t gm_reg[] = {
++    0x00100000, 0x1f0000, 0x03d90000, 0x9000,
++    0x03d6a000, 0x30000, 0x17a00000, 0x4000
++};
++static const uint64_t gm_dram_base = 0x180000000ULL, gm_dram_size = 0x80000000ULL;
++static const uint32_t gm_chip = 0x06020001;
++static const uint32_t gm_clock[] = {200000000, 31, 0x4000, 2, 6, 2};
++static const uint32_t gm_tcm[] = {1, 0x10004000, 0x7000, 2, 1, 1000};
++static const uint32_t gm_parent[] = {0x30000, 64, 65535, 7, 416};
++static const uint32_t gm_irqs[] = {336, 337};
++
++static bool
++gm_property(struct gm_context *context, const char *path, const char *key,
++    const void *expected, unsigned size)
++{
++    DTEntry node;
++    const void *raw = NULL;
++    unsigned bytes = 0;
++    if (SecureDTLookupEntry(NULL, path, &node) != kSuccess ||
++        SecureDTGetProperty(node, key, &raw, &bytes) != kSuccess ||
++        !raw || bytes != size || memcmp(raw, expected, size))
++        return false;
++    if (context) {
++        if (context->binding_count >= sizeof(context->bindings) / sizeof(context->bindings[0]))
++            return false;
++        struct gm_binding *binding = &context->bindings[context->binding_count++];
++        binding->live = raw;
++        binding->expected = expected;
++        binding->bytes = bytes;
++    }
++    return true;
++}
++
++static bool
++gm_contract(struct gm_context *context)
++{
++    return gm_property(context, "/chosen", "dram-base", &gm_dram_base, sizeof(gm_dram_base)) &&
++        gm_property(context, "/chosen", "dram-size", &gm_dram_size, sizeof(gm_dram_size)) &&
++        gm_property(context, "/redfin-gmu", "reg", gm_reg, sizeof(gm_reg)) &&
++        gm_property(context, "/redfin-gmu", "chip-id", &gm_chip, sizeof(gm_chip)) &&
++        gm_property(context, "/redfin-gmu", "clock-policy", gm_clock, sizeof(gm_clock)) &&
++        gm_property(context, "/redfin-gmu", "tcm-policy", gm_tcm, sizeof(gm_tcm)) &&
++        gm_property(context, "/redfin-gmu", "cx-parent", gm_parent, sizeof(gm_parent)) &&
++        gm_property(context, "/redfin-gmu", "interrupts", gm_irqs, sizeof(gm_irqs));
++}
++
++int
++redfin_gmu_probe_contract(const char *frozen_args, unsigned args_bytes)
++{
++    const char *live = PE_boot_args();
++    if (!redfin_gmu_args_valid(frozen_args, args_bytes) || !live ||
++        memcmp(live, frozen_args, args_bytes))
++        return ENOTSUP;
++    return gm_contract(NULL) ? 0 : ENXIO;
++}
++
++static uint32_t
++gm_read32(vm_offset_t address)
++{
++    uint32_t value = *(volatile const uint32_t *)address;
++    __asm__ volatile("dmb oshld" ::: "memory");
++    return value;
++}
++
++static void
++gm_write32(vm_offset_t address, uint32_t value)
++{
++    __asm__ volatile("dmb oshst" ::: "memory");
++    *(volatile uint32_t *)address = value;
++    __asm__ volatile("dsb osh" ::: "memory");
++}
++
++static bool
++gm_valid(void *argument)
++{
++    struct gm_context *context = argument;
++    const char *live = PE_boot_args();
++    if (!context || !context->active || !context->args_bytes || !context->parent_args ||
++        !context->parent_context || !context->parent_valid || !live ||
++        memcmp(live, context->args, context->args_bytes) ||
++        memcmp(context->parent_args, context->args, context->args_bytes) ||
++        __builtin_arm_rsr64("CurrentEL") != 4 ||
++        (__builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL) ||
++        redfin_spmi_return_ready() != 1 || !context->parent_valid(context->parent_context))
++        return false;
++    for (unsigned i = 0; i < context->binding_count; i++) {
++        const struct gm_binding *binding = &context->bindings[i];
++        if (memcmp(binding->live, binding->expected, binding->bytes))
++            return false;
++    }
++    if (context->base[RF_GT_GCC] &&
++        (gm_read32(context->base[RF_GT_GCC] + 0x71004) & 0x80000001u) != 1)
++        return false;
++    if (context->base[RF_GT_GPUCC] &&
++        ((gm_read32(context->base[RF_GT_GPUCC] + 0x106c) & 3u) ||
++         !(gm_read32(context->base[RF_GT_GPUCC] + 0x1540) & 0x80000000u)))
++        return false;
++    if (context->gic) {
++        const uint32_t mask = 3u << 16;
++        if ((gm_read32(context->gic + 0x128) | gm_read32(context->gic + 0x228) |
++                gm_read32(context->gic + 0x328)) & mask)
++            return false;
++    }
++    return true;
++}
++
++static int
++gm_read(void *argument, unsigned unit, uint32_t at, uint32_t *value)
++{
++    struct gm_context *context = argument;
++    if (!value || unit >= 3 || !context->base[unit] || !rf_gt_allowed(unit, at, false))
++        return EINVAL;
++    if (!gm_valid(context))
++        return ECANCELED;
++    *value = gm_read32(context->base[unit] + at);
++    return 0;
++}
++
++static int
++gm_write(void *argument, unsigned unit, uint32_t at, uint32_t value)
++{
++    struct gm_context *context = argument;
++    if (unit >= 3 || !context->base[unit] || !rf_gt_allowed(unit, at, true) ||
++        (unit == RF_GT_GMU && at == 0x14000 && value != 1))
++        return EINVAL;
++    if (!gm_valid(context))
++        return ECANCELED;
++    gm_write32(context->base[unit] + at, value);
++    return 0;
++}
++
++static void
++gm_delay(void *argument, unsigned microseconds)
++{
++    (void)argument;
++    delay((int)microseconds); /* Leaf delays are bounded to at most 1000us. */
++}
++
++static uint64_t
++gm_time_ns(void *argument)
++{
++    uint64_t nanoseconds;
++    (void)argument;
++    absolutetime_to_nanoseconds(mach_absolute_time(), &nanoseconds);
++    return nanoseconds;
++}
++
++int
++redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
++    void *held_cx_context, redfin_gmu_parent_valid_fn held_cx_valid)
++{
++    struct gm_context context = {0};
++    struct rf_gt_report report = {0};
++    int result;
++    if (__atomic_exchange_n(&gm_attempted, true, __ATOMIC_ACQ_REL))
++        return EBUSY;
++    result = redfin_gmu_probe_contract(frozen_args, args_bytes);
++    if (result)
++        return result;
++    if (!held_cx_context || !held_cx_valid)
++        return EINVAL;
++    context.parent_args = frozen_args;
++    context.parent_context = held_cx_context;
++    context.parent_valid = held_cx_valid;
++    context.args_bytes = args_bytes;
++    memcpy(context.args, frozen_args, args_bytes);
++    context.active = true;
++    if (!gm_contract(&context) || !gm_valid(&context))
++        return EPERM;
++    context.base[RF_GT_GCC] = ml_io_map(0x100000, 0x1f0000);
++    if (!context.base[RF_GT_GCC])
++        return ENOMEM;
++    if (!gm_valid(&context))
++        return EAGAIN;
++    context.base[RF_GT_GPUCC] = ml_io_map(0x3d90000, 0x9000);
++    if (!context.base[RF_GT_GPUCC])
++        return ENOMEM;
++    if (!gm_valid(&context))
++        return EAGAIN;
++    context.gic = ml_io_map(0x17a00000, 0x4000);
++    if (!context.gic)
++        return ENOMEM;
++    if (!gm_valid(&context))
++        return EAGAIN;
++    context.base[RF_GT_GMU] = ml_io_map(0x3d6a000, 0x30000);
++    if (!context.base[RF_GT_GMU])
++        return ENOMEM;
++    if (!gm_valid(&context))
++        return EAGAIN;
++    const struct rf_gt_ops ops = {&context, gm_valid, gm_read, gm_write, gm_delay, gm_time_ns};
++    result = rf_gt_run(&ops, gm_chip, &report);
++    context.active = false;
++    printf("REDFIN GMU: result=%d stage=%u reads=%u writes=%u polls=%u source200=%u counter=%u restored=%u dirty=%u; no firmware/DMA/GX\n",
++        result, report.stage, report.reads, report.writes, report.polls, report.source_200m,
++        report.counter_live, report.dtcm_restored, report.dtcm_dirty);
++    printf("REDFIN GMU CLOCK: MODE=%#x L=%#x USER=%#x ALPHA=%#x MISC=%#x source=%#x/%#x branch=%#x/%#x CX=%#x HW=%#x GX=%#x\n",
++        report.pll_mode, report.pll_l, report.pll_user, report.pll_alpha, report.misc,
++        report.source_before, report.source_after, report.gmu_clock_before,
++        report.gmu_clock_after, report.cx, report.cx_hw, report.gx);
++    printf("REDFIN GMU RESET: before=%#x after=%#x asserted=%u INIT=%#x HFI=%#x counter=%#x/%#x delta=%u elapsed-ns=%llu\n",
++        report.reset_before, report.reset_after, report.reset_held, report.result_before,
++        report.hfi_before, report.counter_before, report.counter_after, report.counter_delta,
++        (unsigned long long)report.counter_elapsed_ns);
++    printf("REDFIN GMU TCM: saved=%#x/%#x pattern=%#x/%#x restored=%#x/%#x\n",
++        report.saved[0], report.saved[1], report.pattern_read[0], report.pattern_read[1],
++        report.restored[0], report.restored[1]);
++    return result;
++}
++#endif /* ARM64_BOARD_CONFIG_SWEET */
+diff --git a/bsd/dev/redfin_gmu_probe.h b/bsd/dev/redfin_gmu_probe.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_probe.h
+@@ -0,0 +1,104 @@
++/* SPDX-License-Identifier: MIT */
++/* Synchronous Redfin reset-held GMU probe; no standalone power authority. */
++#ifndef REDFIN_GMU_PROBE_H
++#define REDFIN_GMU_PROBE_H
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++
++typedef bool (*redfin_gmu_parent_valid_fn)(void *);
++
++/* bytes includes the NUL; every word and the nonzero boot nonce is unique. */
++static inline bool
++redfin_gmu_args_valid(const char *args, unsigned bytes)
++{
++    static const char *const required[] = {
++        "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
++        "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
++        "modem=0", "wifi=0", "gpu=0", "redfingpu=2", "redfingpupower=1",
++        "redfinrpmh=1", "redfinspmi=1", "redfinreturn=1", "redfingmu=1"
++    };
++    uint32_t seen = 0;
++    bool nonce_seen = false, trace_seen = false;
++    unsigned at = 0;
++    if (!args || !bytes || bytes > 608 || args[bytes - 1])
++        return false;
++    while (at < bytes - 1) {
++        unsigned first, n, i;
++        bool known = false;
++        if (args[at] == ' ') { at++; continue; }
++        first = at;
++        while (at < bytes - 1 && args[at] != ' ') {
++            if ((unsigned char)args[at] < 33 || (unsigned char)args[at] > 126)
++                return false;
++            at++;
++        }
++        n = at - first;
++        for (i = 0; i < sizeof(required) / sizeof(required[0]); i++) {
++            unsigned length = 0;
++            while (required[i][length]) length++;
++            if (length != n) continue;
++            unsigned j;
++            for (j = 0; j < n && args[first + j] == required[i][j]; j++) {}
++            if (j != n) continue;
++            if (seen & (1u << i)) return false;
++            seen |= 1u << i;
++            known = true;
++            break;
++        }
++        if (known) continue;
++        static const char trace[] = "-enable_kprintf_spam";
++        if (n == sizeof(trace) - 1) {
++            for (i = 0; i < n && args[first + i] == trace[i]; i++) {}
++            if (i == n) {
++                if (trace_seen) return false;
++                trace_seen = true;
++                continue;
++            }
++        }
++        static const char prefix[] = "redfinbootid=0x";
++        if (n == 31) {
++            for (i = 0; i < sizeof(prefix) - 1 && args[first + i] == prefix[i]; i++) {}
++            if (i == sizeof(prefix) - 1) {
++                uint64_t nonce = 0;
++                if (nonce_seen) return false;
++                for (; i < n; i++) {
++                    unsigned digit = (unsigned)(args[first + i] - '0');
++                    if (digit > 9) {
++                        if (args[first + i] < 'a' || args[first + i] > 'f') return false;
++                        digit = (unsigned)(args[first + i] - 'a' + 10);
++                    }
++                    nonce = (nonce << 4) | digit;
++                }
++                if (!nonce) return false;
++                nonce_seen = true;
++                continue;
++            }
++        }
++        return false;
++    }
++    return seen == (1u << (sizeof(required) / sizeof(required[0]))) - 1 && nonce_seen;
++}
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Read-only DT/argument validation, safe before the parent's first power write. */
++int redfin_gmu_probe_contract(const char *frozen_args, unsigned args_bytes);
++
++/*
++ * Call only after successful RF_GP_OK/parent_held/cx_on in the same exact mode.
++ * The parent's callback must revalidate that owned result and its original
++ * frozen argument/context lifetime. No callback or argument is retained after
++ * this synchronous function returns. It never releases the parent's ARC vote.
++ */
++int redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
++    void *held_cx_context, redfin_gmu_parent_valid_fn held_cx_valid);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* REDFIN_GMU_PROBE_H */
+diff --git a/bsd/dev/redfin_gmu_tcm.h b/bsd/dev/redfin_gmu_tcm.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_tcm.h
+@@ -0,0 +1,390 @@
++/* SPDX-License-Identifier: MIT */
++/*
++ * Lito-only, reset-held GMU clock/counter/TCM experiment. References: GMU.md.
++ * This does not start CM3, configure SMMU/GX/PDC/RSC, or load firmware.
++ * The caller must own a bounded single-CPU md0 session, fresh CX power and
++ * its held ARC floor, exclusive GCC/GPUCC/GMU clock access and reset return.
++ * Added votes/clocks stay held until that platform reset. Only the two DTCM
++ * words and the RCG's initial force-enable bit are restored here.
++ */
++#ifndef REDFIN_GMU_TCM_H
++#define REDFIN_GMU_TCM_H
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <sys/errno.h>
++
++enum { RF_GT_GCC, RF_GT_GPUCC, RF_GT_GMU };
++enum {
++    RF_GT_PREFLIGHT = 1, RF_GT_BUS_CLOCKS, RF_GT_RESET, RF_GT_SOURCE,
++    RF_GT_CORE_CLOCK, RF_GT_COUNTER, RF_GT_SAVE, RF_GT_PATTERN,
++    RF_GT_RESTORE, RF_GT_DONE
++};
++
++struct rf_gt_ops {
++    void *context;
++    /* Recheck the exact A620/UP/md0/power/clock/return lifetime each time. */
++    bool (*valid)(void *);
++    /* Ordered 32-bit Device MMIO; return positive errno on failure. */
++    int (*read)(void *, unsigned, uint32_t, uint32_t *);
++    int (*write)(void *, unsigned, uint32_t, uint32_t);
++    /* Bounded busy wait in microseconds; no thread sleep or rescheduling. */
++    void (*delay)(void *, unsigned);
++    /* CPU monotonic time; no Device MMIO or scheduling in this callback. */
++    uint64_t (*time_ns)(void *);
++};
++
++struct rf_gt_report {
++    uint32_t stage, error, reads, writes, polls;
++    uint32_t pll_mode, pll_l, pll_user, pll_alpha;
++    uint32_t pll_vote_before, feed_before, misc, cx, cx_hw, gx;
++    uint32_t rcg_before, source_before, gmu_clock_before;
++    uint32_t reset_before, result_before, hfi_before;
++    uint32_t reset_after, source_after, gmu_clock_after;
++    uint32_t counter_before, counter_after, counter_delta;
++    uint32_t saved[2], pattern_read[2], restored[2];
++    uint64_t counter_elapsed_ns;
++    bool reset_held, source_200m, counter_live, dtcm_dirty, dtcm_restored;
++};
++
++/* Narrow callback allowlist; the adapter must enforce its own bound lease. */
++static inline bool
++rf_gt_allowed(unsigned unit, uint32_t at, bool writing)
++{
++    if (unit == RF_GT_GCC) {
++        switch (at) {
++        case 0x52010: case 0x52000: case 0x71154: case 0x7100c: case 0x71018:
++            return true;
++        case 0: case 4: case 0xc: case 0x40: case 0x71004: case 0x71028:
++            return !writing;
++        default: return false;
++        }
++    }
++    if (unit == RF_GT_GPUCC) {
++        switch (at) {
++        case 0x1078: case 0x109c: case 0x5000: case 0x1120: case 0x1124: case 0x1098:
++            return true;
++        case 0x106c: case 0x1540: case 0x100c: case 0x1064:
++            return !writing;
++        default: return false;
++        }
++    }
++    if (unit == RF_GT_GMU) {
++        switch (at) {
++        case 0x14000: case 0x7000: case 0x7004:
++            return true;
++        case 0x14070: case 0x14600: case 0x14220:
++            return !writing;
++        default: return false;
++        }
++    }
++    return false;
++}
++
++static inline int
++rf_gt_rd(const struct rf_gt_ops *ops, struct rf_gt_report *r,
++    unsigned unit, uint32_t at, uint32_t *value)
++{
++    if (!rf_gt_allowed(unit, at, false))
++        return EINVAL;
++    if (!ops->valid(ops->context))
++        return ECANCELED;
++    r->reads++;
++    return ops->read(ops->context, unit, at, value);
++}
++
++static inline int
++rf_gt_wr(const struct rf_gt_ops *ops, struct rf_gt_report *r,
++    unsigned unit, uint32_t at, uint32_t value)
++{
++    if (!rf_gt_allowed(unit, at, true) ||
++        (unit == RF_GT_GMU && at == 0x14000 && value != 1))
++        return EINVAL;
++    if (!ops->valid(ops->context))
++        return ECANCELED;
++    r->writes++;
++    return ops->write(ops->context, unit, at, value);
++}
++
++static inline int
++rf_gt_delay(const struct rf_gt_ops *ops, unsigned us)
++{
++    if (!ops->valid(ops->context))
++        return ECANCELED;
++    ops->delay(ops->context, us);
++    return ops->valid(ops->context) ? 0 : ECANCELED;
++}
++
++static inline int
++rf_gt_poll(const struct rf_gt_ops *ops, struct rf_gt_report *r,
++    unsigned unit, uint32_t at, uint32_t mask, uint32_t expected, unsigned limit)
++{
++    uint32_t value;
++    unsigned i;
++    int error;
++    for (i = 0; i < limit; i++) {
++        error = rf_gt_rd(ops, r, unit, at, &value);
++        if (error)
++            return error;
++        r->polls++;
++        if ((value & mask) == expected)
++            return 0;
++        error = rf_gt_delay(ops, 1);
++        if (error)
++            return error;
++    }
++    return ETIMEDOUT;
++}
++
++static inline int
++rf_gt_update(const struct rf_gt_ops *ops, struct rf_gt_report *r,
++    unsigned unit, uint32_t at, uint32_t mask, uint32_t value)
++{
++    uint32_t before, after;
++    int error = rf_gt_rd(ops, r, unit, at, &before);
++    if (error)
++        return error;
++    error = rf_gt_wr(ops, r, unit, at, (before & ~mask) | (value & mask));
++    if (error)
++        return error;
++    error = rf_gt_rd(ops, r, unit, at, &after);
++    if (error)
++        return error;
++    return (after & mask) == (value & mask) ? 0 : EIO;
++}
++
++static inline bool
++rf_gt_pll_identity(uint32_t mode, uint32_t l, uint32_t user, uint32_t alpha)
++{
++    /* Locked/active FSM, all native outputs on, even postdivision /2. */
++    return (mode & 0xc0100000u) == 0xc0100000u && l == 31 &&
++        (user & 0xf07u) == 0x107u && alpha == 0x4000;
++}
++
++static inline int
++rf_gt_source_live(const struct rf_gt_ops *ops, struct rf_gt_report *r, bool running)
++{
++    uint32_t v[15];
++    static const struct { unsigned unit; uint32_t at; } registers[15] = {
++        {RF_GT_GCC, 0x71004}, {RF_GT_GPUCC, 0x106c},
++        {RF_GT_GCC, 0}, {RF_GT_GCC, 4}, {RF_GT_GCC, 0xc}, {RF_GT_GCC, 0x40},
++        {RF_GT_GCC, 0x52010}, {RF_GT_GCC, 0x52000},
++        {RF_GT_GPUCC, 0x1124}, {RF_GT_GPUCC, 0x1120},
++        {RF_GT_GPUCC, 0x1098}, {RF_GT_GPUCC, 0x109c},
++        {RF_GT_GPUCC, 0x100c}, {RF_GT_GPUCC, 0x1064}, {RF_GT_GPUCC, 0x1540}
++    };
++    unsigned i;
++    int error;
++    for (i = 0; i < 15; i++) {
++        error = rf_gt_rd(ops, r, registers[i].unit, registers[i].at, &v[i]);
++        if (error)
++            return error;
++    }
++    if ((v[0] & 0x80000001u) != 1 || (v[1] & 3u) || !(v[14] & 0x80000000u) ||
++        !rf_gt_pll_identity(v[2], v[3], v[4], v[5]) ||
++        !(v[6] & 1) || !(v[7] & 0x10000u) || (v[11] & 0x80000001u) != 1 ||
++        (v[12] & 0x80000001u) != 1 ||
++        (v[13] & 0x80000001u) != 0x80000000u)
++        return EAGAIN;
++    if (!running && (v[10] & 0x80000001u) != 0x80000000u)
++        return EBUSY;
++    if (running && ((v[8] & 0x10371fu) != 0x602 ||
++            (v[9] & 0x80000001u) != 0 || (v[10] & 0x80000001u) != 1))
++        return EAGAIN;
++    return 0;
++}
++
++/* CSR access with fresh power/source proof; data access also verifies reset. */
++static inline int
++rf_gt_gmu_rd(const struct rf_gt_ops *ops, struct rf_gt_report *r,
++    uint32_t at, uint32_t *value, bool running, bool data)
++{
++    uint32_t reset;
++    int error = rf_gt_source_live(ops, r, running);
++    if (error)
++        return error;
++    if (data) {
++        error = rf_gt_rd(ops, r, RF_GT_GMU, 0x14000, &reset);
++        if (error)
++            return error;
++        if (reset != 1)
++            return EAGAIN;
++    }
++    return rf_gt_rd(ops, r, RF_GT_GMU, at, value);
++}
++
++static inline int
++rf_gt_gmu_wr(const struct rf_gt_ops *ops, struct rf_gt_report *r,
++    uint32_t at, uint32_t value, bool running, bool data)
++{
++    uint32_t reset;
++    int error = rf_gt_source_live(ops, r, running);
++    if (error)
++        return error;
++    if (data) {
++        error = rf_gt_rd(ops, r, RF_GT_GMU, 0x14000, &reset);
++        if (error)
++            return error;
++        if (reset != 1)
++            return EAGAIN;
++    }
++    return rf_gt_wr(ops, r, RF_GT_GMU, at, value);
++}
++
++static inline int
++rf_gt_branch(const struct rf_gt_ops *ops, struct rf_gt_report *r,
++    unsigned unit, uint32_t at, bool halt_delay)
++{
++    uint32_t before;
++    int error = rf_gt_rd(ops, r, unit, at, &before);
++    if (error)
++        return error;
++    error = rf_gt_wr(ops, r, unit, at, before | 1u);
++    if (error)
++        return error;
++    /* Native GPUCC AHB completion is a delay, not a reliable HALT bit. */
++    if (halt_delay)
++        return rf_gt_delay(ops, 10);
++    return rf_gt_poll(ops, r, unit, at, 0x80000001u, 1, 200);
++}
++
++static inline int
++rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *output)
++{
++    struct rf_gt_report r = {0};
++    uint32_t value, gmu_gx, cfg, command, reset;
++    uint64_t time_before, time_after, expected_ticks;
++    static const uint32_t pattern[2] = {0x62a00d01u, 0xa062f00du};
++    unsigned i;
++    int error = EINVAL, pattern_error = 0;
++
++    if (!output)
++        return EINVAL;
++    if (chip != 0x06020001u || !ops || !ops->valid || !ops->read ||
++        !ops->write || !ops->delay || !ops->time_ns)
++        goto done;
++    r.stage = RF_GT_PREFLIGHT;
++#define RF_GT_TRY(action) do { error = (action); if (error) goto done; } while (0)
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 0x71004, &value));
++    if ((value & 0x80000001u) != 1) { error = EAGAIN; goto done; }
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x106c, &r.cx));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1540, &r.cx_hw));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x100c, &r.gx));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1064, &gmu_gx));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1098, &r.gmu_clock_before));
++    if ((r.cx & 3u) || !(r.cx_hw & 0x80000000u) ||
++        (r.gx & 0x80000001u) != 1 ||
++        (gmu_gx & 0x80000001u) != 0x80000000u ||
++        (r.gmu_clock_before & 0x80000001u) != 0x80000000u) {
++        error = EBUSY; goto done;
++    }
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 0, &r.pll_mode));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 4, &r.pll_l));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 0xc, &r.pll_user));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 0x40, &r.pll_alpha));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 0x71028, &r.misc));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 0x52010, &r.pll_vote_before));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GCC, 0x52000, &r.feed_before));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1120, &r.rcg_before));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1124, &r.source_before));
++    if (!rf_gt_pll_identity(r.pll_mode, r.pll_l, r.pll_user, r.pll_alpha) ||
++        (r.misc & 3u) != 3 || (r.rcg_before & 0xf1u)) {
++        error = EAGAIN; goto done;
++    }
++
++    r.stage = RF_GT_BUS_CLOCKS;
++    RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GCC, 0x52010, 1, 1));
++    RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GCC, 0x52000, 0x10000, 0x10000));
++    RF_GT_TRY(rf_gt_delay(ops, 10)); /* Divided feed uses BRANCH_HALT_DELAY. */
++    RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GCC, 0x71154, false));
++    RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GCC, 0x7100c, false));
++    RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GCC, 0x71018, false));
++    RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GPUCC, 0x109c, false));
++    RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GPUCC, 0x1078, true));
++    RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GPUCC, 0x5000, false));
++
++    /* Do not clock an ambiguous inherited processor before holding reset. */
++    r.stage = RF_GT_RESET;
++    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14000, &r.reset_before, false, false));
++    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14070, &r.result_before, false, false));
++    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14600, &r.hfi_before, false, false));
++    if (r.reset_before > 1 || r.result_before != 0 || r.hfi_before != 0) {
++        error = EBUSY; goto done;
++    }
++    RF_GT_TRY(rf_gt_gmu_wr(ops, &r, 0x14000, 1, false, false));
++    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14000, &r.reset_after, false, false));
++    if (r.reset_after != 1) { error = EIO; goto done; }
++    r.reset_held = true;
++
++    r.stage = RF_GT_SOURCE;
++    RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GPUCC, 0x1120, 2, 2));
++    RF_GT_TRY(rf_gt_poll(ops, &r, RF_GT_GPUCC, 0x1120, 0x80000000u, 0, 500));
++    RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GPUCC, 0x1124, 0x10371f, 0x602));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1120, &command));
++    RF_GT_TRY(rf_gt_wr(ops, &r, RF_GT_GPUCC, 0x1120, command | 1));
++    RF_GT_TRY(rf_gt_poll(ops, &r, RF_GT_GPUCC, 0x1120, 1, 0, 500));
++    RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GPUCC, 0x1120, 2, r.rcg_before & 2u));
++
++    r.stage = RF_GT_CORE_CLOCK;
++    RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GPUCC, 0x1098, 0xff0, 0xff0));
++    RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GPUCC, 0x1098, false));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1124, &r.source_after));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1098, &r.gmu_clock_after));
++    RF_GT_TRY(rf_gt_source_live(ops, &r, true));
++    r.source_200m = true;
++
++    r.stage = RF_GT_COUNTER;
++    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_before, true, true));
++    time_before = ops->time_ns(ops->context);
++    RF_GT_TRY(rf_gt_delay(ops, 1000));
++    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_after, true, true));
++    time_after = ops->time_ns(ops->context);
++    r.counter_delta = r.counter_after - r.counter_before;
++    if (time_after <= time_before || time_after - time_before < 1000000 ||
++        time_after - time_before > 10000000) {
++        error = ETIMEDOUT; goto done;
++    }
++    r.counter_elapsed_ns = time_after - time_before;
++    expected_ticks = r.counter_elapsed_ns * 192u / 10000u;
++    if ((uint64_t)r.counter_delta * 5 < expected_ticks * 4 ||
++        (uint64_t)r.counter_delta * 5 > expected_ticks * 6) {
++        error = ETIMEDOUT; goto done;
++    }
++    r.counter_live = true;
++
++    r.stage = RF_GT_SAVE;
++    for (i = 0; i < 2; i++)
++        RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x7000 + 4*i, &r.saved[i], true, true));
++    r.stage = RF_GT_PATTERN;
++    for (i = 0; i < 2; i++) {
++        r.dtcm_dirty = true; /* A failed write may have partially completed. */
++        RF_GT_TRY(rf_gt_gmu_wr(ops, &r, 0x7000 + 4*i, pattern[i], true, true));
++    }
++    for (i = 0; i < 2; i++) {
++        RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x7000 + 4*i, &r.pattern_read[i], true, true));
++        if (r.pattern_read[i] != pattern[i])
++            pattern_error = EIO;
++    }
++    r.stage = RF_GT_RESTORE;
++    for (i = 0; i < 2; i++)
++        RF_GT_TRY(rf_gt_gmu_wr(ops, &r, 0x7000 + 4*i, r.saved[i], true, true));
++    for (i = 0; i < 2; i++) {
++        RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x7000 + 4*i, &r.restored[i], true, true));
++        if (r.restored[i] != r.saved[i]) { error = EIO; goto done; }
++    }
++    r.dtcm_dirty = false;
++    r.dtcm_restored = true;
++    if (pattern_error) { error = pattern_error; goto done; }
++    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14000, &reset, true, false));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1124, &cfg));
++    if (reset != 1 || (cfg & 0x10371fu) != 0x602) { error = EAGAIN; goto done; }
++    r.stage = RF_GT_DONE;
++    error = 0;
++done:
++#undef RF_GT_TRY
++    r.error = (uint32_t)error;
++    *output = r;
++    return error;
++}
++
++#endif /* REDFIN_GMU_TCM_H */
