@@ -5,6 +5,9 @@ read-only global-register snapshot. It has no write callback, reads no
 context-bank page and grants no DMA/context ownership. Its new code is not
 connected to the current TCM kernel startup. The held-CX/clock/reset proofs
 in [GMU.md](GMU.md) must precede a separately selected hardware experiment.
+[`include/redfin_gmu_pagetables.h`](include/redfin_gmu_pagetables.h) separately
+constructs CPU-only 4KiB tables from owned allocations. It installs no table
+or route and is also unwired.
 
 ## Native resource and access boundary
 
@@ -115,16 +118,59 @@ For 39-bit VA, 36-bit PA and a 4KiB granule, this image needs five table pages:
 the root, an L2/L3 pair for low cached firmware, and an L2/L3 pair for the
 `0x60000000` uncached kernel region. XNU's 16KiB VM page size does not change
 this SMMU granule. Allocating two 16KiB-owned pages can back five distinct
-4KiB table pages while retaining the remaining allocator-owned slack.
+4KiB table pages only when the host and physical views form one contiguous
+32KiB extent; the remaining allocator-owned slack stays retained.
 
 Every descriptor-pool and DMA allocation needs a verified host-view/physical
 pair, complete allocator-owned extent, unique ownership/lifetime token and
 proof that it does not alias another extent, existing tables, kernel image,
-framebuffer or reservation. Zero and publish complete owned buffers before
-making them reachable; retain them until the context is proved stopped or
-the platform resets. A stable global snapshot cannot supply those proofs.
+framebuffer or reservation. Initialize every range that a descriptor can
+expose and publish its cache changes before making it reachable; retain the
+complete allocations until the context is proved stopped or the platform
+resets. A stable global snapshot cannot supply those proofs.
 Do not generate a TTBR from an ordinary virtual address or treat a protected
 context's apparent zero as free space.
+
+## CPU-only table constructor
+
+`rf_gm_pt_build(snapshot, chip, image, image_bytes, backing, backing_count,
+table_pool, owner, output)` reparses the immutable firmware and accepts only
+a successful, stable snapshot with consistent raw/decoded native geometry
+and supported table format. It uses the snapshot to select a table format;
+it does not select or acquire a context.
+
+Each `rf_gm_memory` supplies a contiguous host view, physical base, complete
+allocator-owned size, unique nonzero token and the corresponding firmware
+GMU address. `table_pool.gmu_address` is zero; the root is reached by physical
+address. Data allocations are matched by GMU address, independent of caller
+array order. The owner must prove that all allocations are exclusive and
+unreachable by DMA. Its `owns(context, memory, usage)` callback receives the
+full extent, including 16KiB allocator slack, and its `valid(context)`
+callback must cover their complete lifetime and immutable callback state.
+Callback state must remain outside the writable pool.
+
+This first constructor accepts only the approved XNU RAM window
+`0x180000000+0x80000000`, aligned physical bases and sizes, and at most 2MiB
+per owned extent. Full physical/host extents and ownership tokens must be
+distinct. Firmware, input metadata and output cannot alias the writable
+pool; output also cannot overwrite firmware, input metadata or DMA memory.
+All malformed inputs, insufficient table storage and denied ownership fail
+before the first pool store. Firmware-parser errors propagate unchanged.
+
+The constructor emits only table and page descriptors: no blocks, TCM
+entries or mappings of allocator slack. It bounds storage to 40 table pages
+and 18 DMA extents, retains the full pool/data ownership metadata in the
+result, and reports `table_bytes` separately from the owned pool size. For
+the current image, only `0x5000` of a `0x8000` pool is zeroed and populated;
+the unused `0x3000` is preserved and remains unreachable.
+
+Lifetime validation precedes every bounded page zero, descriptor store and
+final output publication. Revocation stops further stores and leaves output
+unchanged. The CPU pool can then contain incomplete tables and must not be
+installed. Even successful construction still requires separate data/HFI
+initialization, cache publication, context/route ownership, context
+programming and TLB synchronization. No such hardware operation, allocation,
+firmware load or reset release is part of this interface.
 
 ## Validation and next experiment
 
@@ -135,6 +181,19 @@ boundary, latent references, stream aliases/ambiguity, malformed fields,
 fault preservation and an allowlist excluding all context/TCU/TBU/TLB access.
 These results are host observations. No GPU-SMMU hardware read or new kernel
 startup is enabled by this milestone.
+
+`python3 -m unittest ports/redfin/test_gmu_pagetables.py` adds 19 host tests.
+An independent three-level descriptor walker checks every emitted entry,
+exact physical mappings, HFI privilege, unmapped gaps and TCM exclusion.
+Other cases cover 16KiB allocator slack/canaries, unordered backing arrays,
+2MiB boundaries, the maximum 18 extents and a sparse 34-table layout,
+unsupported/inconsistent snapshots, range/alias/token/ownership failures,
+and every lifetime-revocation point. A private standalone ASan+UBSan run
+passes 403 scenarios across the current, sparse and boundary layouts,
+including all 219 lease edges, 31 allocation denials and 150 malformed/alias
+cases. The private header copy also passes the actual XNU
+`DEVELOPMENT_ARM64_SWEET` BSD compiler flags with `-Werror`.
+These are CPU-memory results; no table is installed or firmware started.
 
 Next: after physical reset-held TCM success, bind a separate exact read-only
 GPU-SMMU mode to that same successful lifetime and collect native IDs/routes.
