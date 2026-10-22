@@ -1,0 +1,197 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -27,6 +27,7 @@
+ #include <sys/kpi_mbuf.h>
+ #include <sys/kpi_socket.h>
+ #include <sys/sockio.h>
++#include <sys/filio.h>
+ #include <net/if.h>
+ #include <net/if_types.h>
+ #include <net/ethernet.h>
+@@ -221,6 +222,7 @@
+ 	bool        data_in;        /* data stage direction */
+ 	uint32_t    events;
+ 	bool        configured;
++ bool network_stopped; /* Redfin software stop is sticky for this boot. */
+ 	uint8_t     data_alt;       /* data interface alternate setting */
+ 	/* network */
+ 	ifnet_t     ifp;
+@@ -234,6 +236,8 @@
+ static bool
+ ud_redfin_proof(void)
+ {
++ if (ud.guard.redfin && !ud.guard.enum_only &&
++     __atomic_load_n(&ud.network_stopped,__ATOMIC_ACQUIRE)) return false;
+  return rf_usb_gadget_proof(&ud.guard,mach_absolute_time());
+ }
+ 
+@@ -520,8 +524,10 @@
+ {
+ 	volatile uint32_t *t = (volatile uint32_t *)(ud.dma + UD_TRB_RX);
+ 	ud_sync(UD_TRB_RX, 16);
++ if (ud.guard.redfin && !ud_redfin_proof()) return;
+ 	uint32_t len = UD_FRAME_MAX - (t[2] & 0xffffff);
+ 	ud_sync(UD_RX, UD_FRAME_MAX);
++ if (ud.guard.redfin && !ud_redfin_proof()) return;
+ 	if (ud.ifp != NULL && len >= ETHER_HDR_LEN && len <= ETHER_MAX_LEN) {
+ 		/*
+ 		 * One mbuf with a 2 KiB cluster holds any frame. (mbuf_allocpacket
+@@ -543,12 +549,14 @@
+ 			(void)mbuf_setdata(m, (char *)mbuf_data(m) + ETHER_HDR_LEN, mbuf_len(m) - ETHER_HDR_LEN);
+ 			stats.packets_in = 1;
+ 			stats.bytes_in = len;
++            if (ud.guard.redfin && !ud_redfin_proof()) { mbuf_freem(m);return; }
+ 			ud.rx_frames++;
+ 			ifnet_input(ud.ifp, m, &stats);
+ 		} else if (m != NULL) {
+ 			mbuf_freem(m);
+ 		}
+ 	}
++ if (ud.guard.redfin && !ud_redfin_proof()) return;
+ 	ud_rx_arm();
+ }
+ 
+@@ -557,6 +565,7 @@
+ ud_tx_kick_locked(void)
+ {
+ 	while (!ud.tx_busy && ud.txq_count > 0 && ud.configured) {
++  if (ud.guard.redfin && !ud_redfin_proof()) return;
+ 		mbuf_t m = ud.txq[ud.txq_head];
+ 		ud.txq_head = (ud.txq_head + 1) % UD_TXQ;
+ 		ud.txq_count--;
+@@ -565,6 +574,7 @@
+ 			mbuf_freem(m);
+ 			continue;
+ 		}
++        if (ud.guard.redfin && !ud_redfin_proof()) { mbuf_freem(m);return; }
+ 		mbuf_copydata(m, 0, len, (void *)(ud.dma + UD_TX));
+ 		mbuf_freem(m);
+ 		/* A frame of a multiple of 512 bytes would need a zero-length
+@@ -583,6 +593,9 @@
+ {
+     if (ud.guard.redfin && !ud_redfin_proof()) { mbuf_freem(m);return ENXIO; }
+ 	lck_mtx_lock(ud.lock);
++    if (ud.guard.redfin && !ud_redfin_proof()) {
++        lck_mtx_unlock(ud.lock);mbuf_freem(m);return ENXIO;
++    }
+ 	if (ud.txq_count == UD_TXQ || !ud.configured) {
+ 		lck_mtx_unlock(ud.lock);
+ 		mbuf_freem(m);
+@@ -627,7 +640,10 @@
+ 	static lck_grp_t *grp;
+ 
+ 	grp = lck_grp_alloc_init("sweet_usb", LCK_GRP_ATTR_NULL);
++ if (ud.guard.redfin && !grp) { rf_usb_gadget_fail(&ud.guard,ENOMEM);return; }
+ 	ud.lock = lck_mtx_alloc_init(grp, LCK_ATTR_NULL);
++ if (ud.guard.redfin && !ud.lock) { rf_usb_gadget_fail(&ud.guard,ENOMEM);return; }
++ if (ud.guard.redfin && !ud_redfin_proof()) return;
+ 
+ 	bzero(&init, sizeof(init));
+ 	init.ver = IFNET_INIT_CURRENT_VERSION;
+@@ -649,7 +665,9 @@
+ 	init.detach = ud_if_detach;
+ 	init.broadcast_addr = etherbroadcastaddr;
+ 	init.broadcast_len = ETHER_ADDR_LEN;
+-	if (ifnet_allocate_extended(&init, &ud.ifp) != 0) {
++	errno_t if_error = ifnet_allocate_extended(&init, &ud.ifp);
++	if (if_error != 0) {
++  if (ud.guard.redfin) rf_usb_gadget_fail(&ud.guard,if_error);
+ 		printf("SWEET USB: ifnet_allocate failed\n");
+ 		ud.ifp = NULL;
+ 		return;
+@@ -659,7 +677,10 @@
+ 	ifnet_set_mtu(ud.ifp, ETHERMTU);
+ 	ifnet_set_baudrate(ud.ifp, 480000000);
+ 	ifnet_set_flags(ud.ifp, IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST, 0xffff);
+-	if (ifnet_attach(ud.ifp, NULL) != 0) {
++ if (ud.guard.redfin && !ud_redfin_proof()) return;
++	if_error = ifnet_attach(ud.ifp, NULL);
++	if (if_error != 0) {
++  if (ud.guard.redfin) rf_usb_gadget_fail(&ud.guard,if_error);
+ 		printf("SWEET USB: ifnet_attach failed\n");
+ 		ud.ifp = NULL;
+ 		return;
+@@ -690,6 +711,8 @@
+ 		err = sock_ioctl(so, SIOCAIFADDR, &ifra);
+ 		sock_close(so);
+ 	}
++ if (ud.guard.redfin && err) { rf_usb_gadget_fail(&ud.guard,err);return; }
++ if (ud.guard.redfin && !ud_redfin_proof()) return;
+ 	ifnet_set_flags(ud.ifp, IFF_UP | IFF_RUNNING, IFF_UP | IFF_RUNNING);
+ 	printf("SWEET USB: ue0 192.168.7.2/24 %s (err %d)\n", err ? "NOT configured" : "up", err);
+ }
+@@ -766,12 +789,34 @@
+ 	}
+ }
+ 
++/* Stop software ingress before halt, including lost route/power proof.
++ * The static ifnet/callbacks and permanent DMA slab outlive both workers. */
++static void
++ud_redfin_network_stop(void)
++{
++ if (!ud.guard.redfin || ud.guard.enum_only ||
++     __atomic_exchange_n(&ud.network_stopped,true,__ATOMIC_ACQ_REL)) return;
++ if (ud.lock) lck_mtx_lock(ud.lock);
++ ud.configured=false;
++ while (ud.txq_count) {
++  mbuf_t m=ud.txq[ud.txq_head];
++  ud.txq[ud.txq_head]=NULL;
++  ud.txq_head=(ud.txq_head+1)%UD_TXQ;
++  ud.txq_count--;
++  if (m) mbuf_freem(m);
++ }
++ ud.txq_head=0;ud.tx_busy=false;
++ if (ud.lock) lck_mtx_unlock(ud.lock);
++ if (ud.ifp) ifnet_set_flags(ud.ifp,0,IFF_UP|IFF_RUNNING);
++}
++
+ /* Only QUIESCE proof may bypass the sticky failure latch, solely to halt.
+  * DMA slab remains permanently allocated, including uncertain halt failures. */
+ static bool
+ ud_redfin_stop(void)
+ {
+  if (!ud.guard.redfin) return false;
++ ud_redfin_network_stop();
+  if (!ud.guard.policy.authorize ||
+      ud.guard.policy.authorize(ud.guard.caller,ud.guard.policy.context,RF_USB_QUIESCE)) return false;
+  uint32_t control=usb_rd(ud.dwc,DCTL);
+@@ -853,9 +898,18 @@
+ 		if (!ud.configured) {
+ 			continue;
+ 		}
+-		if (so == NULL && sock_socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, NULL, &so) != 0) {
+-			so = NULL;
+-			continue;
++		if (so == NULL) {
++   if (sock_socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, NULL, &so) != 0) {
++    so=NULL;continue;
++   }
++   if (ud.guard.redfin) {
++    if (!ud_redfin_proof()) break;
++    /* XNU sosendcheck tests SS_NBIO for a full send buffer; MSG_DONTWAIT
++     * alone only prevents waiting for the socket-buffer lock. */
++    int nonblocking=1;
++    errno_t error=sock_ioctl(so,FIONBIO,&nonblocking);
++    if (error) { rf_usb_gadget_fail(&ud.guard,error);break; }
++   }
+ 		}
+ 		uint32_t n;
+ 		while ((n = sweet_log_copy(&pos, chunk, sizeof(chunk))) > 0) {
+@@ -866,7 +920,7 @@
+ 				.msg_iov = &iov, .msg_iovlen = 1,
+ 			};
+ 			size_t sent = 0;
+-			if (sock_send(so, &msg, 0, &sent) != 0) {
++			if (sock_send(so, &msg, ud.guard.redfin ? MSG_DONTWAIT : 0, &sent) != 0) {
+ 				break;          /* no route/ARP yet: retry later */
+ 			}
+ 		}
+@@ -908,6 +962,7 @@
+     if (ud.guard.redfin && !ud.guard.enum_only && (!ud.ifp || !ud.lock)) {
+         rf_usb_gadget_fail(&ud.guard,ENOMEM);return;
+     }
++    if (ud.guard.redfin && !ud.guard.enum_only && !ud_redfin_proof()) return;
+ 
+ 	/* Device controller soft reset (PHY and global setup stay as ABL left them). */
+ 	dwc_wr(DCTL,ud.guard.redfin ? ((dwc_rd(DCTL)&~DCTL_RUN_STOP)|DCTL_CSFTRST) : DCTL_CSFTRST);

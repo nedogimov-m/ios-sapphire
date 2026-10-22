@@ -43,8 +43,12 @@ an uncertain halt cannot expose freed memory to the controller.
 
 The API additionally requires the Redfin platform contract and
 `redfinusb=3`. Its finite lifetime is `redfinusbsecs=1..120`, default 30 s.
-The integrated enumeration caller fixes this at 30 s and rejects network
-and log streaming options.
+The integrated caller fixes this at 30 s and seals one typed mode for the
+boot: enumeration, ECM, or ECM with logs. Every phase rechecks that exact
+mode. `--usb-network-probe` selects ECM with the validated AArch64 context;
+`--usb-live-log` requires that explicit network option. Network modes still
+require the initial RAM root, one CPU, verified bootloader return and all
+other peripheral writers disabled. Late mode changes are refused.
 `redfinusbnet=0` is the default: only EP0 is configured, CDC data alternate
 setting 1 stalls, no network interface is created, and log streaming is off.
 `redfinusbnet=1` separately opts into the inherited ECM network path.
@@ -151,6 +155,22 @@ at the same USB port for the bounded run. The worker stops with `ETIMEDOUT`
 at its 30-second lease and reports `halted=1`; authenticated, image-matched
 logs reach PID1 without panic and the collector verifies return to fastboot.
 No USB network interface or live log transport was enabled by this test.
+
+The network worker overlay adds fresh TX/RX proof checks, allocation/error
+checks before controller startup, and sticky software stop with a bounded
+queue drain and interface-down transition before hardware halt. Its log
+socket uses both FIONBIO and MSG_DONTWAIT: XNU's send-buffer capacity check
+does not treat MSG_DONTWAIT alone as nonblocking. Real constructor, log,
+RX/TX, output and cleanup handlers have fifteen actual-C tests. The six
+typed-caller tests cover flag parsing, frozen modes, unchanged route writes
+and phase ownership. The full host suite passes 577 tests.
+
+The first network run (`usb-net-v2`) creates XNU `ue0` at 192.168.7.2/24
+with errno 0, starts ECM+log and stops/halt cleanly at the lease deadline.
+The host sees 1209:0001 but sends no SET_CONFIGURATION; no host interface
+or UDP packets are observed. Network packet exchange and live logs remain
+unproved. macOS has matching ECM drivers; the host configuration/access path
+needs investigation. The earlier `usb-net-v1` image was never booted.
 
 Host validation:
 

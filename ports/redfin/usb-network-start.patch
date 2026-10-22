@@ -1,0 +1,87 @@
+diff --git a/bsd/dev/redfin_usb_start.c b/bsd/dev/redfin_usb_start.c
+--- a/bsd/dev/redfin_usb_start.c
++++ b/bsd/dev/redfin_usb_start.c
+@@ -32,6 +32,10 @@
+ 
+ static uint32_t redfin_initial_usb_lease;
+ static uint32_t redfin_initial_usb_gadget_owned;
++/* Zero is unsealed; mode+1 is immutable once this module acquires its lease. */
++static uint32_t redfin_initial_usb_network_lease;
++enum rf_initial_usb_mode { RF_INITIAL_USB_ENUM, RF_INITIAL_USB_ECM,
++ RF_INITIAL_USB_ECM_LOG, RF_INITIAL_USB_INVALID };
+ static const uint8_t redfin_initial_usb_caller;
+ 
+ static bool
+@@ -75,16 +79,40 @@
+  return 4+rw64;
+ }
+ 
++/* Exact optional flags; never let numeric truncation or strings enable DMA. */
++static int
++redfin_initial_usb_net_flag(const char *name)
++{
++ uint32_t value=0;
++ char text[3]={0};
++ if (!PE_parse_boot_argn(name,&value,sizeof(value))) return 0;
++ if (!PE_parse_boot_arg_str(name,text,sizeof(text)) || text[1] ||
++     (text[0]!='0' && text[0]!='1') || value!=(uint32_t)(text[0]-'0')) return -1;
++ return (int)value;
++}
++static enum rf_initial_usb_mode
++redfin_initial_usb_mode(void)
++{
++ int network=redfin_initial_usb_net_flag("redfinusbnet");
++ int log=redfin_initial_usb_net_flag("redfinusblog");
++ if (network<0 || log<0 || (log && !network)) return RF_INITIAL_USB_INVALID;
++ return network ? (log ? RF_INITIAL_USB_ECM_LOG : RF_INITIAL_USB_ECM) : RF_INITIAL_USB_ENUM;
++}
++
+ static bool
+ redfin_initial_usb_gates(void)
+ {
+  uint32_t contexts=0,bypass=0,gadget=0;
+  unsigned steps=redfin_initial_usb_context_steps();
++ enum rf_initial_usb_mode mode=redfin_initial_usb_mode();
++ uint32_t frozen=__atomic_load_n(&redfin_initial_usb_network_lease,__ATOMIC_ACQUIRE);
++ if (mode==RF_INITIAL_USB_INVALID || (frozen && frozen!=(uint32_t)mode+1)) return false;
+  (void)PE_parse_boot_argn("redfinusbcontexts",&contexts,sizeof(contexts));
+  (void)PE_parse_boot_argn("redfinusbbypass",&bypass,sizeof(bypass));
+  (void)PE_parse_boot_argn("redfinusbgadget",&gadget,sizeof(gadget));
+  if (!steps || (steps==5 && !bypass) || contexts>1 || bypass>1 || gadget>1 || (contexts && bypass) || (gadget && !bypass)) return false;
+  if (gadget && !redfin_initial_usb_arg("redfinusbsecs",30,false)) return false;
++ if (mode!=RF_INITIAL_USB_ENUM && (!gadget || !bypass || steps!=5)) return false;
+  if (!redfin_usb_platform() || redfin_spmi_return_ready()!=1 ||
+      !redfin_initial_usb_arg("redfinusb",3,true) ||
+      !redfin_initial_usb_arg("redfinusbowned",1,true) ||
+@@ -94,7 +122,7 @@
+      "sweetbattery","modem","wifi","gpu"};
+  const char *native[]={"redfintouch","redfintouchsetup","redfintouchevents",
+      "redfinrpmhtouch","redfinrpmh","redfinrail","redfinwifi","redfingpu",
+-     "redfinroot","redfinufs","ufsrw","rootrw","redfinusbnet","redfinusblog",
++     "redfinroot","redfinufs","ufsrw","rootrw",
+      "redfinfb","redfinscreen","sweethw","sweetusblog"};
+  for (unsigned i=0;i<sizeof(legacy)/sizeof(legacy[0]);i++)
+   if (!redfin_initial_usb_arg(legacy[i],0,true)) return false;
+@@ -140,6 +168,9 @@
+  uint32_t expected=0;
+  if (!__atomic_compare_exchange_n(&redfin_initial_usb_lease,&expected,1,false,
+      __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return EBUSY;
++ enum rf_initial_usb_mode mode=redfin_initial_usb_mode();
++ if (mode==RF_INITIAL_USB_INVALID) return EPERM; /* Sticky consumed lease. */
++ __atomic_store_n(&redfin_initial_usb_network_lease,(uint32_t)mode+1,__ATOMIC_RELEASE);
+  static const struct redfin_usb_owned_policy policy={redfin_initial_usb_exclusive,&redfin_initial_usb_lease};
+  int error=redfin_usb_owned_register(&redfin_initial_usb_caller,&policy);
+  printf("REDFIN USB START: owner register result=%d\n",error);
+@@ -166,7 +197,11 @@
+    static const struct redfin_usb_gadget_policy gadget_policy={redfin_initial_usb_gadget_authorize,&redfin_initial_usb_lease};
+    __atomic_store_n(&redfin_initial_usb_gadget_owned,1,__ATOMIC_RELEASE);
+    error=redfin_usb_gadget_start(&redfin_initial_usb_caller,&gadget_policy);
+-   printf("REDFIN USB START: enumeration-only gadget result=%d (bounded DMA)\n",error);
++   if (mode==RF_INITIAL_USB_ENUM)
++    printf("REDFIN USB START: enumeration-only gadget result=%d (bounded DMA)\n",error);
++   else
++    printf("REDFIN USB START: ECM%s gadget result=%d (bounded DMA, 30s)\n",
++        mode==RF_INITIAL_USB_ECM_LOG?"+log":"",error);
+   }
+   return error;
+  }

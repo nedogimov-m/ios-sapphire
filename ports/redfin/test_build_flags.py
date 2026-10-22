@@ -136,6 +136,20 @@ class BuildFlagTests(unittest.TestCase):
                               '--return-bootloader', '--ufs-root'],
                              '--usb-bypass-probe requires the initial RAM root without UFS')
 
+    def test_live_log_requires_explicit_network_probe(self):
+        self.refused(['--usb-live-log'], '--usb-live-log requires --usb-network-probe')
+
+    def test_usb_network_probe_keeps_ram_return_and_exclusive_profile(self):
+        self.refused(['--usb-network-probe'], 'peripheral observers require --kernel')
+        self.refused(['--kernel', '/missing-kernel', '--usb-network-probe'],
+                     '--usb-bypass-probe requires --return-bootloader')
+        self.refused(['--kernel', '/missing-kernel', '--usb-network-probe',
+                      '--return-bootloader', '--ufs-root'],
+                     '--usb-bypass-probe requires the initial RAM root without UFS')
+        self.refused(['--kernel', '/missing-kernel', '--usb-network-probe',
+                      '--return-bootloader', '--touch-scan-probe'],
+                     'USB bypass experiment must run separately from touch ID, direct claim and context observation')
+
 
 if __name__ == '__main__':
     unittest.main()

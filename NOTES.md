@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN ECM/log startup validated; host configuration still missing — 2026-10-22
+
+Commit `e6de11b` records V5 host enumeration. New typed startup modes
+ENUM/ECM/ECM_LOG are sealed once and rechecked by every ownership phase;
+strict textual/numeric flags reject overflow/bare/late changes. Network
+requires the proved five-store AArch64 route, md0, CPU1 and 30s lease; all
+other writers stay fenced. No SMMU changes added. Six actual-C caller tests
+and independent review pass; 18 CLI tests pass.
+Runtime hardening checks TX/RX proof, constructor allocations and exact
+errors, drains the bounded queue/lowers ifnet once before halt, retains DMA,
+and uses FIONBIO + MSG_DONTWAIT for log sends. XNU sosendcheck tests SS_NBIO,
+so MSG_DONTWAIT alone was insufficient; the first local `usb-net-v1` image
+was never booted. Fifteen actual-C real-handler tests and independent source
+review pass. Full suite 577 PASS (`peripherals-host-tests-v24.txt`).
+Worker overlay SHA256 `5bb409bd8bb69394af57301d24dd44150fff37f5030aaeb3fd8f4195a5e8d163`;
+startup SHA256 `81b76303a8462f7ffba259ecfb804e4946ffddbfdad627164f081c89a4a1aa60`.
+ARM64 build `research/redfin-build/build-20261022-205957.log` succeeds;
+kernel SHA256 `1387206ce4912c8d1546f2d219bc628bb678a3e6a64bf3469bb2e3f3822fa447`.
+Image `ports/redfin/out/usb-net-v2/redfin-xnu.img` SHA256
+`134a8fe9c2bd3b3a5d9a3cdaa227a597b6563ab598c99717861179c3435c30b6`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x4d2b27fe54a8cf56`.
+Authenticated, image-matched `logs/redfin/usb-net-v2/` reaches PID1, no panic,
+metadata primed and return to fastboot verified. Claim/revalidation0, five
+stores exact; XNU ue0 192.168.7.2/24 up errno0; ECM+log gadget0. Host-only
+watch sees 1209:0001 on same Pixel port. Again only descriptor requests, no
+SET_CONFIGURATION. No host ECM interface or UDP packets. DeadlineETIMEDOUT60,
+halted1, permanent slab retained. No hardware fault/quarantine observed.
+Packet exchange/live USB logs are not yet proved. Local macOS ECM driver
+matching is present; IOAccessory log query does not prove a permission block.
+Next: standard libusb configuration/CDC packet probe on this exact own port,
+with no driver detach/reset or host network edits. Host libusb exists;
+sudo has no cached authorization (not needed for the planned raw probe).
+
 ## REDFIN USB V5: host enumeration and EP0 DMA validated — 2026-10-22
 
 Commit `d14e784` records the five-store native-format experiment. The new

@@ -72,6 +72,8 @@ def main():
     p.add_argument('--usb-bypass-probe', action='store_true', help='claim a dedicated NS bypass context and USB route only; no gadget or DMA')
     p.add_argument('--usb-enumeration-probe', action='store_true', help='start the guarded enumeration-only USB gadget for 30 seconds; initial RAM root only')
     p.add_argument('--usb-aarch64-context', action='store_true', help='opt into native AArch64 format for the owned USB bypass context; requires a USB bypass or enumeration probe')
+    p.add_argument('--usb-network-probe', action='store_true', help='start bounded USB ECM networking with the validated AArch64 context; initial RAM root only')
+    p.add_argument('--usb-live-log', action='store_true', help='stream kernel log over bounded USB ECM; requires --usb-network-probe')
     p.add_argument('--rpmh-probe', action='store_true', help='inspect CMD-DB and RPMh TCS handoff without commands')
     p.add_argument('--gpu-probe', action='store_true', help='observe Adreno 620 clock handoff; requires --display')
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
@@ -89,6 +91,11 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.usb_live_log and not a.usb_network_probe:
+        p.error('--usb-live-log requires --usb-network-probe')
+    if a.usb_network_probe:
+        a.usb_enumeration_probe = True
+        a.usb_aarch64_context = True
     if a.usb_enumeration_probe:
         a.usb_bypass_probe = True
     if a.usb_aarch64_context and not a.usb_bypass_probe:
@@ -323,6 +330,10 @@ def main():
             command_line += ' redfinusbrw64=1'
         if a.usb_enumeration_probe:
             command_line += ' redfinusbgadget=1 redfinusbsecs=30'
+        if a.usb_network_probe:
+            command_line += ' redfinusbnet=1'
+        if a.usb_live_log:
+            command_line += ' redfinusblog=1'
         if ufs_mode:
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:
