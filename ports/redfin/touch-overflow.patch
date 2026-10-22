@@ -1,0 +1,228 @@
+diff --git a/bsd/dev/redfin_touch_protocol.h b/bsd/dev/redfin_touch_protocol.h
+--- a/bsd/dev/redfin_touch_protocol.h
++++ b/bsd/dev/redfin_touch_protocol.h
+@@ -71,12 +71,24 @@
+  for (unsigned i=0;i<checksum;i++) out[checksum]=(uint8_t)(out[checksum]+out[i]);
+  return (checksum+1+3)&~3u;
+ }
++/* Pinned SEC sec_ts.c:2337..2350 uses CLEAR_EVENT_STACK for count>31.
++ * This exact volatile command drops queued input; it is not an IC reset. */
++static inline unsigned
++redfin_touch_clear_frame(uint8_t out[8])
++{
++ if(!out) return 0;
++ for(unsigned i=0;i<8;i++) out[i]=0;
++ out[0]=0xaa;out[2]=1;out[5]=0x62;out[6]=0x0d;
++ return 8;
++}
+ static inline int
+ redfin_touch_tx_valid(const uint8_t *tx,unsigned bytes)
+ {
+  if (!tx || (bytes!=8 && bytes!=12)) return 0;
+  uint8_t expected[12]={0};
+- if (bytes==8 && tx[5]!=0x10) {
++ if(bytes==8 && tx[5]==0x62) {
++  if(redfin_touch_clear_frame(expected)!=bytes) return 0;
++ } else if (bytes==8 && tx[5]!=0x10) {
+   unsigned count=((unsigned)tx[3]<<8)|tx[4];
+   if (!redfin_touch_read_request(tx[5],count,expected)) return 0;
+  } else {
+diff --git a/bsd/dev/redfin_touch_events.h b/bsd/dev/redfin_touch_events.h
+--- a/bsd/dev/redfin_touch_events.h
++++ b/bsd/dev/redfin_touch_events.h
+@@ -11,13 +11,15 @@
+ 	uint16_t down, suppressed;
+ 	uint16_t x[10], y[10];
+ 	bool synchronized, startup_reset;
+-	unsigned contacts, releases;
++	unsigned contacts, releases, overflows, recoveries;
++	uint8_t overflow_event[8];
+ };
+ typedef void (*redfin_events_emit)(void *, unsigned, int, unsigned, unsigned);
+ struct redfin_events_ops {
+ 	int (*read)(void *, unsigned, unsigned, uint8_t *);
+ 	redfin_events_emit emit;
+ 	void *context;
++	int (*clear)(void *);
+ };
+ static inline void
+ redfin_events_release_all(struct redfin_events_state *s, redfin_events_emit emit, void *ctx)
+@@ -37,7 +39,7 @@
+ 	unsigned kind = event[0] & 3u;
+ 	if (kind == 1) {
+ 		unsigned type = (event[0] >> 2) & 15u;
+-		if (type == 1) return EIO; /* core error, queue full, ESD or unknown error. */
++		if (type == 1) return event[1] == 1 ? EOVERFLOW : EIO; /* Queue full only; other errors stay fatal. */
+ 		if (type == 2 && event[1] == 0) {
+ 			if (s->synchronized || !s->startup_reset ||
+ 			    (event[2] != 0x10 && event[2] != 0x40)) return EIO;
+@@ -93,7 +95,11 @@
+ 		return 0;
+ 	}
+ 	unsigned remaining = events[7] & 63u;
+-	if (remaining > 31) return EOVERFLOW;
++	if (remaining > 31) {
++		for (unsigned i = 0; i < 8; i++) s->overflow_event[i] = events[i];
++		s->overflows++;
++		return EOVERFLOW;
++	}
+ 	if (remaining) {
+ 		error = ops->read(ops->context,0x61,remaining * 8,events + 8);
+ 		if (error) return error;
+@@ -102,10 +108,35 @@
+ 	for (unsigned i = 0; i <= remaining; i++) {
+ 		if (!events[i * 8]) return EINVAL; /* A declared queued event must be nonempty. */
+ 		error = redfin_events_accept(&next,events + i * 8,deliver,NULL,NULL);
+-		if (error) return error;
++		if (error) {
++			if (error == EOVERFLOW) {
++				for (unsigned j = 0; j < 8; j++) s->overflow_event[j] = events[i * 8 + j];
++				s->overflows++;
++			}
++			return error;
++		}
+ 	}
+ 	for (unsigned i = 0; i <= remaining; i++)
+ 		(void)redfin_events_accept(s,events + i * 8,deliver,ops->emit,ops->context);
+ 	return 0;
+ }
++/* Recover only the queue, once per caller attempt. Release held fingers before
++ * clearing; discard at most four bounded batches until an actual empty reply.
++ * A transport/ownership failure, reset, corrupt packet or persistent overflow
++ * remains fatal. Held stale contacts stay suppressed until their UP. */
++static inline int
++redfin_events_recover(struct redfin_events_state *s, const struct redfin_events_ops *ops)
++{
++ if(!s || !ops || !ops->read || !ops->clear) return EINVAL;
++ redfin_events_release_all(s,ops->emit,ops->context);
++ s->synchronized=false;s->startup_reset=false;
++ int error=ops->clear(ops->context);
++ if(error) return error;
++ for(unsigned batch=0;batch<4;batch++) {
++  error=redfin_events_batch(s,ops,false);
++  if(error) return error;
++  if(s->synchronized) { s->recoveries++;return 0; }
++ }
++ return EBUSY;
++}
+ #endif
+diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
+--- a/bsd/dev/redfin_touch_spi.c
++++ b/bsd/dev/redfin_touch_spi.c
+@@ -33,11 +33,13 @@
+ static vm_offset_t redfin_spi_verified_se;
+ static unsigned redfin_spi_verified_hz;
+ static struct redfin_spi redfin_spi_event_context;
+-static bool redfin_spi_event_open;
++static bool redfin_spi_event_open,redfin_spi_event_sensing;
++static unsigned redfin_spi_event_clears;
+ bool redfin_touch_spi_identity_ready(void);
+ int redfin_touch_spi_events_begin(bool gic_irq_masked);
+ int redfin_touch_spi_event_read(unsigned reg, unsigned count, uint8_t *out);
+ void redfin_touch_spi_events_close(void);
++int redfin_touch_spi_events_clear(void);
+ 
+ static uint32_t
+ redfin_spi_rd(struct redfin_spi *s, unsigned offset)
+@@ -317,6 +319,7 @@
+ 		redfin_spi_event_context.dead = true;
+ 		redfin_spi_event_open = false;
+ 	}
++	redfin_spi_event_sensing = false;
+ 	redfin_spi_verified_se = 0;
+ 	redfin_spi_verified_hz = 0;
+ }
+@@ -329,6 +332,7 @@
+ 	redfin_spi_event_context = (struct redfin_spi){redfin_spi_verified_se,0,0,false,false};
+ 	int error = redfin_spi_prepare(&redfin_spi_event_context);
+ 	if (error) { redfin_touch_spi_events_close(); return error; }
++	redfin_spi_event_sensing = false;
+ 	redfin_spi_event_open = true;
+ 	return 0;
+ }
+@@ -434,6 +438,25 @@
+      __atomic_load_n(&redfin_spi_scan_active,__ATOMIC_ACQUIRE)) return ENOTSUP;
+  int error=redfin_spi_sense_init(&redfin_spi_event_context);
+  if (error) redfin_touch_spi_events_close();
++ else redfin_spi_event_sensing=true;
+  return error;
+ }
++/* Caller rechecks the permanent UFS lease, GIC/GPIO and HID before this leaf.
++ * Only this open, successfully sensed session can issue the exact clear frame.
++ * At most eight per boot. No retry after a transport failure or IC reset. */
++int
++redfin_touch_spi_events_clear(void)
++{
++ if(!redfin_spi_event_open || !redfin_spi_event_sensing || !redfin_spi_verified_se ||
++    !redfin_spi_verified_hz || redfin_spi_event_context.se!=redfin_spi_verified_se ||
++    redfin_spi_event_context.dead || __atomic_load_n(&redfin_spi_scan_active,__ATOMIC_ACQUIRE)) return ENOTSUP;
++ if(redfin_spi_event_clears>=8) return EOVERFLOW;
++ redfin_spi_event_clears++;
++ uint8_t frame[8];
++ if(redfin_touch_clear_frame(frame)!=sizeof(frame)) return EINVAL;
++ int error=redfin_spi_transfer(&redfin_spi_event_context,frame,NULL,sizeof(frame));
++ printf("REDFIN TOUCH CLEAR: attempt=%u result=%d\n",redfin_spi_event_clears,error);
++ if(error) redfin_touch_spi_events_close();
++ return error;
++}
+ #endif
+diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
+--- a/bsd/dev/redfin_touch_events.c
++++ b/bsd/dev/redfin_touch_events.c
+@@ -23,6 +23,7 @@
+ extern int redfin_touch_spi_events_begin(bool);
+ extern int redfin_touch_spi_event_read(unsigned,unsigned,uint8_t *);
+ extern void redfin_touch_spi_events_close(void);
++extern int redfin_touch_spi_events_clear(void);
+ extern bool sweet_hid_redfin_touch_ready(void);
+ extern void sweet_hid_touch(int,int,int,int);
+ int redfin_touch_events_start(void);
+@@ -62,6 +63,14 @@
+ 	if (!sweet_hid_redfin_touch_ready()) return EPIPE;
+ 	return redfin_touch_spi_event_read(reg,count,out);
+ }
++static int
++redfin_events_clear(void *ctx)
++{
++ (void)ctx;
++ if(!redfin_events_owned()) return EBUSY;
++ if(!sweet_hid_redfin_touch_ready()) return EPIPE;
++ return redfin_touch_spi_events_clear();
++}
+ static void
+ redfin_events_emit_hid(void *ctx,unsigned finger,int down,unsigned x,unsigned y)
+ {
+@@ -81,7 +90,7 @@
+ 	struct redfin_events_state state = {0};
+ 	state.startup_reset = true;
+ 	redfin_events_delivery_failed = false;
+-	const struct redfin_events_ops ops = {redfin_events_read,redfin_events_emit_hid,NULL};
++	const struct redfin_events_ops ops = {redfin_events_read,redfin_events_emit_hid,NULL,redfin_events_clear};
+ 	uint64_t deadline;
+ 	clock_interval_to_deadline(redfin_events_seconds,NSEC_PER_SEC,&deadline);
+ 	int error = 0;
+@@ -114,6 +123,13 @@
+ 		if (!redfin_events_owned()) { error = EBUSY; break; }
+ 		if (!(redfin_events_rd(redfin_events_gpio,0x1004) & 1) || state.down || (ticks++ % 13) == 0) {
+ 			error = redfin_events_batch(&state,&ops,true);
++			if (error == EOVERFLOW) {
++				const uint8_t *p = state.overflow_event;
++				printf("REDFIN TOUCH OVERFLOW: count=%u raw=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
++				    state.overflows,p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7]);
++				error = redfin_events_recover(&state,&ops);
++				printf("REDFIN TOUCH OVERFLOW: resync=%d recovered=%u\n",error,state.recoveries);
++			}
+ 			if (error) break;
+ 			if (redfin_events_delivery_failed) { error = EPIPE; break; }
+ 			batches++;
+@@ -123,8 +139,8 @@
+ done:
+ 	redfin_events_release_all(&state,redfin_events_emit_hid,NULL);
+ 	redfin_touch_spi_events_close();
+-	printf("REDFIN TOUCH EVENTS: stopped error=%d batches=%u contacts=%u releases=%u\n",
+-	    error,batches,state.contacts,state.releases);
++	printf("REDFIN TOUCH EVENTS: stopped error=%d batches=%u contacts=%u releases=%u overflows=%u recovered=%u\n",
++	    error,batches,state.contacts,state.releases,state.overflows,state.recoveries);
+ 	(void)thread_terminate(current_thread());
+ 	__builtin_unreachable();
+ }

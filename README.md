@@ -14,7 +14,8 @@ userspace with touch. The user reports a large speed improvement over one core.
 The user confirms physical iOS display and touch-driven UI response. A fresh
 eight-core capture records 72 physical SEC contacts and 72 releases;
 multitouch remains unverified. CPU copies are capped at 10 Hz in that run;
-the 60 Hz comparison is in progress. Timed
+the user reports smoother UI at a 60 Hz copy limit. A touch queue overflow
+stopped input in that comparison; queue recovery is being validated. Timed
 process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
 The minimal MobileGestalt Wi-Fi identity fix is validated on the device.

@@ -21,17 +21,37 @@ The display contract is exact: framebuffer `0xa0000000+0x02300000`,
 Screen capture (`redfinscreen=1`) is optional. Scan and events are mutually
 exclusive; an old initial-md0 lease boolean cannot authorize either mode.
 
-`redfintouchsecs` defaults to 120 and accepts 1..300 seconds. Start returning
+`redfintouchsecs` defaults to 120 (180 in strict GUI8) and accepts 1..300 seconds. Start returning
 zero means the worker was created. The boot thread never waits for HID.
 The permanent owner has no release or retry after a power/SPI failure; see
 [TOUCH-RAIL.md](TOUCH-RAIL.md) for its typed callback contract.
+
+GUI8 uses the separately verified eight-core/root/display contract and pins
+the touch worker to CPU0. The old UP profiles remain available. Hardware on
+2026-10-23 confirms Apple GUI and native HID on all eight CPUs. At 60 Hz CPU
+copy cadence the parser stopped with `EOVERFLOW` after 381 batches/12 contacts;
+the kernel/rendering continued and the root unmounted cleanly.
+
+`touch-overflow.patch` implements the pinned SEC driver's queue recovery
+(`sec_ts.c:2337` count above 31, `sec_ts.h:244` register `0x62`). A complete
+validated packet reporting overflow, including queue-full status ID 1, releases
+all active fingers before an exact eight-byte CLEAR_EVENT_STACK command.
+Only an open, successfully sensed SPI session can clear, at most eight times
+per boot. The worker rechecks its permanent lease, GIC/GPIO and HID before
+the command and every following read. It discards at most four bounded batches
+and requires an actual empty reply before delivering new contacts. Unknown
+MOVE cannot create a new finger; stale held contacts remain suppressed until UP.
+The raw triggering event and recovery result are logged. A failed command,
+lost ownership/consumer, malformed response, persistent overflow, reset or other
+IC error still stops the worker and closes the session. No IC reset, firmware,
+calibration or persistent storage operation is added.
 
 Hardware, 2026-10-22: SEC ID `53:45:37:91:00` and the md0 scan both passed.
 Scan read APP boot `0x20`, STATUS `00:03:01:00`, functions `0x61` with exact
 `0x61` readback, then STATUS `00:02:01:02`. It consumed boot/vendor status
 events followed by an empty queue and returned zero. This proves the bounded
-sensing/queue path. GUI contact delivery and a physical gesture remain
-unverified pending the UFS/HID capture.
+sensing/queue path. Later authenticated UFS/HID captures and user gestures
+confirm GUI input; the all-eight-core result is recorded above.
 
 The overlay extends the generated SPI source, without changing the frozen
 earlier patch files. Successful ID comparison stores this boot's SE address
@@ -66,7 +86,8 @@ read `0xaf` and reject FLASH status, read current functions `0x30`, write
 `current | 0x61` (TOUCH/PALM/WET), require exact readback, send SENSE_ON `0x10`,
 and reread `0xaf`. Only these two volatile writes are allowed, with native
 checksums and 12/8-byte padded frames. There is no firmware upload, flash,
-NVM, reset, calibration or event-clear command, and no retry.
+NVM, reset or calibration in this sensing routine, and no retry. Runtime
+overflow recovery may separately issue the exact event-clear command above.
 
 Lease, HID and GIC/GPIO guards run before the whole bounded sensing routine;
 the SPI transport retains its own hardware checks for each phase. The lease
@@ -76,7 +97,7 @@ The worker then drains at most four startup batches until the queue is empty.
 Those queued contacts are discarded. A previously held contact remains
 suppressed until UP; an unknown MOVE cannot start a new gesture. One initial queued hardware/software
 reset notification is accepted during this drain. Watchdog reset, later
-reset, error/queue-full/ESD status, malformed data, loss of consumer, loss of
+reset, non-queue-full error/ESD status, malformed data, loss of consumer, loss of
 ownership or transport failure stops the worker and releases every active
 contact. DOWN rechecks readiness and ownership before HID injection; UP still
 clears SweetHID's state after its consumer disappears. The saved transition
@@ -125,5 +146,5 @@ failure without later resurrection), and the corrected bottom-edge mapping.
 The startup tests also execute the patched RPMh backend and worker: all three
 lease modes, exact root/display gates, reentrancy, loss of lease at each power
 boundary and after one or ten DOWNs, and sensing failure before FIFO access.
-ARM kernel compilation and md0 sensing have passed; physical GUI input remains
-the next validation step.
+ARM kernel compilation, md0 sensing and physical GUI input have passed.
+Queue recovery hardware validation is tracked in `NOTES.md`.

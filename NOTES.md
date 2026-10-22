@@ -1,5 +1,27 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN source-backed touch overflow recovery prepared — 2026-10-23
+
+Adds `touch-overflow.patch` after GUI8. Pinned native SEC code at
+`0701b191882dc408104ad8af9e2f5eb2bf34c297` uses0x62/CLEAR_EVENT_STACK on
+remaining-count>31 (`sec_ts.c:2337..2350`, `sec_ts.h:244`). Queue-full status
+ID1 is separately recognized; other IC errors/reset/malformed packets remain
+fatal. Runtime overflow releases active contacts, logs the raw event, issues
+one exact volatile8-byte clear only in the open/sensed session, then discards
+at most4batches until empty before new DOWNs. No transport retry or reopen;
+max8clears/boot. Lease/HID/GIC/GPIO checks precede clear and each drain read.
+Full817 host tests PASS (`peripherals-host-tests-v37.txt`): exact frame and
+64single-bit corruption negatives, pure state/held-contact recovery, lost
+ownership/consumer/transport/reset/persistent overflow, bounded session clear
+API and actual worker survive-overflow/failed-clear tests. ARM64 build
+`build-20261023-024851.log`, kernel SHA256 `9e64446032a61cad8fdefc1057cf61a9830b962b3b027101718cdf7839c6c576`.
+Image `gui8-60hz-touch-v2` SHA256 `ea43b29ff0ed8f2c2c9f30ccc24be28ca77905fb7eecc1a4c317e0416cfdd7d3`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa886a8a1c2c18f12 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Complete payload/ADT/liveFDT and host recovery-cycle policy PASS.
+Observation: software validation complete, new clear command untested on
+hardware; previous60Hz root is clean and phone verified in fastboot.
+Next: temporary8-core60Hz GUI touch session and authenticated collection.
+
 ## REDFIN GUI8 60Hz boots; touch stops on queue-count overflow — 2026-10-23
 
 Source `69ff90f`; local ARM64 build023513/kernel
