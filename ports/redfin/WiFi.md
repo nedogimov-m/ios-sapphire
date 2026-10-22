@@ -404,3 +404,34 @@ bytes for the observer, 816 for the SMEM parser, 192 for AOP observation and
 64 for its snapshot helper. No full kernel or hardware test is claimed for
 this milestone. Next: isolated temporary md0 observer boot, then use its fresh
 mailbox/MSS-resource facts to finish native power/SMP2P/SCM startup.
+
+## Native SMEM allocation and SMP2P lifecycle prepared — 2026-10-23
+
+`wifi_smp2p.c` implements a bounded cold APPS/MODEM private-SMEM allocator and
+the native MPSS ready/stop protocol. Its platform lease must prove this
+session's PAS reset/authentication state, serialize APPS allocation and own
+Redfin TCSR lock 3 (`0x01f43000`, APPS owner 1). Neither an absent SMEM object
+nor a boot argument establishes reset. The allocator refuses existing items
+428/435, GLINK or cached allocations, initializes only a new 340-byte outbound
+item, publishes allocation metadata before its valid version and releases only
+the verified APPS-owned mutex. `master-kernel` and `ipa` come from Lito's DT.
+
+Subsequent writes recheck the TOC fingerprint, partition geometry, item header
+and every APPS-owned payload word. After authenticated PAS4, a newly allocated
+inbound item 435 must have stable snapshots, the exact SMP2P ABI/PIDs and valid
+entry names. Feature/restart acknowledgement changes only the APPS words;
+later restart, fatal or identity changes quarantine the session. The bounded
+stop path requires a fresh low-to-high stop acknowledgement and clears the
+APPS force-stop bit only afterward. A missing acknowledgement retains the
+request and prevents PAS/power/AOP release. No retry resets the channel.
+
+Observation: all 91 focused Wi-Fi tests pass, including 21 new SMP2P tests.
+Every one of the allocator's 92 stores has a failure-injection case. Three
+combined models execute the actual firmware lifecycle, AOP transport and
+SMP2P implementation together, covering successful acknowledged shutdown,
+stop failure retaining resources and corrupt firmware failing before any I/O.
+The deployed overlay compiles with actual XNU ARM64 flags in a private source
+tree; maximum frame is 1152 bytes (`peer`), allocator 160 and heap parser 816.
+`wifi-smp2p.patch` contains the exact source/header without startup or source-list
+changes. No SMEM, TCSR or SMP2P IPCC write has run on the device. PAS/SCM proof,
+native power binding, GLINK/WLFW and Wi-Fi association/data remain unfinished.
