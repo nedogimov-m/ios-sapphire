@@ -87,3 +87,10 @@ profiles. `smp-log.patch`, `smp-return.patch`, `smp.patch` and
 configuration gates and image hashes. The proof exercises dedicated SGI2,
 per-core timers, bound worker progress and zero logger drops before CPU
 publication. TLB shootdowns and GUI/UFS SMP need separate validation.
+
+The first hardware SMP2 test passes on 2026-10-23 (`logs/redfin/smp2-v1/`):
+CPU0/CPU6 each finish32steps, actual timer IRQ counts66/65, self/cross SGIs
+complete, logger drops0, worker inactive and IRQ observers drained. XNU
+publishes2/2CPUs and md0 PID1 runs11heartbeats before automatic fastboot
+return. Capture is authenticated and image-matched. All8cores have separate
+EL1/16K capability proof; extending concurrent XNU startup remains next.

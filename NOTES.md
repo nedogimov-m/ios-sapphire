@@ -1,5 +1,22 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN two XNU cores run timers, cross-IPIs and bound tasks — 2026-10-23
+
+Code commit `db420e4`; kernel d1521723/full local ARM64 build013354.
+Image `ports/redfin/out/smp2-v1/redfin-xnu.img` SHA256
+`33ee6f90b1c50c3d5686a083019b040deb92a49814431552df2f36e5ea4e3212`.
+Exact args: `debug=0xc serial=3 cpus=2 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfinbootid=0xb61737af5c379a88`.
+Authenticated/image-matched `logs/redfin/smp2-v1/`: live RO return proof
+APID210/subtype4/PON4 twice/IMEM0x77665500 succeeds before CPU_ON.
+CPU0 and physicalCPU6 come alive with SGI1; bound tasks each progress32,
+timer completions66/65, self acknowledgements1/1 and crossSGI2 acknowledgements
+131/130. Worker exited/IRQ observers drained, busy/reentrant drops0/0;
+kernel publishes2/2 initialized CPUs. md0 PID1 alive/11heartbeats, no
+panic, metadata primed and fastboot return verified. TLB shootdowns are
+explicitly untested; this is an isolated scheduling/IRQ/coherency result.
+Next: extend the same separately gated proof to all8already-capable cores;
+preserve the working2-core profile and keep UFS/GUI off until verified.
+
 ## REDFIN SMP-capable kernel UP regression passes — 2026-10-23
 
 Kernel d1521723/full local ARM64 build013354, all new SMP overlays
