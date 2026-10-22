@@ -115,6 +115,60 @@ class UserspaceTests(unittest.TestCase):
         self.assertFalse(result["pid1_alive"])
 
 
+class AppleUserspaceTests(unittest.TestCase):
+    def evidence(self, body, authenticated=True):
+        return cycle.apple_userspace_evidence(b"[REDFIN RAMLOG v1]\n" + body, authenticated)
+
+    def test_actual_launchd_runtime_and_boot_tasks_with_later_panic(self):
+        result = self.evidence(
+            b"Darwin Ignition Sequence VersionREDFIN PID1: syscall 16 return code=4 error=0 value=32\n"
+            b" 1.0.0: Tue Jul  2 20:41:23 PDT 2024; root:libignition-51~1974\r\r\n"
+            b"libignition: 1:        hello: hello from launchd.1\r\r\n"
+            b"com.apple.xpc.launchd|1970-01-01 00:00:51.730686 (system) <Notice>: created\r\r\n"
+            b"com.apple.xpc.launchd|1970-01-01 00:00:51.740785 (fsck) <Notice>: Doing boot task\r\r\n"
+            b"com.apple.xpc.launchd|1970-01-01 00:00:51.849513 (mount-phase-1) <Notice>: Doing boot task\r\r\n"
+            b"REDFIN PANIC: mount[3] exited -- (signal 0, exit status 1)\n"
+            b"panic(cpu 0 caller 0xfffffe0007b84950): mount[3] exited\r\n")
+        self.assertEqual(result, {"capture_authenticated": True, "launchd_pid1_hello": True,
+            "darwin_ignition_banner": True, "system_domain_created": True,
+            "boot_tasks": ["fsck", "mount-phase-1"], "panic": True})
+
+    def test_boot_argument_strings_and_other_pid_are_not_pid1_runtime(self):
+        result = self.evidence(
+            b"Boot args: launchd_unsecure_cache=1 libignition: 1: hello from launchd.1 "
+            b"Darwin Ignition Sequence Version com.apple.xpc.launchd| (system) <Notice>: created "
+            b"REDFIN PANIC: panic(cpu 0 caller 0x123)\n"
+            b"libignition: 2: hello: hello from launchd.1\r\n"
+            b"libignition: 1: hello: hello from launchd.12\r\n", authenticated=False)
+        self.assertEqual(result, {"capture_authenticated": False, "launchd_pid1_hello": False,
+            "darwin_ignition_banner": False, "system_domain_created": False,
+            "boot_tasks": [], "panic": False})
+
+    def test_following_boot_history_is_excluded_and_native_panic_is_recognized(self):
+        result = self.evidence(b"panic(cpu 0 caller 0x123): failed\n--- BOOT HISTORY ---\n"
+                              b"libignition: 1: hello: hello from launchd.1\n")
+        self.assertTrue(result["panic"])
+        self.assertFalse(result["launchd_pid1_hello"])
+
+    def test_apple_launchd_entry_alone_preserves_non_success_exit_status(self):
+        console = b"[REDFIN RAMLOG v1]\nlibignition: 1: hello: hello from launchd.1\n"
+        with tempfile.TemporaryDirectory() as directory:
+            runner = cycle.Cycle(argparse.Namespace(out=Path(directory), serial=None,
+                collect_only=True, raw_ramoops=True))
+            def capture():
+                runner.save("after/redfin-console.txt", console)
+                return [("after/redfin-console.txt", console)]
+            with mock.patch.object(runner, "verify_android"), \
+                    mock.patch.object(runner, "raw_ramoops", side_effect=capture), \
+                    mock.patch.object(runner, "pstore", return_value=[]), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                result = runner.run()
+        self.assertEqual(result, 1)
+        self.assertEqual(runner.manifest["status"], "logs-collected")
+        self.assertTrue(runner.manifest["apple_userspace"]["launchd_pid1_hello"])
+        self.assertFalse(runner.manifest["userspace"]["pid1_alive"])
+
+
 class FakeClock:
     def __init__(self):
         self.now = 0

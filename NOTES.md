@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN Apple launchd executes; bounded RW first boot — 2026-10-22
+
+`logs/redfin/apple-root-ro-first/` authenticated the actual Apple PID1 boot:
+Darwin Ignition, `hello from launchd.1`, system domain creation, fsck and
+mount-phase-1. Fatal blocker was mount_hfs EROFS while remounting root; mount[3]
+exit1 caused kernel panic. Missing Preboot firmware bindfs source and filesystem
+info warnings were nonfatal. No kernel/storage-read or userspace ISA failure.
+
+A separate, independently reviewed RW overlay now compiles after the RO port.
+It requires both exact ufsrw=1/rootrw=1, validates HFSX headers and bounds all
+writes to the first16GiB of userdata. Default stays RO and raw character writes
+stay EROFS. Added strict response/controller ownership validation, FUA flush,
+cache sync and permanent no-DMA-reuse poison after uncertain completion.
+Actual command/strategy C harness tests fault injection; all165 host tests pass.
+
+Local kernel build `research/redfin-build/build-20261022-071331.log` succeeded;
+SHA25699a4aa0dfc2fe1f2687003be2728f96fee53edf479bb98c0482c00ed649b56bd.
+Prepared first RW boot SHA256 `3461ab6eaa86d0fb7da3fbc8883183d54977e7a2229305f4cb8c123b96c51854`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+This first RW boot is running; hardware writes and later boot tasks remain
+unconfirmed until its recovery log. Original Android full backup and metadata
+remain verified under ignored backup/redfin/pre-ios-full-20261022/.
+Boot partitions/GPT/modem/persist/EFS have not been written. Never boot Android
+without restoring the saved userdata image. Collector reports Apple runtime
+milestones separately from static PID1 health, including panic state.
+
 ## REDFIN installation authorized, backup first — 2026-10-22
 
 The user answered “газик” to the explicit question about installing the prepared

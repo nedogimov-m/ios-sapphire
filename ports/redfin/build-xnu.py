@@ -198,9 +198,12 @@ def main(argv=None):
             shutil.copy2(spmi_patch, patches / "zzzzzzzzzzzzzzzzzz-redfin-spmi-probe.patch")
             return_patch = ROOT / "ports/redfin/spmi-return.patch"
             shutil.copy2(return_patch, patches / "zzzzzzzzzzzzzzzzzzz-redfin-spmi-return.patch")
+            ufs_rw_patch = ROOT / "ports/redfin/ufs-root-rw.patch"
+            shutil.copy2(ufs_rw_patch, patches / "zzzzzzzzzzzzzzzzzzzz-redfin-ufs-root-rw.patch")
             overlays = [overlay, logging_patch, trace_patch, cpu_trace_patch, battery_patch,
                         watchdog_patch, pid1_patch, panic_patch, open_patch, namei_patch, pan_patch,
-                        ufs_probe_patch, ufs_read_patch, ufs_sense_patch, ufs_root_patch, ufs_raw_patch, spmi_patch, return_patch]
+                        ufs_probe_patch, ufs_read_patch, ufs_sense_patch, ufs_root_patch, ufs_raw_patch,
+                        spmi_patch, return_patch, ufs_rw_patch]
             result["patch_sha256"] = {path.name: digest(path)
                                       for path in local_patches + local_scripts + overlays}
             fingerprint_path = dxb / "xnu/.redfin-patches.json"

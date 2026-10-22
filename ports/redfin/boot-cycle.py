@@ -84,6 +84,22 @@ def userspace_evidence(data):
     return {"pid1_alive": alive, "getpid_1": pid is not None, "heartbeats": heartbeat_count}
 
 
+def apple_userspace_evidence(data, authenticated=False):
+    """Describe runtime Apple boot observations without declaring a healthy boot."""
+    xnu = extract_xnu(data)
+    hello = re.search(rb"^libignition:[ \t]+1:[^\r\n]*\bhello from launchd\.1[ \t]*\r*$", xnu, re.MULTILINE)
+    launchd = rb"^com\.apple\.xpc\.launchd\|[^\r\n]* "
+    created = re.search(launchd + rb"\(system\) <[^>\r\n]+>: created[ \t]*\r*$", xnu, re.MULTILINE)
+    tasks = re.findall(launchd + rb"\(([^()\r\n]{1,128})\) <[^>\r\n]+>: Doing boot task[ \t]*\r*$",
+                       xnu, re.MULTILINE)
+    return {"capture_authenticated": bool(authenticated),
+            "launchd_pid1_hello": hello is not None,
+            "darwin_ignition_banner": re.search(rb"^Darwin Ignition Sequence Version", xnu, re.MULTILINE) is not None,
+            "system_domain_created": created is not None,
+            "boot_tasks": list(dict.fromkeys(task.decode(errors="replace") for task in tasks))[:64],
+            "panic": re.search(rb"^(?:REDFIN PANIC:|panic\(cpu[ \t]+\d+[ \t])", xnu, re.MULTILINE) is not None}
+
+
 def extract_ring(raw, offset=CONSOLE_OFFSET, length=CONSOLE_LENGTH):
     if offset < 0 or length < 12 or offset + length > len(raw):
         raise ValueError("truncated ramoops console region")
@@ -422,6 +438,8 @@ class Cycle:
             time.sleep(2)
         evidence = userspace_evidence(current)
         self.manifest["userspace"] = evidence
+        self.manifest["apple_userspace"] = apple_userspace_evidence(current,
+            authenticated=self.manifest.get("ramoops_decryption", {}).get("status") == "authenticated")
         self.manifest["status"] = ("userspace-alive" if evidence["pid1_alive"] else
                                      "logs-collected" if b"REDFIN" in current else "no-log")
         self.manifest["captured_bytes"] = len(current)

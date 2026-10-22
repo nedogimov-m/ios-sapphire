@@ -63,10 +63,13 @@ def main():
     ufs.add_argument('--ufs-read-probe', action='store_true', help='test UFS capacity and GPT reads; leave filesystem drivers disabled')
     ufs.add_argument('--ufs-wake-probe', action='store_true', help='activate UFS Device WLUN before read probes; no media writes')
     ufs.add_argument('--ufs-root-probe', action='store_true', help='expose userdata read-only and test a raw device read from PID1')
-    ufs.add_argument('--ufs-root', action='store_true', help='boot the prepared HFS userdata root read-only; requires --apple-adt')
+    ufs.add_argument('--ufs-root', action='store_true', help='boot the prepared HFS userdata root; defaults to read-only and requires --apple-adt')
+    p.add_argument('--ufs-rw', action='store_true', help='enable writes to the prepared userdata root; requires --ufs-root and the gated writable kernel overlay')
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.ufs_rw and not a.ufs_root:
+        p.error('--ufs-rw requires --ufs-root')
     if a.return_bootloader:
         a.spmi_probe = True
     ufs_mode = 3 if a.ufs_wake_probe or a.ufs_root_probe or a.ufs_root else 2 if a.ufs_read_probe else int(a.ufs_probe)
@@ -205,7 +208,8 @@ def main():
         if a.return_bootloader:
             command_line += ' redfinreturn=1'
         if a.ufs_root_probe or a.ufs_root:
-            command_line += ' redfinroot=1 ufsroot=userdata ufsrw=0 rootrw=0 sweetlog=0'
+            writable = int(a.ufs_rw)
+            command_line += f' redfinroot=1 ufsroot=userdata ufsrw={writable} rootrw={writable} sweetlog=0'
         run([sys.executable, ROOT / 'tools/mkpayload.py', a.kernel, out / 'redfin.adt',
             out / 'payload.bin', '--ramdisk', out / 'init', '--cmdline',
             command_line])
@@ -249,6 +253,7 @@ def main():
     (out / image_name).write_bytes(boot_v3(compressed, os_version))
     artifacts = ('Image', 'redfin-diag.elf', image_name, 'init')
     manifest = dict(stage='XNU/PID1 execution unverified' if payload else 'diagnostics only',
+        root_writable=bool(a.ufs_rw),
         splash_reservation_assumption=a.splash, stride=a.stride, seconds=a.seconds,
         linux_text_offset='0x80000', kernel_encoding='LZ4 frame + LE32 size',
         upstream=subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip(),

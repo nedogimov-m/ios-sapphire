@@ -1,0 +1,356 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -122,6 +122,82 @@
+ static bool redfin_ufs_root_read_only, redfin_ufs_probe_ready;
+ static uint64_t redfin_ufs_root_blocks;
+ static vm_offset_t redfin_ufs_probe_base;
++static bool redfin_ufs_rw_armed, redfin_ufs_rw_preparing, redfin_ufs_submit_poisoned;
++static uint64_t redfin_ufs_partition_blocks;
++
++/* REDFIN_RW_TEST_BEGIN: fixed 16 GiB filesystem, never the userdata tail. */
++#define REDFIN_RW_BLOCKS (0x400000ULL)
++static int
++redfin_rw_flags(uint32_t rw, uint32_t rootrw, uint32_t log, bool *requested)
++{
++	if (!requested) return EINVAL;
++	*requested = false;
++	if (log || rw > 1 || rootrw > 1 || rw != rootrw) return EROFS;
++	*requested = rw == 1;
++	return 0;
++}
++static bool
++redfin_rw_window(uint64_t first, uint64_t partition, uint64_t exposed, uint64_t disk)
++{
++	return first >= 6 && first < disk && disk <= UINT32_MAX &&
++	    partition >= REDFIN_RW_BLOCKS && partition <= disk - first &&
++	    exposed == REDFIN_RW_BLOCKS;
++}
++static bool
++redfin_rw_command(const uint8_t *cdb, unsigned bytes, uint32_t len, bool write,
++    uint8_t lun, bool armed, uint64_t first, uint64_t partition,
++    uint64_t exposed, uint64_t disk)
++{
++	if (!armed || !cdb || bytes != 10 || lun ||
++	    !redfin_rw_window(first, partition, exposed, disk)) return false;
++	if (cdb[0] == 0x35 && !write && !len) {
++		for (unsigned i = 1; i < 10; i++) if (cdb[i]) return false;
++		return true; /* SYNCHRONIZE CACHE(10), IMMED=0, whole LUN. */
++	}
++	if (cdb[0] != 0x2a || !write || cdb[1] || cdb[6] || cdb[9]) return false;
++	uint64_t lba = (uint32_t)cdb[2] << 24 | (uint32_t)cdb[3] << 16 |
++	    (uint32_t)cdb[4] << 8 | cdb[5];
++	uint32_t count = (uint32_t)cdb[7] << 8 | cdb[8];
++	return count && count <= BOUNCE_SIZE / UFS_BLOCK && len == count * UFS_BLOCK &&
++	    lba >= first && lba - first < exposed && count <= exposed - (lba - first);
++}
++static uint32_t
++redfin_rw_be32(const uint8_t *p)
++{
++	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
++}
++static bool
++redfin_rw_hfs(const uint8_t *primary, unsigned pn, const uint8_t *alternate, unsigned an)
++{
++	if (!primary || !alternate || pn != 512 || an != 512) return false;
++	const uint8_t *headers[2] = {primary, alternate};
++	uint32_t block = 0, total = 0, journal = 0;
++	for (unsigned i = 0; i < 2; i++) {
++		const uint8_t *h = headers[i];
++		if (h[0] != 'H' || h[1] != 'X' || h[2] || h[3] != 5) return false;
++		uint32_t attributes = redfin_rw_be32(h + 4);
++		if (!(attributes & (1u << 13)) || (attributes & ((1u << 7) | (1u << 11) | (1u << 15))) ||
++		    (!i && !(attributes & (1u << 8)))) return false;
++		uint32_t b = redfin_rw_be32(h + 40), n = redfin_rw_be32(h + 44);
++		uint32_t j = redfin_rw_be32(h + 12);
++		if (b < UFS_BLOCK || b > BOUNCE_SIZE || (b & (b - 1)) ||
++		    (uint64_t)b * n != REDFIN_RW_BLOCKS * UFS_BLOCK || !j || j >= n) return false;
++		if (i && (b != block || n != total || j != journal)) return false;
++		block = b; total = n; journal = j;
++	}
++	return true; /* Only primary supplies clean-unmount bit; alternate may be stale. */
++}
++static bool
++redfin_rw_response(const uint8_t *r, unsigned size, uint32_t ocs, uint8_t lun, uint8_t tag)
++{
++	if (!r || size < 34 || ocs || r[0] != 0x21 || r[1] || r[2] != lun || r[3] != tag ||
++	    r[4] || r[5] || r[6] || r[7] || r[8] || (r[9] & ~1u) ||
++	    (r[10] || (r[11] != 0 && r[11] != 2)) || redfin_rw_be32(r + 12) || r[32] || r[33])
++		return false;
++	for (unsigned i = 16; i < 32; i++) if (r[i]) return false;
++	return true; /* EE bit may be set; exact block transfers cannot have residuals. */
++}
++/* REDFIN_RW_TEST_END */
+ 
+ /* REDFIN_ROOT_GUARD_TEST_BEGIN: permanent read-only SCSI allowlist. */
+ static bool
+@@ -175,6 +251,36 @@
+ {
+ 	clean_dcache64((addr64_t)(su.dma_pa + off), len, TRUE);
+ }
++
++
++/* REDFIN_RW_IO_TEST_BEGIN: never touch DMA again after an uncertain command. */
++static void
++redfin_rw_poison(void)
++{
++	redfin_ufs_submit_poisoned = true;
++	redfin_ufs_rw_armed = false;
++	redfin_ufs_rw_preparing = false;
++	su.writable = false;
++	su.ready = false;
++}
++static int
++redfin_rw_io_ready(void)
++{
++	if (redfin_ufs_submit_poisoned) return EIO;
++	if (redfin_ufs_root_read_only && (ufs_rd(REG_UTRLDBR) || ufs_rd(0x78))) {
++		redfin_rw_poison();
++		return EBUSY;
++	}
++	if (redfin_ufs_root_read_only && (!(ufs_rd(REG_HCE) & 1) ||
++	    !(ufs_rd(REG_UTRLRSR) & 1) || (ufs_rd(REG_HCS) & 0xf) != 0xf ||
++	    ufs_rd(REG_UTRLBA) != (uint32_t)(su.dma_pa + DMA_UTRL) ||
++	    ufs_rd(REG_UTRLBAU) != (uint32_t)((su.dma_pa + DMA_UTRL) >> 32))) {
++		redfin_rw_poison();
++		return EIO;
++	}
++	return 0;
++}
++/* REDFIN_RW_IO_TEST_END */
+ 
+ /* UFS response UPIU: 12-byte header, residual+reserved through byte 31,
+  * BE16 sense length at 32 and sense bytes at 34 (Google drivers/scsi/ufs/ufs.h).
+@@ -222,9 +328,15 @@
+ static int
+ ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
+ {
++	int ready_error = redfin_rw_io_ready();
++	if (ready_error) return ready_error;
++	bool exact_rw = redfin_ufs_rw_armed || redfin_ufs_rw_preparing;
+ 	if (redfin_ufs_root_read_only) {
+ 		if (!redfin_root_read_allowed(cdb, cdb_len, len, write, su.lun,
+-		    redfin_ufs_root_blocks)) return EROFS;
++		    redfin_ufs_root_blocks) &&
++		    !redfin_rw_command(cdb, cdb_len, len, write, su.lun,
++		    redfin_ufs_rw_armed && su.writable && su.ready, su.first_block,
++		    redfin_ufs_partition_blocks, su.nblocks, redfin_ufs_root_blocks)) return EROFS;
+ 	} else if (redfin_ufs_read_only) {
+ 		if (write || !cdb || !cdb_len || len > (512u << 10)) return EROFS;
+ 		if (su.lun == 0xd0) {
+@@ -301,7 +413,7 @@
+ 
+ 	ufs_wr(REG_UTRLDBR, 1);
+ 	uint64_t deadline;
+-	nanoseconds_to_absolutetime(redfin_ufs_read_only ? 2ull * NSEC_PER_SEC : CMD_TIMEOUT_NS, &deadline);
++	nanoseconds_to_absolutetime(redfin_ufs_read_only && !exact_rw ? 2ull * NSEC_PER_SEC : CMD_TIMEOUT_NS, &deadline);
+ 	deadline += mach_absolute_time();
+ 	bool sleepable = su.wait && su.ready && ml_get_interrupts_enabled() &&
+ 	    !ml_at_interrupt_context() && get_preemption_level() == 0;
+@@ -314,6 +426,10 @@
+ 	while (ufs_rd(REG_UTRLDBR) & 1) {
+ 		uint64_t now = mach_absolute_time();
+ 		if (now > deadline) {
++			/* Clearing the doorbell does not prove DMA has stopped. Keep
++			 * KMA_PERMANENT memory owned and forbid all reuse until reboot.
++			 */
++			if (redfin_ufs_root_read_only) redfin_rw_poison();
+ 			ufs_wr(REG_UTRLCLR, ~1u);
+ 			printf("SWEET UFS: command 0x%02x timed out\n", cdb[0]);
+ 			return ETIMEDOUT;
+@@ -330,6 +446,8 @@
+ 		}
+ 	}
+ 	__builtin_arm_dsb(0xf);
++	ready_error = redfin_rw_io_ready();
++	if (ready_error) return ready_error;
+ 	ufs_wr(REG_IS, ufs_rd(REG_IS));         /* acknowledge completion status */
+ 
+ 	dma_sync(DMA_UTRL, sizeof(*utrd));
+@@ -343,6 +461,11 @@
+ 	}
+ 
+ 	uint32_t ocs = utrd->dw2 & 0xff;
++	if (exact_rw && !redfin_rw_response(ucd->resp, sizeof(ucd->resp), ocs, su.lun, su.tag)) {
++		redfin_rw_poison();
++		printf("REDFIN UFS: exact RW completion rejected; submissions poisoned until reboot\n");
++		return EIO;
++	}
+ 	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
+ 		printf("SWEET UFS: command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
+ 		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
+@@ -538,7 +661,9 @@
+ 	uint32_t rw = 0, rootrw = 0;
+ 	(void)PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
+ 	(void)PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw));
+-	if (rw || rootrw || su.writable || su.lun != 0) return EROFS;
++	bool requested = false;
++	if (redfin_rw_flags(rw, rootrw, 0, &requested) || su.writable ||
++	    redfin_ufs_rw_armed || redfin_ufs_submit_poisoned || su.lun != 0) return EROFS;
+ 	static const uint8_t capacity[10] = {0x25};
+ 	int error = ufs_scsi(capacity, sizeof(capacity), 8, false);
+ 	if (error) return error;
+@@ -562,6 +687,7 @@
+ 	gpt_bhcrc = 0;
+ 	su.first_block = first;
+ 	su.nblocks = count;
++	redfin_ufs_partition_blocks = count; /* Preserve the complete validated GPT slice. */
+ 	return 0;
+ }
+ 
+@@ -785,13 +911,19 @@
+ {
+ 	int error = 0;
+ 	caddr_t vaddr = NULL;
+-	uint64_t off = (uint64_t)buf_blkno(bp) * su.secsize;
++	int64_t block_number = buf_blkno(bp);
++	uint64_t off = 0;
+ 	uint32_t count = buf_count(bp);
+ 	uint64_t part_bytes = su.nblocks * UFS_BLOCK;
+ 
+ 	bool rd = buf_flags(bp) & B_READ;
+ 
+ 	buf_setresid(bp, count);
++	if (block_number < 0 || !su.secsize || (uint64_t)block_number > part_bytes / su.secsize) {
++		error = EINVAL;
++		goto done;
++	}
++	off = (uint64_t)block_number * su.secsize;
+ 	if (!rd && !su.writable) {
+ 		error = EROFS;
+ 		goto done;
+@@ -809,6 +941,9 @@
+ 	}
+ 
+ 	lck_mtx_lock(&sweet_ufs_lock);
++	/* This precedes even memcpy into bounce: timed-out DMA may still read it. */
++	error = redfin_rw_io_ready();
++	if (error) goto unlock;
+ 	for (uint32_t done = 0; done < count;) {
+ 		uint64_t pos = off + done;
+ 		uint64_t lba = pos / UFS_BLOCK;
+@@ -831,12 +966,17 @@
+ 				error = ufs_write_blocks(su.first_block + lba, blocks);
+ 			}
+ 		}
++		/* Conservatively implement B_FUA without advertising hardware FUA.
++		 * The same lock orders read/merge/write/flush and completion.
++		 */
++		if (!error && !rd && redfin_ufs_rw_armed && buf_fua(bp)) error = ufs_sync_cache();
+ 		if (error) {
+ 			break;
+ 		}
+ 		done += want;
+ 		buf_setresid(bp, count - done);
+ 	}
++unlock:
+ 	lck_mtx_unlock(&sweet_ufs_lock);
+ 	buf_unmap(bp);
+ 
+@@ -878,11 +1018,9 @@
+ 		return 0;
+ 	case DKIOCSYNCHRONIZE:
+ 	case DKIOCSYNCHRONIZECACHE: {
+-		if (!su.writable) {
+-			return 0;
+-		}
+ 		lck_mtx_lock(&sweet_ufs_lock);
+-		int error = ufs_sync_cache();
++		/* Check poison and writability under the same lock as all I/O. */
++		int error = redfin_ufs_submit_poisoned ? EIO : !su.writable ? 0 : ufs_sync_cache();
+ 		lck_mtx_unlock(&sweet_ufs_lock);
+ 		return error;
+ 	}
+@@ -954,7 +1092,8 @@
+ static int
+ sweet_ufs_write(dev_t dev, struct uio *uio, __unused int ioflag)
+ {
+-	if (!su.writable) {
++	/* Raw physio's user VA path is intentionally not enabled by root RW. */
++	if (redfin_ufs_root_read_only || !su.writable) {
+ 		return EROFS;
+ 	}
+ 	return physio(sweet_ufs_strategy, NULL, dev, B_WRITE, minphys, uio, (int)su.secsize);
+@@ -1297,7 +1436,33 @@
+ 	if (mode == 2 || mode == 3) redfin_ufs_read_probe(base, mode == 3);
+ }
+ 
+-/* Publish a read-only partition after mode 3; no legacy hardware/log threads. */
++
++/* REDFIN_RW_ARM_TEST_BEGIN: read both on-device headers while still read-only. */
++static int
++redfin_rw_prepare(void)
++{
++	if (redfin_ufs_rw_armed || su.writable || redfin_ufs_submit_poisoned ||
++	    !redfin_rw_window(su.first_block, redfin_ufs_partition_blocks,
++	    REDFIN_RW_BLOCKS, redfin_ufs_root_blocks)) return EROFS;
++	uint8_t primary[512];
++	redfin_ufs_rw_preparing = true;
++	int error = ufs_read_blocks(su.first_block, 1);
++	if (!error) {
++		memcpy(primary, (const uint8_t *)(su.dma + DMA_BOUNCE) + 1024, sizeof(primary));
++		error = ufs_read_blocks(su.first_block + REDFIN_RW_BLOCKS - 1, 1);
++	}
++	if (!error) {
++		const uint8_t *alternate = (const uint8_t *)(su.dma + DMA_BOUNCE) + UFS_BLOCK - 1024;
++		if (!redfin_rw_hfs(primary, sizeof(primary), alternate, 512)) error = EINVAL;
++	}
++	redfin_ufs_rw_preparing = false;
++	if (error) return error;
++	su.nblocks = REDFIN_RW_BLOCKS;
++	return 0; /* Caller arms only after device registration also succeeds. */
++}
++/* REDFIN_RW_ARM_TEST_END */
++
++/* Publish a guarded partition after mode 3; no legacy hardware/log threads. */
+ static int
+ redfin_ufs_root_init(void)
+ {
+@@ -1305,8 +1470,13 @@
+ 	(void)PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
+ 	(void)PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw));
+ 	(void)PE_parse_boot_argn("sweetlog", &log, sizeof(log));
+-	if (rw || rootrw || log || su.writable) return EROFS;
+-	if (su.ready) return redfin_ufs_root_read_only && su.dma ? 0 : ENXIO;
++	bool requested = false;
++	int request_error = redfin_rw_flags(rw, rootrw, log, &requested);
++	if (request_error) return request_error;
++	if (redfin_ufs_submit_poisoned) return EIO;
++	if (su.ready) return redfin_ufs_root_read_only && su.dma &&
++	    requested == redfin_ufs_rw_armed && su.writable == requested ? 0 : ENXIO;
++	if (su.writable || redfin_ufs_rw_armed) return EROFS;
+ 	DTEntry node;
+ 	const uint64_t *reg = NULL;
+ 	unsigned size = 0;
+@@ -1321,14 +1491,16 @@
+ 	    (ufs_rd(REG_HCS) & 0xf) != 0xf || !(ufs_rd(REG_UTRLRSR) & 1) ||
+ 	    ufs_rd(REG_UTRLBA) != (uint32_t)su.dma_pa ||
+ 	    ufs_rd(REG_UTRLBAU) != (uint32_t)(su.dma_pa >> 32)) return ENXIO;
+-	/* From here every SCSI submission is permanently constrained to reads. */
++	/* Keep the permanent command fence; only a separately armed write window can extend it. */
+ 	redfin_ufs_root_read_only = true;
+ 	su.writable = false; su.cache = false; su.wait = false; su.secsize = DEV_BSIZE;
+ 	char want[64] = "userdata";
+ 	(void)PE_parse_boot_argn("ufsroot", want, sizeof(want));
+ 	want[sizeof(want) - 1] = 0;
++	if (requested && strcmp(want, "userdata")) return EROFS;
+ 	int error = redfin_ufs_find_partition(want);
+ 	if (error) return error;
++	if (requested && (error = redfin_rw_prepare())) return error;
+ 	su.bmajor = bdevsw_add(-1, &sweet_ufs_bdevsw);
+ 	if (su.bmajor < 0) return ENXIO;
+ 	su.cmajor = cdevsw_add_with_bdev(-1, &sweet_ufs_cdevsw, su.bmajor);
+@@ -1336,9 +1508,11 @@
+ 	su.bdev = makedev(su.bmajor, 0);
+ 	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
+ 	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
++	redfin_ufs_rw_armed = requested;
++	su.writable = requested;
+ 	su.ready = true;
+-	printf("REDFIN UFS: read-only partition %s, first=%#llx blocks=%llu sector=%u\n",
+-	    want, su.first_block, su.nblocks, su.secsize);
++	printf("REDFIN UFS: %s partition %s, first=%#llx blocks=%llu sector=%u\n",
++	    requested ? "gated 16GiB read/write" : "read-only", want, su.first_block, su.nblocks, su.secsize);
+ 	return 0;
+ }
+ 

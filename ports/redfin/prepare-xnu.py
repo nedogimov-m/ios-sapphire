@@ -161,7 +161,7 @@ def main(argv=None):
             ('pid1-trace.patch', 'watchdog-progress.patch', 'panic-log.patch',
              'console-open-trace.patch', 'namei-trace.patch', 'pan.patch',
              'ufs-probe.patch', 'ufs-read-probe.patch', 'ufs-sense.patch', 'ufs-root.patch',
-             'ufs-raw-read.patch', 'spmi-probe.patch', 'spmi-return.patch')]
+             'ufs-raw-read.patch', 'spmi-probe.patch', 'spmi-return.patch', 'ufs-root-rw.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)
