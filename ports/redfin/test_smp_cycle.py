@@ -99,6 +99,28 @@ class SMPCycleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.verify()
 
+    def test_eight_cpus_need_matching_args_manifest_and_compiled_count(self):
+        original = self.config.read_bytes()
+        self.manifest['boot_args'] = ARGS.replace('cpus=2', 'cpus=8')
+        self.manifest['smp_cpus'] = 8
+        for config in (original, original + b'#define REDFIN_SMP_CPUS 2\n'):
+            self.config.write_bytes(config)
+            self.manifest['sha256']['config.h'] = hashlib.sha256(config).hexdigest()
+            with self.assertRaises(ValueError):
+                self.verify()
+        config = original + b'#define REDFIN_SMP_CPUS 8\n'
+        self.config.write_bytes(config)
+        self.manifest['sha256']['config.h'] = hashlib.sha256(config).hexdigest()
+        self.assertEqual(self.verify()['cpus'], 8)
+        self.manifest['boot_args'] = ARGS
+        with self.assertRaises(ValueError):
+            self.verify()
+        self.manifest['boot_args'] = ARGS.replace('cpus=2', 'cpus=8')
+        for count in (None, True, 0, 2, 7, 16, '8'):
+            self.manifest['smp_cpus'] = count
+            with self.assertRaises(ValueError):
+                self.verify()
+
 
 if __name__ == '__main__':
     unittest.main()

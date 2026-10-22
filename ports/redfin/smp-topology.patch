@@ -5,42 +5,46 @@
  
  
 -def build(memory_base, memory_size, boot_mpidr=0, seed=None):
-+def build(memory_base, memory_size, boot_mpidr=0, seed=None, *, smp=False):
++def build(memory_base, memory_size, boot_mpidr=0, seed=None, *, smp=False, smp_cpus=2):
      """Return an ADT node; address validation does not prove a RAM window safe."""
      for name, value in (('memory-base', memory_base), ('memory-size', memory_size)):
          if type(value) is not int or value <= 0 or value % PAGE_SIZE:
-@@ -129,6 +129,10 @@
+@@ -129,6 +129,12 @@
          raise ValueError('RAM window exceeds the 36-bit physical address limit')
      if type(boot_mpidr) is not int or boot_mpidr not in MPIDRS:
          raise ValueError('boot-mpidr must be 0x0..0x700 in steps of 0x100')
 +    if type(smp) is not bool:
 +        raise ValueError('smp must be a boolean')
++    if type(smp_cpus) is not int or smp_cpus not in (2, 8) or (not smp and smp_cpus != 2):
++        raise ValueError('smp_cpus must be 2 or 8 in the SMP profile')
 +    if smp and (memory_base, memory_size, boot_mpidr) != (0x180000000, 0x80000000, 0):
 +        raise ValueError('SMP probe requires canonical Redfin RAM and boot CPU0')
      seed = os.urandom(64) if seed is None else seed
      if not isinstance(seed, bytes) or len(seed) != 64:
          raise ValueError('random seed must contain exactly 64 bytes')
-@@ -165,7 +169,23 @@
+@@ -165,7 +171,25 @@
          ('timebase-frequency', u32(TIMEBASE)),
          ('fixed-frequency', u32(TIMEBASE)),
      ])
 -    cpus = node('cpus', [ph(), ('#address-cells', u32(1)), ('#size-cells', u32(0))], [cpu])
 +    cpu_nodes = [cpu]
 +    if smp:
-+        # CPU6's EL1 entry and 16K granule are independently measured. These
-+        # are two logical cores in SWEET's single generic cluster, not a claim
-+        # about Redfin's physical cache/cluster hierarchy. Cache sizes unknown.
++        # All physical cores have independent EL1/16K capability proof. The
++        # two-core profile retains logical1 -> CPU6; eight cores use natural
++        # affinity order. SWEET has one generic logical cluster. L2s are
++        # distinct and L3 shared in the live FDT; cache sizes remain unknown.
 +        cpu.props.extend((key, 0, u32(0)) for key in ('l2-cache-size', 'l3-cache-size'))
-+        secondary = node('cpu1', [ph()])
-+        for key, flag, value in cpu.props[2:]:
-+            if key == 'reg':
-+                value = u32(0x600)
-+            elif key in ('cpu-id', 'cluster-core-id', 'l2-cache-id'):
-+                value = u32(1)
-+            elif key == 'state':
-+                value = cstr('stopped')
-+            secondary.props.append((key, flag, value))
-+        cpu_nodes.append(secondary)
++        for index in range(1, smp_cpus):
++            secondary = node(f'cpu{index}', [ph()])
++            for key, flag, value in cpu.props[2:]:
++                if key == 'reg':
++                    value = u32(0x600 if smp_cpus == 2 else index << 8)
++                elif key in ('cpu-id', 'cluster-core-id', 'l2-cache-id'):
++                    value = u32(index)
++                elif key == 'state':
++                    value = cstr('stopped')
++                secondary.props.append((key, flag, value))
++            cpu_nodes.append(secondary)
 +    cpus = node('cpus', [ph(), ('#address-cells', u32(1)), ('#size-cells', u32(0))], cpu_nodes)
      gic = node('gic', [
          ph(),
@@ -56,7 +60,7 @@
      uint64_t mpidr, uint64_t base, uint64_t memory)
  {
      uint32_t pending[32], kinds[32];
-@@ -99,6 +99,223 @@
+@@ -99,6 +99,236 @@
      }
  }
  
@@ -68,6 +72,14 @@
 +#define REDFIN_SMP_BUILD_READY 1
 +#else
 +#define REDFIN_SMP_BUILD_READY 0
++#endif
++#ifndef REDFIN_SMP_CPUS
++#define REDFIN_SMP_CPUS 2
++#endif
++#if REDFIN_SMP_CPUS == 8
++#define REDFIN_SMP_CPU_TOKEN "cpus=8"
++#else
++#define REDFIN_SMP_CPU_TOKEN "cpus=2"
 +#endif
 +
 +static int smp_token(const char *p, unsigned size, const char *s)
@@ -94,12 +106,12 @@
 +static int smp_command(const char command[608])
 +{
 +    static const char required[][24] = {
-+        "debug=0xc", "serial=3", "cpus=2", "keepsyms=1", "-noprogress", "rd=md0",
++        "debug=0xc", "serial=3", REDFIN_SMP_CPU_TOKEN, "keepsyms=1", "-noprogress", "rd=md0",
 +        "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0",
 +        "sweetbattery=0", "modem=0", "wifi=0", "gpu=0", "redfinsmp=1",
 +        "redfinshim=1", "redfinspmi=0", "redfinreturn=0"
 +    };
-+    if (!REDFIN_SMP_BUILD_READY) return 0;
++    if (!REDFIN_SMP_BUILD_READY || (REDFIN_SMP_CPUS != 2 && REDFIN_SMP_CPUS != 8)) return 0;
 +    unsigned off = 0, seen = 0, id_seen = 0;
 +    const unsigned count = sizeof(required) / sizeof(required[0]);
 +    while (off < 608 && command[off]) {
@@ -178,20 +190,25 @@
 +        "l3-cache-size", "timebase-frequency", "fixed-frequency"
 +    };
 +    static const unsigned char cpu_compatible[] = "qcom,kryo475\0qcom,kryo470\0ARM,v8";
-+    uint32_t pending[32], kinds[32], handles[2] = {0, 0};
++    uint32_t pending[32], kinds[32], handles[8] = {0};
 +    unsigned depth = 0, cpus = 0, root_seen = 0, chosen_children = 0;
 +    uint64_t off = 0;
 +    pending[0] = 1; kinds[0] = 0;
 +    for (;;) {
 +        while (!pending[depth]) {
-+            if (!depth) return off == size && cpus == 2 && (root_seen & 15) == 15 &&
-+                (chosen_children & 1) && chosen_children <= 3 && handles[0] != handles[1];
++            if (!depth) {
++                if (REDFIN_SMP_CPUS != 2 && REDFIN_SMP_CPUS != 8) return 0;
++                for (unsigned i = 0; i < REDFIN_SMP_CPUS; i++)
++                    for (unsigned j = 0; j < i; j++) if (handles[i] == handles[j]) return 0;
++                return off == size && cpus == REDFIN_SMP_CPUS && (root_seen & 15) == 15 &&
++                    (chosen_children & 1) && chosen_children <= 3;
++            }
 +            depth--;
 +        }
 +        pending[depth]--;
 +        if (depth == 31 || off > size || size - off < 8) return 0;
 +        uint32_t props = word(b + off, 0), children = word(b + off + 4, 0);
-+        unsigned kind = 0, seen = 0, cpu = 2;
++        unsigned kind = 0, seen = 0, cpu = 8;
 +        off += 8;
 +        if (!props || props > 1024 || children > 1024) return 0;
 +        for (uint32_t i = 0; i < props; i++) {
@@ -215,10 +232,9 @@
 +                    root_seen |= 1U << n;
 +                    kind = n == 0 ? CHOSEN : n == 1 ? CPUS : n == 2 ? ARMIO : LEAF;
 +                } else if (depth == 2 && kinds[depth] == CPUS) {
-+                    if (smp_string(value, len, "cpu0")) cpu = 0;
-+                    else if (smp_string(value, len, "cpu1")) cpu = 1;
-+                    else return 0;
-+                    if (cpu != cpus) return 0;
++                    char name[5] = {'c', 'p', 'u', (char)('0' + cpus), 0};
++                    if (cpus >= REDFIN_SMP_CPUS || !smp_string(value, len, name)) return 0;
++                    cpu = cpus;
 +                    kind = CPU;
 +                } else if (depth == 2 && kinds[depth] == ARMIO && smp_string(value, len, "gic")) kind = GIC;
 +                else if (depth == 2 && kinds[depth] == CHOSEN) {
@@ -229,14 +245,15 @@
 +                    if (chosen_children & bit) return 0;
 +                    chosen_children |= bit; kind = LEAF;
 +                } else return 0;
-+                if ((kind == CPUS && children != 2) || (kind == ARMIO && children != 1) ||
++                if ((kind == CPUS && children != REDFIN_SMP_CPUS) || (kind == ARMIO && children != 1) ||
 +                    (kind == CHOSEN && (children < 1 || children > 2)) ||
 +                    ((kind == CPU || kind == GIC || kind == LEAF) && children)) return 0;
 +            } else {
 +                if (smp_key(key, "name")) return 0;
 +                if (kind == CPU) {
 +                    unsigned n = 0;
-+                    uint32_t values[] = { cpu ? 0x600U : 0U, cpu, 0, 0, 0, cpu, cpu, 0, 0, 0, 19200000, 19200000 };
++                    uint32_t physical = REDFIN_SMP_CPUS == 8 ? cpu << 8 : (cpu ? 0x600U : 0U);
++                    uint32_t values[] = { physical, cpu, 0, 0, 0, cpu, cpu, 0, 0, 0, 19200000, 19200000 };
 +                    for (; n < sizeof(cpu_u32) / sizeof(cpu_u32[0]); n++)
 +                        if (smp_key(key, cpu_u32[n])) break;
 +                    if (n < sizeof(cpu_u32) / sizeof(cpu_u32[0])) {
@@ -280,7 +297,7 @@
  static const char *validate(const void *data, uint64_t size, uint64_t image,
      uint64_t image_end, uint64_t dtb, const struct hardware *hw, uint64_t mpidr, struct plan *q)
  {
-@@ -132,6 +350,9 @@
+@@ -132,6 +362,9 @@
      unsigned nul = 0, entry = 0;
      for (unsigned i = 0; i < sizeof(p->command); i++) if (!p->command[i]) nul = 1;
      if (!nul || mpidr > 0x700 || (mpidr & 0xff)) return "command or CPU affinity";
@@ -290,7 +307,7 @@
      if ((p->adt_offset & 15) || (p->adt_size & 3) || p->adt_size < 8 || p->adt_size > UINT32_MAX ||
          p->adt_offset < table || p->adt_offset > size || p->adt_size > size - p->adt_offset) return "ADT bounds";
      uint64_t last = p->virt;
-@@ -158,7 +379,9 @@
+@@ -158,7 +391,9 @@
      q->top = (q->args + sizeof(struct boot_args) + PAGE - 1) & ~(PAGE - 1);
      if (q->top > p->phys + p->memory) return "boot args outside RAM";
      q->entry = p->phys + (p->entry - p->virt);

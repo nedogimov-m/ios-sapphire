@@ -78,7 +78,7 @@ UFS/GUI must stay gated until the isolated md0 stage succeeds. CPU suspend,
 halt and hotplug remain unsupported.
 
 The isolated `--smp-probe --shim-early-return --return-bootloader` profile
-currently admits exactly CPU0+CPU6, canonical RAM and md0. It disables
+admits CPU0+CPU6 by default, or all8 with `--smp-cpus 8`, canonical RAM and md0. It disables
 legacy SPMI/return writers with `redfinspmi=0 redfinreturn=0`; the shim
 prearms PMIC/IMEM and a separate read-only kernel verifier checks that
 hardware state before CPU_ON. Loader and kernel independently reject other
@@ -93,4 +93,12 @@ CPU0/CPU6 each finish32steps, actual timer IRQ counts66/65, self/cross SGIs
 complete, logger drops0, worker inactive and IRQ observers drained. XNU
 publishes2/2CPUs and md0 PID1 runs11heartbeats before automatic fastboot
 return. Capture is authenticated and image-matched. All8cores have separate
-EL1/16K capability proof; extending concurrent XNU startup remains next.
+EL1/16K capability proof.
+
+The eight-core test also passes (`logs/redfin/smp8-v1/`, 2026-10-23):
+XNU publishes8/8, CPU0 finishes224steps and CPU1..7 each32; all8timers,
+selfSGIs and bidirectional CPU0↔secondary exchanges complete. Workers exit,
+observers drain, logger drops0, md0 PID1 runs11heartbeats and fastboot return
+is verified in authenticated/image-matched capture. Kernel44b38fd5,
+full local build020056. UFS/GUI integration and TLB-specific workload remain
+separate work; the user requests the next iOS session on all8cores.

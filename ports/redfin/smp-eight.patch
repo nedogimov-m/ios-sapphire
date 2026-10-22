@@ -1,0 +1,494 @@
+diff --git a/osfmk/arm64/redfin_smp.c b/osfmk/arm64/redfin_smp.c
+--- a/osfmk/arm64/redfin_smp.c
++++ b/osfmk/arm64/redfin_smp.c
+@@ -30,16 +30,24 @@
+ static unsigned rf_smp_frozen_bytes;
+ static uint64_t rf_smp_boot_id;
+ static uint32_t rf_smp_prepared,rf_smp_started,rf_smp_selected;
++static unsigned rf_smp_cpu_count=2;
++static unsigned rf_smp_count(void) { return __atomic_load_n(&rf_smp_cpu_count,__ATOMIC_ACQUIRE); }
++static uint64_t rf_smp_physical(unsigned logical)
++{ return rf_smp_count()==8?(uint64_t)logical<<8:(logical?RF_SMP_TARGET:0); }
++static int rf_smp_start_eight(unsigned,vm_offset_t);
++static int rf_smp_prove_eight(void);
++static void rf_smp_irq_eight(unsigned,uint32_t,unsigned);
+ /* phase ACTIVE permits IRQ facts, DRAIN acknowledges the final SGI only. */
+ enum { RF_SMP_IDLE,RF_SMP_ACTIVE,RF_SMP_DRAIN,RF_SMP_DONE };
+ static uint32_t rf_smp_phase,rf_smp_fault;
+-static uint64_t rf_smp_request[2],rf_smp_ack[2],rf_smp_timers[2],rf_smp_progress[2];
+-static uint32_t rf_smp_ready[2],rf_smp_finished[2],rf_smp_drained[2];
++static uint64_t rf_smp_request[8],rf_smp_ack[8],rf_smp_timers[8],rf_smp_progress[8];
++static uint32_t rf_smp_ready[8],rf_smp_finished[8],rf_smp_drained[8];
+ static uint64_t rf_smp_deadline;
+ extern int redfin_smp_return_ready(void);
+ extern int redfin_log_smp_quiescent(void);
+ extern void redfin_shutdown_watchdog_tick(unsigned);
+ extern unsigned char redfin_smp_secondary_entry[],redfin_smp_secondary_entry_end[];
++extern unsigned char redfin_smp_eight_entry[],redfin_smp_eight_entry_end[];
+ extern vm_offset_t ml_static_vtop(vm_offset_t);
+ int redfin_smp_mode(void);
+ int redfin_smp_sgi_selected(void);
+@@ -73,7 +81,7 @@
+ }
+ static void rf_smp_send(unsigned logical)
+ {
+- uint64_t physical=logical?RF_SMP_TARGET:0;
++ uint64_t physical=rf_smp_physical(logical);
+  uint64_t sgi=((physical>>8)<<16)|((uint64_t)RF_SMP_SGI<<24)|1;
+  __builtin_arm_dsb(DSB_ISHST);
+  __builtin_arm_wsr64("ICC_SGI1R_EL1",sgi);
+@@ -81,8 +89,8 @@
+ }
+ static bool rf_smp_entry_ok(vm_offset_t entry)
+ {
+- vm_offset_t first=ml_static_vtop((vm_offset_t)redfin_smp_secondary_entry);
+- vm_offset_t last=ml_static_vtop((vm_offset_t)redfin_smp_secondary_entry_end);
++ vm_offset_t first=ml_static_vtop((vm_offset_t)(rf_smp_count()==8?redfin_smp_eight_entry:redfin_smp_secondary_entry));
++ vm_offset_t last=ml_static_vtop((vm_offset_t)(rf_smp_count()==8?redfin_smp_eight_entry_end:redfin_smp_secondary_entry_end));
+  return entry==first && last>first && last-first<=512 && last<=0x200000000ULL;
+ }
+ static void rf_smp_barrier(void) { __builtin_arm_dsb(DSB_SY); }
+@@ -116,7 +124,7 @@
+  static const char *tokens[]={"debug=0xc","serial=3","cpus=2","keepsyms=1","-noprogress",
+   "rd=md0","sweettouch=0","sweetkeys=0","sweetusb=0","sweetcpufreq=0","sweetbattery=0",
+   "modem=0","wifi=0","gpu=0","redfinsmp=1","redfinshim=1","redfinspmi=0","redfinreturn=0"};
+- uint32_t seen=0;bool nonce_seen=false,spam_seen=false;uint64_t boot_nonce=0;
++ uint32_t seen=0;unsigned selected_count=0;bool nonce_seen=false,spam_seen=false;uint64_t boot_nonce=0;
+  if(!args || !bytes || bytes>RF_SMP_ARGS || args[bytes-1]) return false;
+  for(unsigned p=0;p<bytes-1;) {
+   if(!args[p]) return false;
+@@ -124,7 +132,11 @@
+   unsigned s=p;while(p<bytes-1 && !rf_smp_space(args[p])) p++;
+   unsigned n=p-s;bool known=false;
+   for(unsigned i=0;i<sizeof(tokens)/sizeof(tokens[0]);i++) {
+-   if(!rf_smp_word(args+s,n,tokens[i])) continue;
++   if(i==2) {
++    if(rf_smp_word(args+s,n,"cpus=2")) selected_count=2;
++    else if(rf_smp_word(args+s,n,"cpus=8")) selected_count=8;
++    else continue;
++   } else if(!rf_smp_word(args+s,n,tokens[i])) continue;
+    if(seen&(1u<<i)) return false;
+    seen|=1u<<i;known=true;break;
+   }
+@@ -147,7 +159,8 @@
+   }
+   return false;
+  }
+- if(seen!=((1u<<(sizeof(tokens)/sizeof(tokens[0])))-1) || !nonce_seen) return false;
++ if(seen!=((1u<<(sizeof(tokens)/sizeof(tokens[0])))-1) || !nonce_seen || !selected_count) return false;
++ __atomic_store_n(&rf_smp_cpu_count,selected_count,__ATOMIC_RELEASE);
+  if(boot_id) *boot_id=boot_nonce;
+  return true;
+ }
+@@ -165,14 +178,15 @@
+ int redfin_smp_topology_valid(void)
+ {
+  const ml_topology_info_t *t=ml_get_topology_info();
+- if(!t || t->version!=CPU_TOPOLOGY_VERSION || t->num_cpus!=2 || t->max_cpu_id!=1 || t->num_clusters!=1 ||
++ unsigned count=rf_smp_count();
++ if((count!=2 && count!=8) || !t || t->version!=CPU_TOPOLOGY_VERSION || t->num_cpus!=count || t->max_cpu_id!=count-1 || t->num_clusters!=1 ||
+     t->max_cluster_id || t->max_die_id || !t->cpus || !t->clusters ||
+     t->boot_cpu!=&t->cpus[0] || t->boot_cluster!=&t->clusters[0] ||
+     t->clusters[0].cluster_id || t->clusters[0].cluster_type!=CLUSTER_TYPE_SMP ||
+-    t->clusters[0].num_cpus!=2 || t->clusters[0].first_cpu_id || t->clusters[0].cpu_mask!=3) return 0;
+- for(unsigned i=0;i<2;i++) {
++    t->clusters[0].num_cpus!=count || t->clusters[0].first_cpu_id || t->clusters[0].cpu_mask!=((1ULL<<count)-1)) return 0;
++ for(unsigned i=0;i<count;i++) {
+   const ml_topology_cpu_t *c=&t->cpus[i];
+-  if(c->cpu_id!=i || c->phys_id!=(i?RF_SMP_TARGET:0) || c->cluster_id || c->die_id ||
++  if(c->cpu_id!=i || c->phys_id!=rf_smp_physical(i) || c->cluster_id || c->die_id ||
+      c->cluster_type!=CLUSTER_TYPE_SMP || c->die_cluster_id || c->cluster_core_id!=i ||
+      c->l2_cache_id!=i || c->l3_cache_id || c->l2_cache_size || c->l3_cache_size) return 0;
+  }
+@@ -208,6 +222,7 @@
+ }
+ int redfin_smp_start(unsigned logical,vm_offset_t entry)
+ {
++ if(rf_smp_count()==8) return rf_smp_start_eight(logical,entry);
+  uint32_t expected=0;
+  /* Consume even failed requests: no retry or second CPU_ON is permitted. */
+  if(!__atomic_compare_exchange_n(&rf_smp_started,&expected,1,true,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return -100;
+@@ -228,6 +243,7 @@
+ static int rf_smp_local(void)
+ {
+  uint64_t affinity=rf_smp_reg(RF_SMP_MPIDR)&0xff00ffffffULL;
++ if(rf_smp_count()==8) return affinity<=0x700 && !(affinity&0xff)?(int)(affinity>>8):-1;
+  return affinity==0?0:(affinity==RF_SMP_TARGET?1:-1);
+ }
+ /* kind0 means a completed architected timer IRQ, kind1 our dedicated SGI2. */
+@@ -237,6 +253,7 @@
+  if(phase!=RF_SMP_ACTIVE && phase!=RF_SMP_DRAIN) return;
+  int cpu=rf_smp_local();
+  if(cpu<0) { __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);return; }
++ if(rf_smp_count()==8) { rf_smp_irq_eight(kind,phase,(unsigned)cpu);return; }
+  if(phase==RF_SMP_DRAIN) {
+   if(kind==1) __atomic_store_n(&rf_smp_drained[cpu],1,__ATOMIC_RELEASE);
+   return;
+@@ -302,8 +319,10 @@
+  if(!rf_smp_worker(1)) __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);
+  thread_terminate(current_thread());
+ }
++#include "redfin_smp_eight.h"
+ int redfin_smp_prove(void)
+ {
++ if(rf_smp_count()==8) return rf_smp_prove_eight();
+  if(!rf_smp_unchanged() || __atomic_load_n(&rf_smp_started,__ATOMIC_ACQUIRE)!=2 ||
+     __atomic_load_n(&rf_smp_phase,__ATOMIC_ACQUIRE)!=RF_SMP_IDLE) return -110;
+  nanoseconds_to_deadline(5*NSEC_PER_SEC,&rf_smp_deadline);
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -372,6 +372,7 @@
+ static char rf_smr_frozen[608];
+ static unsigned rf_smr_bytes;
+ static uint64_t rf_smr_nonce;
++static unsigned rf_smr_expected_cpus=2;
+ static struct redfin_er_report rf_smr_report;
+ static struct redfin_er_target rf_smr_target;
+ static bool rf_smr_space(char c) { return c==' ' || c=='\t' || c=='\r' || c=='\n'; }
+@@ -383,6 +384,7 @@
+   "sweettouch=0","sweetkeys=0","sweetusb=0","sweetcpufreq=0","sweetbattery=0","modem=0","wifi=0","gpu=0",
+   "redfinsmp=1","redfinshim=1","redfinspmi=0","redfinreturn=0"};
+  uint64_t seen=0,value=0;
++ unsigned selected_count=0;
+  bool id_seen=false,trace_seen=false;
+  if(!args || !nonce || !bytes || bytes>sizeof(rf_smr_frozen) || args[bytes-1]) return false;
+  for(unsigned pos=0;pos<bytes-1;) {
+@@ -392,7 +394,11 @@
+   unsigned length=pos-start;
+   bool known=false;
+   for(unsigned i=0;i<sizeof(required)/sizeof(required[0]);i++) {
+-   if(!rf_smr_word(args+start,length,required[i])) continue;
++   if(i==2) {
++    if(rf_smr_word(args+start,length,"cpus=2")) selected_count=2;
++    else if(rf_smr_word(args+start,length,"cpus=8")) selected_count=8;
++    else continue;
++   } else if(!rf_smr_word(args+start,length,required[i])) continue;
+    if(seen&(1ULL<<i)) return false;
+    seen|=1ULL<<i; known=true;
+   }
+@@ -413,6 +419,7 @@
+   if(!known) return false; /* Includes every unreviewed writer/observer flag. */
+  }
+  if(seen!=((1ULL<<(sizeof(required)/sizeof(required[0])))-1) || !id_seen) return false;
++ rf_smr_expected_cpus=selected_count;
+  *nonce=value;
+  return true;
+ }
+@@ -424,19 +431,22 @@
+ static bool rf_smr_runtime(void)
+ {
+  const ml_topology_info_t *t=ml_get_topology_info();
+- if(PAGE_SIZE!=16384 || !t || t->version!=CPU_TOPOLOGY_VERSION || t->num_cpus!=2 ||
+-    t->max_cpu_id!=1 || t->num_clusters!=1 || t->max_cluster_id || t->max_die_id || !t->cpus || !t->clusters ||
++ unsigned count=rf_smr_expected_cpus;
++ if(PAGE_SIZE!=16384 || (count!=2 && count!=8) || !t || t->version!=CPU_TOPOLOGY_VERSION || t->num_cpus!=count ||
++    t->max_cpu_id!=count-1 || t->num_clusters!=1 || t->max_cluster_id || t->max_die_id || !t->cpus || !t->clusters ||
+     t->boot_cpu!=&t->cpus[0] || t->boot_cluster!=&t->clusters[0] ||
+     rf_smr_el()!=4 || (rf_smr_mpidr()&0xff00ffffffULL) || (rf_smr_sctlr()&5)!=5) return false;
+- const ml_topology_cpu_t *a=&t->cpus[0],*b=&t->cpus[1];
+  const ml_topology_cluster_t *c=&t->clusters[0];
+- return a->cpu_id==0 && a->phys_id==0 && b->cpu_id==1 && b->phys_id==0x600 &&
+-  !a->cluster_id && !b->cluster_id && !a->die_id && !b->die_id &&
+-  a->cluster_type==CLUSTER_TYPE_SMP && b->cluster_type==CLUSTER_TYPE_SMP &&
+-  !a->l2_cache_id && b->l2_cache_id==1 && !a->l3_cache_id && !b->l3_cache_id &&
+-  !a->l2_cache_size && !b->l2_cache_size && !a->l3_cache_size && !b->l3_cache_size &&
+-  !c->cluster_id && c->cluster_type==CLUSTER_TYPE_SMP && c->num_cpus==2 &&
+-  c->first_cpu_id==0 && c->cpu_mask==3;
++ if(c->cluster_id || c->cluster_type!=CLUSTER_TYPE_SMP || c->num_cpus!=count ||
++    c->first_cpu_id || c->cpu_mask!=((1ULL<<count)-1)) return false;
++ for(unsigned i=0;i<count;i++) {
++  const ml_topology_cpu_t *cpu=&t->cpus[i];
++  unsigned physical=count==8?i<<8:(i?0x600:0);
++  if(cpu->cpu_id!=i || cpu->phys_id!=physical || cpu->cluster_id || cpu->die_id ||
++     cpu->cluster_type!=CLUSTER_TYPE_SMP || cpu->l2_cache_id!=i || cpu->l3_cache_id ||
++     cpu->l2_cache_size || cpu->l3_cache_size) return false;
++ }
++ return true;
+ }
+ static bool rf_smr_frozen_valid(void)
+ {
+@@ -474,10 +484,16 @@
+  if(!redfin || !lito || !rf_smr_property("/chosen","dram-base",&base,8) || base!=0x180000000ULL ||
+     !rf_smr_property("/chosen","dram-size",&size,8) || size!=0x80000000ULL ||
+     !rf_smr_property("/cpus/cpu0","reg",&cpu0,4) || cpu0!=0 ||
+-    !rf_smr_property("/cpus/cpu1","reg",&cpu1,4) || cpu1!=0x600 ||
++    !rf_smr_property("/cpus/cpu1","reg",&cpu1,4) || cpu1!=(rf_smr_expected_cpus==8?0x100u:0x600u) ||
+     !rf_smr_property("/redfin-spmi","reg",spmi,48) ||
+     !rf_smr_property("/redfin-spmi","ee",&ee,4) || ee!=0 ||
+     !rf_smr_property("/redfin-return","reg",reason,32)) return false;
++ if(rf_smr_expected_cpus==8) for(unsigned cpu=2;cpu<8;cpu++) {
++  char path[]="/cpus/cpu0";
++  path[sizeof(path)-2]=(char)('0'+cpu);
++  uint32_t physical=0;
++  if(!rf_smr_property(path,"reg",&physical,4) || physical!=(cpu<<8)) return false;
++ }
+  return spmi[0]==0x0c440000 && spmi[1]==0x1100 && spmi[2]==0x0e600000 && spmi[3]==0x100000 &&
+   spmi[4]==0x0c40a000 && spmi[5]==0x26000 && reason[0]==0x0c600000 && reason[1]==0x2000000 &&
+   reason[2]==0x146ab65c && reason[3]==4;
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -21,6 +21,7 @@
+ extern "C" void sweet_secondary_entry(void);
+ extern "C" boolean_t sweet_cpu_signal_is_enabled(unsigned int cpu);
+ extern "C" void redfin_smp_secondary_entry(void);
++extern "C" void redfin_smp_eight_entry(void);
+ extern "C" int redfin_smp_mode(void);
+ extern "C" int redfin_smp_topology_valid(void);
+ extern "C" void redfin_smp_prepare(void);
+@@ -194,7 +195,7 @@
+ 	if (redfin_smp_mode()) {
+ 		int proof = redfin_smp_prove();
+ 		if (proof != 0) {
+-			panic("REDFIN SMP2: IRQ/timer/progress proof failed=%d", proof);
++			panic("REDFIN SMP: IRQ/timer/progress proof failed=%d", proof);
+ 		}
+ 	}
+ 	/* Publish exactly once, after every selected CPU has completed initCPU(). */
+@@ -271,10 +272,11 @@
+ 		panic("SWEET CPU: cpu=%u unsupported restart", getCPUNumber());
+ 	}
+ 	if (redfin_smp_mode()) {
+-		vm_offset_t entry = ml_static_vtop((vm_offset_t)&redfin_smp_secondary_entry);
++		vm_offset_t entry = ml_static_vtop((vm_offset_t)(ml_get_topology_info()->num_cpus == 8 ?
++		    &redfin_smp_eight_entry : &redfin_smp_secondary_entry));
+ 		int rc = redfin_smp_start(getCPUNumber(), entry);
+ 		if (rc != 0) {
+-			panic("REDFIN SMP2: fresh return/OFF/CPU_ON gate failed=%d", rc);
++			panic("REDFIN SMP: fresh return/OFF/CPU_ON gate failed=%d", rc);
+ 		}
+ 		return KERN_SUCCESS;
+ 	}
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -286,6 +286,59 @@
+  * The EL2 path assumes no resident hypervisor and CNTVOFF_EL2=0 on boot.
+  */
+ 	.align 2
++
++ .align 2
++ .globl EXT(redfin_smp_eight_entry)
++LEXT(redfin_smp_eight_entry)
++ msr DAIFSet, #0xf
++ mrs x1, CurrentEL
++ cmp x1, #4
++ b.ne Lrf_eight_park
++ mrs x1, SCTLR_EL1
++ mov x2, #0x1005
++ tst x1, x2
++ b.ne Lrf_eight_park
++ cmp x0, #1
++ b.lo Lrf_eight_park
++ cmp x0, #7
++ b.hi Lrf_eight_park
++ mrs x1, MPIDR_EL1
++ MOV64 x2, 0xff00ffffff
++ and x1, x1, x2
++ lsl x2, x0, #8
++ cmp x1, x2
++ b.ne Lrf_eight_park
++ mrs x1, MIDR_EL1
++ ubfx x2, x1, #24, #8
++ cmp x2, #0x51
++ b.ne Lrf_eight_park
++ ubfx x1, x1, #4, #12
++ mov x2, #0x804
++ cmp x0, #6
++ b.hs Lrf_eight_part
++ mov x2, #0x805
++Lrf_eight_part:
++ cmp x1, x2
++ b.ne Lrf_eight_park
++ mrs x1, ID_AA64MMFR0_EL1
++ ubfx x1, x1, #20, #4
++ sub x1, x1, #1
++ cmp x1, #1
++ b.hi Lrf_eight_park
++ mrs x1, CTR_EL0
++ and x2, x1, #15
++ cmp x2, #4
++ b.ne Lrf_eight_park
++ ubfx x1, x1, #16, #4
++ cmp x1, #4
++ b.ne Lrf_eight_park
++ msr SPSel, #1
++ b EXT(LowResetVectorBase)
++Lrf_eight_park:
++ wfe
++ b Lrf_eight_park
++ .globl EXT(redfin_smp_eight_entry_end)
++LEXT(redfin_smp_eight_entry_end)
+ 	.globl EXT(redfin_smp_secondary_entry)
+ LEXT(redfin_smp_secondary_entry)
+ 	/* Separate opt-in trampoline. Redfin CPU6 was observed at EL1 only.
+diff --git a/osfmk/arm64/redfin_smp_eight.h b/osfmk/arm64/redfin_smp_eight.h
+new file mode 100644
+--- /dev/null
++++ b/osfmk/arm64/redfin_smp_eight.h
+@@ -0,0 +1,164 @@
++/* Included after the shared SMP primitives. All eight physical cores have
++ * independent EL1/16K proof. CPU0 serializes the star exchange, so every
++ * mailbox has one sender at a time. No device, storage or GPU operations. */
++#ifndef REDFIN_SMP_EIGHT_H
++#define REDFIN_SMP_EIGHT_H
++static uint32_t rf_eight_started[8],rf_eight_turn;
++static uint64_t rf_eight_replies[8];
++
++static int rf_smp_start_eight(unsigned logical,vm_offset_t entry)
++{
++ if(logical<1 || logical>=8) return -200;
++ bool owned=false;
++ for(unsigned attempt=0;attempt<256;attempt++) {
++  uint32_t expected=0;
++  if(__atomic_compare_exchange_n(&rf_eight_started[logical],&expected,1,true,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) {
++   owned=true;break;
++  }
++  if(expected) return -201;
++ }
++ if(!owned || rf_smp_count()!=8 || !__atomic_load_n(&rf_smp_prepared,__ATOMIC_ACQUIRE) ||
++    !rf_smp_unchanged() || entry<0x180000000ULL || entry>=0x200000000ULL ||
++    (entry&3) || !rf_smp_entry_ok(entry)) return -202;
++ uint64_t target=(uint64_t)logical<<8;
++ int32_t version=rf_smp_psci(0x84000000u,0,0,0);
++ if(((uint32_t)version>>16)!=1 || ((uint32_t)version&0xffff)<1 ||
++    rf_smp_psci(0x8400000au,RF_SMP_ON,0,0)!=0 ||
++    rf_smp_psci(0x8400000au,RF_SMP_AFFINITY,0,0)!=0 ||
++    rf_smp_psci(RF_SMP_AFFINITY,target,0,0)!=1) return -203;
++ if(redfin_smp_return_ready()!=1 || !rf_smp_unchanged()) return -204;
++ rf_smp_barrier();
++ int32_t result=rf_smp_psci(RF_SMP_ON,target,entry,logical);
++ if(!result) __atomic_store_n(&rf_eight_started[logical],2,__ATOMIC_RELEASE);
++ return result;
++}
++
++static void rf_smp_irq_eight(unsigned kind,uint32_t phase,unsigned cpu)
++{
++ if(cpu>=8) { __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);return; }
++ if(phase==RF_SMP_DRAIN) {
++  if(kind==1) __atomic_store_n(&rf_smp_drained[cpu],1,__ATOMIC_RELEASE);
++  return;
++ }
++ if(kind==0) {
++  uint64_t n=__atomic_load_n(&rf_smp_timers[cpu],__ATOMIC_RELAXED);
++  if(n==UINT64_MAX) __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);
++  else __atomic_store_n(&rf_smp_timers[cpu],n+1,__ATOMIC_RELEASE);
++ } else if(kind==1) {
++  uint64_t n=__atomic_load_n(&rf_smp_request[cpu],__ATOMIC_ACQUIRE);
++  uint64_t previous=__atomic_load_n(&rf_smp_ack[cpu],__ATOMIC_RELAXED);
++  unsigned turn=__atomic_load_n(&rf_eight_turn,__ATOMIC_ACQUIRE);
++  uint64_t round=n>>4,origin=n&15;
++  bool cross=turn>=1 && turn<8 && round>(turn-1)*RF_SMP_ROUNDS && round<=turn*RF_SMP_ROUNDS &&
++   (cpu==0?origin==(uint64_t)turn+1:(turn==cpu && origin==1));
++  if((n==1 || cross) && n>previous) __atomic_store_n(&rf_smp_ack[cpu],n,__ATOMIC_RELEASE);
++ }
++}
++
++static void rf_smp_eight_worker(void *arg,wait_result_t result __unused)
++{
++ unsigned cpu=(unsigned)(uintptr_t)arg;
++ bool ok=cpu>=1 && cpu<8;
++ if(ok) {
++  thread_bind(cpu_to_processor(cpu));thread_block(THREAD_CONTINUE_NULL);
++  ok=rf_smp_alive(cpu);
++ }
++ if(ok) {
++  __atomic_store_n(&rf_smp_request[cpu],1,__ATOMIC_RELEASE);rf_smp_send(cpu);
++  ok=rf_smp_wait64(&rf_smp_ack[cpu],1,cpu);
++ }
++ if(ok) {
++  __atomic_store_n(&rf_smp_ready[cpu],1,__ATOMIC_RELEASE);
++  ok=rf_smp_wait32(&rf_eight_turn,cpu,cpu);
++ }
++ for(unsigned round=1;ok && round<=RF_SMP_ROUNDS;round++) {
++  uint64_t serial=(cpu-1)*RF_SMP_ROUNDS+round;
++  uint64_t request=(serial<<4)|1;
++  if(!rf_smp_wait64(&rf_smp_ack[cpu],request,cpu)) { ok=false;break; }
++  uint64_t reply=(serial<<4)|(cpu+1);
++  __atomic_store_n(&rf_smp_request[0],reply,__ATOMIC_RELEASE);rf_smp_send(0);
++  if(!rf_smp_wait64(&rf_smp_ack[0],reply,cpu)) { ok=false;break; }
++  rf_smp_round_delay();
++  if(!rf_smp_alive(cpu)) { ok=false;break; }
++  __atomic_store_n(&rf_smp_progress[cpu],round,__ATOMIC_RELEASE);
++ }
++ if(ok) __atomic_store_n(&rf_smp_finished[cpu],1,__ATOMIC_RELEASE);
++ else __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);
++ thread_terminate(current_thread());
++}
++
++static int rf_smp_prove_eight(void)
++{
++ if(rf_smp_count()!=8 || !rf_smp_unchanged() ||
++    __atomic_load_n(&rf_smp_phase,__ATOMIC_ACQUIRE)!=RF_SMP_IDLE) return -210;
++ for(unsigned cpu=1;cpu<8;cpu++)
++  if(__atomic_load_n(&rf_eight_started[cpu],__ATOMIC_ACQUIRE)!=2) return -211;
++ thread_t workers[8]={THREAD_NULL};
++ int error=-212;
++ nanoseconds_to_deadline(5*NSEC_PER_SEC,&rf_smp_deadline);
++ __atomic_store_n(&rf_smp_phase,RF_SMP_ACTIVE,__ATOMIC_RELEASE);
++ __atomic_store_n(&rf_smp_request[0],1,__ATOMIC_RELEASE);rf_smp_send(0);
++ if(!rf_smp_wait64(&rf_smp_ack[0],1,0)) goto fail;
++ __atomic_store_n(&rf_smp_ready[0],1,__ATOMIC_RELEASE);
++ for(unsigned cpu=1;cpu<8;cpu++) {
++  if(kernel_thread_start(rf_smp_eight_worker,(void *)(uintptr_t)cpu,&workers[cpu])!=KERN_SUCCESS) {
++   error=-213;goto fail;
++  }
++ }
++ for(unsigned cpu=1;cpu<8;cpu++) {
++  if(!rf_smp_wait32(&rf_smp_ready[cpu],1,0)) { error=-214;goto fail; }
++ }
++ for(unsigned cpu=1;cpu<8;cpu++) {
++  __atomic_store_n(&rf_eight_turn,cpu,__ATOMIC_RELEASE);
++  for(unsigned round=1;round<=RF_SMP_ROUNDS;round++) {
++   uint64_t serial=(cpu-1)*RF_SMP_ROUNDS+round;
++   uint64_t request=(serial<<4)|1,reply=(serial<<4)|(cpu+1);
++   __atomic_store_n(&rf_smp_request[cpu],request,__ATOMIC_RELEASE);rf_smp_send(cpu);
++   if(!rf_smp_wait64(&rf_smp_ack[cpu],request,0) || !rf_smp_wait64(&rf_smp_ack[0],reply,0) ||
++      !rf_smp_wait64(&rf_smp_progress[cpu],round,0)) { error=-215;goto fail; }
++   rf_eight_replies[cpu]=__atomic_load_n(&rf_smp_ack[0],__ATOMIC_ACQUIRE);
++   __atomic_store_n(&rf_smp_progress[0],(cpu-1)*RF_SMP_ROUNDS+round,__ATOMIC_RELEASE);
++  }
++  if(!rf_smp_wait32(&rf_smp_finished[cpu],1,0)) { error=-216;goto fail; }
++ }
++ for(unsigned cpu=1;cpu<8;cpu++) {
++  bool exited=false;
++  for(unsigned poll=0;poll<RF_SMP_POLLS;poll++) {
++   if(!rf_smp_alive(0)) break;
++   if(!thread_is_active(workers[cpu])) { exited=true;break; }
++   rf_smp_pause();
++  }
++  if(!exited) { error=-217;goto fail; }
++  thread_deallocate(workers[cpu]);workers[cpu]=THREAD_NULL;
++ }
++ __atomic_store_n(&rf_smp_phase,RF_SMP_DRAIN,__ATOMIC_RELEASE);
++ for(unsigned cpu=0;cpu<8;cpu++) rf_smp_send(cpu);
++ for(unsigned cpu=0;cpu<8;cpu++) {
++  if(!rf_smp_wait32(&rf_smp_drained[cpu],1,0)) { error=-218;goto fail; }
++ }
++ __atomic_store_n(&rf_smp_phase,RF_SMP_DONE,__ATOMIC_RELEASE);
++ if(__atomic_load_n(&rf_smp_fault,__ATOMIC_ACQUIRE)) { error=-219;goto fail; }
++ for(unsigned cpu=0;cpu<8;cpu++) {
++  uint64_t expected=cpu?RF_SMP_ROUNDS:7*RF_SMP_ROUNDS;
++  if(__atomic_load_n(&rf_smp_timers[cpu],__ATOMIC_ACQUIRE)<2 ||
++     __atomic_load_n(&rf_smp_progress[cpu],__ATOMIC_ACQUIRE)!=expected ||
++     __atomic_load_n(&rf_smp_ready[cpu],__ATOMIC_ACQUIRE)!=1 ||
++     (cpu && (__atomic_load_n(&rf_smp_ack[cpu],__ATOMIC_ACQUIRE)!=((cpu*RF_SMP_ROUNDS<<4)|1) ||
++              rf_eight_replies[cpu]!=((cpu*RF_SMP_ROUNDS<<4)|(cpu+1))))) { error=-220;goto fail; }
++ }
++ if(redfin_log_smp_quiescent()!=1) { error=-221;goto fail; }
++ rf_smp_pause();
++ if(redfin_log_smp_quiescent()!=1 || !rf_smp_unchanged()) { error=-222;goto fail; }
++ for(unsigned cpu=0;cpu<8;cpu++)
++  kprintf("REDFIN SMP8: bootid=%#llx cpu=%u mpidr=%#x timer=%llu progress=%llu self=%u cross_ack=%llu reply=%llu log_busy=0 log_reentrant=0 workers_exited=1 irq_drained=1 tlb=untested\n",
++   rf_smp_boot_id,cpu,cpu<<8,__atomic_load_n(&rf_smp_timers[cpu],__ATOMIC_ACQUIRE),
++   __atomic_load_n(&rf_smp_progress[cpu],__ATOMIC_ACQUIRE),
++   __atomic_load_n(&rf_smp_ready[cpu],__ATOMIC_ACQUIRE),
++   __atomic_load_n(&rf_smp_ack[cpu],__ATOMIC_ACQUIRE),rf_eight_replies[cpu]);
++ return 0;
++fail:
++ __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);
++ for(unsigned cpu=1;cpu<8;cpu++) if(workers[cpu]!=THREAD_NULL) thread_deallocate(workers[cpu]);
++ return error;
++}
++#endif /* REDFIN_SMP_EIGHT_H */

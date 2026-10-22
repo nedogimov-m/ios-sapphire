@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN all8XNU cores pass isolated scheduling/IRQ test — 2026-10-23
+
+Eight-core extension preserves the working2-core profile and uses natural
+physical/logical CPU0..7 affinity0x000..0x700. Each distinct live-FDT L2
+keeps a separate logical cache ID; L3 is shared, sizes unspecified.
+Kernel local full ARM64 build `research/redfin-build/build-20261023-020056.log`,
+SHA256 `44b38fd5a934d179c2e4d829d13ae4d79a6eef6ed2896740c61f31d6799ba4a2`.
+Image `ports/redfin/out/smp8-v1/redfin-xnu.img` SHA256
+`62762312bb1e9b4c8c2401ee804dd168b6c14f4308b3c8261e32890a852ad020`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfinbootid=0xdf8acf043e7907ef`.
+Full798 host tests PASS (`peripherals-host-tests-v34.txt`), including
+real8pthread proof, missing IRQ/timer/return/binding/logger negatives,
+2-core regressions, allCPU ADT mutations/handle uniqueness, native ARM64
+backend/trampoline and actual GCC relocation tests. Complete generated
+payload/ADT/liveFDT passes actual C loader and count-bound host return policy.
+Authenticated/image-matched `logs/redfin/smp8-v1/`: RO PON/IMEM proof succeeds;
+all8 enter XNU with SGI1. CPU0 progresses224; CPU1..7 each32. Timer counts
+4258/99/706/1313/1919/2528/3273/3982. Each core self-SGI2 passes; CPU0 has
+bidirectional unique-sequence exchanges with every secondary. All workers
+inactive/IRQ observers drained, logger busy/reentrant drops0; XNU publishes
+8/8 initialized. md0 PID1 alive/11heartbeats, no panic, metadata primed and
+fastboot return verified. This proves concurrent XNU scheduling and stated
+IRQ/cache-coherency facts; TLB shootdowns are explicitly untested.
+User requests iOS8 immediately after this test to compare performance.
+Next GUI integration preserves UFS media bounds/mutex and framebuffer locks,
+and adds a strict GUI8 contract plus CPU0 ownership for touch/shutdown;
+current md0-only profile cannot yet admit Apple userspace/root writers.
+
 ## REDFIN two XNU cores run timers, cross-IPIs and bound tasks — 2026-10-23
 
 Code commit `db420e4`; kernel d1521723/full local ARM64 build013354.

@@ -62,6 +62,7 @@ def main():
     p.add_argument('--early-return-probe', action='store_true', help='rehearse the shared bootloader-return leaf after existing verified return; separate RAM-only CPU0 test')
     p.add_argument('--shim-early-return', action='store_true', help='prearm the same return leaf before payload validation; requires the isolated --early-return-probe rehearsal profile')
     p.add_argument('--smp-probe', action='store_true', help='isolated md0 CPU0+CPU6 XNU proof; requires compiled shim prearm and bootloader return')
+    p.add_argument('--smp-cpus', type=int, choices=(2, 8), help='CPU count for the isolated --smp-probe; default 2')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
     p.add_argument('--display-hz', type=int, help='software display copy cadence, 1..10 Hz; requires --display; omitted keeps kernel default')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
@@ -97,6 +98,8 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.smp_cpus is not None and not a.smp_probe:
+        p.error('--smp-cpus requires --smp-probe')
     if a.cpu_capability_target is not None:
         if not a.cpu_capability_probe:
             p.error('--cpu-capability-target requires --cpu-capability-probe')
@@ -260,7 +263,7 @@ def main():
         import mkadt
         from tools import adt
         validate_window(a.dtb.read_bytes(), a.memory_base, a.memory_size)
-        tree = (mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr, smp=True)
+        tree = (mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr, smp=True, smp_cpus=a.smp_cpus or 2)
                 if a.smp_probe else mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr))
         if a.apple_adt:
             mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes())
@@ -363,7 +366,7 @@ def main():
         if a.early_return_probe:
             command_line += ' redfinearlyreturn=1'
         if a.smp_probe:
-            command_line = command_line.replace('cpus=1', 'cpus=2')
+            command_line = command_line.replace('cpus=1', f'cpus={a.smp_cpus or 2}')
             command_line += ' redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0'
         if a.display:
             command_line += ' redfinfb=1 sweetfb_noconsole=1'
@@ -423,6 +426,7 @@ def main():
         f'#define WATCHDOG_SECONDS {a.watchdog_seconds}\n'
         f'#define SHIM_EARLY_RETURN {int(a.shim_early_return)}\n'
         f'#define REDFIN_SMP_PROBE {int(a.smp_probe)}\n'
+        f'#define REDFIN_SMP_CPUS {a.smp_cpus or 2}\n'
         f'#define XNU_PAYLOAD_SIZE {len(payload)}ULL\n')
     flags = ['-O2', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-pic',
         '-mgeneral-regs-only', '-mstrict-align', '-fno-stack-protector',
@@ -484,6 +488,7 @@ def main():
         manifest['shim_early_return'] = True
     if a.smp_probe:
         manifest['smp_probe'] = True
+        manifest['smp_cpus'] = a.smp_cpus or 2
         manifest['sha256']['config.h'] = hashlib.sha256((out / 'config.h').read_bytes()).hexdigest()
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')

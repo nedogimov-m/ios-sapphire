@@ -68,7 +68,10 @@ def smp_return_profile(image, manifest, arguments, tokens, checksum):
     This validates host build provenance; the kernel independently reads the
     actual PMIC/IMEM reason before CPU_ON. It is not a hardware success verdict.
     """
-    required = set(('debug=0xc serial=3 cpus=2 keepsyms=1 -noprogress rd=md0 '
+    count = manifest.get('smp_cpus', 2)
+    if type(count) is not int or count not in (2, 8):
+        raise ValueError('SMP recovery cycle requires exactly 2 or 8 CPUs')
+    required = set((f'debug=0xc serial=3 cpus={count} keepsyms=1 -noprogress rd=md0 '
                     'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 '
                     'modem=0 wifi=0 gpu=0 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0').split())
     flags = [token for token in tokens if not token.startswith('redfinbootid=') and token != '-enable_kprintf_spam']
@@ -82,13 +85,16 @@ def smp_return_profile(image, manifest, arguments, tokens, checksum):
             type(manifest.get('shutdown_seconds')) is not int or manifest['shutdown_seconds'] != 0):
         raise ValueError('SMP recovery cycle requires the exact isolated md0 shim-return profile')
     config = image.with_name('config.h').read_bytes()
+    count_defines = re.findall(rb'^#define REDFIN_SMP_CPUS[^\n]*$', config, re.MULTILINE)
     if (len(config) > 4096 or b'\0' in config or
             hashlib.sha256(config).hexdigest() != manifest['sha256'].get('config.h') or
             re.findall(rb'^#define SHIM_EARLY_RETURN[^\n]*$', config, re.MULTILINE) != [b'#define SHIM_EARLY_RETURN 1'] or
             re.findall(rb'^#define REDFIN_SMP_PROBE[^\n]*$', config, re.MULTILINE) != [b'#define REDFIN_SMP_PROBE 1']):
         raise ValueError('SMP recovery cycle requires matching compiled shim/SMP configuration')
+    if (count == 8 or 'smp_cpus' in manifest or count_defines) and count_defines != [f'#define REDFIN_SMP_CPUS {count}'.encode()]:
+        raise ValueError('SMP recovery cycle CPU count disagrees with the compiled configuration')
     return {'sha256': checksum, 'pmic_bootloader_return': True, 'armed_by': 'shim',
-            'cpus': 2, 'root_device': 'md0', 'boot_id': match[1]}
+            'cpus': count, 'root_device': 'md0', 'boot_id': match[1]}
 
 
 def verify_recovery_mounts(data):

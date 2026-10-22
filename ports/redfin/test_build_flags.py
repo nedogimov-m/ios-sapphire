@@ -77,6 +77,11 @@ class BuildFlagTests(unittest.TestCase):
                        '--ufs-probe', '--ufs-root', '--touch-events', '--gpu-probe', '--splash'):
             self.refused([*base, option], '--smp-probe requires a separate RAM-only profile')
 
+    def test_smp_cpu_count_requires_explicit_smp_profile(self):
+        self.refused(['--smp-cpus', '8'], '--smp-cpus requires --smp-probe')
+        for count in ('1', '3', '7', '9'):
+            self.refused(['--smp-cpus', count], 'invalid choice')
+
     def test_shutdown_needs_recovery_return(self):
         self.refused(['--kernel', '/missing-kernel', '--ufs-root', '--shutdown-seconds', '120'],
                      '--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')

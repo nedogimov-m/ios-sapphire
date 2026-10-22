@@ -108,6 +108,14 @@ static int adt_valid_up(const volatile unsigned char *b, uint64_t size,
 #else
 #define REDFIN_SMP_BUILD_READY 0
 #endif
+#ifndef REDFIN_SMP_CPUS
+#define REDFIN_SMP_CPUS 2
+#endif
+#if REDFIN_SMP_CPUS == 8
+#define REDFIN_SMP_CPU_TOKEN "cpus=8"
+#else
+#define REDFIN_SMP_CPU_TOKEN "cpus=2"
+#endif
 
 static int smp_token(const char *p, unsigned size, const char *s)
 {
@@ -133,12 +141,12 @@ static int smp_requested(const char command[608])
 static int smp_command(const char command[608])
 {
     static const char required[][24] = {
-        "debug=0xc", "serial=3", "cpus=2", "keepsyms=1", "-noprogress", "rd=md0",
+        "debug=0xc", "serial=3", REDFIN_SMP_CPU_TOKEN, "keepsyms=1", "-noprogress", "rd=md0",
         "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0",
         "sweetbattery=0", "modem=0", "wifi=0", "gpu=0", "redfinsmp=1",
         "redfinshim=1", "redfinspmi=0", "redfinreturn=0"
     };
-    if (!REDFIN_SMP_BUILD_READY) return 0;
+    if (!REDFIN_SMP_BUILD_READY || (REDFIN_SMP_CPUS != 2 && REDFIN_SMP_CPUS != 8)) return 0;
     unsigned off = 0, seen = 0, id_seen = 0;
     const unsigned count = sizeof(required) / sizeof(required[0]);
     while (off < 608 && command[off]) {
@@ -217,20 +225,25 @@ static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
         "l3-cache-size", "timebase-frequency", "fixed-frequency"
     };
     static const unsigned char cpu_compatible[] = "qcom,kryo475\0qcom,kryo470\0ARM,v8";
-    uint32_t pending[32], kinds[32], handles[2] = {0, 0};
+    uint32_t pending[32], kinds[32], handles[8] = {0};
     unsigned depth = 0, cpus = 0, root_seen = 0, chosen_children = 0;
     uint64_t off = 0;
     pending[0] = 1; kinds[0] = 0;
     for (;;) {
         while (!pending[depth]) {
-            if (!depth) return off == size && cpus == 2 && (root_seen & 15) == 15 &&
-                (chosen_children & 1) && chosen_children <= 3 && handles[0] != handles[1];
+            if (!depth) {
+                if (REDFIN_SMP_CPUS != 2 && REDFIN_SMP_CPUS != 8) return 0;
+                for (unsigned i = 0; i < REDFIN_SMP_CPUS; i++)
+                    for (unsigned j = 0; j < i; j++) if (handles[i] == handles[j]) return 0;
+                return off == size && cpus == REDFIN_SMP_CPUS && (root_seen & 15) == 15 &&
+                    (chosen_children & 1) && chosen_children <= 3;
+            }
             depth--;
         }
         pending[depth]--;
         if (depth == 31 || off > size || size - off < 8) return 0;
         uint32_t props = word(b + off, 0), children = word(b + off + 4, 0);
-        unsigned kind = 0, seen = 0, cpu = 2;
+        unsigned kind = 0, seen = 0, cpu = 8;
         off += 8;
         if (!props || props > 1024 || children > 1024) return 0;
         for (uint32_t i = 0; i < props; i++) {
@@ -254,10 +267,9 @@ static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
                     root_seen |= 1U << n;
                     kind = n == 0 ? CHOSEN : n == 1 ? CPUS : n == 2 ? ARMIO : LEAF;
                 } else if (depth == 2 && kinds[depth] == CPUS) {
-                    if (smp_string(value, len, "cpu0")) cpu = 0;
-                    else if (smp_string(value, len, "cpu1")) cpu = 1;
-                    else return 0;
-                    if (cpu != cpus) return 0;
+                    char name[5] = {'c', 'p', 'u', (char)('0' + cpus), 0};
+                    if (cpus >= REDFIN_SMP_CPUS || !smp_string(value, len, name)) return 0;
+                    cpu = cpus;
                     kind = CPU;
                 } else if (depth == 2 && kinds[depth] == ARMIO && smp_string(value, len, "gic")) kind = GIC;
                 else if (depth == 2 && kinds[depth] == CHOSEN) {
@@ -268,14 +280,15 @@ static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
                     if (chosen_children & bit) return 0;
                     chosen_children |= bit; kind = LEAF;
                 } else return 0;
-                if ((kind == CPUS && children != 2) || (kind == ARMIO && children != 1) ||
+                if ((kind == CPUS && children != REDFIN_SMP_CPUS) || (kind == ARMIO && children != 1) ||
                     (kind == CHOSEN && (children < 1 || children > 2)) ||
                     ((kind == CPU || kind == GIC || kind == LEAF) && children)) return 0;
             } else {
                 if (smp_key(key, "name")) return 0;
                 if (kind == CPU) {
                     unsigned n = 0;
-                    uint32_t values[] = { cpu ? 0x600U : 0U, cpu, 0, 0, 0, cpu, cpu, 0, 0, 0, 19200000, 19200000 };
+                    uint32_t physical = REDFIN_SMP_CPUS == 8 ? cpu << 8 : (cpu ? 0x600U : 0U);
+                    uint32_t values[] = { physical, cpu, 0, 0, 0, cpu, cpu, 0, 0, 0, 19200000, 19200000 };
                     for (; n < sizeof(cpu_u32) / sizeof(cpu_u32[0]); n++)
                         if (smp_key(key, cpu_u32[n])) break;
                     if (n < sizeof(cpu_u32) / sizeof(cpu_u32[0])) {
