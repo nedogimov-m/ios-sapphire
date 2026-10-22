@@ -242,3 +242,78 @@ UP1A fingerprint/security patch alongside Android16/BP4A/SDK36/userdebug
 fields. It must not be described as a pristine stock or effective snapshot.
 COW/modem compatibility and native PAS/GLINK/WLFW startup remain unproved.
 No firmware was loaded.
+
+## Native MPSS loader and private firmware bundle — 2026-10-23
+
+`wifi_firmware.h` now implements the native firmware-loading boundary rather
+than using Topaz's modem tables. It parses the observed compact ELF32/Hexagon
+MDT, preserves the original program-header number in each `modem.bNN` choice,
+and checks all load/zero-fill extents, overlap, entry point and firmware bounds.
+The supported destination remains the exact live Redfin MPSS reservation
+`0x8c000000+0x11800000`. Its hash program header is metadata; its address is
+never treated as another load destination. Mixed fixed/relocatable images and
+other metadata layouts are refused until separately established.
+
+The host planner compiles that same C implementation:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror ports/redfin/wifi-firmware-plan.c \
+  -o /tmp/redfin-wifi-firmware-plan
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+  -s ports/redfin -p 'test_wifi_*.py'
+```
+
+`wifi_firmware.py` binds the MPSS node's PAS4/modem/AOP contract and phandle
+to the exact live reservation, verifies SMEM/display reservations and kernel
+RAM, and passes all other fixed/recovery reservations to the native planner.
+It consumes the existing private, verified FAT inventory and extracted files;
+it neither reads a partition nor invents a firmware-table fallback. Every
+required asset must match its inventoried length/SHA256 and native PHDR index.
+The optional output is a mode0600, atomically published, no-overwrite bundle.
+Firmware, hashes tied to a device capture and reports remain in ignored paths.
+
+For example, using already captured host files (replace the private paths):
+
+```sh
+python3 ports/redfin/wifi_firmware.py \
+  --inventory research/private/inventory.json \
+  --assets research/private/minimal-mpss --dtb research/private/device.dtb \
+  --planner /tmp/redfin-wifi-firmware-plan \
+  --xnu-base 0x180000000 --xnu-bytes 0x80000000 \
+  --bundle research/private/mpss.bundle
+```
+
+The runtime validates the bundle's bounded layout, every SHA256 and exact asset
+set before invoking any platform callback. Its one-attempt lifecycle performs
+AOP load-state, proxy votes, metadata copy/sync, PAS INIT_IMAGE and MEM_SETUP,
+bounded 64 KiB firmware copies/BSS clearing, final sync and PAS AUTH_AND_RESET.
+SCM transport status and PAS result must both succeed. Success additionally
+requires a fresh, post-authentication SMP2P err-ready observation. Shutdown
+requires an acknowledged SMP2P stop before PAS shutdown, power release and AOP
+load-state off. Ownership loss or failed teardown quarantines the lease and
+retains uncertain resources; no automatic retry or forced reset is provided.
+The platform must implement these operations with native hardware guards.
+
+The caller owns a 6352-byte workspace in its persistent worker context; large
+arrays never occupy the kernel entry stack. Freestanding optimized ARM64
+compilation reports 176 bytes for the boot wrapper, 80 for the planner, 96 for
+SCM and 80 for cleanup. `wifi-firmware.patch` exports an exact header copy and
+`RedfinWiFiFirmware.cpp`, which uses XNU's existing SHA256 implementation.
+The adapter compiles with the actual ARM64 IOKit flags. The patch has no startup
+hook or source-list changes and is deliberately not in the builders yet.
+
+Observation: 37 Wi-Fi host tests pass (23 new firmware tests plus 14 existing
+SMEM tests), including real native copy/BSS contents, corruption before I/O,
+original PHDR numbering, all platform failure positions, lease loss, separate
+PAS failures, acknowledged-stop ordering, file safety and strict C++/ARM64
+compilation. The existing real Redfin inventory produced a 99,395,632-byte
+private bundle. Its native parser/hash preflight passes with 35 PHDRs, 33 loads,
+31 assets, 30 live exclusions and the exact 0x11800000 span. File payloads total
+99,384,626 bytes and BSS 191,553,563 bytes. No MPSS power/start/SCM operation ran;
+PAS authentication, GLINK creation, WLFW capability, association and packets
+remain unobserved.
+
+Integration still requires a source-complete native XO/CX/MSS and bandwidth
+lease, AOP QMP mailbox with acknowledged delivery, SCM convention/resume
+handling, APPS/MPSS allocator/SMP2P ownership and fresh ready/stop proof. A
+review of these hardware prerequisites follows before any startup hook.

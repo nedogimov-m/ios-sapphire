@@ -1,0 +1,552 @@
+diff --git a/iokit/Kernel/arm/redfin_wifi_firmware.h b/iokit/Kernel/arm/redfin_wifi_firmware.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_firmware.h
+@@ -0,0 +1,523 @@
++/* SPDX-License-Identifier: MIT
++ * Redfin MPSS firmware: bounded MDT/bundle parsing and a one-shot PAS4 loader.
++ * No platform I/O lives here. The platform owns exclusive leases, power, AOP,
++ * cache maintenance, SCM and fresh SMP2P readiness, and must implement every
++ * operation before this loader can run. No allocator or fallback board table.
++ *
++ * Wire/ordering references reviewed at Google kernel/msm commit
++ * 500b3a2059c1eec0fec08ec56add06320ea901a8:
++ * drivers/soc/qcom/peripheral-loader.c (pil_setup_region, pil_load_seg, pil_boot)
++ * drivers/soc/qcom/subsys-pil-tz.c (pil_*_trusted, pil_make_proxy_vote)
++ * Reference only; implementation below is native, allocation-free C.
++ */
++#ifndef REDFIN_WIFI_FIRMWARE_H
++#define REDFIN_WIFI_FIRMWARE_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++#define REDFIN_MPSS_ZERO {}
++#else
++#define REDFIN_MPSS_ZERO {0}
++#endif
++
++#define REDFIN_MPSS_BASE UINT64_C(0x8c000000)
++#define REDFIN_MPSS_BYTES UINT64_C(0x11800000)
++#define REDFIN_MPSS_PAS 4u
++#define REDFIN_MPSS_MAX_PHDRS 64u
++#define REDFIN_MPSS_MAX_ASSETS (REDFIN_MPSS_MAX_PHDRS + 1u)
++#define REDFIN_MPSS_MAX_MDT 65536u
++#define REDFIN_MPSS_MAX_EXCLUSIONS 64u
++#define REDFIN_MPSS_MAX_BUNDLE UINT64_C(0x10000000)
++#define REDFIN_MPSS_METADATA_INDEX UINT32_C(0xffffffff)
++#define REDFIN_MPSS_COPY_CHUNK 65536u
++#define REDFIN_MPSS_READY_TIMEOUT_MS 10000u
++#define REDFIN_MPSS_STOP_TIMEOUT_MS 1000u
++
++enum redfin_mpss_error {
++    REDFIN_MPSS_OK, REDFIN_MPSS_ARGUMENT, REDFIN_MPSS_ELF,
++    REDFIN_MPSS_METADATA, REDFIN_MPSS_SEGMENT, REDFIN_MPSS_RANGE,
++    REDFIN_MPSS_OVERLAP, REDFIN_MPSS_ENTRY, REDFIN_MPSS_BUNDLE,
++    REDFIN_MPSS_HASH, REDFIN_MPSS_ASSETS, REDFIN_MPSS_PLATFORM,
++    REDFIN_MPSS_STATE
++};
++
++struct redfin_mpss_range { uint64_t base, bytes; };
++struct redfin_mpss_segment {
++    uint32_t index, flags, source_address, file_bytes, memory_bytes;
++    uint64_t physical_address;
++};
++struct redfin_mpss_plan {
++    uint32_t metadata_bytes, phdrs, segments, alignment;
++    uint64_t source_base, physical_base, memory_bytes, entry_address;
++    uint64_t file_bytes, zero_bytes;
++    struct redfin_mpss_segment segment[REDFIN_MPSS_MAX_PHDRS];
++};
++struct redfin_mpss_asset {
++    const uint8_t *data;
++    uint32_t index, bytes;
++};
++struct redfin_mpss_image {
++    const uint8_t *bundle;
++    size_t bundle_bytes;
++    uint32_t assets;
++    struct redfin_mpss_asset asset[REDFIN_MPSS_MAX_ASSETS];
++};
++
++/* Allocate/pin this once in the serialized platform worker's private context.
++ * It is intentionally caller-owned: neither parsing nor boot puts the large
++ * plan/asset arrays on XNU's kernel stack. Scratch contents are unpublished. */
++struct redfin_mpss_scratch {
++    struct redfin_mpss_plan plan;
++    struct redfin_mpss_image image;
++};
++struct redfin_mpss_workspace {
++    struct redfin_mpss_plan plan;
++    struct redfin_mpss_image image;
++    struct redfin_mpss_scratch scratch;
++};
++
++static inline uint16_t redfin_mpss_u16(const uint8_t *p)
++{ return (uint16_t)((uint16_t)p[0] | (uint16_t)p[1] << 8); }
++static inline uint32_t redfin_mpss_u32(const uint8_t *p)
++{ return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
++static inline uint64_t redfin_mpss_u64(const uint8_t *p)
++{ return (uint64_t)redfin_mpss_u32(p) | (uint64_t)redfin_mpss_u32(p + 4) << 32; }
++static inline int redfin_mpss_equal(const uint8_t *a, const uint8_t *b, size_t n)
++{
++    uint8_t different = 0;
++    for (size_t i = 0; i < n; ++i) different |= a[i] ^ b[i];
++    return different == 0;
++}
++static inline void redfin_mpss_clear(void *buffer, size_t bytes)
++{
++    uint8_t *data = (uint8_t *)buffer;
++    for (size_t i = 0; i < bytes; ++i) data[i] = 0;
++}
++static inline int redfin_mpss_valid_range(uint64_t base, uint64_t bytes)
++{ return bytes && base <= UINT64_MAX - bytes; }
++static inline int redfin_mpss_intersects(uint64_t a, uint64_t n, uint64_t b, uint64_t m)
++{ return a < b + m && b < a + n; }
++
++/* The two mandatory exclusions are the actual kernel RAM window and physical
++ * framebuffer reservation. The caller additionally supplies every other live
++ * fixed reservation, incoming image/ADT/bootargs and recovery log range. They
++ * come from the live FDT/handoff, never from an untrusted firmware manifest.
++ * Redfin currently supports its exact fixed MPSS reservation only. All MDT
++ * loads must be relocatable; mixed fixed/relocatable images fail closed.
++ * Metadata is the observed compact header + PHDRs + one hash blob layout.
++ * The hash PHDR's address is NOT a load destination (it is outside MPSS).
++ */
++static inline int
++redfin_mpss_plan_into(const uint8_t *mdt, size_t bytes,
++    const struct redfin_mpss_range *excluded, size_t excluded_count,
++    struct redfin_mpss_plan *result)
++{
++    struct redfin_mpss_plan *out = result;
++    uint64_t minimum = UINT64_MAX, maximum = 0;
++    uint32_t entry, phnum, hash_bytes = 0;
++    size_t headers;
++    if (!result || !mdt || !excluded || excluded_count < 2 ||
++        excluded_count > REDFIN_MPSS_MAX_EXCLUSIONS)
++        return REDFIN_MPSS_ARGUMENT;
++    redfin_mpss_clear(out, sizeof(*out));
++    if (bytes < 52 || bytes > REDFIN_MPSS_MAX_MDT ||
++        !redfin_mpss_equal(mdt, (const uint8_t *)"\177ELF\1\1\1", 7) ||
++        redfin_mpss_u16(mdt + 16) != 2 || redfin_mpss_u16(mdt + 18) != 164 ||
++        redfin_mpss_u32(mdt + 20) != 1 || redfin_mpss_u32(mdt + 28) != 52 ||
++        redfin_mpss_u16(mdt + 40) != 52 || redfin_mpss_u16(mdt + 42) != 32)
++        return REDFIN_MPSS_ELF;
++    phnum = redfin_mpss_u16(mdt + 44);
++    if (phnum < 3 || phnum > REDFIN_MPSS_MAX_PHDRS)
++        return REDFIN_MPSS_ELF;
++    headers = 52u + (size_t)phnum * 32u;
++    if (headers > bytes) return REDFIN_MPSS_ELF;
++    for (size_t i = 0; i < excluded_count; ++i) {
++        if (!redfin_mpss_valid_range(excluded[i].base, excluded[i].bytes))
++            return REDFIN_MPSS_RANGE;
++        if (redfin_mpss_intersects(REDFIN_MPSS_BASE, REDFIN_MPSS_BYTES,
++            excluded[i].base, excluded[i].bytes))
++            return REDFIN_MPSS_OVERLAP;
++    }
++    for (uint32_t i = 0; i < phnum; ++i) {
++        const uint8_t *ph = mdt + 52u + (size_t)i * 32u;
++        uint32_t type = redfin_mpss_u32(ph), offset = redfin_mpss_u32(ph + 4);
++        uint32_t physical = redfin_mpss_u32(ph + 12);
++        uint32_t file = redfin_mpss_u32(ph + 16), memory = redfin_mpss_u32(ph + 20);
++        uint32_t flags = redfin_mpss_u32(ph + 24), align = redfin_mpss_u32(ph + 28);
++        uint32_t kind = flags & (7u << 24);
++        if (i == 0) {
++            if (type || offset || file != headers || memory || kind != 7u << 24)
++                return REDFIN_MPSS_METADATA;
++            continue;
++        }
++        if (kind == 2u << 24) {
++            if (i != 1 || type || !file || file > REDFIN_MPSS_MAX_MDT ||
++                memory < file || hash_bytes)
++                return REDFIN_MPSS_METADATA;
++            hash_bytes = file;
++            continue;
++        }
++        if (i == 1 || type != 1 || !memory || file > memory ||
++            !(flags & (1u << 27)) || (align && (align & (align - 1u))))
++            return REDFIN_MPSS_SEGMENT;
++        if ((uint64_t)physical + memory > UINT64_C(0x100000000))
++            return REDFIN_MPSS_RANGE;
++        for (uint32_t j = 0; j < out->segments; ++j) {
++            const struct redfin_mpss_segment *previous = &out->segment[j];
++            if (redfin_mpss_intersects(physical, memory,
++                previous->source_address, previous->memory_bytes))
++                return REDFIN_MPSS_OVERLAP;
++        }
++        struct redfin_mpss_segment *segment = &out->segment[out->segments++];
++        segment->index = i; segment->flags = flags;
++        segment->source_address = physical; segment->file_bytes = file;
++        segment->memory_bytes = memory;
++        if (physical < minimum) { minimum = physical; out->alignment = align; }
++        if ((uint64_t)physical + memory > maximum) maximum = (uint64_t)physical + memory;
++        out->file_bytes += file; out->zero_bytes += memory - file;
++    }
++    if (!hash_bytes || headers + hash_bytes != bytes)
++        return REDFIN_MPSS_METADATA;
++    if (!out->segments || minimum != REDFIN_MPSS_BASE ||
++        maximum > REDFIN_MPSS_BASE + REDFIN_MPSS_BYTES ||
++        (out->alignment && REDFIN_MPSS_BASE % out->alignment))
++        return REDFIN_MPSS_RANGE;
++    /* Linux PIL rounds the upper image bound to 4 KiB for XPUs. This is
++     * firmware geometry, unrelated to XNU's 16 KiB CPU page tables. */
++    maximum = (maximum + UINT64_C(4095)) & ~UINT64_C(4095);
++    if (maximum > REDFIN_MPSS_BASE + REDFIN_MPSS_BYTES || bytes > maximum - minimum)
++        return REDFIN_MPSS_RANGE;
++    entry = redfin_mpss_u32(mdt + 24);
++    int entry_found = 0;
++    for (uint32_t i = 0; i < out->segments; ++i) {
++        struct redfin_mpss_segment *segment = &out->segment[i];
++        segment->physical_address = REDFIN_MPSS_BASE + segment->source_address - minimum;
++        if (entry >= segment->source_address &&
++            (uint64_t)entry < (uint64_t)segment->source_address + segment->memory_bytes &&
++            (segment->flags & 1u)) entry_found = 1;
++    }
++    if (!entry_found) return REDFIN_MPSS_ENTRY;
++    out->metadata_bytes = (uint32_t)bytes; out->phdrs = phnum;
++    out->source_base = minimum; out->physical_base = REDFIN_MPSS_BASE;
++    out->memory_bytes = maximum - minimum; out->entry_address = REDFIN_MPSS_BASE + entry - minimum;
++    return REDFIN_MPSS_OK;
++}
++
++/* Transactional public planner: output is unchanged on failure. Scratch is
++ * caller-owned memory, never an automatic kernel-stack object. */
++static inline int
++redfin_mpss_plan(const uint8_t *mdt, size_t bytes,
++    const struct redfin_mpss_range *excluded, size_t excluded_count,
++    struct redfin_mpss_plan *result, struct redfin_mpss_plan *scratch)
++{
++    if (!result || !scratch || result == scratch) return REDFIN_MPSS_ARGUMENT;
++    int error = redfin_mpss_plan_into(mdt, bytes, excluded, excluded_count, scratch);
++    if (!error) *result = *scratch;
++    return error;
++}
++
++typedef int (*redfin_mpss_sha256_fn)(void *context, const uint8_t *data,
++    size_t bytes, uint8_t digest[32]);
++
++#if defined(KERNEL)
++#if defined(__cplusplus)
++extern "C" {
++#endif
++int redfin_mpss_kernel_sha256(void *context, const uint8_t *data,
++    size_t bytes, uint8_t digest[32]);
++#if defined(__cplusplus)
++}
++#endif
++#endif
++
++/* RFWIFI1 bundle v1: 64-byte header and sorted 48-byte asset descriptors.
++ * Header: magic[8], version/u32, count/u32, descriptor-size/u32, flags/u32,
++ * total/u64, MPSS-base/u64, MPSS-reservation-size/u64, reserved[16].
++ * Descriptor: index/u32, bytes/u32, offset/u64, SHA256[32]. Metadata first
++ * (index ffffffff), then exactly the nonempty load PHDRs in original order.
++ * Data begins immediately after the table, each asset padded to 8 bytes.
++ * Every padding/reserved byte is zero; trailing bytes and aliases fail.
++ * Hashes prove consistency with the host-selected inventory, not a trusted
++ * firmware signature. TrustZone remains responsible for PAS authentication.
++ */
++static inline int
++redfin_mpss_bundle_open(const uint8_t *bundle, size_t bytes,
++    const struct redfin_mpss_range *excluded, size_t excluded_count,
++    redfin_mpss_sha256_fn sha256, void *hash_context,
++    struct redfin_mpss_plan *plan, struct redfin_mpss_image *image,
++    struct redfin_mpss_scratch *scratch)
++{
++    struct redfin_mpss_image *out;
++    struct redfin_mpss_plan *planned;
++    uint64_t cursor;
++    uint8_t digest[32];
++    int error;
++    if (!bundle || !sha256 || !plan || !image || !scratch ||
++        plan == &scratch->plan || image == &scratch->image) return REDFIN_MPSS_ARGUMENT;
++    out = &scratch->image; planned = &scratch->plan;
++    redfin_mpss_clear(out, sizeof(*out));
++    if (bytes < 64 || bytes > REDFIN_MPSS_MAX_BUNDLE ||
++        !redfin_mpss_equal(bundle, (const uint8_t *)"RFWIFI1\0", 8) ||
++        redfin_mpss_u32(bundle + 8) != 1 || redfin_mpss_u32(bundle + 16) != 48 ||
++        redfin_mpss_u32(bundle + 20) || redfin_mpss_u64(bundle + 24) != bytes ||
++        redfin_mpss_u64(bundle + 32) != REDFIN_MPSS_BASE ||
++        redfin_mpss_u64(bundle + 40) != REDFIN_MPSS_BYTES)
++        return REDFIN_MPSS_BUNDLE;
++    for (size_t i = 48; i < 64; ++i) if (bundle[i]) return REDFIN_MPSS_BUNDLE;
++    out->assets = redfin_mpss_u32(bundle + 12);
++    if (out->assets < 2 || out->assets > REDFIN_MPSS_MAX_ASSETS)
++        return REDFIN_MPSS_BUNDLE;
++    cursor = 64u + (uint64_t)out->assets * 48u;
++    if (cursor > bytes) return REDFIN_MPSS_BUNDLE;
++    for (uint32_t i = 0; i < out->assets; ++i) {
++        const uint8_t *descriptor = bundle + 64u + (size_t)i * 48u;
++        struct redfin_mpss_asset *asset = &out->asset[i];
++        uint64_t offset = redfin_mpss_u64(descriptor + 8);
++        asset->index = redfin_mpss_u32(descriptor);
++        asset->bytes = redfin_mpss_u32(descriptor + 4);
++        if (!asset->bytes || offset != cursor || offset > bytes ||
++            asset->bytes > bytes - offset ||
++            (i == 0 ? asset->index != REDFIN_MPSS_METADATA_INDEX :
++             (asset->index >= REDFIN_MPSS_MAX_PHDRS ||
++              (i > 1 && asset->index <= out->asset[i - 1].index))))
++            return REDFIN_MPSS_BUNDLE;
++        if (i == 0 && asset->bytes > REDFIN_MPSS_MAX_MDT)
++            return REDFIN_MPSS_BUNDLE;
++        asset->data = bundle + (size_t)offset;
++        cursor = (offset + asset->bytes + UINT64_C(7)) & ~UINT64_C(7);
++        if (cursor > bytes) return REDFIN_MPSS_BUNDLE;
++        for (uint64_t j = offset + asset->bytes; j < cursor; ++j)
++            if (bundle[(size_t)j]) return REDFIN_MPSS_BUNDLE;
++        if (sha256(hash_context, asset->data, asset->bytes, digest) ||
++            !redfin_mpss_equal(digest, descriptor + 16, 32))
++            return REDFIN_MPSS_HASH;
++    }
++    if (cursor != bytes) return REDFIN_MPSS_BUNDLE;
++    error = redfin_mpss_plan_into(out->asset[0].data, out->asset[0].bytes,
++        excluded, excluded_count, planned);
++    if (error) return error;
++    uint32_t asset_index = 1;
++    for (uint32_t i = 0; i < planned->segments; ++i) {
++        const struct redfin_mpss_segment *segment = &planned->segment[i];
++        if (!segment->file_bytes) continue;
++        if (asset_index >= out->assets || out->asset[asset_index].index != segment->index ||
++            out->asset[asset_index].bytes != segment->file_bytes)
++            return REDFIN_MPSS_ASSETS;
++        ++asset_index;
++    }
++    if (asset_index != out->assets) return REDFIN_MPSS_ASSETS;
++    out->bundle = bundle; out->bundle_bytes = bytes;
++    *plan = *planned; *image = *out;
++    return REDFIN_MPSS_OK;
++}
++
++enum redfin_mpss_stage {
++    REDFIN_MPSS_IDLE, REDFIN_MPSS_PREFLIGHT, REDFIN_MPSS_LEASE,
++    REDFIN_MPSS_AOP, REDFIN_MPSS_PROXY, REDFIN_MPSS_INIT,
++    REDFIN_MPSS_MEM_SETUP, REDFIN_MPSS_COPY, REDFIN_MPSS_AUTH,
++    REDFIN_MPSS_READY, REDFIN_MPSS_STOPPED, REDFIN_MPSS_QUARANTINED
++};
++struct redfin_mpss_session {
++    uint32_t attempted, stage, failing_stage;
++    int platform_error, shutdown_error;
++    uint32_t initialized, authenticated, ready, quarantined;
++    uint64_t copied_bytes, zeroed_bytes;
++};
++struct redfin_mpss_scm {
++    uint32_t command, arginfo;
++    uint64_t argument[3];
++};
++/* PAS_INIT_IMAGE takes (VAL, RW), as Google's driver does. SCM return status
++ * and the PAS result in x1 must BOTH succeed. The backend must bound resume
++ * and busy retries, keep interrupted arguments intact, and implement the
++ * convention actually probed on Redfin (no hardcoded 32-bit/64-bit guess). */
++#define REDFIN_MPSS_SCM_INIT 1u
++#define REDFIN_MPSS_SCM_MEM_SETUP 2u
++#define REDFIN_MPSS_SCM_AUTH 5u
++#define REDFIN_MPSS_SCM_SHUTDOWN 6u
++#define REDFIN_MPSS_SCM_VALUE 1u
++#define REDFIN_MPSS_SCM_THREE_VALUES 3u
++#define REDFIN_MPSS_SCM_VALUE_RW 0x82u
++
++struct redfin_mpss_ops {
++    void *context;
++    redfin_mpss_sha256_fn sha256;
++    /* Acquire and revalidate an exclusive native MPSS lease, immutable bundle
++     * and all live forbidden ranges; prepare our SMP2P state before returning.
++     * Reject live/stale ambiguous MPSS state. All callbacks run on one worker.
++     * A failed acquire must undo its own partial work and grant no lease. */
++    int (*acquire)(void *, const struct redfin_mpss_plan *);
++    int (*check)(void *); /* Recheck ownership before EVERY hardware operation. */
++    int (*aop)(void *, int on); /* Exact modem load_state QMP message + ACK. */
++    int (*proxy)(void *, int on); /* Native XO/CX/MSS/bandwidth, source backed. */
++    int (*write)(void *, uint64_t physical, const uint8_t *, uint32_t bytes);
++    int (*zero)(void *, uint64_t physical, uint32_t bytes);
++    int (*sync)(void *, uint64_t physical, uint64_t bytes);
++    int (*scm)(void *, const struct redfin_mpss_scm *, uint64_t *pas_result);
++    /* Require a fresh post-auth SMP2P err-ready edge in this boot/session;
++     * reject fatal/restart/timeout. Stale SMEM or PAS success alone is not up. */
++    int (*wait_ready)(void *, uint32_t timeout_ms);
++    /* Before shutting down an authenticated MPSS, request SMP2P force-stop
++     * and require its stop ACK. A failed stop quarantines; never force reset. */
++    int (*stop)(void *, uint32_t timeout_ms);
++    /* Called once for an acquired lease, after cleanup or with retained state
++     * quarantined. A quarantined release must keep mappings/power and prohibit
++     * retry/reuse. A successful boot retains the lease until shutdown(). */
++    void (*release)(void *, int quarantined);
++};
++
++static inline int redfin_mpss_check_ops(const struct redfin_mpss_ops *ops)
++{
++    return ops && ops->sha256 && ops->acquire && ops->check && ops->aop &&
++        ops->proxy && ops->write && ops->zero && ops->sync && ops->scm &&
++        ops->wait_ready && ops->stop && ops->release;
++}
++static inline int
++redfin_mpss_call(const struct redfin_mpss_ops *ops, uint32_t command,
++    uint64_t address, uint64_t bytes)
++{
++    struct redfin_mpss_scm request = REDFIN_MPSS_ZERO;
++    uint64_t result = UINT64_MAX;
++    if ((command == REDFIN_MPSS_SCM_INIT && (address != REDFIN_MPSS_BASE || bytes)) ||
++        (command == REDFIN_MPSS_SCM_MEM_SETUP && (address != REDFIN_MPSS_BASE ||
++            !bytes || bytes > REDFIN_MPSS_BYTES || bytes % 4096u)) ||
++        ((command == REDFIN_MPSS_SCM_AUTH || command == REDFIN_MPSS_SCM_SHUTDOWN) && (address || bytes)) ||
++        (command != REDFIN_MPSS_SCM_INIT && command != REDFIN_MPSS_SCM_MEM_SETUP &&
++            command != REDFIN_MPSS_SCM_AUTH && command != REDFIN_MPSS_SCM_SHUTDOWN))
++        return -1;
++    int error = ops->check(ops->context);
++    if (error) return error;
++    request.command = command;
++    request.arginfo = command == REDFIN_MPSS_SCM_INIT ? REDFIN_MPSS_SCM_VALUE_RW :
++        command == REDFIN_MPSS_SCM_MEM_SETUP ? REDFIN_MPSS_SCM_THREE_VALUES : REDFIN_MPSS_SCM_VALUE;
++    request.argument[0] = REDFIN_MPSS_PAS;
++    request.argument[1] = address; request.argument[2] = bytes;
++    error = ops->scm(ops->context, &request, &result);
++    return error ? error : result ? -1 : 0;
++}
++
++/* Cleanup never guesses whether a partially completed hardware operation was
++ * rolled back. A callback failure after AOP/proxy enable may have left those
++ * resources active: retain/quarantine unless the backend explicitly completed
++ * a safe teardown. Ownership loss, unsuccessful stop, PAS shutdown failure or
++ * failed power/AOP teardown permanently prohibit another attempt in session. */
++static inline int
++redfin_mpss_cleanup(struct redfin_mpss_session *session,
++    const struct redfin_mpss_ops *ops, int aop, int proxy)
++{
++    int error = ops->check(ops->context);
++    if (!error && session->authenticated) error = ops->stop(ops->context, REDFIN_MPSS_STOP_TIMEOUT_MS);
++    if (!error && session->initialized) error = redfin_mpss_call(ops, REDFIN_MPSS_SCM_SHUTDOWN, 0, 0);
++    if (!error && proxy) {
++        error = ops->check(ops->context);
++        if (!error) error = ops->proxy(ops->context, 0);
++    }
++    if (!error && aop) {
++        error = ops->check(ops->context);
++        if (!error) error = ops->aop(ops->context, 0);
++    }
++    if (error) {
++        session->shutdown_error = error; session->quarantined = 1;
++        session->stage = REDFIN_MPSS_QUARANTINED;
++    } else {
++        session->initialized = session->authenticated = session->ready = 0;
++        session->stage = REDFIN_MPSS_STOPPED;
++    }
++    ops->release(ops->context, error != 0);
++    return error ? REDFIN_MPSS_PLATFORM : REDFIN_MPSS_OK;
++}
++
++static inline int
++redfin_mpss_boot(struct redfin_mpss_session *session,
++    const uint8_t *bundle, size_t bundle_bytes,
++    const struct redfin_mpss_range *excluded, size_t excluded_count,
++    struct redfin_mpss_workspace *workspace, const struct redfin_mpss_ops *ops)
++{
++    struct redfin_mpss_plan *plan;
++    struct redfin_mpss_image *image;
++    uint32_t asset_index = 1;
++    int error, aop = 0, proxy = 0;
++    if (!session || !workspace || !redfin_mpss_check_ops(ops)) return REDFIN_MPSS_ARGUMENT;
++    if (session->attempted || session->stage != REDFIN_MPSS_IDLE)
++        return REDFIN_MPSS_STATE;
++    plan = &workspace->plan; image = &workspace->image;
++    session->attempted = 1; session->stage = REDFIN_MPSS_PREFLIGHT;
++    error = redfin_mpss_bundle_open(bundle, bundle_bytes, excluded, excluded_count,
++        ops->sha256, ops->context, plan, image, &workspace->scratch);
++    if (error) { session->failing_stage = session->stage; return error; }
++    session->stage = REDFIN_MPSS_LEASE;
++    error = ops->acquire(ops->context, plan);
++    if (error) { session->platform_error = error; session->failing_stage = session->stage; return REDFIN_MPSS_PLATFORM; }
++#define REDFIN_MPSS_DO(operation) do { \
++    error = ops->check(ops->context); \
++    if (!error) error = (operation); \
++    if (error) goto failed; \
++} while (0)
++    session->stage = REDFIN_MPSS_AOP;
++    aop = 1; REDFIN_MPSS_DO(ops->aop(ops->context, 1));
++    session->stage = REDFIN_MPSS_PROXY;
++    proxy = 1; REDFIN_MPSS_DO(ops->proxy(ops->context, 1));
++    session->stage = REDFIN_MPSS_INIT;
++    REDFIN_MPSS_DO(ops->write(ops->context, plan->physical_base,
++        image->asset[0].data, image->asset[0].bytes));
++    REDFIN_MPSS_DO(ops->sync(ops->context, plan->physical_base, image->asset[0].bytes));
++    /* Mark attempted init before the SMC: transport failure can leave PAS
++     * state behind and therefore also needs a verified shutdown. */
++    session->initialized = 1;
++    error = redfin_mpss_call(ops, REDFIN_MPSS_SCM_INIT, plan->physical_base, 0);
++    if (error) goto failed;
++    session->stage = REDFIN_MPSS_MEM_SETUP;
++    error = redfin_mpss_call(ops, REDFIN_MPSS_SCM_MEM_SETUP, plan->physical_base, plan->memory_bytes);
++    if (error) goto failed;
++    session->stage = REDFIN_MPSS_COPY;
++    for (uint32_t i = 0; i < plan->segments; ++i) {
++        const struct redfin_mpss_segment *segment = &plan->segment[i];
++        const struct redfin_mpss_asset *asset = segment->file_bytes ? &image->asset[asset_index++] : NULL;
++        uint64_t offset = 0;
++        while (offset < segment->file_bytes) {
++            uint32_t take = segment->file_bytes - (uint32_t)offset;
++            if (take > REDFIN_MPSS_COPY_CHUNK) take = REDFIN_MPSS_COPY_CHUNK;
++            REDFIN_MPSS_DO(ops->write(ops->context, segment->physical_address + offset,
++                asset->data + (size_t)offset, take));
++            session->copied_bytes += take; offset += take;
++        }
++        while (offset < segment->memory_bytes) {
++            uint32_t take = segment->memory_bytes - (uint32_t)offset;
++            if (take > REDFIN_MPSS_COPY_CHUNK) take = REDFIN_MPSS_COPY_CHUNK;
++            REDFIN_MPSS_DO(ops->zero(ops->context, segment->physical_address + offset, take));
++            session->zeroed_bytes += take; offset += take;
++        }
++    }
++    REDFIN_MPSS_DO(ops->sync(ops->context, plan->physical_base, plan->memory_bytes));
++    session->stage = REDFIN_MPSS_AUTH;
++    /* An uncertain AUTH result also requires the acknowledged stop path. */
++    session->authenticated = 1;
++    error = redfin_mpss_call(ops, REDFIN_MPSS_SCM_AUTH, 0, 0);
++    if (error) goto failed;
++    REDFIN_MPSS_DO(ops->wait_ready(ops->context, REDFIN_MPSS_READY_TIMEOUT_MS));
++    error = ops->check(ops->context);
++    if (error) goto failed;
++    session->ready = 1; session->stage = REDFIN_MPSS_READY;
++#undef REDFIN_MPSS_DO
++    return REDFIN_MPSS_OK;
++failed:
++    session->platform_error = error; session->failing_stage = session->stage;
++    (void)redfin_mpss_cleanup(session, ops, aop, proxy);
++    return REDFIN_MPSS_PLATFORM;
++}
++
++static inline int
++redfin_mpss_shutdown(struct redfin_mpss_session *session,
++    const struct redfin_mpss_ops *ops)
++{
++    if (!session || !redfin_mpss_check_ops(ops)) return REDFIN_MPSS_ARGUMENT;
++    if (!session->attempted || session->stage != REDFIN_MPSS_READY ||
++        !session->initialized || !session->authenticated || !session->ready || session->quarantined)
++        return REDFIN_MPSS_STATE;
++    return redfin_mpss_cleanup(session, ops, 1, 1);
++}
++
++#undef REDFIN_MPSS_ZERO
++#endif
+diff --git a/iokit/Kernel/arm/RedfinWiFiFirmware.cpp b/iokit/Kernel/arm/RedfinWiFiFirmware.cpp
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinWiFiFirmware.cpp
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: MIT
++ * Kernel digest adapter for redfin_wifi_firmware.h. No startup hook or I/O.
++ * SWEET's SHA256 uses ccsha256_ltc_di directly; no corecrypto kext is needed.
++ */
++#include "redfin_wifi_firmware.h"
++#include <libkern/crypto/sha2.h>
++
++extern "C" int
++redfin_mpss_kernel_sha256(void *context, const uint8_t *data, size_t bytes,
++    uint8_t digest[32])
++{
++    (void)context;
++    if (!data || !digest || !bytes || bytes > REDFIN_MPSS_MAX_BUNDLE) return -1;
++    SHA256_CTX state;
++    SHA256_Init(&state);
++    SHA256_Update(&state, data, bytes);
++    SHA256_Final(digest, &state);
++    return 0;
++}
