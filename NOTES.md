@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CPU6 V1 refused misaligned mailbox; V2 kernel ready — 2026-10-23
+
+Commit `eace595` records the guarded capability probe. V1 image SHA256
+`a8c57217ab5e9e38d3bb289293573d54ec710e27e47952cd8efdab7fa00913b6`
+uses kernel f7c3dc43/build000903.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfincpu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x17d0a351bbf24a67`.
+Authenticated/image-matched `logs/redfin/cpu-cap-v1/`: return armed first,
+CPUCAP result22/EINVAL before any PSCI diagnostic/CPU_ON; PID1 alive,
+no panic, metadata primed and fastboot return verified. Offline nm identifies
+mailbox VAfffffe000806f000, only4KiB aligned despite the C alignment attribute.
+The guard correctly prevented waking CPU6; there is no capability result.
+Fix uses permanent32KiB static backing and selects a checked16KiB interior
+page at runtime. All PA/span/entry/cache/one-shot guards remain. Preflight
+failure now reports addresses. 16 backend tests PASS plus independent
+49152 alignment cases spanning every residue at low/high/kernel addresses.
+Full664 PASS (`peripherals-host-tests-v29.txt`), including separate future
+SMP-log tests; that logger patch is NOT applied to the capability kernel.
+ARM64 build `research/redfin-build/build-20261023-002659.log` succeeds;
+kernel SHA256 `e2770bcc5077056f357d00630c7df6e7c40209b0ce04912138bfb8462418b4f4`,
+CPU overlay SHA256 `10fdda6ff3c19c26135e68159ef841ba842b5b60a22bd194c1a81500c33841ba`.
+Next: fresh V2 temporary image and automatic capture, no manual input needed.
+User is away and authorizes autonomous tests. Interactive touch/UI tests wait.
+
 ## REDFIN parked CPU6 capability kernel prepared — 2026-10-23
 
 User requests more cores/GPU after the unchanged V3 lag and About freeze.

@@ -2,7 +2,7 @@ diff --git a/bsd/dev/redfin_cpu_probe.c b/bsd/dev/redfin_cpu_probe.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_cpu_probe.c
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,282 @@
 +/* One-shot Redfin CPU6 capability observer. The secondary never joins XNU.
 + * PSCI: Arm DEN0022D, CPU_ON64/AFFINITY_INFO64/FEATURES, SMC conduit.
 + * Target: pinned Lito DTS afc98e2bb0716a57bf4f8d2b6191378dd7123ce4,
@@ -41,7 +41,10 @@ new file mode 100644
 +_Static_assert(sizeof(struct rf_cpu_page)==RF_CPU_PAGE,"CPU mailbox page");
 +_Static_assert(offsetof(struct rf_cpu_page,midr)==64,"CPU assembly payload offset");
 +_Static_assert(offsetof(struct rf_cpu_page,ready)==120,"CPU assembly publication offset");
-+static struct rf_cpu_page rf_cpu_mailbox __attribute__((aligned(RF_CPU_PAGE)));
++/* Kernel linking may shift BSS despite an object alignment attribute.
++ * Reserve two pages permanently and choose the complete aligned interior page. */
++static unsigned char rf_cpu_storage[2*RF_CPU_PAGE];
++static struct rf_cpu_page *rf_cpu_mailbox;
 +static uint32_t rf_cpu_attempted;
 +static char rf_cpu_frozen[RF_CPU_ARGS];
 +static unsigned rf_cpu_frozen_bytes;
@@ -81,7 +84,7 @@ new file mode 100644
 +{
 + /* CPU0 never dirties this dedicated report line after the pre-wake clean.
 +  * IVAC only: a clean here could overwrite uncached CPU6 report stores. */
-+ vm_offset_t line=(vm_offset_t)&rf_cpu_mailbox.midr;
++ vm_offset_t line=(vm_offset_t)&rf_cpu_mailbox->midr;
 + __asm__ volatile("dsb sy\ndc ivac, %0\ndsb sy" :: "r"(line) : "memory");
 +}
 +/* RF_CPU_HW_END */
@@ -191,6 +194,17 @@ new file mode 100644
 + return size && address>=base && address-base<bytes && size<=bytes-(address-base) &&
 +  address<(1ULL<<36) && size<=(1ULL<<36)-address;
 +}
++static uintptr_t
++rf_cpu_select_mailbox(uintptr_t backing,size_t capacity)
++{
++ const uintptr_t mask=(uintptr_t)RF_CPU_PAGE-1;
++ if (!backing || capacity<RF_CPU_PAGE || capacity>UINTPTR_MAX-backing ||
++     backing>UINTPTR_MAX-mask) return 0;
++ uintptr_t selected=(backing+mask)&~mask;
++ if (selected<backing || selected-backing>capacity ||
++     RF_CPU_PAGE>capacity-(selected-backing)) return 0;
++ return selected;
++}
 +int
 +redfin_cpu_probe(void)
 +{
@@ -205,17 +219,33 @@ new file mode 100644
 + memcpy(rf_cpu_frozen,args,count+1); rf_cpu_frozen_bytes=count+1;
 + uint64_t base=0,bytes=0;
 + if (!rf_cpu_contract(&base,&bytes)) return ENXIO;
-+ vm_offset_t va=(vm_offset_t)&rf_cpu_mailbox;
++ uintptr_t backing=(uintptr_t)rf_cpu_storage;
++ uintptr_t selected=rf_cpu_select_mailbox(backing,sizeof(rf_cpu_storage));
++ if (!selected) {
++  printf("REDFIN CPU PROBE: backing reject VA=%#llx bytes=%u; no CPU_ON\n",(uint64_t)backing,(unsigned)sizeof(rf_cpu_storage));
++  return EINVAL;
++ }
++ rf_cpu_mailbox=(struct rf_cpu_page *)selected; /* Permanent after this one-shot selection. */
++ vm_offset_t va=(vm_offset_t)rf_cpu_mailbox;
 + uint64_t pa=ml_static_vtop(va),last=ml_static_vtop(va+RF_CPU_PAGE-1);
 + vm_offset_t entry_va=(vm_offset_t)redfin_cpu_probe_entry;
 + vm_offset_t end_va=(vm_offset_t)redfin_cpu_probe_entry_end;
-+ if (end_va<=entry_va || end_va-entry_va>512) return EINVAL;
++ if (end_va<=entry_va || end_va-entry_va>512) {
++  printf("REDFIN CPU PROBE: entry size reject VA=%#llx end=%#llx; no CPU_ON\n",(uint64_t)entry_va,(uint64_t)end_va);
++  return EINVAL;
++ }
 + uint64_t entry=ml_static_vtop(entry_va),entry_last=ml_static_vtop(end_va-1);
 + if ((va&(RF_CPU_PAGE-1)) || (pa&(RF_CPU_PAGE-1)) ||
 +     last!=pa+RF_CPU_PAGE-1 || !rf_cpu_span(pa,RF_CPU_PAGE,base,bytes) ||
 +     (entry&3) || !rf_cpu_span(entry,end_va-entry_va,base,bytes) ||
 +     entry_last!=entry+end_va-entry_va-1 ||
-+     (entry<pa+RF_CPU_PAGE && pa<entry+end_va-entry_va)) return EINVAL;
++     (entry<pa+RF_CPU_PAGE && pa<entry+end_va-entry_va)) {
++  printf("REDFIN CPU PROBE: memory reject backing=%#llx bytes=%u selected-VA=%#llx PA=%#llx last-PA=%#llx\n",
++   (uint64_t)backing,(unsigned)sizeof(rf_cpu_storage),(uint64_t)va,pa,last);
++  printf("REDFIN CPU PROBE: entry reject VA=%#llx end-VA=%#llx PA=%#llx last-PA=%#llx; no CPU_ON\n",
++   (uint64_t)entry_va,(uint64_t)end_va,entry,entry_last);
++  return EINVAL;
++ }
 + int32_t version=(int32_t)rf_cpu_smc(0x84000000u,0,0,0);
 + if (version<0 || (unsigned)version>>16<1) return ENOTSUP;
 + if ((int32_t)rf_cpu_smc(0x8400000au,RF_CPU_ON,0,0)<0 ||
@@ -224,8 +254,8 @@ new file mode 100644
 + printf("REDFIN CPU PROBE: PSCI version=%#x target=%#llx affinity=%d (OFF=1)\n",version,RF_CPU_TARGET,affinity);
 + if (affinity!=1) return EBUSY;
 + if (!rf_cpu_frozen_valid()) return EPERM;
-+ memset(&rf_cpu_mailbox,0,sizeof(rf_cpu_mailbox));
-+ rf_cpu_mailbox.magic=RF_CPU_MAGIC; rf_cpu_mailbox.target=RF_CPU_TARGET; rf_cpu_mailbox.boot_id=rf_cpu_boot_id;
++ memset(rf_cpu_mailbox,0,RF_CPU_PAGE);
++ rf_cpu_mailbox->magic=RF_CPU_MAGIC; rf_cpu_mailbox->target=RF_CPU_TARGET; rf_cpu_mailbox->boot_id=rf_cpu_boot_id;
 + CleanPoC_DcacheRegion_Force(va,RF_CPU_PAGE);
 + CleanPoC_DcacheRegion_Force(entry_va,end_va-entry_va);
 + rf_cpu_barrier();
@@ -237,10 +267,10 @@ new file mode 100644
 + if (result) return EIO;
 + for (unsigned poll=0;poll<RF_CPU_POLLS;poll++) {
 +  rf_cpu_invalidate();
-+  if (rf_cpu_mailbox.ready==rf_cpu_boot_id) {
++  if (rf_cpu_mailbox->ready==rf_cpu_boot_id) {
 +   rf_cpu_barrier();
-+   uint64_t midr=rf_cpu_mailbox.midr,mpidr=rf_cpu_mailbox.mpidr,mmfr0=rf_cpu_mailbox.mmfr0;
-+   uint64_t el=rf_cpu_mailbox.current_el,sctlr=rf_cpu_mailbox.sctlr,ctr=rf_cpu_mailbox.ctr;
++   uint64_t midr=rf_cpu_mailbox->midr,mpidr=rf_cpu_mailbox->mpidr,mmfr0=rf_cpu_mailbox->mmfr0;
++   uint64_t el=rf_cpu_mailbox->current_el,sctlr=rf_cpu_mailbox->sctlr,ctr=rf_cpu_mailbox->ctr;
 +   printf("REDFIN CPU PROBE: ready MIDR=%#llx MPIDR=%#llx MMFR0=%#llx CurrentEL=%#llx SCTLR-current=%#llx CTR=%#llx\n",midr,mpidr,mmfr0,el,sctlr,ctr);
 +   unsigned granule=(unsigned)((mmfr0>>20)&15);
 +   bool valid=(mpidr&0xff00ffffffULL)==RF_CPU_TARGET && (el==4 || el==8) && !(sctlr&0x1005) &&
