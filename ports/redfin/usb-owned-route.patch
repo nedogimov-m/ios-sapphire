@@ -1,0 +1,315 @@
+diff --git a/bsd/dev/redfin_usb_owned.h b/bsd/dev/redfin_usb_owned.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_usb_owned.h
+@@ -0,0 +1,25 @@
++/* Trusted sole-owner manager for the isolated md0 USB experiment. */
++#ifndef REDFIN_USB_OWNED_H
++#define REDFIN_USB_OWNED_H
++#include <stdbool.h>
++struct redfin_usb_owned_policy {
++ /* Pure, non-reentrant audited kernel policy; never supplied by a boot arg.
++  * Confirms sole NSapps-SMMU ownership, disabled competing write paths and
++  * an actual md0-only experiment without UFS. Must remain true for the lease. */
++ bool (*exclusive)(const void *caller_id, void *context);
++ void *context;
++};
++#ifdef __cplusplus
++extern "C" {
++#endif
++int redfin_usb_owned_register(const void *caller_id, const struct redfin_usb_owned_policy *);
++int redfin_usb_owned_claim(const void *caller_id);
++/* Retained route evidence only. No API here authorizes or starts DMA. */
++int redfin_usb_owned_revalidate(const void *caller_id);
++/* Active gadget may have changed core/ring state; all SMMU proofs still apply.
++ * On lost proof the caller must quiesce DWC3. Quarantine does not revoke DMA. */
++int redfin_usb_owned_route_retained(const void *caller_id);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/bsd/dev/redfin_usb_owned.c b/bsd/dev/redfin_usb_owned.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_usb_owned.c
+@@ -0,0 +1,280 @@
++/* Draft, no startup hook. Only the audited sole NSapps-SMMU owner may call.
++ * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8:
++ * drivers/iommu/arm-smmu{,-regs.h}: software ownership, SMR/S2CR format.
++ * Imported routes, invalid slots and global controls remain byte-identical
++ * except one leased slot. No reset, CB/table/TLB/PHY/controller/DMA writes.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <kern/locks.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include "redfin_usb_owned.h"
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern int redfin_spmi_return_ready(void);
++
++#define RF_USB_GROUPS 128u
++#define RF_USB_SID 0xe0u
++#define RF_USB_VALID 0x80000000u
++#define RF_USB_BYPASS 0x00010300u /* type=BYPASS, NSH, default privilege. */
++enum rf_usb_owner_state { RF_USB_UNREGISTERED, RF_USB_REGISTERED, RF_USB_ROUTED, RF_USB_QUARANTINED };
++struct rf_usb_snapshot {
++ uint32_t id0,id1,id2,cr0,smr[RF_USB_GROUPS],s2cr[RF_USB_GROUPS];
++ unsigned groups;
++};
++struct rf_usb_core_state { uint32_t gctl,dctl,ring_lo,ring_hi,ring_size,ring_count; };
++static struct {
++ const void *caller;
++ struct redfin_usb_owned_policy policy;
++ enum rf_usb_owner_state state;
++ vm_offset_t gcc,dwc,smmu;
++ unsigned slot;
++ struct rf_usb_snapshot imported;
++ struct rf_usb_core_state core;
++} rf_usb_owner;
++static LCK_GRP_DECLARE(rf_usb_group,"redfin-usb-owned");
++static LCK_MTX_DECLARE(rf_usb_lock,&rf_usb_group);
++
++static uint32_t
++rf_usb_rd(vm_offset_t base,unsigned offset)
++{
++ uint32_t value = *(const volatile uint32_t *)(base + offset);
++ __asm__ volatile("dmb oshld" ::: "memory");
++ return value;
++}
++static int
++rf_usb_store(unsigned offset,uint32_t value)
++{
++ if (rf_usb_owner.slot >= rf_usb_owner.imported.groups ||
++     !((offset == 0xc00u + 4u * rf_usb_owner.slot && value == RF_USB_BYPASS) ||
++       (offset == 0x800u + 4u * rf_usb_owner.slot && value == (RF_USB_VALID | RF_USB_SID)))) return EINVAL;
++ __asm__ volatile("dmb oshst" ::: "memory");
++ *(volatile uint32_t *)(rf_usb_owner.smmu + offset) = value;
++ __asm__ volatile("dsb osh" ::: "memory");
++ /* Readback is bounded. Uncertain writes are never rolled back or retried. */
++ for (unsigned us=0;us<1000;us++) {
++  if (rf_usb_rd(rf_usb_owner.smmu,offset) == value) return 0;
++  delay(1);
++ }
++ return EIO;
++}
++static bool
++rf_usb_flag(const char *name,uint32_t wanted,bool required)
++{
++ uint32_t value=0;
++ bool found=PE_parse_boot_argn(name,&value,sizeof(value));
++ return (!required || found) && value == wanted;
++}
++static bool
++rf_usb_policy(void)
++{
++ if (!rf_usb_owner.caller || !rf_usb_owner.policy.exclusive ||
++     !rf_usb_owner.policy.exclusive(rf_usb_owner.caller,rf_usb_owner.policy.context)) return false;
++ char root[16]={0},ufsroot[16]={0};
++ if (!rf_usb_flag("redfinusb",3,true) || !rf_usb_flag("cpus",1,true) ||
++     !rf_usb_flag("redfinreturn",1,true) || !redfin_spmi_return_ready() ||
++     !rf_usb_flag("sweetusb",0,false) || !rf_usb_flag("modem",0,false) ||
++     !rf_usb_flag("wifi",0,false) || !rf_usb_flag("gpu",0,false) ||
++     !rf_usb_flag("redfinufs",0,false) || !rf_usb_flag("ufsrw",0,false) ||
++     !rf_usb_flag("redfinroot",0,false) ||
++     !rf_usb_flag("rootrw",0,false) ||
++     !PE_parse_boot_argn("rd",root,sizeof(root)) || root[sizeof(root)-1] ||
++     strcmp(root,"md0") || PE_parse_boot_argn("ufsroot",ufsroot,sizeof(ufsroot))) return false;
++ return true;
++}
++static bool
++rf_usb_platform(void)
++{
++ DTEntry root,chosen;
++ const char *list=NULL;
++ const uint64_t *base=NULL,*size=NULL;
++ unsigned n=0;
++ bool redfin=false,lito=false;
++ if (SecureDTLookupEntry(NULL,"/",&root) != kSuccess ||
++     SecureDTGetProperty(root,"compatible",(const void **)&list,&n) != kSuccess ||
++     !list || !n || n>256 || list[n-1]) return false;
++ for (unsigned at=0;at<n;) {
++  unsigned end=at;
++  while (end<n && list[end]) end++;
++  if (end==at || end==n) return false;
++  if (end-at==sizeof("google,redfin")-1 && !memcmp(list+at,"google,redfin",sizeof("google,redfin")-1)) redfin=true;
++  if (end-at==sizeof("qcom,sm7250")-1 && !memcmp(list+at,"qcom,sm7250",sizeof("qcom,sm7250")-1)) lito=true;
++  at=end+1;
++ }
++ if (!redfin || !lito || SecureDTLookupEntry(NULL,"/chosen",&chosen) != kSuccess ||
++     SecureDTGetProperty(chosen,"dram-base",(const void **)&base,&n) != kSuccess || !base || n!=8) return false;
++ uint64_t ram_base;memcpy(&ram_base,base,8);
++ if (SecureDTGetProperty(chosen,"dram-size",(const void **)&size,&n) != kSuccess || !size || n!=8) return false;
++ uint64_t ram_size;memcpy(&ram_size,size,8);
++ if (!ram_base || !ram_size || ((ram_base|ram_size)&0x3fffULL) ||
++     ram_base>(1ULL<<36) || ram_size>(1ULL<<36)-ram_base) return false;
++ const uint64_t pages[]={0x10c000,0xa60c000,0x15000000};
++ for (unsigned i=0;i<3;i++)
++  if (ram_base<pages[i]+0x4000 && pages[i]<ram_base+ram_size) return false;
++ return true;
++}
++static int
++rf_usb_core_snapshot(struct rf_usb_core_state *out)
++{
++ vm_offset_t gcc=rf_usb_owner.gcc,dwc=rf_usb_owner.dwc;
++ uint32_t power=rf_usb_rd(gcc,0x3004),reset=rf_usb_rd(gcc,0x3000);
++ if (!(power&0x80000000u) || (power&1) || (reset&1)) return EBUSY;
++ const unsigned clocks[]={0x3010,0x307c,0x3080,0x3018,0x301c};
++ for (unsigned i=0;i<5;i++) {
++  uint32_t value=rf_usb_rd(gcc,clocks[i]);
++  if (!(value&1) || (value&0x80000000u)) return EBUSY;
++ }
++ uint32_t id=rf_usb_rd(dwc,0x120),params=rf_usb_rd(dwc,0x140);
++ out->gctl=rf_usb_rd(dwc,0x110);
++ if (id!=0x5533330au || (params>>24)!=64 ||
++     ((out->gctl>>12)&3)!=2 || (out->gctl&0x800u)) return ENOTSUP;
++ out->dctl=rf_usb_rd(dwc,0x704);
++ uint32_t dsts=rf_usb_rd(dwc,0x70c);
++ out->ring_lo=rf_usb_rd(dwc,0x400);out->ring_hi=rf_usb_rd(dwc,0x404);
++ out->ring_size=rf_usb_rd(dwc,0x408);out->ring_count=rf_usb_rd(dwc,0x40c);
++ if ((out->dctl&0xe0000000u) || !(dsts&0x00400000u) ||
++     out->ring_size!=0x80001000u || out->ring_count ||
++     (out->ring_lo&0xfff) || out->ring_hi>15 ||
++     !(out->ring_lo|out->ring_hi)) return EBUSY;
++ return 0;
++}
++static int
++rf_usb_smmu_snapshot(struct rf_usb_snapshot *out)
++{
++ out->id0=rf_usb_rd(rf_usb_owner.smmu,0x20);
++ out->id1=rf_usb_rd(rf_usb_owner.smmu,0x24);
++ out->id2=rf_usb_rd(rf_usb_owner.smmu,0x28);
++ out->cr0=rf_usb_rd(rf_usb_owner.smmu,0);
++ /* Immutable observed Redfin v500 format. CR0 is not hardcoded: only
++  * policy bits are required, then its entire initial value is preserved. */
++ if (out->id0!=0x4c017e51u || out->id1!=0x6000003eu || out->id2!=0x5111u ||
++     (out->cr0&9u) || !(out->cr0&0x400u)) return ENOTSUP;
++ out->groups=out->id0&255u;
++ if (!out->groups || out->groups>RF_USB_GROUPS) return ENOTSUP;
++ for (unsigned i=0;i<out->groups;i++) {
++  out->smr[i]=rf_usb_rd(rf_usb_owner.smmu,0x800+4*i);
++  out->s2cr[i]=rf_usb_rd(rf_usb_owner.smmu,0xc00+4*i);
++  if (out->smr[i]==0xffffffffu || out->s2cr[i]==0xffffffffu) return EIO;
++ }
++ return 0;
++}
++static bool
++rf_usb_matches(uint32_t smr)
++{
++ uint32_t mask=(smr>>16)&0x7fff;
++ return (smr&RF_USB_VALID) && !((RF_USB_SID^(smr&0x7fff))&~mask);
++}
++static int
++rf_usb_verify(bool warm)
++{
++ if (!rf_usb_policy() || !rf_usb_platform()) return EPERM;
++ int error=0;
++ if (warm) {
++  struct rf_usb_core_state core;
++  error=rf_usb_core_snapshot(&core);
++  if (error) return error;
++  if (memcmp(&core,&rf_usb_owner.core,sizeof(core))) return EAGAIN;
++ }
++ struct rf_usb_snapshot now;
++ error=rf_usb_smmu_snapshot(&now);
++ if (error) return error;
++ const struct rf_usb_snapshot *old=&rf_usb_owner.imported;
++ if (now.id0!=old->id0 || now.id1!=old->id1 || now.id2!=old->id2 ||
++     now.cr0!=old->cr0 || now.groups!=old->groups) return EAGAIN;
++ unsigned matches=0;
++ for (unsigned i=0;i<now.groups;i++) {
++  if (now.smr[i]!=old->smr[i] || now.s2cr[i]!=old->s2cr[i]) return EAGAIN;
++  if (rf_usb_matches(now.smr[i])) matches++;
++ }
++ unsigned wanted=rf_usb_owner.state==RF_USB_ROUTED ? 1 : 0;
++ return matches==wanted ? 0 : EAGAIN;
++}
++static int
++rf_usb_quarantine(int error)
++{
++ rf_usb_owner.state=RF_USB_QUARANTINED;
++ printf("REDFIN USB OWNED: quarantined error=%d; no rollback/retry/DMA\n",error);
++ return error;
++}
++int
++redfin_usb_owned_register(const void *caller_id,const struct redfin_usb_owned_policy *policy)
++{
++ if (!caller_id || !policy || !policy->exclusive || !policy->exclusive(caller_id,policy->context)) return EPERM;
++ lck_mtx_lock(&rf_usb_lock);
++ int error=0;
++ if (rf_usb_owner.state!=RF_USB_UNREGISTERED) error=EBUSY;
++ else {
++  rf_usb_owner.caller=caller_id;rf_usb_owner.policy=*policy;
++  rf_usb_owner.state=RF_USB_REGISTERED;
++ }
++ lck_mtx_unlock(&rf_usb_lock);
++ return error;
++}
++int
++redfin_usb_owned_claim(const void *caller_id)
++{
++ lck_mtx_lock(&rf_usb_lock);
++ int error=0;
++ if (!caller_id || caller_id!=rf_usb_owner.caller) { error=EPERM;goto done; }
++ if (rf_usb_owner.state!=RF_USB_REGISTERED) { error=EBUSY;goto done; }
++ /* A failed attempt cannot be retried even if no publication was completed. */
++ rf_usb_owner.state=RF_USB_QUARANTINED;
++ if (!rf_usb_policy() || !rf_usb_platform()) { error=EPERM;goto failed; }
++ rf_usb_owner.gcc=ml_io_map(0x10c000,0x4000);
++ rf_usb_owner.dwc=ml_io_map(0xa60c000,0x4000);
++ if (!rf_usb_owner.gcc || !rf_usb_owner.dwc) { error=ENOMEM;goto failed; }
++ error=rf_usb_core_snapshot(&rf_usb_owner.core);if (error) goto failed;
++ rf_usb_owner.smmu=ml_io_map(0x15000000,0x4000);
++ if (!rf_usb_owner.smmu) { error=ENOMEM;goto failed; }
++ error=rf_usb_smmu_snapshot(&rf_usb_owner.imported);if (error) goto failed;
++ rf_usb_owner.slot=RF_USB_GROUPS;
++ for (unsigned i=0;i<rf_usb_owner.imported.groups;i++) {
++  if (rf_usb_matches(rf_usb_owner.imported.smr[i])) { error=EEXIST;goto failed; }
++  if (!(rf_usb_owner.imported.smr[i]&RF_USB_VALID) && rf_usb_owner.slot==RF_USB_GROUPS)
++   rf_usb_owner.slot=i;
++ }
++ if (rf_usb_owner.slot==RF_USB_GROUPS) { error=ENOSPC;goto failed; }
++ error=rf_usb_verify(true);if (error) goto failed;
++ unsigned slot=rf_usb_owner.slot;
++ error=rf_usb_store(0xc00+4*slot,RF_USB_BYPASS);if (error) goto failed;
++ rf_usb_owner.imported.s2cr[slot]=RF_USB_BYPASS;
++ error=rf_usb_verify(true);if (error) goto failed;
++ error=rf_usb_store(0x800+4*slot,RF_USB_VALID|RF_USB_SID);if (error) goto failed;
++ rf_usb_owner.imported.smr[slot]=RF_USB_VALID|RF_USB_SID;
++ rf_usb_owner.state=RF_USB_ROUTED;
++ error=rf_usb_verify(true);if (error) goto failed;
++ printf("REDFIN USB OWNED: retained SID=e0 slot=%u bypass; no DMA authorization\n",slot);
++ goto done;
++failed:
++ error=rf_usb_quarantine(error);
++done:
++ lck_mtx_unlock(&rf_usb_lock);
++ return error;
++}
++int
++redfin_usb_owned_revalidate(const void *caller_id)
++{
++ lck_mtx_lock(&rf_usb_lock);
++ int error=0;
++ if (!caller_id || caller_id!=rf_usb_owner.caller) error=EPERM;
++ else if (rf_usb_owner.state!=RF_USB_ROUTED) error=EBUSY;
++ else { error=rf_usb_verify(true);if (error) error=rf_usb_quarantine(error); }
++ lck_mtx_unlock(&rf_usb_lock);
++ return error;
++}
++int
++redfin_usb_owned_route_retained(const void *caller_id)
++{
++ lck_mtx_lock(&rf_usb_lock);
++ int error=0;
++ if (!caller_id || caller_id!=rf_usb_owner.caller) error=EPERM;
++ else if (rf_usb_owner.state!=RF_USB_ROUTED) error=EBUSY;
++ else { error=rf_usb_verify(false);if (error) error=rf_usb_quarantine(error); }
++ lck_mtx_unlock(&rf_usb_lock);
++ return error;
++}
++#endif

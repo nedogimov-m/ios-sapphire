@@ -1,0 +1,498 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -35,6 +35,9 @@
+ #include <net/kpi_interface.h>
+ #include <net/kpi_protocol.h>
+ #include <netinet/in.h>
++#include <pexpert/device_tree.h>
++#include "redfin_usb_gadget_guard.h"
++extern kern_return_t thread_terminate(thread_t);
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ void sweet_usb_probe(void);
+@@ -163,6 +166,7 @@
+ 
+ #define DCTL_RUN_STOP   (1u << 31)
+ #define DCTL_CSFTRST    (1u << 30)
++#define DCTL_LSFTRST    (1u << 29)
+ #define DSTS_DEVCTRLHLT (1u << 22)
+ 
+ #define DEPCMD_SETEPCONFIG      1
+@@ -206,6 +210,8 @@
+ #define UD_TXQ          32
+ 
+ static struct {
++	struct rf_usb_gadget_guard guard;
++	vm_offset_t redfin_qs;
+ 	vm_offset_t dwc;
+ 	vm_offset_t dma;
+ 	uint64_t    dma_pa;
+@@ -225,9 +231,19 @@
+ 	uint64_t    rx_frames, tx_frames;
+ } ud;
+ 
++static bool
++ud_redfin_proof(void)
++{
++ return rf_usb_gadget_proof(&ud.guard,mach_absolute_time());
++}
++
+ static inline void
+ dwc_wr(uint32_t off, uint32_t v)
+ {
++ if (!ud_redfin_proof()) return;
++ if (ud.guard.redfin && !rf_usb_gadget_write(off,v,ud.dma_pa)) {
++  rf_usb_gadget_fail(&ud.guard,EINVAL);return;
++ }
+ 	*(volatile uint32_t *)(ud.dwc + off) = v;
+ 	__asm__ volatile ("dsb sy" ::: "memory");
+ }
+@@ -235,12 +251,19 @@
+ static inline uint32_t
+ dwc_rd(uint32_t off)
+ {
+-	return usb_rd(ud.dwc, off);
++	if (!ud_redfin_proof()) return 0xffffffffu;
++    uint32_t value=usb_rd(ud.dwc,off);
++    if (ud.guard.redfin && value==0xffffffffu) rf_usb_gadget_fail(&ud.guard,EIO);
++    return value;
+ }
+ 
+ static void
+ ud_sync(uint32_t off, uint32_t len)
+ {
++ if (!ud_redfin_proof()) return;
++ if (ud.guard.redfin && !rf_usb_gadget_buffer(off,len)) {
++  rf_usb_gadget_fail(&ud.guard,EINVAL);return;
++ }
+ 	flush_dcache64((addr64_t)(ud.dma_pa + off), len, TRUE);
+ }
+ 
+@@ -256,6 +279,10 @@
+ static int
+ ud_epcmd(unsigned ep, uint32_t cmd, uint32_t p0, uint32_t p1, uint32_t p2)
+ {
++ if (!ud_redfin_proof()) return -1;
++ if (ud.guard.redfin && ep!=0 && ep!=1 && ep!=2 && ep!=3 && ep!=5) {
++  rf_usb_gadget_fail(&ud.guard,EINVAL);return -1;
++ }
+ 	dwc_wr(DEPCMDPAR0(ep), p0);
+ 	dwc_wr(DEPCMDPAR1(ep), p1);
+ 	dwc_wr(DEPCMDPAR2(ep), p2);
+@@ -266,6 +293,7 @@
+ 			uint32_t status = (v >> 12) & 0xf;
+ 			if (status) {
+ 				printf("SWEET USB: ep%u cmd 0x%x status %u\n", ep, cmd & 0xf, status);
++                rf_usb_gadget_fail(&ud.guard,EIO);
+ 				return -1;
+ 			}
+ 			return 0;
+@@ -273,6 +301,7 @@
+ 		delay(1);
+ 	}
+ 	printf("SWEET USB: ep%u cmd 0x%x timeout\n", ep, cmd & 0xf);
++    rf_usb_gadget_fail(&ud.guard,ETIMEDOUT);
+ 	return -1;
+ }
+ 
+@@ -280,6 +309,10 @@
+ static void
+ ud_start_trb(unsigned ep, uint32_t trb, uint32_t buf, uint32_t len, uint32_t ctl)
+ {
++ if (!ud_redfin_proof()) return;
++ if (ud.guard.redfin && !rf_usb_gadget_trb(ep,trb,buf,len)) {
++  rf_usb_gadget_fail(&ud.guard,EINVAL);return;
++ }
+ 	volatile uint32_t *t = (volatile uint32_t *)(ud.dma + trb);
+ 	uint64_t bpa = ud.dma_pa + buf;
+ 
+@@ -382,6 +415,7 @@
+ static void
+ ud_configure(void)
+ {
++ if (ud.guard.redfin && ud.guard.enum_only) { ud.configured=true;return; }
+ 	if (ud.configured) {
+ 		return;
+ 	}
+@@ -442,6 +476,7 @@
+ 		data[0] = 0; data[1] = 0; n = 2;
+ 	} else if (req == 11) {         /* SET_INTERFACE */
+ 		if (index == 1) {
++            if (ud.guard.redfin && ud.guard.enum_only && value!=0) { ud_stall();return; }
+ 			ud.data_alt = (uint8_t)value;
+ 			if (value == 1 && ud.configured) {
+ 				ud_notify_connected();
+@@ -546,6 +581,7 @@
+ static errno_t
+ ud_if_output(ifnet_t ifp, mbuf_t m)
+ {
++    if (ud.guard.redfin && !ud_redfin_proof()) { mbuf_freem(m);return ENXIO; }
+ 	lck_mtx_lock(ud.lock);
+ 	if (ud.txq_count == UD_TXQ || !ud.configured) {
+ 		lck_mtx_unlock(ud.lock);
+@@ -683,6 +719,7 @@
+ 	unsigned type = (ev >> 6) & 0xf;
+ 	unsigned status = (ev >> 12) & 0xf;
+ 
++    if (ud.guard.redfin && ud.guard.enum_only && ep>1) return;
+ 	if (ep == EP_RX && type == 1) {
+ 		ud_rx_done();
+ 		return;
+@@ -729,15 +766,43 @@
+ 	}
+ }
+ 
++/* Only QUIESCE proof may bypass the sticky failure latch, solely to halt.
++ * DMA slab remains permanently allocated, including uncertain halt failures. */
++static bool
++ud_redfin_stop(void)
++{
++ if (!ud.guard.redfin) return false;
++ if (!ud.guard.policy.authorize ||
++     ud.guard.policy.authorize(ud.guard.caller,ud.guard.policy.context,RF_USB_QUIESCE)) return false;
++ uint32_t control=usb_rd(ud.dwc,DCTL);
++ if (control==0xffffffffu || (control&(DCTL_CSFTRST|DCTL_LSFTRST))) return false;
++ if (ud.guard.policy.authorize(ud.guard.caller,ud.guard.policy.context,RF_USB_QUIESCE)) return false;
++ *(volatile uint32_t *)(ud.dwc+DCTL)=control&~DCTL_RUN_STOP;
++ __asm__ volatile("dsb sy" ::: "memory");
++ for (unsigned us=0;us<500000;us+=1000) {
++  if (ud.guard.policy.authorize(ud.guard.caller,ud.guard.policy.context,RF_USB_QUIESCE)) return false;
++  uint32_t status=usb_rd(ud.dwc,DSTS);
++  if (status==0xffffffffu) return false;
++  if (status&DSTS_DEVCTRLHLT) return true;
++  delay(1000);
++ }
++ return false;
++}
++
+ static void
+ ud_thread(void *arg __unused, wait_result_t wr __unused)
+ {
+ 	uint32_t ticks = 0;
+ 	for (;;) {
+-		uint32_t count = dwc_rd(GEVNTCOUNT) & 0xffff;
++        if (ud.guard.redfin && !ud_redfin_proof()) break;
++		uint32_t raw=dwc_rd(GEVNTCOUNT),count=raw&0xffff;
++        if (ud.guard.redfin && !rf_usb_gadget_events(raw,ud.evt_pos,&count)) {
++            rf_usb_gadget_fail(&ud.guard,EOVERFLOW);break;
++        }
+ 		if (count) {
+ 			ud_sync(UD_EVT, UD_EVT_SIZE);
+ 			for (uint32_t done = 0; done < count; done += 4) {
++                if (ud.guard.redfin && !ud_redfin_proof()) break;
+ 				uint32_t ev = *(volatile uint32_t *)(ud.dma + UD_EVT + ud.evt_pos);
+ 				ud.evt_pos = (ud.evt_pos + 4) % UD_EVT_SIZE;
+ 				if (ud.events++ < 200) {
+@@ -752,6 +817,10 @@
+ 		}
+ 		ud_sleep_ms(1);
+ 	}
++    bool halted=ud_redfin_stop();
++    printf("REDFIN USB GADGET: stopped error=%d halted=%u; DMA slab retained\n",ud.guard.error,halted);
++    (void)thread_terminate(current_thread());
++    __builtin_unreachable();
+ }
+ 
+ /*
+@@ -780,6 +849,7 @@
+ 	to.sin_addr.s_addr = htonl(0xc0a80701);         /* 192.168.7.1 */
+ 	for (;;) {
+ 		ud_sleep_ms(100);
++        if (ud.guard.redfin && !ud_redfin_proof()) break;
+ 		if (!ud.configured) {
+ 			continue;
+ 		}
+@@ -789,6 +859,7 @@
+ 		}
+ 		uint32_t n;
+ 		while ((n = sweet_log_copy(&pos, chunk, sizeof(chunk))) > 0) {
++            if (ud.guard.redfin && !ud_redfin_proof()) break;
+ 			struct iovec iov = { .iov_base = chunk, .iov_len = n };
+ 			struct msghdr msg = {
+ 				.msg_name = &to, .msg_namelen = sizeof(to),
+@@ -800,6 +871,9 @@
+ 			}
+ 		}
+ 	}
++    if (so) sock_close(so);
++    (void)thread_terminate(current_thread());
++    __builtin_unreachable();
+ }
+ 
+ static void
+@@ -808,20 +882,35 @@
+ 	thread_t thread;
+ 
+ 	ud.dwc = dwc;
++    if (!ud_redfin_proof()) return;
+ 	if (kmem_alloc_contig(kernel_map, &ud.dma, UD_SIZE, PAGE_MASK, 0, 0,
+ 	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+ 		printf("SWEET USB: no DMA memory\n");
++        rf_usb_gadget_fail(&ud.guard,ENOMEM);
+ 		return;
+ 	}
+ 	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)ud.dma);
+ 	if (!pn) {
++        rf_usb_gadget_fail(&ud.guard,EFAULT);
+ 		return;
+ 	}
+ 	ud.dma_pa = ptoa_64(pn);
+-	ud_if_create();
++    if (ud.guard.redfin) {
++        ppnum_t last=pmap_find_phys(kernel_pmap,(addr64_t)ud.dma+UD_SIZE-1);
++        if (!rf_usb_gadget_dma(ud.dma,ud.dma_pa,UD_SIZE,PAGE_SIZE,ud.guard.ram_base,ud.guard.ram_size) || last!=pn) {
++            rf_usb_gadget_fail(&ud.guard,EFAULT);return;
++        }
++        ud_sync(0,UD_SIZE); /* Clean zeroed event/TRB/data slab before publishing DMA addresses. */
++        if (!ud_redfin_proof()) return;
++        ud.guard.active=true; /* All future checks use retained route, never old core snapshot. */
++    }
++    if (!ud.guard.redfin || !ud.guard.enum_only) ud_if_create();
++    if (ud.guard.redfin && !ud.guard.enum_only && (!ud.ifp || !ud.lock)) {
++        rf_usb_gadget_fail(&ud.guard,ENOMEM);return;
++    }
+ 
+ 	/* Device controller soft reset (PHY and global setup stay as ABL left them). */
+-	dwc_wr(DCTL, DCTL_CSFTRST);
++	dwc_wr(DCTL,ud.guard.redfin ? ((dwc_rd(DCTL)&~DCTL_RUN_STOP)|DCTL_CSFTRST) : DCTL_CSFTRST);
+ 	int i;
+ 	for (i = 0; i < 500 && (dwc_rd(DCTL) & DCTL_CSFTRST); i++) {
+ 		delay(1000);
+@@ -829,13 +918,18 @@
+ 	printf("SWEET USB: soft reset %s after %d ms, GCTL 0x%08x DCFG 0x%08x\n",
+ 	    (dwc_rd(DCTL) & DCTL_CSFTRST) ? "STUCK" : "done", i, dwc_rd(GCTL), dwc_rd(DCFG));
+ 	if (dwc_rd(DCTL) & DCTL_CSFTRST) {
++        rf_usb_gadget_fail(&ud.guard,ETIMEDOUT);
+ 		return;
+ 	}
+ 
+ 	dwc_wr(GEVNTADRLO, (uint32_t)(ud.dma_pa + UD_EVT));
+ 	dwc_wr(GEVNTADRHI, (uint32_t)((ud.dma_pa + UD_EVT) >> 32));
+ 	dwc_wr(GEVNTSIZ, (1u << 31) | UD_EVT_SIZE);     /* interrupt masked: polled */
+-	dwc_wr(GEVNTCOUNT, dwc_rd(GEVNTCOUNT) & 0xffff);
++    uint32_t initial_count=dwc_rd(GEVNTCOUNT)&0xffff;
++    if (ud.guard.redfin && !rf_usb_gadget_events(initial_count,0,&initial_count)) {
++        rf_usb_gadget_fail(&ud.guard,EOVERFLOW);return;
++    }
++	dwc_wr(GEVNTCOUNT, initial_count);
+ 	ud.evt_pos = 0;
+ 
+ 	/* High speed, address 0 */
+@@ -851,13 +945,27 @@
+ 	    ud_epcmd(1, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (1u << 25), 0) ||
+ 	    ud_epcmd(1, DEPCMD_SETTRANSFRESOURCE, 1, 0, 0)) {
+ 		printf("SWEET USB: endpoint 0 setup failed\n");
++        rf_usb_gadget_fail(&ud.guard,EIO);
+ 		return;
+ 	}
+ 	dwc_wr(DALEPENA, 0x3);
+ 	ud_start_setup();
+ 
+-	vm_offset_t qs = ml_io_map(QSCRATCH_PA, 0x100);
+-	if (qs != 0) {
++	vm_offset_t qs=ud.guard.redfin ? ud.redfin_qs : ml_io_map(QSCRATCH_PA,0x100);
++    if (ud.guard.redfin) {
++        if (!qs || !ud_redfin_proof()) { rf_usb_gadget_fail(&ud.guard,ENOMEM);return; }
++        /* Native msm override_vbus_status: HS bit20 only. Preserve retained
++         * SW_SESSVLD_SEL, all SS PHY fields, clocks and reset controls. */
++        uint32_t hs=usb_rd(qs,QSCRATCH_HS_PHY_CTRL);
++        if (hs==0xffffffffu) { rf_usb_gadget_fail(&ud.guard,EIO);return; }
++        if (!ud_redfin_proof()) return;
++        *(volatile uint32_t *)(qs+QSCRATCH_HS_PHY_CTRL)=hs|UTMI_OTG_VBUS_VALID;
++        __asm__ volatile("dsb sy" ::: "memory");
++        if (!ud_redfin_proof()) return;
++        if (usb_rd(qs,QSCRATCH_HS_PHY_CTRL)!=(hs|UTMI_OTG_VBUS_VALID)) {
++            rf_usb_gadget_fail(&ud.guard,EIO);return;
++        }
++    } else if (qs != 0) {
+ 		uint32_t hs = usb_rd(qs, QSCRATCH_HS_PHY_CTRL), ss = usb_rd(qs, QSCRATCH_SS_PHY_CTRL);
+ 		printf("SWEET USB: QSCRATCH HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x GENERAL_CFG 0x%08x\n",
+ 		    hs, ss, usb_rd(qs, 0x08));
+@@ -873,13 +981,73 @@
+ 		delay(1000);
+ 	}
+ 	printf("SWEET USB: running (DSTS 0x%08x after %d ms), DMA at 0x%llx\n", dwc_rd(DSTS), i, ud.dma_pa);
++    if (ud.guard.redfin && ((dwc_rd(DSTS)&DSTS_DEVCTRLHLT) || !ud_redfin_proof())) {
++        rf_usb_gadget_fail(&ud.guard,ETIMEDOUT);return;
++    }
+ 	if (kernel_thread_start(ud_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+-	}
+-	int livelog = 1;
+-	PE_parse_boot_argn("sweetusblog", &livelog, sizeof(livelog));
++	} else if (ud.guard.redfin) { rf_usb_gadget_fail(&ud.guard,EIO);return; }
++	int livelog = ud.guard.redfin ? 0 : 1;
++	PE_parse_boot_argn(ud.guard.redfin?"redfinusblog":"sweetusblog", &livelog, sizeof(livelog));
++    if (ud.guard.redfin && ud.guard.enum_only) livelog=0;
+ 	if (livelog && ud.ifp != NULL && kernel_thread_start(ud_log_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
+ }
++
++/* No caller in this patch. Trusted md0 owner must first claim the route and
++ * supply real WARM/ACTIVE/QUIESCE proofs using the identical stable caller ID. */
++int
++redfin_usb_gadget_start(const void *caller_id,const struct redfin_usb_gadget_policy *policy)
++{
++ static bool attempted;
++ extern bool redfin_usb_platform(void);
++ uint32_t mode=0,seconds=30,network=0;
++ (void)PE_parse_boot_argn("redfinusb",&mode,sizeof(mode));
++ (void)PE_parse_boot_argn("redfinusbsecs",&seconds,sizeof(seconds));
++ (void)PE_parse_boot_argn("redfinusbnet",&network,sizeof(network));
++ if (!caller_id || !policy || !policy->authorize || mode!=3 || !redfin_usb_platform()) return ENOTSUP;
++ if (seconds<1 || seconds>120 || network>1) return EINVAL;
++ if (policy->authorize(caller_id,policy->context,RF_USB_WARM)) return EPERM;
++ if (__atomic_exchange_n(&attempted,true,__ATOMIC_ACQ_REL)) return EBUSY;
++ DTEntry chosen;const void *value=NULL;unsigned bytes=0;
++ uint64_t ram_base=0,ram_size=0;
++ if (SecureDTLookupEntry(NULL,"/chosen",&chosen)!=kSuccess ||
++     SecureDTGetProperty(chosen,"dram-base",&value,&bytes)!=kSuccess || !value || bytes!=8) return ENXIO;
++ memcpy(&ram_base,value,8);
++ if (SecureDTGetProperty(chosen,"dram-size",&value,&bytes)!=kSuccess || !value || bytes!=8) return ENXIO;
++ memcpy(&ram_size,value,8);
++ if (ram_base<0x80000000ULL || ram_base>=(1ULL<<36) || !ram_size || ram_size>(1ULL<<36)-ram_base) return ENXIO;
++ ud.guard=(struct rf_usb_gadget_guard){.redfin=true,.enum_only=!network,.caller=caller_id,.policy=*policy,
++     .ram_base=ram_base,.ram_size=ram_size};
++ clock_interval_to_deadline(seconds,NSEC_PER_SEC,&ud.guard.deadline);
++ if (!ud_redfin_proof()) return ud.guard.error;
++ vm_offset_t gcc=ml_io_map(0x10c000,0x4000);
++ vm_offset_t core=ml_io_map(0xa60c000,0x4000);
++ vm_offset_t qs=ml_io_map(0xa6f8000,0x4000);
++ if (!gcc || !core || !qs) { rf_usb_gadget_fail(&ud.guard,ENOMEM);return ENOMEM; }
++ ud.dwc=core-0xc000;ud.redfin_qs=qs+0x800;
++ if (!ud_redfin_proof()) return ud.guard.error;
++ uint32_t power=usb_rd(gcc,0x3004),reset=usb_rd(gcc,0x3000);
++ if (!(power&0x80000000u) || (power&1) || (reset&1)) { rf_usb_gadget_fail(&ud.guard,EBUSY);return EBUSY; }
++ const unsigned clocks[]={0x3010,0x307c,0x3080,0x3018,0x301c};
++ for (unsigned i=0;i<5;i++) {
++  if (!ud_redfin_proof()) return ud.guard.error;
++  uint32_t clock=usb_rd(gcc,clocks[i]);
++  if (!(clock&1) || (clock&0x80000000u)) { rf_usb_gadget_fail(&ud.guard,EBUSY);return EBUSY; }
++ }
++ if (dwc_rd(0xc120)!=0x5533330au || (dwc_rd(0xc140)>>24)!=64 ||
++     ((dwc_rd(GCTL)>>12)&3)!=2 || (dwc_rd(GCTL)&0x800u) ||
++     (dwc_rd(DCTL)&(DCTL_RUN_STOP|DCTL_CSFTRST|DCTL_LSFTRST)) || !(dwc_rd(DSTS)&DSTS_DEVCTRLHLT)) {
++  rf_usb_gadget_fail(&ud.guard,EBUSY);return EBUSY;
++ }
++ if (!ud_redfin_proof()) return ud.guard.error;
++ sweet_usb_gadget_start(ud.dwc);
++ int error=__atomic_load_n(&ud.guard.error,__ATOMIC_ACQUIRE);
++ if (error) {
++  bool halted=ud_redfin_stop();
++  printf("REDFIN USB GADGET: start failed error=%d halted=%u; DMA slab retained\n",error,halted);
++ }
++ return error;
++}
+ #endif /* ARM64_BOARD_CONFIG_SWEET */
+diff --git a/bsd/dev/redfin_usb_gadget.h b/bsd/dev/redfin_usb_gadget.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_usb_gadget.h
+@@ -0,0 +1,25 @@
++/* Trusted unhooked Redfin gadget experiment. No user-controlled callbacks. */
++#ifndef REDFIN_USB_GADGET_H
++#define REDFIN_USB_GADGET_H
++#include <stdbool.h>
++/* WARM: manager strict revalidate, sole owner and halted ABL core.
++ * ACTIVE: manager route_retained plus continuing sole controller ownership
++ * and live power/clocks for every requested MMIO/cache/DMA operation.
++ * QUIESCE: continuing sole controller ownership and live power/clocks; only
++ * clearing RUN_STOP/polling HALT is authorized even if the route was lost.
++ * Never return success from a boot argument or a cached boolean. Policy and
++ * caller identity/context must remain valid until the bounded worker exits.
++ */
++enum redfin_usb_gadget_phase { RF_USB_WARM, RF_USB_ACTIVE, RF_USB_QUIESCE };
++struct redfin_usb_gadget_policy {
++ int (*authorize)(const void *caller_id,void *context,enum redfin_usb_gadget_phase);
++ void *context;
++};
++#ifdef __cplusplus
++extern "C" {
++#endif
++int redfin_usb_gadget_start(const void *caller_id,const struct redfin_usb_gadget_policy *);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/bsd/dev/redfin_usb_gadget_guard.h b/bsd/dev/redfin_usb_gadget_guard.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_usb_gadget_guard.h
+@@ -0,0 +1,75 @@
++/* Pure bounded guards shared by the real gadget and host fault models. */
++#ifndef REDFIN_USB_GADGET_GUARD_H
++#define REDFIN_USB_GADGET_GUARD_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <sys/errno.h>
++#include "redfin_usb_gadget.h"
++struct rf_usb_gadget_guard {
++ bool redfin,active,enum_only;
++ int error;
++ const void *caller;
++ struct redfin_usb_gadget_policy policy;
++ uint64_t ram_base,ram_size,deadline;
++};
++static inline void
++rf_usb_gadget_fail(struct rf_usb_gadget_guard *g,int error)
++{
++ if (!g->redfin) return;
++ int expected=0;
++ (void)__atomic_compare_exchange_n(&g->error,&expected,error?error:EIO,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE);
++}
++static inline bool
++rf_usb_gadget_proof(struct rf_usb_gadget_guard *g,uint64_t now)
++{
++ if (!g->redfin) return true;
++ if (__atomic_load_n(&g->error,__ATOMIC_ACQUIRE)) return false;
++ if (now>=g->deadline) { rf_usb_gadget_fail(g,ETIMEDOUT);return false; }
++ if (!g->caller || !g->policy.authorize ||
++     g->policy.authorize(g->caller,g->policy.context,g->active?RF_USB_ACTIVE:RF_USB_WARM)) {
++  rf_usb_gadget_fail(g,EPERM);return false;
++ }
++ return true;
++}
++static inline bool
++rf_usb_gadget_dma(uint64_t va,uint64_t pa,uint64_t size,uint64_t page_size,uint64_t ram_base,uint64_t ram_size)
++{
++ const uint64_t limit=1ULL<<36;
++ return page_size==0x4000 && size==0x4000 && va && pa && !((va|pa)&0x3fff) &&
++     ram_base>=0x80000000ULL && ram_size && ram_base<limit && ram_size<=limit-ram_base &&
++     pa>=ram_base && size<=ram_size && pa-ram_base<=ram_size-size && pa<=limit-size;
++}
++static inline bool
++rf_usb_gadget_buffer(unsigned offset,unsigned length)
++{
++ return offset<=0x4000u && length<=0x4000u-offset;
++}
++static inline bool
++rf_usb_gadget_trb(unsigned ep,unsigned trb,unsigned buf,unsigned len)
++{
++ unsigned expected=ep==0?0x1000:ep==1?0x1010:ep==2?0x1020:ep==3?0x1030:ep==5?0x1050:0;
++ if (!expected || trb!=expected || !rf_usb_gadget_buffer(trb,16) || !rf_usb_gadget_buffer(buf,len)) return false;
++ if (ep<=1) return (buf==0x1040 && len==8) || (buf==0x1100 && len<=512);
++ if (ep==2) return buf==0x2000 && len<=0x800;
++ if (ep==3) return buf==0x2800 && len<=0x800;
++ return buf==0x1300 && len<=16;
++}
++static inline bool
++rf_usb_gadget_events(uint32_t raw,unsigned position,unsigned *count)
++{
++ unsigned bytes=raw&0xffffu;
++ if (bytes>0x1000 || (bytes&3) || position>=0x1000 || (position&3)) return false;
++ *count=bytes;return true;
++}
++static inline bool
++rf_usb_gadget_write(unsigned offset,uint32_t value,uint64_t dma_pa)
++{
++ if (offset==0xc400) return value==(uint32_t)dma_pa;
++ if (offset==0xc404) return value==(uint32_t)(dma_pa>>32);
++ if (offset==0xc408) return value==0x80001000u;
++ if (offset==0xc40c) return value<=0x1000 && !(value&3);
++ if (offset==0xc700 || offset==0xc704 || offset==0xc708 || offset==0xc720) return true;
++ if (offset>=0xc800 && offset<=0xc85c && !(offset&3)) return ((offset-0xc800)/16)!=4;
++ return false; /* No PHY/global reset/clock/SMMU access via this core. */
++}
++#endif

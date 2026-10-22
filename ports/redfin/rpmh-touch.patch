@@ -1,0 +1,339 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -118,6 +118,7 @@
+ bsd/dev/sweet_cpufreq.c			standard
+ bsd/dev/sweet_rpmh.c			standard
+ bsd/dev/redfin_rpmh.c			standard
++bsd/dev/redfin_rpmh_touch.c			standard
+ bsd/dev/sweet_spmi.c			standard
+ bsd/dev/sweet_usb.c			standard
+ bsd/dev/redfin_usb.c			standard
+diff --git a/bsd/dev/redfin_rpmh_touch.h b/bsd/dev/redfin_rpmh_touch.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_rpmh_touch.h
+@@ -0,0 +1,18 @@
++/* Draft trusted-caller contract; no boot argument can establish physical identity. */
++#ifndef REDFIN_RPMH_TOUCH_H
++#define REDFIN_RPMH_TOUCH_H
++#include "redfin_touch_rail.h"
++struct redfin_touch_rail_ops {
++ /* Caller must own DRV2, interrupt37 and all of its RPMh clients for this boot.
++  * read() must perform fresh physical SPMI reads, and set index_verified only
++  * after source/runtime evidence identifies PM8150 L17. Never derive it from
++  * a boot argument, CMD-DB metadata, a TCS ACK, or a guessed page address. */
++ bool initial_md0_drv2_lease;
++ int (*read)(void *context, struct redfin_touch_rail_state *out);
++ void *context;
++};
++/* Zero means either power was already verified, or the floor-preserving ACTIVE
++ * vote completed, followed by two fresh configured+VALID power samples.
++ * One-shot, initial-md0 manager only; no startup hook. */
++int redfin_rpmh_touch_prepare(const struct redfin_touch_rail_ops *ops);
++#endif
+diff --git a/bsd/dev/redfin_rpmh_touch.c b/bsd/dev/redfin_rpmh_touch.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_rpmh_touch.c
+@@ -0,0 +1,300 @@
++/* DRAFT: one floor-preserving PM8150 PMIC5-PLDO ACTIVE vote, no startup hook.
++ * Requires a trusted fresh physical reader with proven L17 indexing, which
++ * this patch deliberately does not implement. No GPIO, SPMI writes or unvote.
++ * Google msm500b3a2059c1eec0fec08ec56add06320ea901a8 rpmh-rsc.c/rpmh-regulator.c;
++ * Redfin V5: ldoa17=41300, DRV2=18220000, ACTIVE0/1, GIC INTID37.
++ * PM8150 L17 is PMIC5PLDO (logical1504..3544mV); 3304 is this board's target,
++ * not its maximum. Require that exact inherited configured floor before voting.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include "redfin_rpmh.h"
++#include "redfin_rpmh_touch.h"
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
++extern int redfin_spmi_return_ready(void);
++
++#define RT_BASE 0x41300u
++#define RT_TCS(t) (0xd00u + 0x2a0u * (t))
++#define RT_IRQ37 (1u << 5)
++#define RT_AMC (1u << 16)
++#define RT_TRIGGER (1u << 24)
++#define RT_COMPLETE ((1u << 8) | (1u << 16))
++static bool rt_attempted, rt_poisoned;
++struct rt_context { vm_offset_t rsc, gic; unsigned commands; uint32_t irq_enable; };
++struct rt_snapshot {
++ uint32_t idle, control, enable, wait;
++ struct { uint32_t message, address, data; } command[16];
++};
++
++static uint32_t
++rt_read(vm_offset_t base, unsigned offset)
++{
++ uint32_t value = *(const volatile uint32_t *)(base + offset);
++ __asm__ volatile("dmb oshld" ::: "memory");
++ return value;
++}
++static void
++rt_write(vm_offset_t base, unsigned offset, uint32_t value)
++{
++ __asm__ volatile("dmb oshst" ::: "memory");
++ *(volatile uint32_t *)(base + offset) = value;
++ __asm__ volatile("dsb osh" ::: "memory");
++}
++static int
++rt_sync(struct rt_context *c, unsigned offset, uint32_t value)
++{
++ rt_write(c->rsc, offset, value);
++ for (unsigned us = 0; us < 1000; us++) {
++  if (rt_read(c->rsc, offset) == value) return 0;
++  delay(1);
++ }
++ return EIO;
++}
++
++static bool
++rt_platform(void)
++{
++ DTEntry root, chosen;
++ const char *list = NULL;
++ const void *raw = NULL;
++ unsigned size = 0;
++ bool redfin = false, lito = false;
++ uint64_t base = 0, bytes = 0;
++ if (SecureDTLookupEntry(NULL, "/", &root) != kSuccess ||
++     SecureDTGetProperty(root, "compatible", (const void **)&list, &size) != kSuccess ||
++     !list || !size || size > 256 || list[size - 1]) return false;
++ for (unsigned at = 0; at < size;) {
++  unsigned end = at;
++  while (end < size && list[end]) end++;
++  if (end == size || end == at) return false;
++  if (end - at == sizeof("google,redfin") - 1 && !memcmp(list + at, "google,redfin", sizeof("google,redfin") - 1)) redfin = true;
++  if (end - at == sizeof("qcom,sm7250") - 1 && !memcmp(list + at, "qcom,sm7250", sizeof("qcom,sm7250") - 1)) lito = true;
++  at = end + 1;
++ }
++ if (!redfin || !lito || SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
++     SecureDTGetProperty(chosen, "dram-base", &raw, &size) != kSuccess || !raw || size != 8) return false;
++ memcpy(&base, raw, 8);
++ if (SecureDTGetProperty(chosen, "dram-size", &raw, &size) != kSuccess || !raw || size != 8) return false;
++ memcpy(&bytes, raw, 8);
++ if (!base || !bytes || ((base | bytes) & 0x3fffULL) ||
++     base > (1ULL << 36) || bytes > (1ULL << 36) - base) return false;
++ const uint64_t regions[][2] = {{0x80860000, 0x20000}, {0x18220000, 0x10000}, {0x17a00000, 0x4000}};
++ for (unsigned i = 0; i < 3; i++)
++  if (base < regions[i][0] + regions[i][1] && regions[i][0] < base + bytes) return false;
++ return true;
++}
++
++static bool
++rt_same(const struct redfin_touch_rail_state *a, const struct redfin_touch_rail_state *b)
++{
++ return a->index_verified == b->index_verified && a->pmic_type == b->pmic_type &&
++     a->pmic_subtype == b->pmic_subtype && a->sid == b->sid && a->base == b->base &&
++     a->peripheral_type == b->peripheral_type && a->peripheral_subtype == b->peripheral_subtype &&
++     a->millivolts == b->millivolts && a->valid_millivolts == b->valid_millivolts &&
++     a->mode == b->mode && a->enable == b->enable && a->status == b->status;
++}
++static int
++rt_physical_floor(const struct redfin_touch_rail_state *s)
++{
++ if (!s->index_verified || s->pmic_type != 0x51 || s->pmic_subtype != 0x1e ||
++     s->sid != 1 || s->base != 0x5000 || s->peripheral_type != 4 || s->peripheral_subtype != 0x7d) return ENXIO;
++ /* V7 inherited configured3304/HPM7, disabled. Preserve voltage and mode;
++  * enable may only rise0->1. 3304 is not the PMIC5PLDO hardware maximum. */
++ if (s->millivolts != 3304 || s->mode != 7 ||
++     (s->enable != 0 && s->enable != 0x80) || (s->status & ~0x83u)) return EINVAL;
++ if (!!s->enable != !!(s->status & 0x80) ||
++     (s->enable && s->valid_millivolts != 3304)) return EBUSY;
++ return 0;
++}
++static bool
++rt_powered(const struct redfin_touch_rail_state *s)
++{
++ return !rt_physical_floor(s) && s->millivolts == 3304 && s->valid_millivolts == 3304 && s->mode == 7 &&
++     s->enable == 0x80 && (s->status & 0x80);
++}
++
++static int
++rt_irq(struct rt_context *c, bool before)
++{
++ uint32_t enable = rt_read(c->gic, 0x104), pending = rt_read(c->gic, 0x204), active = rt_read(c->gic, 0x304);
++ if (enable == 0xffffffffu || pending == 0xffffffffu || active == 0xffffffffu) return EIO;
++ if ((enable | active | (before ? pending : 0)) & RT_IRQ37) return EBUSY;
++ if (rt_read(c->rsc, 0xd00) != c->irq_enable) return EAGAIN;
++ return 0;
++}
++
++static int
++rt_inherited(struct rt_context *c)
++{
++ struct rt_snapshot slots[8];
++ for (unsigned t = 0; t < 8; t++) {
++  struct rt_snapshot *s = &slots[t];
++  unsigned at = RT_TCS(t);
++  s->idle = rt_read(c->rsc, at + 0x18); s->control = rt_read(c->rsc, at + 0x14);
++  s->enable = rt_read(c->rsc, at + 0x1c); s->wait = rt_read(c->rsc, at + 0x10);
++  if (s->idle == 0xffffffffu || s->control == 0xffffffffu ||
++      ((s->enable | s->wait) & ~((1u << c->commands) - 1u))) return EIO;
++  if (!s->idle || (t < 2 && (s->control || s->enable || s->wait))) return EBUSY;
++  for (unsigned n = 0; n < c->commands; n++) {
++   if (!(s->enable & (1u << n))) continue;
++   unsigned cmd = at + 0x30 + n * 0x14;
++   s->command[n].message = rt_read(c->rsc, cmd);
++   s->command[n].address = rt_read(c->rsc, cmd + 4);
++   s->command[n].data = rt_read(c->rsc, cmd + 8);
++   uint32_t address = s->command[n].address, data = s->command[n].data;
++   if ((address & ~15u) != RT_BASE) continue;
++   if (!(s->command[n].message & (1u << 16))) return ENOTSUP;
++   switch (address - RT_BASE) {
++   case 0: if (data > 3304) return ERANGE; break;
++   case 4: if (data > 1) return ERANGE; break;
++   case 8: if (data != 0 && data != 3 && data != 4 && data != 7) return ENOTSUP; break;
++   case 12: break; /* Headroom is retained unchanged. */
++   default: return ENOTSUP;
++   }
++  }
++ }
++ for (unsigned t = 0; t < 8; t++) {
++  const struct rt_snapshot *s = &slots[t];
++  unsigned at = RT_TCS(t);
++  if (s->idle != rt_read(c->rsc, at + 0x18) || s->control != rt_read(c->rsc, at + 0x14) ||
++      s->enable != rt_read(c->rsc, at + 0x1c) || s->wait != rt_read(c->rsc, at + 0x10)) return EAGAIN;
++  for (unsigned n = 0; n < c->commands; n++) {
++   if (!(s->enable & (1u << n))) continue;
++   unsigned cmd = at + 0x30 + n * 0x14;
++   if (s->command[n].message != rt_read(c->rsc, cmd) || s->command[n].address != rt_read(c->rsc, cmd + 4) ||
++       s->command[n].data != rt_read(c->rsc, cmd + 8)) return EAGAIN;
++  }
++ }
++ return 0;
++}
++
++static int
++rt_vote(struct rt_context *c)
++{
++ const uint32_t addresses[] = {RT_BASE, RT_BASE + 8, RT_BASE + 4}, values[] = {3304, 7, 1};
++ rt_poisoned = true; /* Any uncertain write permanently quarantines this owner. */
++ for (unsigned n = 0; n < 3; n++) {
++  unsigned cmd = RT_TCS(0) + 0x30 + n * 0x14;
++  if (rt_sync(c, cmd, 0x10108) || rt_sync(c, cmd + 4, addresses[n]) || rt_sync(c, cmd + 8, values[n])) return EIO;
++ }
++ if (rt_sync(c, RT_TCS(0) + 0x10, 7) || rt_sync(c, RT_TCS(0) + 0x1c, 7) ||
++     rt_sync(c, RT_TCS(0) + 0x14, 0) || rt_sync(c, RT_TCS(0) + 0x14, RT_AMC)) return EIO;
++ rt_write(c->rsc, RT_TCS(0) + 0x14, RT_AMC | RT_TRIGGER);
++ bool completed = false;
++ for (unsigned us = 0; us < 100000; us++) {
++  int error = rt_irq(c, false);
++  if (error) return error;
++  uint32_t irq = rt_read(c->rsc, 0xd04), idle = rt_read(c->rsc, RT_TCS(0) + 0x18);
++  if (irq == 0xffffffffu || idle == 0xffffffffu || (irq & ~1u)) return EIO;
++  bool commands = true;
++  for (unsigned n = 0; n < 3; n++) {
++   uint32_t status = rt_read(c->rsc, RT_TCS(0) + 0x3c + n * 0x14);
++   if (status == 0xffffffffu) return EIO;
++   commands &= (status & RT_COMPLETE) == RT_COMPLETE;
++  }
++  /* The initially-clear, enabled local completion bit must become set.
++   * Stale CMD_STATUS/idle values cannot satisfy this requirement. */
++  if ((irq & 1) && idle && commands) { completed = true; break; }
++  delay(1);
++ }
++ if (!completed) return ETIMEDOUT;
++ if (rt_sync(c, RT_TCS(0) + 0x14, RT_AMC) || rt_sync(c, RT_TCS(0) + 0x14, 0) ||
++     rt_sync(c, RT_TCS(0) + 0x1c, 0) || rt_sync(c, RT_TCS(0) + 0x10, 0)) return EIO;
++ rt_write(c->rsc, 0xd08, 1); /* Owned W1C only; no global reset or unvote. */
++ if (rt_read(c->rsc, 0xd04)) return EIO;
++ return rt_irq(c, false);
++}
++
++int
++redfin_rpmh_touch_prepare(const struct redfin_touch_rail_ops *ops)
++{
++ uint32_t mode = 0, touch = 0, setup = 0, cpus = 0;
++ (void)PE_parse_boot_argn("redfinrpmhtouch", &mode, sizeof(mode));
++ (void)PE_parse_boot_argn("redfintouch", &touch, sizeof(touch));
++ (void)PE_parse_boot_argn("redfintouchsetup", &setup, sizeof(setup));
++ if (mode != 1 || touch != 2 || setup != 1 || !ops || !ops->initial_md0_drv2_lease || !ops->read) return ENOTSUP;
++ if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 || !redfin_spmi_return_ready() || !rt_platform()) return ENXIO;
++ char root_device[16] = {0};
++ uint32_t publication = 0;
++ (void)PE_parse_boot_argn("redfinroot", &publication, sizeof(publication));
++ if (publication || !PE_parse_boot_argn("rd", root_device, sizeof(root_device)) ||
++     memcmp(root_device, "md0", sizeof("md0"))) return ENOTSUP;
++ const char *legacy[] = {"sweethw", "sweetkeys", "sweetbattery", "sweetusb", "modem", "wifi", "gpu",
++     "redfingpu", "redfinwifi", "redfinusb"};
++ for (unsigned i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++) {
++  uint32_t enabled = 0; (void)PE_parse_boot_argn(legacy[i], &enabled, sizeof(enabled));
++  if (enabled) return EBUSY;
++ }
++ if (__atomic_exchange_n(&rt_attempted, true, __ATOMIC_RELAXED)) return EBUSY;
++ struct redfin_touch_rail_state initial = {0}, check = {0};
++ int error = ops->read(ops->context, &initial);
++ if (!error) error = rt_physical_floor(&initial);
++ if (error) return error;
++ delay(100);
++ error = ops->read(ops->context, &check);
++ if (error) return error;
++ if (!rt_same(&initial, &check)) return EAGAIN;
++ if (rt_powered(&initial)) {
++  printf("REDFIN RPMH TOUCH: two physical samples already prove power; no vote needed\n");
++  return 0;
++ }
++ vm_offset_t db = ml_io_map_wcomb(0x80860000, RF_CMDDB_BYTES);
++ if (!db) return ENOMEM;
++ const uint8_t key[8] = "ldoa17";
++ struct rf_cmddb_resource resource;
++ if (rf_cmddb_lookup((const volatile uint8_t *)db, RF_CMDDB_BYTES, key, RF_CMDDB_VRM, &resource) != RF_CMDDB_OK ||
++     resource.address != RT_BASE) return EINVAL;
++ struct rt_context c = {ml_io_map(0x18220000, 0x10000), 0, 0, 0};
++ if (!c.rsc) return ENOMEM;
++ uint32_t id = rt_read(c.rsc, 0), config = rt_read(c.rsc, 0xc);
++ unsigned major = (id >> 16) & 255, count = (config >> 12) & 63;
++ c.commands = (config >> 27) & 31;
++ if ((major != 1 && major != 2) || config == 0xffffffffu || count < 8 || count > 9 ||
++     c.commands < 3 || c.commands > 16) return ENOTSUP;
++ c.gic = ml_io_map(0x17a00000, 0x4000);
++ if (!c.gic) return ENOMEM;
++ c.irq_enable = rt_read(c.rsc, 0xd00);
++ if (!(c.irq_enable & 1) || c.irq_enable == 0xffffffffu || rt_read(c.rsc, 0xd04)) return EBUSY;
++ error = rt_irq(&c, true);
++ if (!error) error = rt_inherited(&c);
++ if (error) return error;
++ /* Last physical/RSC/GIC check before acquiring the slot with any write. */
++ error = ops->read(ops->context, &check);
++ if (error) return error;
++ if (!rt_same(&initial, &check) || rt_read(c.rsc, 0) != id || rt_read(c.rsc, 0xc) != config ||
++     rt_read(c.rsc, 0xd04)) return EAGAIN;
++ error = rt_irq(&c, true);
++ if (!error) error = rt_inherited(&c);
++ if (error) return error;
++ error = rt_vote(&c);
++ if (error) {
++  printf("REDFIN RPMH TOUCH: transaction failed=%d; ACTIVE0/DRV owner quarantined, no retry/unvote\n", error);
++  return error;
++ }
++ for (unsigned us = 0; us < 100000; us += 100) {
++  struct redfin_touch_rail_state a = {0}, b = {0};
++  error = ops->read(ops->context, &a);
++  if (error) return error;
++  if (rt_powered(&a)) {
++   delay(100);
++   error = ops->read(ops->context, &b);
++   if (error) return error;
++   if (rt_powered(&b) && rt_same(&a, &b)) {
++    rt_poisoned = false;
++    printf("REDFIN RPMH TOUCH: retained ACTIVE vote3304mV/HPM7/enable1; configured+VALID L17 samples verified\n");
++    return 0;
++   }
++  }
++  delay(100);
++ }
++ printf("REDFIN RPMH TOUCH: physical readback did not prove power; enable vote retained, owner quarantined\n");
++ return ETIMEDOUT;
++}
++#endif

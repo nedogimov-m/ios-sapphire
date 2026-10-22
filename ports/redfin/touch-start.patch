@@ -1,0 +1,98 @@
+diff --git a/bsd/dev/redfin_touch_start.c b/bsd/dev/redfin_touch_start.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_touch_start.c
+@@ -0,0 +1,69 @@
++/* Initial md0-only SEC ID experiment. No event worker or userspace injection.
++ * This built-in module is the sole Redfin DRV2/SE0 owner for this experiment:
++ * the legacy RPMh entry refuses Redfin, competing native paths remain off,
++ * and a one-shot software claim spans power preparation and cold SPI setup.
++ * Hardware/TCS/PMIC proof is independently enforced by the called backends.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <pexpert/pexpert.h>
++#include "redfin_rpmh_touch.h"
++
++extern bool redfin_usb_platform(void);
++extern int redfin_spmi_return_ready(void);
++extern int redfin_touch_setup(bool, bool);
++int redfin_touch_start_initial(void);
++
++static uint32_t redfin_initial_touch_owner;
++static bool
++redfin_initial_touch_arg(const char *name, uint32_t expected, bool required)
++{
++ uint32_t value = 0;
++ bool found = PE_parse_boot_argn(name, &value, sizeof(value));
++ return found ? value == expected : !required;
++}
++
++int
++redfin_touch_start_initial(void)
++{
++ if (!redfin_usb_platform() || !redfin_spmi_return_ready() ||
++     !redfin_initial_touch_arg("cpus", 1, true) ||
++     !redfin_initial_touch_arg("redfintouch", 2, true) ||
++     !redfin_initial_touch_arg("redfintouchsetup", 1, true) ||
++     !redfin_initial_touch_arg("redfinrpmhtouch", 1, true) ||
++     !redfin_initial_touch_arg("redfinrail", 1, true)) return ENOTSUP;
++ const char *legacy[] = {"sweettouch", "sweetkeys", "sweetusb", "sweetcpufreq",
++     "sweetbattery", "modem", "wifi", "gpu"};
++ const char *native[] = {"redfinusb", "redfinwifi", "redfingpu", "redfinroot",
++     "redfinufs", "redfintouchevents"};
++ for (unsigned i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++)
++  if (!redfin_initial_touch_arg(legacy[i], 0, true)) return ENOTSUP;
++ for (unsigned i = 0; i < sizeof(native) / sizeof(native[0]); i++)
++  if (!redfin_initial_touch_arg(native[i], 0, false)) return ENOTSUP;
++ /* Boot arguments corroborate the compiled sole-writer policy. The lease
++  * itself is this module's actual exclusive software claim, never an arg.
++  * No release/retry: a failed power or bus transaction can be uncertain.
++  */
++ uint32_t expected = 0;
++ bool held = __atomic_compare_exchange_n(&redfin_initial_touch_owner, &expected,
++     1, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
++ if (!held) return EBUSY;
++ const struct redfin_touch_rail_ops ops = {held, redfin_touch_rail_snapshot, NULL};
++ int error = redfin_rpmh_touch_prepare(&ops);
++ printf("REDFIN TOUCH START: power preparation result=%d\n", error);
++ if (error) return error;
++ bool rail_ready = redfin_touch_rail_ready() == 1;
++ if (!rail_ready) {
++  printf("REDFIN TOUCH START: fresh physical rail proof lost; SPI skipped\n");
++  return ENXIO;
++ }
++ /* setup independently requires masked GIC633, cold/free GPIO/SE state,
++  * exact live-FDT contracts and its own one-shot before hardware writes. */
++ error = redfin_touch_setup(rail_ready, held);
++ printf("REDFIN TOUCH START: SEC ID result=%d; no event worker\n", error);
++ return error;
++}
++#endif
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -107,6 +107,7 @@
+ bsd/dev/sweet_ufs.c			standard
+ bsd/dev/redfin_spmi.c			standard
+ bsd/dev/redfin_gpu.c			standard
++bsd/dev/redfin_touch_start.c			standard
+ bsd/dev/redfin_touch_events.c			standard
+ bsd/dev/redfin_touch_setup.c			standard
+ bsd/dev/redfin_touch_spi.c			standard
+diff --git a/bsd/dev/sweet_rpmh.c b/bsd/dev/sweet_rpmh.c
+--- a/bsd/dev/sweet_rpmh.c
++++ b/bsd/dev/sweet_rpmh.c
+@@ -327,6 +327,9 @@
+ int
+ sweet_rpmh_vreg_enable(const char *res, unsigned mv)
+ {
++	/* Redfin has a separate, exclusively owned DRV2 manager. */
++	extern bool redfin_usb_platform(void);
++	if (redfin_usb_platform()) return ENOTSUP;
+ 	/* Board-specific helper: do not apply PMIC5-LDO policy to arbitrary resources. */
+ 	if (!res || strcmp(res, "ldoc11") || mv < 2950 || mv > 3400) {
+ 		printf("SWEET RPMH: expected ldoc11 and 2950..3400 mV\n");

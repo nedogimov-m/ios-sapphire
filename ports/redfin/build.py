@@ -62,6 +62,7 @@ def main():
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
     p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
     p.add_argument('--touch-rail-probe', action='store_true', help='read fixed PMIC identity and candidate LDO states without PMIC writes')
+    p.add_argument('--touch-id-probe', action='store_true', help='prepare L17 and cold SEC SPI, then read ID only; RAM root and bootloader return required')
     p.add_argument('--usb-probe', action='store_true', help='observe DWC3 handoff without PHY or DMA changes')
     p.add_argument('--usb-route-probe', action='store_true', help='observe halted DWC3 and standard SMMU routing without writes')
     p.add_argument('--rpmh-probe', action='store_true', help='inspect CMD-DB and RPMh TCS handoff without commands')
@@ -81,10 +82,14 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.touch_id_probe:
+        a.touch_rail_probe = True
     if (a.touch_probe or a.touch_rail_probe or a.usb_probe or a.usb_route_probe or a.rpmh_probe or a.gpu_probe or a.wifi_probe) and not a.kernel:
         p.error('peripheral observers require --kernel')
     if a.gpu_probe and not a.display:
         p.error('--gpu-probe requires --display')
+    if a.touch_id_probe and not a.return_bootloader:
+        p.error('--touch-id-probe requires --return-bootloader')
     if a.ufs_rw and not a.ufs_root:
         p.error('--ufs-rw requires --ufs-root')
     if a.display and not (a.kernel and a.apple_adt and a.splash):
@@ -104,6 +109,8 @@ def main():
     if a.return_bootloader or a.touch_rail_probe:
         a.spmi_probe = True
     ufs_mode = 3 if a.ufs_wake_probe or a.ufs_root_probe or a.ufs_root else 2 if a.ufs_read_probe else int(a.ufs_probe)
+    if a.touch_id_probe and ufs_mode:
+        p.error('--touch-id-probe requires the initial RAM root without UFS')
     if (a.apple_adt or ufs_mode or a.spmi_probe) and not a.kernel:
         p.error('Apple identity and UFS probes require --kernel')
     if a.ufs_root and not a.apple_adt:
@@ -156,7 +163,7 @@ def main():
         nodes, _ = _tree(a.dtb.read_bytes())
         from peripherals import add_observers
         try:
-            add_observers(tree, nodes, touch=a.touch_probe, usb=a.usb_probe,
+            add_observers(tree, nodes, touch=a.touch_probe or a.touch_id_probe, usb=a.usb_probe,
                           gpu=a.gpu_probe, wifi=a.wifi_probe,
                           usb_route=a.usb_route_probe, rpmh=a.rpmh_probe)
         except ValueError as error:
@@ -252,11 +259,14 @@ def main():
         if a.userspace_stacks:
             command_line += ' redfinstacks=1'
         usb_mode = 2 if a.usb_route_probe else int(a.usb_probe)
-        for mode, name in ((int(a.touch_probe), 'redfintouch'), (usb_mode, 'redfinusb'),
+        touch_mode = 2 if a.touch_id_probe else int(a.touch_probe)
+        for mode, name in ((touch_mode, 'redfintouch'), (usb_mode, 'redfinusb'),
                            (int(a.gpu_probe), 'redfingpu'), (int(a.wifi_probe), 'redfinwifi'),
                            (int(a.rpmh_probe), 'redfinrpmh'), (int(a.touch_rail_probe), 'redfinrail')):
             if mode:
                 command_line += f' {name}={mode}'
+        if a.touch_id_probe:
+            command_line += ' redfintouchsetup=1 redfinrpmhtouch=1'
         if ufs_mode:
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:

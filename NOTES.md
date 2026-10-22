@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN first controlled L17 vote: completion but no power proof — 2026-10-22
+
+New initial md0-only touch caller owns a sticky software lease, explicitly
+disables competing paths and blocks the legacy RPMh helper on Redfin. It
+requires the full source/runtime PM8150/L17 producer, then fresh physical
+configured+VALID voltage, MODE/ENABLE/STATUS proof before cold SPI setup.
+Power backend owns only ACTIVE0, preserves other TCS/GIC/command state,
+never unvotes and quarantines uncertainty. Dedicated host tests: rail-ready6,
+RPMh22, caller4; full suite384 PASS (peripherals-host-tests-v9.txt).
+
+Actual ARM64 build research/redfin-build/build-20261022-173614.log passed.
+Kernel ed652ef1407ddf521347102a5a2da830d59adbb7cefd2ded3b58fbda98fd32a3.
+Image ports/redfin/out/touch-id-v1/redfin-xnu.img SHA256
+5bc7081aaeb1285ada8a9128b50672f67a8f46745348b865daa6b2286e7d3626.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x3c5be77ed77f9a70`.
+Full kernel-build.json retained with the immutable image.
+
+Automatic cycle logs/redfin/touch-id-v1/ authenticated and matched image ID,
+observed PID1/11 heartbeats, re-primed the public RAM key and left verified
+fastboot. No UFS enabled or panic observed. Physical pre-vote state again
+configured3304mV/MODE7/ENABLE0/STATUS3. Owned TCS vote reached its completion
+checks, then physical configured+VALID readiness timed out (errno60).
+No SPI/GPIO cold setup or event worker ran. This does not prove the rail
+remained disabled: post-vote raw fields were not logged. Next diagnostic
+must record the exact post-vote tuple before changing vote semantics.
+
+Isolated USB owned-route and warm CDC-ECM core now compile, with no startup
+hook and no device DMA. Sole-owner callback, imported stream preservation,
+one per-stream bypass publication and sticky quarantine are host tested.
+Core has bounded event count, physical DMA bounds/contiguity, route checks,
+bounded halt/run and strict MMIO/reset failure handling; first Redfin mode
+is enumeration only. Fixed XNU current_thread/thread_terminate declarations
+after build173159 failed. Latest guard/reset fixes compile in build174216,
+kernel0f477771a5ce93a4748d58408597f81051bf29c10524ee7a15ceb2ce20b0ba9e.
+36 focused owner/gadget tests PASS; USB remains uninvoked on hardware.
+
 ## REDFIN physical PMIC observations and compiled touch events — 2026-10-22
 
 V6 RAM image2a13c0dc21fcd2451e8f84281794843b66c578ca85d2d706a4c170386226afa9,

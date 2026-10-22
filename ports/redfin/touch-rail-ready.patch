@@ -1,0 +1,187 @@
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -245,6 +245,14 @@
+ struct redfin_rail_target { unsigned ppid, apid, owner; uint32_t mapping; };
+ struct redfin_rail_sample { uint16_t header, millivolts, mode_enable, status; };
+ static bool redfin_rail_attempted;
++static bool redfin_rail_observation_complete, redfin_rail_poisoned;
++static struct redfin_rail_target redfin_rail_verified_targets[2];
++static void
++redfin_rail_invalidate(void)
++{
++ __atomic_store_n(&redfin_rail_observation_complete, false, __ATOMIC_RELEASE);
++ __atomic_store_n(&redfin_rail_poisoned, true, __ATOMIC_RELEASE);
++}
+ 
+ static bool
+ redfin_rail_platform(void)
+@@ -287,8 +295,11 @@
+  bool candidate = t && t->ppid >= 0x140 && t->ppid <= 0x151 &&
+      (address >> 8) == (t->ppid & 255) &&
+      (((address & 255) == 4 && count == 2) || ((address & 255) == 8 && count == 1) ||
+-      ((address & 255) == 0x40 && count == 2) || ((address & 255) == 0x45 && count == 2));
+- if (!out || (!model && !candidate) || !redfin_rail_mapping(t)) return EINVAL;
++      ((address & 255) == 0x40 && count == 2) || ((address & 255) == 0x45 && count == 2) ||
++      (t->ppid == 0x150 && (address & 255) == 0x42 && count == 2));
++ if (!out || (!model && !candidate)) return EINVAL;
++ if (__atomic_load_n(&redfin_rail_poisoned, __ATOMIC_ACQUIRE)) return EIO;
++ if (!redfin_rail_mapping(t)) { redfin_rail_invalidate(); return EINVAL; }
+  unsigned channel = t->apid * 0x80;
+  uint32_t command = (1u << 27) | ((address & 255u) << 4) | (count - 1u);
+  __asm__ volatile("dmb oshst" ::: "memory");
+@@ -297,15 +308,16 @@
+  for (unsigned us = 0; us < 1000; us++) {
+   uint32_t status = redfin_spmi_rd(redfin_spmi_proof.observer, channel + 8);
+   if (status & 1) {
+-   if (status & 0x0e) return EIO;
++   if (status & 0x0e) { redfin_rail_invalidate(); return EIO; }
+    uint32_t data = redfin_spmi_rd(redfin_spmi_proof.observer, channel + 0x18);
+-   if (!redfin_rail_mapping(t)) return EAGAIN;
++   if (!redfin_rail_mapping(t)) { redfin_rail_invalidate(); return EAGAIN; }
+    *out = (uint16_t)(data & (count == 1 ? 255u : 65535u));
+    return 0;
+   }
+   delay(1);
+  }
+- return ETIMEDOUT; /* Caller stops every observer transaction; no reuse/retry. */
++ redfin_rail_invalidate();
++ return ETIMEDOUT; /* All future snapshots/probes refuse channel reuse. */
+ }
+ 
+ static bool
+@@ -370,7 +382,7 @@
+  if (error) return error;
+  if (model != 0x1e51) return ENOTSUP;
+  unsigned present = 0, unified = 0, holes = 0;
+- bool changed = false;
++ bool changed = false, all_ldo = true, correct_target = false;
+  for (unsigned i = 1; i < 19; i++) {
+   const struct redfin_rail_target *t = &targets[i];
+   unsigned base = (t->ppid & 255) << 8;
+@@ -387,6 +399,8 @@
+    return error;
+   }
+   present++;
++  all_ldo &= (a.header & 255) == 4 && (b.header & 255) == 4;
++  if (base == 0x5000) correct_target = a.header == 0x7d04 && b.header == 0x7d04;
+   bool stable = a.header == b.header && a.millivolts == b.millivolts &&
+       a.mode_enable == b.mode_enable && a.status == b.status;
+   changed |= !stable;
+@@ -404,8 +418,93 @@
+  error = redfin_rail_read(&targets[0], 0x0104, 2, &check);
+  if (error) return error;
+  changed |= model != check;
++ /* Publish only a complete, stable PM8150/18-LDO scan with exact7d target.
++  * Source common base/stride + ascending discovery + zero-basedL17=16
++  * establish page5000; APID arithmetic is not the indexing proof. */
++ if (!changed && !holes && present == 18 && all_ldo && correct_target) {
++  redfin_rail_verified_targets[0] = targets[0];
++  redfin_rail_verified_targets[1] = targets[17];
++  __atomic_store_n(&redfin_rail_observation_complete, true, __ATOMIC_RELEASE);
++ }
+  printf("REDFIN RAIL: candidate observation done present=%u unified=%u holes=%u stable=%u; L17 index and AVDD readiness unproven, no PMIC writes\n",
+      present, unified, holes, !changed);
+  return changed ? EAGAIN : holes ? ENXIO : 0;
+ }
++
++/* Fresh physical proof, appended inside the existing SWEET SPMI TU.
++ * Qualcomm firmware20bb8ae: pm_pwr_alg.h VSET_VALID42/43; voltage-status
++ * algorithm800..815 reads VALID when unified VREG_READY is asserted.
++ * A configured40/41 value alone is insufficient to claim a powered voltage.
++ * No new maps, PMIC writes, reset, GPIO, clocks or RPMh votes.
++ */
++#include "redfin_touch_rail.h"
++static unsigned redfin_rail_snapshot_busy;
++
++int
++redfin_touch_rail_snapshot(void *context, struct redfin_touch_rail_state *out)
++{
++ if (!out || context) return EINVAL;
++ *out = (struct redfin_touch_rail_state){0};
++ if (!__atomic_load_n(&redfin_rail_observation_complete, __ATOMIC_ACQUIRE) ||
++     __atomic_load_n(&redfin_rail_poisoned, __ATOMIC_ACQUIRE)) return ENXIO;
++ uint32_t mode = 0, cpus = 0;
++ (void)PE_parse_boot_argn("redfinrail", &mode, sizeof(mode));
++ (void)PE_parse_boot_argn("cpus", &cpus, sizeof(cpus));
++ if (mode != 1 || cpus != 1 || !redfin_spmi_return_ready() || !redfin_rail_platform()) return ENXIO;
++ if (__atomic_exchange_n(&redfin_rail_snapshot_busy, 1, __ATOMIC_ACQUIRE)) return EBUSY;
++ int error = ENXIO;
++ uint16_t model = 0, model_end = 0, header = 0, header_end = 0;
++ uint16_t configured = 0, valid = 0, mode_enable = 0, status = 0, status_end = 0;
++ if (!__atomic_load_n(&redfin_rail_observation_complete, __ATOMIC_ACQUIRE) ||
++     __atomic_load_n(&redfin_rail_poisoned, __ATOMIC_ACQUIRE)) goto out;
++ const struct redfin_rail_target *m = &redfin_rail_verified_targets[0], *t = &redfin_rail_verified_targets[1];
++ if (m->ppid != 0x001 || t->ppid != 0x150) goto invalid;
++ error = redfin_rail_read(m, 0x0104, 2, &model);
++ if (error) goto invalid;
++ if (model != 0x1e51) { error = ENXIO; goto invalid; }
++ error = redfin_rail_read(t, 0x5004, 2, &header);
++ if (error) goto invalid;
++ if (header != 0x7d04) { error = ENXIO; goto invalid; }
++ if (!error) error = redfin_rail_read(t, 0x5040, 2, &configured);
++ if (!error) error = redfin_rail_read(t, 0x5042, 2, &valid);
++ if (!error) error = redfin_rail_read(t, 0x5045, 2, &mode_enable);
++ if (!error) error = redfin_rail_read(t, 0x5008, 1, &status);
++ if (!error) error = redfin_rail_read(t, 0x5004, 2, &header_end);
++ if (!error) error = redfin_rail_read(m, 0x0104, 2, &model_end);
++ if (!error) error = redfin_rail_read(t, 0x5008, 1, &status_end);
++ if (error) goto invalid;
++ if (model != 0x1e51 || model_end != model || header != 0x7d04 || header_end != header || status != status_end) {
++  error = EAGAIN;
++  goto invalid;
++ }
++ out->index_verified = true;
++ out->pmic_type = 0x51; out->pmic_subtype = 0x1e; out->sid = 1; out->base = 0x5000;
++ out->peripheral_type = 4; out->peripheral_subtype = 0x7d;
++ out->millivolts = configured; out->valid_millivolts = valid;
++ out->mode = (uint8_t)mode_enable; out->enable = (uint8_t)(mode_enable >> 8); out->status = (uint8_t)status;
++ error = 0;
++ goto out;
++invalid:
++ redfin_rail_invalidate();
++ if (!error) error = ENXIO;
++out:
++ __atomic_store_n(&redfin_rail_snapshot_busy, 0, __ATOMIC_RELEASE);
++ return error;
++}
++
++int
++redfin_touch_rail_ready(void)
++{
++ struct redfin_touch_rail_state a = {0}, b = {0};
++ if (redfin_touch_rail_snapshot(NULL, &a)) return 0;
++ delay(100);
++ if (redfin_touch_rail_snapshot(NULL, &b)) return 0;
++ /* The producer and each snapshot establish model/index/type provenance.
++  * Compare fields explicitly; struct padding is not part of the proof. */
++ return a.index_verified && b.index_verified &&
++     a.millivolts == 3304 && b.millivolts == 3304 &&
++     a.valid_millivolts == 3304 && b.valid_millivolts == 3304 &&
++     a.mode == 7 && b.mode == 7 && a.enable == 0x80 && b.enable == 0x80 &&
++     a.status == b.status && (a.status & 0x80) && !(a.status & ~0x83u);
++}
+ #endif
+diff --git a/bsd/dev/redfin_touch_rail.h b/bsd/dev/redfin_touch_rail.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_touch_rail.h
+@@ -0,0 +1,18 @@
++/* Trusted physical PM8150 L17 state, sampled through the verified observer. */
++#ifndef REDFIN_TOUCH_RAIL_H
++#define REDFIN_TOUCH_RAIL_H
++#include <stdbool.h>
++#include <stdint.h>
++struct redfin_touch_rail_state {
++ bool index_verified;
++ uint8_t pmic_type, pmic_subtype, sid, peripheral_type, peripheral_subtype;
++ uint16_t base, millivolts, valid_millivolts;
++ uint8_t mode, enable, status;
++};
++/* Callback-compatible; context must be NULL. Zero means a fresh identified
++ * snapshot, including a legitimately disabled rail. Power is a separate test. */
++int redfin_touch_rail_snapshot(void *context, struct redfin_touch_rail_state *out);
++/* Exactly1 means two stable fresh samples prove configured+valid3304mV,
++ * HPM7, enabled, VREG_READY and no OCP/unknown status. All failure paths return0. */
++int redfin_touch_rail_ready(void);
++#endif

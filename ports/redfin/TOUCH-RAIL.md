@@ -56,6 +56,12 @@ voltage/mode/enable/status fields because that subtype was then header-only;
 `unified=0` described the observer's old allowlist, not hardware incapability.
 L17 indexing and physical AVDD readiness were still unproved.
 
+V7 observations, 2026-10-22: page `5000`, subtype `7d`, reported stable
+configured VSET **3304 mV**, MODE `07`, ENABLE `00`, STATUS `03`. Page `4900`
+reported configured 3000 mV, also disabled with STATUS `03`. Thus V7 did not
+prove AVDD power: a configured voltage and HPM mode do not imply enable or
+VREG_READY. VSET_VALID `42/43` was not yet sampled by that raw observer.
+
 The subsequent board attribution combines source and V6 runtime evidence:
 Qualcomm's common LDO base is `4000`, stride `100`; ascending peripheral
 discovery and the LDO driver's base-relative index formula assign `LDO1=0`,
@@ -90,7 +96,36 @@ Sources:
   lists PM8150 LDO1..18; LDO17 uses `pmic5_pldo` at line 1018. Its range is
   defined at line 705, and its PMIC5 LDO HPM vote is raw value 7.
 
-# Prospective owned ACTIVE vote
+# Fresh physical proof overlay
+
+`touch-rail-ready.patch` publishes a private proof only after a successful,
+stable full scan of all eighteen type-04 pages, PM8150 model `511e`, and exact
+target subtype `7d`. Failed, partial, timed-out or changing scans cannot
+authorize further physical reads. Every uncertain bus transaction invalidates
+the proof and prevents channel reuse for this boot.
+
+`int redfin_touch_rail_snapshot(void *context, struct redfin_touch_rail_state *out)`
+requires a NULL context and returns errno, with zero meaning a fresh identified
+snapshot, including a disabled rail. It rechecks model, header, APID mapping,
+owner and status around its reads, and serializes snapshots. Besides configured
+VSET `40/41`, it reads VSET_VALID `42/43`: Qualcomm's unified voltage-status
+algorithm uses this valid register when VREG_READY is asserted.
+
+`int redfin_touch_rail_ready(void)` returns exactly **1** only after two fresh
+samples agree on configured and VALID voltage 3304 mV, MODE `7`, ENABLE `80`,
+and STATUS VREG_READY, with OCP/reserved bits clear. Every failure returns 0.
+The public state and prototypes live in `redfin_touch_rail.h`. This overlay
+contains no startup hook, RPMh vote, PMIC write, GPIO or clock operation.
+
+# Controlled initial md0 vote
+
+`rpmh-touch.patch` adds a separate one-shot backend. Its trusted caller supplies
+`struct redfin_touch_rail_ops` with an actual initial-md0 DRV2 lease and the
+fresh snapshot callback. Boot arguments cannot grant that software lease.
+The backend additionally requires `rd=md0`, no root publication, UP, verified
+return, exact platform/RAM bounds, explicit touch/setup/vote flags and disabled
+legacy/native GPU, Wi-Fi and USB paths. The caller must disable every competing
+writer; `touch-start.patch` owns that policy and the sticky software claim.
 
 V5 observed `ldoa17=0x41300`, DRV2 `0x18220000`, major 2, NCPT 16, eight normal
 TCS slots, ACTIVE0/1 empty, RSC IRQ enable `1`, status `0`, and GIC INTID37
@@ -112,10 +147,21 @@ Cleanup after proven completion may clear only this slot/control/command-enable
 and its completion bit; it must not send an unvote. Uncertain write/timeout
 quarantines the slot and owner for this boot without cleanup, reset or retry.
 
-Before implementation, establish the inherited floor and fresh physical state.
-Do not replace an unknown retained vote with 3304 mV merely because no enabled
-TCS payload mentions it. Retain the maximum authorized inherited voltage,
-enable and mode requirement; refuse incompatible or unknown state. TCS ACK
-must be followed by fresh, stable physical VSET/mode/enable/VREG_READY evidence
-before any future `redfin_touch_rail_ready()` can return true. No write backend
-or startup call is included here.
+The implemented precondition is the exact V7 inherited configured floor:
+3304 mV and HPM7, stable across fresh physical samples. It refuses a higher,
+lower, unknown, bypassed or changing configuration instead of treating 3304
+as a hardware maximum. Enable may only rise from 0 to 1. It also validates
+and preserves all other normal TCS payloads, refusing any conflicting higher
+floor or unsupported target command. Empty TCS metadata alone is insufficient.
+
+`int redfin_rpmh_touch_prepare(const struct redfin_touch_rail_ops *ops)` returns
+zero only if power was already proved or after the owned ACTIVE0 transaction
+and two stable configured+VALID 3304 mV/HPM7/enabled/VREG_READY samples. All
+uncertain write, completion or physical-proof failures leave the owner
+quarantined and never unvote, reset or retry. No automatic startup is added by
+this patch. The separately reviewed initial caller invokes power preparation,
+fresh `ready()==1`, then the guarded cold SEC ID setup; no event worker runs.
+
+Host validation: 9 observer tests, 6 proof tests, 22 backend tests, and 4 initial
+caller tests pass. The combined vote/readback/ID path still requires its first
+device result; V7 only established the disabled physical state.
