@@ -49,7 +49,8 @@ def xnu_return_proof(image):
             or [token for token in tokens if token.startswith("redfinreturn=")] != ["redfinreturn=1"]
             or [token for token in tokens if token.startswith("cpus=")] != ["cpus=1"]):
         raise ValueError("XNU recovery cycle requires a matching image manifest with redfinreturn=1 and cpus=1")
-    return {"sha256": checksum, "pmic_bootloader_return": True, "cpus": 1}
+    return {"sha256": checksum, "pmic_bootloader_return": True, "cpus": 1,
+            "root_device": manifest.get("root_device")}
 
 
 def verify_recovery_mounts(data):
@@ -303,6 +304,38 @@ class Cycle:
         self.manifest["files"][relative] = {"status": status, "bytes": len(data),
                                              "sha256": hashlib.sha256(data).hexdigest()}
 
+    def observe_rootfs(self):
+        """Observe the selected HFS root; a header cannot certify filesystem health."""
+        if self.manifest.get("xnu_return", {}).get("root_device") != "ufsroot0":
+            return
+        observation = self.manifest["rootfs"] = {"status": "unavailable"}
+        if not self.recovery_verified:
+            observation.update(status="unverified-recovery", error="offline recovery was not verified")
+            return
+        try:
+            code, raw, _ = self.adb("exec-out", "dd", "if=/dev/block/sda19", "bs=4096", "count=1", "status=none")
+            self.save("after/rootfs-first-block.raw", raw, private=True)
+            if code:
+                observation.update(status="read-failed", bytes=len(raw))
+                return
+            if len(raw) != 4096:
+                raise ValueError("rootfs header read must contain exactly 4096 bytes")
+            signature, version, attributes = struct.unpack_from(">HHI", raw, 1024)
+            block_bytes, blocks = struct.unpack_from(">II", raw, 1024 + 40)
+            observation.update(signature="HFSX" if signature == 0x4858 else raw[1024:1026].decode("ascii", errors="replace"),
+                version=version, journaled=bool(attributes & (1 << 13)),
+                clean_unmounted=bool(attributes & (1 << 8)), inconsistent=bool(attributes & (1 << 11)),
+                block_bytes=block_bytes, total_bytes=block_bytes * blocks,
+                write_count=struct.unpack_from(">I", raw, 1024 + 68)[0])
+            if signature != 0x4858 or version != 5 or not observation["journaled"]:
+                raise ValueError("expected a journaled HFSX v5 primary header")
+            if (not 4096 <= block_bytes <= 1024**2 or block_bytes & (block_bytes - 1)
+                    or observation["total_bytes"] != 16 * 1024**3):
+                raise ValueError("rootfs HFSX geometry differs from the prepared 16 GiB root")
+            observation["status"] = "observed"
+        except (OSError, ValueError) as error:
+            observation.update(status="invalid", error=str(error))
+
     def pstore(self, stage):
         code, names, _ = self.adb("exec-out", "ls", "-1", "/sys/fs/pstore")
         if code:
@@ -399,6 +432,7 @@ class Cycle:
     def recover(self, verified_identity=False, recovery=False):
         if recovery:
             self.verify_recovery()
+            self.observe_rootfs()
         else:
             self.verify_android(verified_identity)
         # Opening the raw misc device claims the alt bank and can race Android's

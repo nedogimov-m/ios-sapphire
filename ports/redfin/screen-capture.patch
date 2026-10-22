@@ -1,0 +1,113 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -144,6 +144,48 @@
+ }
+ /* REDFIN_FB_TEST_END */
+ 
++/* REDFIN_SCREEN_TEST_BEGIN: fixed RGB thumbnail, no register accesses. */
++#define REDFIN_SCREEN_WIDTH 120u
++#define REDFIN_SCREEN_HEIGHT 260u
++#define REDFIN_SCREEN_BYTES (REDFIN_SCREEN_WIDTH * REDFIN_SCREEN_HEIGHT * 3u)
++#define REDFIN_SCREEN_CHUNK_BYTES 144u
++#define REDFIN_SCREEN_CHUNKS (REDFIN_SCREEN_BYTES / REDFIN_SCREEN_CHUNK_BYTES)
++static void
++redfin_screen_sample(const volatile uint8_t *pixels, uint8_t *rgb)
++{
++	for (uint32_t y = 0; y < REDFIN_SCREEN_HEIGHT; y++) {
++		for (uint32_t x = 0; x < REDFIN_SCREEN_WIDTH; x++) {
++			/* Centers of 9x9 blocks in the observed 1080x2340 BGRA buffer. */
++			const volatile uint8_t *p = pixels + (y * 9u + 4u) * 4320u + (x * 9u + 4u) * 4u;
++			*rgb++ = p[2]; *rgb++ = p[1]; *rgb++ = p[0];
++		}
++	}
++}
++static uint32_t
++redfin_screen_crc32(const uint8_t *bytes, uint32_t count)
++{
++	uint32_t crc = 0xffffffffu;
++	for (uint32_t i = 0; i < count; i++) {
++		crc ^= bytes[i];
++		for (unsigned bit = 0; bit < 8; bit++) crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
++	}
++	return ~crc;
++}
++static void
++redfin_screen_base64(const uint8_t *bytes, char out[193])
++{
++	static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++	unsigned j = 0;
++	for (unsigned i = 0; i < REDFIN_SCREEN_CHUNK_BYTES; i += 3) {
++		uint32_t n = (uint32_t)bytes[i] << 16 | (uint32_t)bytes[i + 1] << 8 | bytes[i + 2];
++		out[j++] = alphabet[(n >> 18) & 63]; out[j++] = alphabet[(n >> 12) & 63];
++		out[j++] = alphabet[(n >> 6) & 63]; out[j++] = alphabet[n & 63];
++	}
++	out[j] = 0;
++}
++/* REDFIN_SCREEN_TEST_END */
++
++
+ static bool
+ redfin_fb_data(IOService *provider, const char *key, void *value, unsigned bytes)
+ {
+@@ -186,6 +228,8 @@
+ 	bool          fDirty;
+ 	bool          fRedfinCopyOnly;
+ 	uint64_t      fRedfinFrames;
++	uint32_t      fRedfinCaptures;
++	void          captureRedfin(uint32_t frame, uint64_t present);
+ 	bool          startRedfinCopy(IOService *provider);
+ 	/* topaz direct MDP scanout (VIG0 / CTL0 from TopazGpuW disp.c) */
+ 	volatile uint32_t *fVig0;
+@@ -293,6 +337,30 @@
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++/* Snapshot before logging: framebuffer workloop is sleepable and fLock is not held. */
++void
++AppleCLCD::captureRedfin(uint32_t frame, uint64_t present)
++{
++	if (!fRedfinCopyOnly || frame < 1 || frame > 3 || !fPixels ||
++	    !redfin_fb_geometry(fPhys, 0x02300000ULL, fWidth, fHeight, fRowBytes, fLogicalW, fLogicalH)) return;
++	uint8_t *rgb = (uint8_t *)IOMallocData(REDFIN_SCREEN_BYTES);
++	if (rgb == NULL) {
++		IOLog("REDFIN FB: thumbnail allocation failed\n");
++		return;
++	}
++	redfin_screen_sample((const volatile uint8_t *)fPixels, rgb);
++	uint32_t crc = redfin_screen_crc32(rgb, REDFIN_SCREEN_BYTES);
++	IOLog("[REDFIN SCREEN v1 BEGIN frame=%u present=%llu width=120 height=260 format=RGB8 raw=93600 b64=124800 chunks=650]\n",
++	    frame, present);
++	for (uint32_t sequence = 0; sequence < REDFIN_SCREEN_CHUNKS; sequence++) {
++		char encoded[193];
++		redfin_screen_base64(rgb + sequence * REDFIN_SCREEN_CHUNK_BYTES, encoded);
++		IOLog("[REDFIN SCREEN v1 DATA frame=%u seq=%u] %s\n", frame, sequence, encoded);
++	}
++	IOLog("[REDFIN SCREEN v1 END frame=%u chunks=650 raw=93600 crc32=%08x]\n", frame, crc);
++	IOFreeData(rgb, REDFIN_SCREEN_BYTES);
++}
++
+ /* No register mappings or modem/GPU initialization in this backend. */
+ bool
+ AppleCLCD::startRedfinCopy(IOService *provider)
+@@ -317,6 +385,11 @@
+ 	if (!IOService::start(provider)) return false;
+ 	fRedfinCopyOnly = true;
+ 	fRedfinFrames = 0;
++	fRedfinCaptures = 3; /* Screen capture is independently opt-in. */
++	uint32_t capture = 0;
++	if (PE_parse_boot_argn("redfinscreen", &capture, sizeof(capture)) && capture == 1) {
++		fRedfinCaptures = 0;
++	}
+ 	fPhys = framebuffer[0]; fWidth = width; fHeight = height; fRowBytes = stride;
+ 	fLogicalW = cw; fLogicalH = ch;
+ 	fOffX = ((int32_t)(cw - width) / 2) & ~3;
+@@ -1161,6 +1234,8 @@
+ 		flipBack();
+ 	} else if (fRedfinCopyOnly) {
+ 		__asm__ volatile("dsb sy" ::: "memory");
++		/* Three attempts maximum, only on a positive CPU copy; no capture timer. */
++		if (copied > 0 && fRedfinCaptures < 3) captureRedfin(++fRedfinCaptures, fRedfinFrames + 1);
+ 		if (++fRedfinFrames <= 3 || (fRedfinFrames % 60) == 0) {
+ 			IOLog("REDFIN FB: CPU present %llu copied %llu bytes\n", fRedfinFrames, copied);
+ 		}

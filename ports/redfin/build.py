@@ -56,6 +56,11 @@ def main():
     p.add_argument('--memory-size', type=lambda x: int(x, 0))
     p.add_argument('--boot-mpidr', type=lambda x: int(x, 0), default=0)
     p.add_argument('--trace', action='store_true', help='enable verbose kernel kprintf tracing')
+    p.add_argument('--trace-syscalls', action='store_true', help='enable PID1 syscall and pathname diagnostics')
+    p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
+    p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
+    p.add_argument('--shutdown-seconds', type=int, default=0,
+        help='gracefully stop iOS after 5..300 seconds; requires --ufs-root and --return-bootloader')
     p.add_argument('--spmi-probe', action='store_true', help='read PM8150 subtype and reboot-reason spare through the SPMI observer')
     p.add_argument('--return-bootloader', action='store_true', help='arm verified PMIC/IMEM bootloader return before the watchdog reset')
     ufs = p.add_mutually_exclusive_group()
@@ -70,6 +75,18 @@ def main():
     a = p.parse_args()
     if a.ufs_rw and not a.ufs_root:
         p.error('--ufs-rw requires --ufs-root')
+    if a.display and not (a.kernel and a.apple_adt and a.splash):
+        p.error('--display requires --kernel, --apple-adt and --splash')
+    if a.display and a.stride != 4320:
+        p.error('--display requires the observed 4320-byte framebuffer stride')
+    if a.capture_screen and not a.display:
+        p.error('--capture-screen requires --display')
+    if a.trace_syscalls and not a.kernel:
+        p.error('--trace-syscalls requires --kernel')
+    if a.shutdown_seconds and not 5 <= a.shutdown_seconds <= 300:
+        p.error('--shutdown-seconds must be zero or in [5, 300]')
+    if a.shutdown_seconds and not (a.kernel and a.ufs_root and a.return_bootloader):
+        p.error('--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')
     if a.return_bootloader:
         a.spmi_probe = True
     ufs_mode = 3 if a.ufs_wake_probe or a.ufs_root_probe or a.ufs_root else 2 if a.ufs_read_probe else int(a.ufs_probe)
@@ -190,6 +207,8 @@ def main():
             tree.children.append(mkadt.node('sweet-fbcon', [
                 ('reg', mkadt.u64(fb_base, fb_size)), ('width', mkadt.u32(1080)),
                 ('height', mkadt.u32(2340)), ('stride', mkadt.u32(a.stride))]))
+            if a.display:
+                mkadt.add_linear_display(tree, fb_base, fb_size, fb_base, 1080, 2340, a.stride)
         (out / 'redfin.adt').write_bytes(adt.serialize(tree))
         command_line = ('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
             'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0')
@@ -201,6 +220,14 @@ def main():
                 'wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1')
         if a.trace:
             command_line += ' -enable_kprintf_spam'
+        if a.trace_syscalls:
+            command_line += ' redfintrace=1'
+        if a.display:
+            command_line += ' redfinfb=1 sweetfb_noconsole=1'
+        if a.capture_screen:
+            command_line += ' redfinscreen=1'
+        if a.shutdown_seconds:
+            command_line += f' redfinshutdown={a.shutdown_seconds}'
         if ufs_mode:
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:
@@ -254,6 +281,9 @@ def main():
     artifacts = ('Image', 'redfin-diag.elf', image_name, 'init')
     manifest = dict(stage='XNU/PID1 execution unverified' if payload else 'diagnostics only',
         root_writable=bool(a.ufs_rw),
+        cpu_copy_display=bool(a.display), shutdown_seconds=a.shutdown_seconds,
+        capture_screen=bool(a.capture_screen),
+        syscall_tracing=bool(a.trace_syscalls),
         splash_reservation_assumption=a.splash, stride=a.stride, seconds=a.seconds,
         linux_text_offset='0x80000', kernel_encoding='LZ4 frame + LE32 size',
         upstream=subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip(),

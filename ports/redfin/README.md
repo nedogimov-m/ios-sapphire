@@ -42,6 +42,35 @@ Subsequent diagnostic kernels include RAM logging and tracing; their hashes are
 recorded in `research/redfin-build/result.json`.
 For source preparation alone, use `prepare-xnu.py --output research/new-xnu`.
 
+The opt-in `--display --splash` build enables AppleCLCD with a CPU-copy
+backend for the observed Redfin ABL buffer: 1080×2340, 4320-byte pitch, BGRA,
+inside the live continuous-splash reservation. It requires `--apple-adt` and
+does not initialize the inherited Xiaomi display, modem or GPU controllers.
+The iOS canvas is 1125×2436; copies default to 5 Hz. Frame-copy log entries
+confirm software activity; visible panel refresh still needs observation.
+
+`--capture-screen` also requires `--display` and enables up to three 120×260 RGB
+thumbnails in the authenticated RAM log, only after a positive CPU copy. It
+does not write image files on the phone. Decode the captured log on the host:
+
+```sh
+python3 ports/redfin/decode-screen.py logs/redfin/RUN/xnu-console.txt \
+  --out logs/redfin/RUN/screens
+```
+
+The decoder verifies sequence numbers, fixed dimensions, Base64 and CRC32
+before writing PNG files. Missing or truncated records fail validation.
+
+For writable-root tests, add `--shutdown-seconds 120` together with
+`--ufs-root --return-bootloader`. A kernel thread requests ordinary process
+shutdown, sync and unmount after that interval. Watchdog feeding is bounded
+and requires confirmed PMIC/IMEM bootloader-return state. Check the persisted
+HFS volume header in recovery after each test; an abrupt reset may still leave
+a dirty journal. Repair and verify an offline snapshot before another RW boot;
+never just change the clean-unmount bit. The original watchdog-only behavior
+remains when the option is absent. PID1 pathname/syscall diagnostics now require
+`--trace-syscalls`; ordinary console and authenticated RAM logs remain enabled.
+
 Build the diagnostic stage:
 
 ```sh

@@ -1,0 +1,180 @@
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -716,6 +716,47 @@
+ static volatile uint32_t *redfin_watchdog_reset;
+ static uint64_t redfin_watchdog_deadline, redfin_watchdog_last, redfin_watchdog_frequency;
+ 
++/* REDFIN_SHUTDOWN_WATCHDOG_TEST_BEGIN: RESET only, no shutdown from console/IRQ. */
++int redfin_shutdown_watchdog_start(uint32_t seconds);
++void redfin_shutdown_watchdog_tick(unsigned final);
++int
++redfin_shutdown_watchdog_start(uint32_t seconds)
++{
++	if (seconds < 5 || seconds > 300 || !redfin_watchdog_reset ||
++	    !redfin_watchdog_frequency || redfin_watchdog_frequency >= 1000000000ULL)
++		return 0;
++	uint64_t now = __builtin_arm_rsr64("CNTPCT_EL0");
++	uint64_t duration = redfin_watchdog_frequency * seconds;
++	if (now > UINT64_MAX - duration) return 0;
++	uint64_t daif = __builtin_arm_rsr64("DAIF");
++	__builtin_arm_wsr64("DAIF", daif | 0x3c0);
++	redfin_watchdog_deadline = now + duration;
++	redfin_watchdog_last = now;
++	*redfin_watchdog_reset = 1;
++	__asm__ volatile("dsb sy" ::: "memory");
++	__builtin_arm_wsr64("DAIF", daif);
++	return 1;
++}
++
++void
++redfin_shutdown_watchdog_tick(unsigned final)
++{
++	uint64_t daif = __builtin_arm_rsr64("DAIF");
++	__builtin_arm_wsr64("DAIF", daif | 0x3c0);
++	uint64_t now = __builtin_arm_rsr64("CNTPCT_EL0");
++	if (redfin_watchdog_reset && now < redfin_watchdog_deadline &&
++	    now - redfin_watchdog_last >= redfin_watchdog_frequency) {
++		*redfin_watchdog_reset = 1;
++		redfin_watchdog_last = now;
++	}
++	/* Never feed past the cap, even if this worker was scheduled late.
++	 * Console progress cannot extend the hardware fallback during shutdown. */
++	if (final) redfin_watchdog_deadline = 0;
++	__asm__ volatile("dsb sy" ::: "memory");
++	__builtin_arm_wsr64("DAIF", daif);
++}
++/* REDFIN_SHUTDOWN_WATCHDOG_TEST_END */
++
+ void
+ redfin_log_putc(char c)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -462,6 +462,69 @@
+ 	return is_ramdisk;
+ }
+ 
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++/* REDFIN_SHUTDOWN_THREAD_TEST_BEGIN: opt-in, after root and PID1 exist. */
++extern int redfin_spmi_return_ready(void);
++extern int redfin_shutdown_watchdog_start(uint32_t seconds);
++extern void redfin_shutdown_watchdog_tick(unsigned final);
++static uint32_t redfin_shutdown_seconds;
++
++static void
++redfin_shutdown_worker(__unused void *parameter, __unused wait_result_t result)
++{
++	if (!redfin_spmi_return_ready()) {
++		printf("REDFIN SHUTDOWN: PMIC/IMEM return not verified; keeping original fallback\n");
++		(void)thread_terminate(current_thread());
++		__builtin_unreachable();
++	}
++	uint64_t duration, interval;
++	nanoseconds_to_absolutetime((uint64_t)redfin_shutdown_seconds * NSEC_PER_SEC, &duration);
++	nanoseconds_to_absolutetime(NSEC_PER_SEC, &interval);
++	uint64_t now = mach_absolute_time();
++	if (now > UINT64_MAX - duration ||
++	    !redfin_shutdown_watchdog_start(redfin_shutdown_seconds)) {
++		printf("REDFIN SHUTDOWN: watchdog proof unavailable; keeping original fallback\n");
++		(void)thread_terminate(current_thread());
++		__builtin_unreachable();
++	}
++	uint64_t deadline = now + duration;
++	printf("REDFIN SHUTDOWN: graceful reboot in %u seconds; watchdog fallback <=31s after cap\n",
++	    redfin_shutdown_seconds);
++	while ((now = mach_absolute_time()) < deadline) {
++		redfin_shutdown_watchdog_tick(0);
++		uint64_t wake = deadline - now > interval ? now + interval : deadline;
++		if (assert_wait_deadline((event_t)&redfin_shutdown_seconds, THREAD_UNINT, wake) == THREAD_WAITING)
++			thread_block(THREAD_CONTINUE_NULL);
++	}
++	redfin_shutdown_watchdog_tick(1);
++	printf("REDFIN SHUTDOWN: entering reboot_kernel(0,NULL)\n");
++	int error = reboot_kernel(0, NULL);
++	printf("REDFIN SHUTDOWN: reboot_kernel returned %d; waiting for watchdog fallback\n", error);
++	(void)thread_terminate(current_thread());
++	__builtin_unreachable();
++}
++
++static void
++redfin_shutdown_start(void)
++{
++	uint32_t seconds = 0, cpus = 0, returning = 0;
++	if (!PE_parse_boot_argn("redfinshutdown", &seconds, sizeof(seconds))) return;
++	if (seconds < 5 || seconds > 300 || initproc == PROC_NULL || rootvnode == NULLVP ||
++	    !PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
++	    !PE_parse_boot_argn("redfinreturn", &returning, sizeof(returning)) || returning != 1) {
++		printf("REDFIN SHUTDOWN: refused invalid deadline, root/PID1 or bootloader-return policy\n");
++		return;
++	}
++	redfin_shutdown_seconds = seconds;
++	thread_t thread;
++	kern_return_t status = kernel_thread_start(redfin_shutdown_worker, NULL, &thread);
++	if (status == KERN_SUCCESS) thread_deallocate(thread);
++	else printf("REDFIN SHUTDOWN: worker creation failed %d; keeping original fallback\n", status);
++}
++/* REDFIN_SHUTDOWN_THREAD_TEST_END */
++#endif
++
+ /*
+  * This function is called very early on in the Mach startup, from the
+  * function start_kernel_threads() in osfmk/kern/startup.c.  It's called
+@@ -1072,6 +1135,10 @@
+ 	machine_timeout_bsd_init();
+ #endif /* DEVELOPMENT || DEBUG */
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	redfin_shutdown_start();
++#endif
++
+ 	bsd_init_kprintf("done\n");
+ }
+ 
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -139,16 +139,26 @@
+ 
+ /*
+  * Only an explicit early UP call can arm this. No reset is issued here.
+  * Sources (Google kernel/msm 500b3a2059c1eec0fec08ec56add06320ea901a8):
+  * drivers/spmi/spmi-pmic-arb.c: pmic_arb_write_cmd, offset_v5, fmt_cmd_v2;
+  * drivers/input/misc/qpnp-power-on.c: qpnp_pon_set_restart_reason;
+  * drivers/power/reset/msm-poweroff.c: bootloader command case.
+  */
++/* REDFIN_SHUTDOWN_RETURN_TEST_BEGIN: set only after both hardware readbacks. */
++static bool redfin_spmi_return_confirmed;
++int redfin_spmi_return_ready(void);
++int
++redfin_spmi_return_ready(void)
++{
++	return redfin_spmi_return_confirmed;
++}
++/* REDFIN_SHUTDOWN_RETURN_TEST_END */
++
+ int redfin_spmi_arm_return(void);
+ int
+ redfin_spmi_arm_return(void)
+ {
+ 	static bool attempted;
+ 	uint32_t enable = 0, cpus = 0, other = 0;
+ 	(void)PE_parse_boot_argn("redfinreturn", &enable, sizeof(enable));
+ 	if (enable != 1 || attempted) return ENOTSUP;
+@@ -211,13 +221,14 @@
+ 	}
+ 	*(volatile uint32_t *)reason = 0x77665500;
+ 	__asm__ volatile("dsb sy" ::: "memory");
+ 	if (redfin_spmi_rd(reason, 0) != 0x77665500) {
+ 		error = EIO;
+ 		printf("REDFIN RETURN: IMEM readback failed; PMIC reason already armed\n");
+ 		goto out;
+ 	}
++	redfin_spmi_return_confirmed = true;
+ 	printf("REDFIN RETURN: PMIC+IMEM bootloader reason verified; reset not issued\n");
+  out:
+ 	return error;
+ }
+ #endif

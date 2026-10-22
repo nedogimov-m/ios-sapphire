@@ -4,9 +4,11 @@ Pixel 5 boots XNU 8796 and Apple's iOS 16.7.16 launchd from a journaled HFSX
 root in userdata. CPU0, IRQ/SGI, BSD, static Darwin PID1 heartbeats, bounded
 UFS read/write, Apple mount phases and FIPS checks are observed. Launchd
 passes keybag initialization and cache loading, starts system daemons, and
-backboardd makes IOKit calls. SpringBoard executes and crashes; its diagnostic
-heap scan includes `failed to find the main CADisplay`. The redfin display
-driver is still disabled, so a working graphical interface remains unfinished.
+backboardd makes IOKit calls. The opt-in CPU framebuffer publishes AppleCLCD;
+backboardd opens it, allocates an iPhone X canvas and submits swaps. The earlier
+SpringBoard `main CADisplay` trap is absent in that test. Visible GUI output
+still needs verification. Timed process shutdown leaves HFS clean; the
+recovery collector records its volume-header state automatically.
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata

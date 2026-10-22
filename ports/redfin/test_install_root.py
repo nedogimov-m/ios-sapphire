@@ -491,6 +491,44 @@ class InstallerTests(unittest.TestCase):
                 self.assertLess(calls.index('restart'), calls.index('sync'))
                 self.assertLess(calls.index('sync'), calls.index('readback'))
 
+    def test_only_uncertain_ack_requires_post_hash_sync_and_rejects_flush_failure(self):
+        primary, backup, state = self.primary, self.backup, self.state
+        cases = ((True, True, False, True), (True, True, True, True),
+                 (True, False, False, True), (False, True, True, True),
+                 (False, True, True, False))
+        for uncertain, matching, flush_failure, restart in cases:
+            calls = []
+            class Fake:
+                def state(self):
+                    return {**state, 'timer': 'stopped'}
+                def gpt(self, unused):
+                    calls.append('gpt')
+                    return primary, backup
+                def stream(self, *unused):
+                    calls.append('write')
+                    return {'ack_uncertain': uncertain}
+                def restart_server(self):
+                    calls.append('restart')
+                def sync(self):
+                    calls.append('sync')
+                    if flush_failure and 'readback' in calls:
+                        raise ValueError('post-readback sync failed')
+                def readback(self):
+                    calls.append('readback')
+                    return ('a' if matching else 'b')*64
+            with self.subTest(case=(uncertain, matching, flush_failure, restart)), \
+                    tempfile.TemporaryDirectory() as directory:
+                code, report, unused = self.run_fixture(Path(directory), erase=True, fake=Fake(), restart=restart)
+            succeeds = matching and not (uncertain and flush_failure)
+            self.assertEqual(code, 0 if succeeds else 1)
+            self.assertEqual(report['post_readback_sync_completed'], uncertain and succeeds)
+            expected_syncs = int(restart) + int(uncertain and matching)
+            self.assertEqual(calls.count('sync'), expected_syncs)
+            if uncertain and matching:
+                self.assertGreater(len(calls)-1-calls[::-1].index('sync'), calls.index('readback'))
+            if not succeeds:
+                self.assertFalse(report['success'])
+
     def test_optional_eof_recovery_requires_all_source_bytes_and_exact_source_hash(self):
         data = b'valid complete source'
         class Process:

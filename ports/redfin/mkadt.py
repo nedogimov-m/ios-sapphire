@@ -25,6 +25,9 @@ GICD, GICD_SIZE = 0x17A00000, 0x10000
 GICR, GICR_SIZE = 0x17A60000, 0x100000
 TIMEBASE = 19200000
 VTIMER_INTID = 19
+DISPLAY_BASE, DISPLAY_BYTES = 0xA0000000, 0x02300000
+DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_STRIDE = 1080, 2340, 4320
+DISPLAY_CANVAS_WIDTH, DISPLAY_CANVAS_HEIGHT = 1125, 2436
 
 
 def u32(*values):
@@ -84,6 +87,33 @@ def apple_userspace_identity(root, blob):
         ('certificate-security-mode', u32(1)), ('effective-security-mode-sep', u32(1))])
     chosen.children.append(node('asmb', [
         ('AAPL,phandle', u32(0x101)), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))]))
+    return root
+
+
+def add_linear_display(root, reservation_base, reservation_bytes, framebuffer_base,
+                       width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, stride=DISPLAY_STRIDE):
+    """Add the observed Redfin ABL buffer; display.patch also requires redfinfb=1.
+
+    Addresses are absolute properties, avoiding arm-io's SOC_BASE translation.
+    Only the geometry demonstrated by REDFIN DIAGNOSTICS is accepted; this does
+    not establish command-mode refresh or hardware-vsync support.
+    """
+    values = reservation_base, reservation_bytes, framebuffer_base, width, height, stride
+    expected = DISPLAY_BASE, DISPLAY_BYTES, DISPLAY_BASE, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_STRIDE
+    if any(type(value) is not int for value in values) or values != expected:
+        raise ValueError('unverified Redfin splash framebuffer contract')
+    arm_io = next(child for child in root.children if child.name == 'arm-io')
+    if any(child.name == 'disp0' for child in arm_io.children):
+        raise ValueError('display already present')
+    arm_io.children.append(node('disp0', [
+        ('AAPL,phandle', u32(0x102)),
+        ('device_type', cstr('display-subsystem')), ('compatible', cstr('sweet,display')),
+        ('redfin,abl-copy-only', u32(1)),
+        ('redfin,framebuffer', u64(framebuffer_base, reservation_bytes)),
+        ('width', u32(width)), ('height', u32(height)), ('stride', u32(stride)),
+        ('pixel-format', cstr('BGRA')),
+        ('canvas-width', u32(DISPLAY_CANVAS_WIDTH)), ('canvas-height', u32(DISPLAY_CANVAS_HEIGHT)),
+    ]))
     return root
 
 

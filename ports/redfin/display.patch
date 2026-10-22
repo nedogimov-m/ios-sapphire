@@ -1,0 +1,194 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -79,6 +79,7 @@
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOUserClient.h>
+ #include <libkern/c++/OSCollectionIterator.h>
++#include <libkern/c++/OSData.h>
+ #include <kern/thread_call.h>
+ #include <IOKit/IOKitKeys.h>
+ #include <IOKit/IOLib.h>
+@@ -123,6 +124,35 @@
+ #define SWEET_FB_LOGICAL_H              2436
+ #define SWEET_FB_FORMAT_BGRA            0x42475241
+ 
++
++/* REDFIN_FB_TEST_BEGIN: observed Pixel 5 splash contract, absolute addresses. */
++static bool
++redfin_fb_geometry(uint64_t physical, uint64_t reserved, uint32_t width,
++    uint32_t height, uint32_t stride, uint32_t canvas_width, uint32_t canvas_height)
++{
++	/* HARDWARE.md: REDFIN DIAGNOSTICS demonstrated this buffer on the unit.
++	 * The extent is the live FDT cont_splash_region, outside XNU's RAM bank.
++	 * Do not turn a display property into an arbitrary physical mapping.
++	 */
++	if (physical != 0xa0000000ULL || reserved != 0x02300000ULL ||
++	    width != 1080 || height != 2340 || stride != 4320 ||
++	    canvas_width != 1125 || canvas_height != 2436) return false;
++	uint64_t bytes = (uint64_t)stride * height;
++	uint64_t mapped = (bytes + 0x3fffULL) & ~0x3fffULL;
++	return bytes <= 0xffffc000ULL && mapped <= reserved &&
++	    !(physical & 0x3fffULL) && physical <= UINT64_MAX - mapped;
++}
++/* REDFIN_FB_TEST_END */
++
++static bool
++redfin_fb_data(IOService *provider, const char *key, void *value, unsigned bytes)
++{
++	OSData *data = OSDynamicCast(OSData, provider->getProperty(key));
++	if (data == NULL || data->getLength() != bytes) return false;
++	memcpy(value, data->getBytesNoCopy(), bytes);
++	return true;
++}
++
+ class IOMobileFramebuffer : public IOService {
+ 	OSDeclareDefaultStructors(IOMobileFramebuffer);
+ };
+@@ -154,6 +184,9 @@
+ 	bool          fConsolePaused;
+ 	uint8_t       fPending[SWEET_FB_SWAP_REC_SIZE];     /* latest swap, not yet shown */
+ 	bool          fDirty;
++	bool          fRedfinCopyOnly;
++	uint64_t      fRedfinFrames;
++	bool          startRedfinCopy(IOService *provider);
+ 	/* topaz direct MDP scanout (VIG0 / CTL0 from TopazGpuW disp.c) */
+ 	volatile uint32_t *fVig0;
+ 	volatile uint32_t *fCtl0;
+@@ -260,10 +293,101 @@
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++/* No register mappings or modem/GPU initialization in this backend. */
++bool
++AppleCLCD::startRedfinCopy(IOService *provider)
++{
++	uint32_t marker = 0, width = 0, height = 0, stride = 0, cw = 0, ch = 0;
++	uint64_t framebuffer[2] = {};
++	char format[5] = {};
++	if (provider == NULL ||
++	    !redfin_fb_data(provider, "redfin,abl-copy-only", &marker, sizeof(marker)) || marker != 1 ||
++	    !redfin_fb_data(provider, "redfin,framebuffer", framebuffer, sizeof(framebuffer)) ||
++	    !redfin_fb_data(provider, "width", &width, sizeof(width)) ||
++	    !redfin_fb_data(provider, "height", &height, sizeof(height)) ||
++	    !redfin_fb_data(provider, "stride", &stride, sizeof(stride)) ||
++	    !redfin_fb_data(provider, "canvas-width", &cw, sizeof(cw)) ||
++	    !redfin_fb_data(provider, "canvas-height", &ch, sizeof(ch)) ||
++	    !redfin_fb_data(provider, "pixel-format", format, sizeof(format)) ||
++	    memcmp(format, "BGRA", sizeof(format)) ||
++	    !redfin_fb_geometry(framebuffer[0], framebuffer[1], width, height, stride, cw, ch)) {
++		IOLog("REDFIN FB: rejected missing or unverified linear display contract\n");
++		return false;
++	}
++	if (!IOService::start(provider)) return false;
++	fRedfinCopyOnly = true;
++	fRedfinFrames = 0;
++	fPhys = framebuffer[0]; fWidth = width; fHeight = height; fRowBytes = stride;
++	fLogicalW = cw; fLogicalH = ch;
++	fOffX = ((int32_t)(cw - width) / 2) & ~3;
++	fOffY = (int32_t)(ch - height) / 2;
++	fVig0 = fCtl0 = fIntf1 = NULL;
++	fDsi = NULL; fDsiBuf = NULL; fDsiBufPhys = 0;
++	fBlLock = NULL; fBlCall = NULL; fBlLevel = fBlSent = 0;
++	fFlip[0] = fFlip[1] = NULL; fFlipPhys[0] = fFlipPhys[1] = 0; fFlipIdx = 0;
++	fFadeOrig = NULL; fCons = NULL; fConsPhys = 0; fConsShown = false;
++	fLastVA = NULL; fLastStride = 0; fLastSurf = NULL;
++	fScanPhys = 0; fScanStride = fBootSrc = fBootStride = fIntfFrames = 0;
++	fPowerOff = false; fFadeStep = 0; fVsyncCount = fSwapID = 0;
++	fDirty = false; fConsolePaused = false; fMap = NULL;
++	fSurface = NULL; fPixels = 0; fVsync = NULL;
++	bzero(fPending, sizeof(fPending));
++	bzero(fPendHold, sizeof(fPendHold)); bzero(fShowHold, sizeof(fShowHold));
++	bzero(fRetireHold, sizeof(fRetireHold));
++	fLock = IOLockAlloc();
++	fClients = OSArray::withCapacity(4);
++	fWorkLoop = IOWorkLoop::workLoop();
++	if (fLock == NULL || fClients == NULL || fWorkLoop == NULL) {
++		OSSafeReleaseNULL(fClients); OSSafeReleaseNULL(fWorkLoop);
++		if (fLock != NULL) { IOLockFree(fLock); fLock = NULL; }
++		return false;
++	}
++	fVsync = IOTimerEventSource::timerEventSource(this, &AppleCLCD::vsyncFired);
++	if (fVsync == NULL || fWorkLoop->addEventSource(fVsync) != kIOReturnSuccess) {
++		OSSafeReleaseNULL(fVsync); OSSafeReleaseNULL(fWorkLoop); OSSafeReleaseNULL(fClients);
++		IOLockFree(fLock); fLock = NULL;
++		return false;
++	}
++	fSurface = sweet_surface_create_physical(fPhys, width, height, stride, SWEET_FB_FORMAT_BGRA);
++	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
++	if (fPixels == 0) {
++		fWorkLoop->removeEventSource(fVsync);
++		OSSafeReleaseNULL(fVsync); OSSafeReleaseNULL(fWorkLoop); OSSafeReleaseNULL(fClients);
++		OSSafeReleaseNULL(fSurface);
++		IOLockFree(fLock); fLock = NULL;
++		return false;
++	}
++	/* This is a software notification clock, not measured hardware vblank. */
++	uint32_t hz = 5;
++	(void)PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
++	if (hz < 1 || hz > 10) hz = 5;
++	fFlushTicks = 60 / hz;
++	fVsync->setTimeoutUS(SWEET_FB_VSYNC_US);
++	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
++	setProperty("external", false);
++	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
++	setProperty("redfin-copy-only", true);
++	/* No Metal plug-in or register access; avoid QuartzCore's 30 s poll. */
++	IOAcceleratorES *accel = OSTypeAlloc(IOAcceleratorES);
++	if (accel != NULL && accel->init()) {
++		accel->setName("sgx");
++		if (accel->attach(this)) accel->registerService();
++	}
++	OSSafeReleaseNULL(accel);
++	registerService();
++	IOLog("REDFIN FB: AppleCLCD CPU-copy %ux%u stride %u at %#llx, canvas %ux%u, %u Hz copies\n",
++	    width, height, stride, fPhys, cw, ch, hz);
++	return true;
++}
++
+ bool
+ AppleCLCD::start(IOService *provider)
+ {
+-	/* REDFIN: display, modem and GPU drivers require separate board ports. */
++	uint32_t redfin = 0;
++	if (PE_parse_boot_argn("redfinfb", &redfin, sizeof(redfin)) && redfin == 1) {
++		return startRedfinCopy(provider);
++	}
++	/* Redfin display stays disabled without both explicit gates. */
+ 	return false;
+ 	PE_Video video;
+ 
+@@ -484,6 +608,7 @@
+ 				}
+ 			}
+ 		}
++		if (fb->fRedfinCopyOnly) __asm__ volatile("dsb sy" ::: "memory");
+ 		sender->setTimeoutUS(SWEET_FB_VSYNC_US);
+ 		return;
+ 	}
+@@ -908,6 +1033,7 @@
+ void
+ AppleCLCD::present(const uint8_t *rec)
+ {
++	uint64_t copied = 0;
+ 	uint32_t mask = get32(rec, 0x104);
+ 	static int console_only = -1;
+ 
+@@ -1027,11 +1153,17 @@
+ 				    (const void *)(src + s->offset + (uint64_t)(sy + y) * s->bytesPerRow + (uint64_t)sx * 4),
+ 				    (size_t)w * 4);
+ 			}
++			copied += (uint64_t)w * (uint64_t)h * 4;
+ 		}
+ 		s->release();
+ 	}
+ 	if (fFlip[0] != NULL) {
+ 		flipBack();
++	} else if (fRedfinCopyOnly) {
++		__asm__ volatile("dsb sy" ::: "memory");
++		if (++fRedfinFrames <= 3 || (fRedfinFrames % 60) == 0) {
++			IOLog("REDFIN FB: CPU present %llu copied %llu bytes\n", fRedfinFrames, copied);
++		}
+ 	}
+ }
+ 

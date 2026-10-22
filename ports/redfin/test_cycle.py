@@ -190,6 +190,14 @@ def raw_ring(console=RAMLOG):
     return bytes(raw)
 
 
+def hfs_first_block(attributes=(1 << 13) | (1 << 8), blocks=4194304):
+    data = bytearray(4096)
+    struct.pack_into(">HHI", data, 1024, 0x4858, 5, attributes)
+    struct.pack_into(">II", data, 1024 + 40, 4096, blocks)
+    struct.pack_into(">I", data, 1024 + 68, 161970)
+    return bytes(data)
+
+
 def public_metadata():
     data = bytearray(4096)
     struct.pack_into("<5I", data, 0, 0x4b6c6243, 0, 0x794b6250, 0x13, 524)
@@ -205,6 +213,7 @@ class FakeDevice:
         self.product, self.uid = b"redfin", b"0"
         self.timer_running, self.return_fastboot, self.booted = True, True, False
         self.marker, self.stop_works = b"1", True
+        self.rootfs_data, self.rootfs_code = hfs_first_block(), 0
         self.polls = 0
         self.mounts = b"rootfs / rootfs rw 0 0\nnone /sys/fs/pstore pstore rw 0 0\n"
 
@@ -261,6 +270,10 @@ class FakeDevice:
             if self.state != "recovery" or self.timer_running:
                 raise AssertionError("raw recovery read before verified recovery/timer stop")
             return 0, raw_ring(), b""
+        if command == ("exec-out", "dd", "if=/dev/block/sda19", "bs=4096", "count=1", "status=none"):
+            if self.state != "recovery" or self.timer_running:
+                raise AssertionError("rootfs read before verified recovery/timer stop")
+            return self.rootfs_code, self.rootfs_data, b""
         if command == ("exec-out", "ls", "-1", "/sys/fs/pstore"):
             return 0, b"" if self.state == "recovery" else b"console-ramoops-0\n", b""
         if command[:3] == ("exec-out", "head", "-c"):
@@ -331,6 +344,55 @@ class CycleStateTests(unittest.TestCase):
         self.assertFalse(any("/dev/access-ramoops" in command for _, command in device.calls))
         self.assertEqual(sum(tool == "fastboot" and command[0] == "boot" for tool, command in device.calls), 1)
         self.assertEqual(runner.manifest["log_freshness"]["status"], "baseline-compared")
+
+    def test_ufs_root_header_is_observed_privately_in_existing_recovery_cycle(self):
+        self.proof["root_device"] = "ufsroot0"
+        self.write_proof()
+        status, runner, device = self.run_cycle(leave=True)
+        self.assertEqual(status, 0)
+        self.assertEqual(runner.manifest["rootfs"], {"status": "observed", "signature": "HFSX", "version": 5,
+            "journaled": True, "clean_unmounted": True, "inconsistent": False,
+            "block_bytes": 4096, "total_bytes": 16 * 1024**3, "write_count": 161970})
+        path = self.base / "logs/after/rootfs-first-block.raw"
+        self.assertEqual(path.read_bytes(), device.rootfs_data)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        commands = [command for _, command in device.calls]
+        read = ("exec-out", "dd", "if=/dev/block/sda19", "bs=4096", "count=1", "status=none")
+        self.assertLess(commands.index(("exec-out", "setprop", "ctl.stop", "recovery-return")), commands.index(read))
+        self.assertLess(commands.index(read), commands.index(("reboot", "bootloader")))
+
+    def test_static_md0_build_never_reads_userdata_header(self):
+        self.proof["root_device"] = "md0"
+        self.write_proof()
+        status, runner, device = self.run_cycle()
+        self.assertEqual(status, 0)
+        self.assertNotIn("rootfs", runner.manifest)
+        self.assertFalse(any("if=/dev/block/sda19" in command for _, command in device.calls))
+
+    def test_dirty_or_failed_rootfs_observations_never_interrupt_log_capture(self):
+        self.proof["root_device"] = "ufsroot0"
+        self.write_proof()
+        cases = [(hfs_first_block(1 << 13), 0, "observed"),
+                 (hfs_first_block((1 << 13) | (1 << 11)), 0, "observed"),
+                 (hfs_first_block(blocks=100), 0, "invalid"), (bytes(4096), 0, "invalid"),
+                 (b"short", 0, "invalid"), (b"denied", 1, "read-failed")]
+        original_base = self.base
+        for index, (data, code, expected) in enumerate(cases):
+            with self.subTest(index=index):
+                self.base = original_base / ("case-" + str(index))
+                self.base.mkdir()
+                self.image, self.recovery = self.base / "xnu.img", self.base / "recovery.img"
+                self.image.write_bytes(b"XNU")
+                self.recovery.write_bytes(b"RECOVERY")
+                self.write_proof()
+                device = FakeDevice(FakeClock(), fastboot=True)
+                device.rootfs_data, device.rootfs_code = data, code
+                status, runner, _ = self.run_cycle(device=device)
+                self.assertEqual(status, 0)
+                self.assertEqual(runner.manifest["rootfs"]["status"], expected)
+                self.assertTrue(runner.manifest["userspace"]["pid1_alive"])
+                if expected == "observed":
+                    self.assertFalse(runner.manifest["rootfs"]["clean_unmounted"])
 
     def test_collect_only_can_enter_recovery_directly_from_fastboot(self):
         status, _, device = self.run_cycle(collect_only=True)

@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import struct
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -81,6 +82,75 @@ class RedfinADTTests(unittest.TestCase):
         root, _ = mkadt.adt.parse(mkpayload.add_ramdisk_to_adt(blob, self.BASE + 0x4000, 0x8000))
         ramdisk = child(child(root, 'chosen'), 'memory-map').prop('RAMDisk')
         self.assertEqual(struct.unpack('<2Q', ramdisk), (self.BASE + 0x4000, 0x8000))
+
+    def test_explicit_display_contract_is_absolute_and_serializable(self):
+        root = mkadt.build(self.BASE, self.SIZE, seed=bytes(64))
+        original_gic = mkadt.adt.serialize(child(child(root, 'arm-io'), 'gic'))
+        mkadt.add_linear_display(root, 0xa0000000, 0x02300000, 0xa0000000)
+        blob = mkadt.adt.serialize(root)
+        root, end = mkadt.adt.parse(blob)
+        self.assertEqual(end, len(blob))
+        display = child(child(root, 'arm-io'), 'disp0')
+        self.assertEqual(display.prop('device_type'), b'display-subsystem\0')
+        self.assertEqual(display.prop('compatible'), b'sweet,display\0')
+        self.assertEqual(display.prop('redfin,abl-copy-only'), mkadt.u32(1))
+        self.assertEqual(display.prop('redfin,framebuffer'), mkadt.u64(0xa0000000, 0x02300000))
+        self.assertIsNone(display.prop('reg'))
+        self.assertEqual(display.prop('pixel-format'), b'BGRA\0')
+        for key, expected in (('width', 1080), ('height', 2340), ('stride', 4320),
+                              ('canvas-width', 1125), ('canvas-height', 2436)):
+            self.assertEqual(display.prop(key), mkadt.u32(expected))
+        self.assertEqual(mkadt.adt.serialize(child(child(root, 'arm-io'), 'gic')), original_gic)
+        with self.assertRaises(ValueError):
+            mkadt.add_linear_display(root, 0xa0000000, 0x02300000, 0xa0000000)
+
+    def test_display_rejects_unobserved_geometry_before_mutating_tree(self):
+        good = [0xa0000000, 0x02300000, 0xa0000000, 1080, 2340, 4320]
+        for index in range(len(good)):
+            for bad in (-1, 0, True, good[index] + 1, 1 << 64):
+                values = good.copy()
+                values[index] = bad
+                root = mkadt.build(self.BASE, self.SIZE, seed=bytes(64))
+                before = mkadt.adt.serialize(root)
+                with self.subTest(index=index, bad=bad), self.assertRaises(ValueError):
+                    mkadt.add_linear_display(root, *values)
+                self.assertEqual(mkadt.adt.serialize(root), before)
+
+    def test_display_driver_guard_accepts_serialized_contract_only(self):
+        compiler = shutil.which('cc')
+        if compiler is None:
+            self.skipTest('host compiler unavailable')
+        patch = Path(__file__).with_name('display.patch').read_text()
+        added = '\n'.join(line[1:] for line in patch.splitlines()
+                          if line.startswith('+') and not line.startswith('+++'))
+        guard = added.split('/* REDFIN_FB_TEST_BEGIN:', 1)[1].split('/* REDFIN_FB_TEST_END */', 1)[0]
+        guard = guard.split('*/', 1)[1]
+        root = mkadt.add_linear_display(mkadt.build(self.BASE, self.SIZE, seed=bytes(64)),
+                                       0xa0000000, 0x02300000, 0xa0000000)
+        root, _ = mkadt.adt.parse(mkadt.adt.serialize(root))
+        display = child(child(root, 'arm-io'), 'disp0')
+        values = list(struct.unpack('<2Q', display.prop('redfin,framebuffer')))
+        values += [int.from_bytes(display.prop(key), 'little') for key in
+                   ('width', 'height', 'stride', 'canvas-width', 'canvas-height')]
+        source = '#include <stdint.h>\n#include <stdbool.h>\n#include <stdlib.h>\n' + guard
+        source += '''\nint main(int argc, char **argv) {
+    if (argc != 8) return 2;
+    return !redfin_fb_geometry(strtoull(argv[1], 0, 0), strtoull(argv[2], 0, 0),
+        (uint32_t)strtoull(argv[3], 0, 0), (uint32_t)strtoull(argv[4], 0, 0),
+        (uint32_t)strtoull(argv[5], 0, 0), (uint32_t)strtoull(argv[6], 0, 0),
+        (uint32_t)strtoull(argv[7], 0, 0));
+}\n'''
+        with tempfile.TemporaryDirectory() as temporary:
+            path, executable = Path(temporary) / 'guard.c', Path(temporary) / 'guard'
+            path.write_text(source)
+            subprocess.run([compiler, '-std=c11', '-Wall', '-Wextra', '-Werror',
+                            '-fsanitize=undefined', str(path), '-o', str(executable)], check=True)
+            self.assertEqual(subprocess.run([str(executable), *map(str, values)]).returncode, 0)
+            for index in range(len(values)):
+                for bad in (0, values[index] + 1):
+                    invalid = values.copy()
+                    invalid[index] = bad
+                    self.assertEqual(subprocess.run([str(executable), *map(str, invalid)]).returncode, 1)
 
     def test_reject_invalid_ranges_and_topology(self):
         invalid = [(0, self.SIZE), (self.BASE, 0), (-0x4000, self.SIZE),

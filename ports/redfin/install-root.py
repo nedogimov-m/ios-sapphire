@@ -484,7 +484,8 @@ def main(argv=None):
     report = {'success': False, 'mode': 'erase-userdata' if args.erase_userdata else 'check-only',
               'disk_write_started': False, 'timer_stopped': False,
               'adb_server_restart_attempted': False, 'adb_server_restarted': False,
-              'usb_reset_performed': False, 'write_ack_uncertain': None, 'device_sync_completed': False}
+              'usb_reset_performed': False, 'write_ack_uncertain': None, 'device_sync_completed': False,
+              'post_readback_sync_completed': False}
     created = False
     try:
         require(not args.out.exists(), 'choose a fresh --out directory')
@@ -553,6 +554,9 @@ def main(argv=None):
                 atomic(args.out/'check.json', report)
             report['readback_sha256'] = adb.readback()
             require(report['readback_sha256'] == image['sha256'], 'full userdata readback SHA256 mismatch')
+            if report['write_ack_uncertain']:
+                adb.sync()
+                report['post_readback_sync_completed'] = True
         report['success'] = True
     except (OSError, ValueError, KeyError, IndexError, UnicodeError, subprocess.SubprocessError) as error:
         report['error'] = str(error)

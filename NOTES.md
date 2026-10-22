@@ -1,5 +1,81 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CPU-copy display and graceful shutdown test — 2026-10-22
+
+User requested continuing after the launchd/backboardd milestone. Added a
+separate display overlay: AppleCLCD publishes the observed ABL framebuffer
+only with redfinfb=1 and exact Redfin ADT contract. Absolute0xa0000000,
+reservation0x02300000,1080x2340/stride4320/BGRA; canvas1125x2436. CPU-copy at
+5Hz by default, no inherited modem/GPU/MDP/DSI operations. Command-mode scanout
+refresh remains to be observed; registration/frame-copy logs alone do not
+prove that the panel displayed a frame.
+
+New opt-in redfinshutdown=5..300 starts a sleepable BSD kernel worker after
+root/PID1 setup. Only confirmed PMIC+IMEM return readbacks allow it to extend
+watchdog feeds. At its deadline console feeds stop and reboot_kernel(0,NULL)
+performs ordinary process shutdown/sync/unmount. Hardware bite remains the
+bounded fallback. Initial actual compile rejected MACH-private
+thread_terminate_self; supported thread_terminate(current_thread()) fixed it.
+Old PID1 NAMEI/OPEN/syscall diagnostics are now gated by redfintrace=1.
+Default is off; kprintf and persistent RAM logging stay available.
+
+Preserved the exact post-keybag16GiB root snapshot privately and independently
+verified stream/host/device SHA256 aedcf2a94c33c437f357fd43dbb12a3084d486b48e32926abf8e909dd833d3d6.
+Native fsck_hfs repaired an APFS clone, then fsck -fn passed. Only two4KiB
+blocks differed (offsets0 and532480). Uploaded both via verified RAM files,
+fsynced and read back. Full repaired device SHA256 now
+086dd9fbcfadbc783a214e1d2ae72cfbeef59685cf8d91d17c57947f0adf2570;
+exact primary/tail GPT and original Android metadata still match. No manual
+clean-bit modification. Snapshot/plan/logs under ignored
+research/ipsw-redfin/root-snapshot-redfin-20261022/.
+
+Actual kernel build research/redfin-build/build-20261022-085809.log passed;
+kernel SHA2569ffdda233da9599f26a42c154d00c4a8083d19ee4a39d7ade9933bd037d9c298.
+184 host tests, compiled C watchdog/scheduler/geometry harnesses and actual
+ARM64 C++ compilation passed; independent display/shutdown review done.
+Boot image ports/redfin/out/ios-display-v1/redfin-xnu.img SHA256
+4c1d4421a2de347d56dd5ae324ea936c3aaa46191d26a5134a03affa09682885.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinfb=1 sweetfb_noconsole=1 redfinshutdown=120 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Temporary hardware test and authenticated recovery collector are running at
+logs/redfin/ios-display-v1/, timeout300 and verified bootloader return.
+No boot/GPT/modem/persist/EFS writes; Android must not boot on this iOS root.
+
+Displayv1 hardware result authenticated: AppleCLCD published1080x2340, backboardd
+opened it, created BGRA IOSurface id2 1125x2436/stride4608 and submitted a full
+1132B swap. SpringBoard executed once; previous SIGTRAP/CADisplay failure is
+absent. This proves display publication/user-client activity, not visible UI.
+PMRD restart messages and automatic recovery return were captured. A fresh
+recovery reads HFS attrs0x80002100, clean=true/inconsistent=false/journaled=true,
+write_count354496: graceful shutdown preserved a clean filesystem.
+
+Missing final presentation/shutdown messages exposed a real logging bug:
+serial_console.c _cnputs returns on sweet_console_muted before reaching the
+Redfin RAM backend. A follow-on muted-log.patch now preserves those bytes
+directly in RAM while pixels stay muted; panic output keeps its original path.
+Three compiled C tests cover diagnostic/screen record bytes, embeddedNUL and
+empty lengths. Collector now automatically observes the HFS primary header
+only for matching ufsroot0 images in verified recovery; dirty headers are
+reported without calling them healthy or interrupting log recovery.
+
+Opt-in redfinscreen=1 now captures at most three120x260 RGB thumbnails after
+positive CPU copies, into RAM only. Each capture is93600 raw bytes,124800 Base64
+bytes. Peer review caught the real IOLog256B buffer limit before any capture
+test: final payload chunks are144 raw/192 Base64 bytes,650 records, max233B
+including newline. All three captures occupy <512KiB including framing.
+Strict host decoder checks geometry, ordered records, fixed lengths and CRC32
+before writing PNGs under ignored logs/. Captures are disabled by default.
+197 host tests, actual ARM64 build and independent peer review pass.
+Latest kernel build research/redfin-build/build-20261022-091542.log SHA256
+b92e5c509cd25ccd0a9a849a695b7a75e6915828562ac6d7a4a3c9c53cf50261.
+Current image ports/redfin/out/ios-display-capture-v2/redfin-xnu.img SHA256
+430f25f312ebfb6b79d6a86860807ca56f34400ce658e0d27959fa1196afa58a.
+Exact args equal displayv1 above plus `redfinscreen=1` immediately before
+redfinshutdown=120. Fresh clean HFS, full primary/tail GPT captures and Android
+metadata SHA were checked again before boot. Automatic test/capture running
+under logs/redfin/ios-display-capture-v2/, timeout300, leave-bootloader.
+Uncertain-ACK installer recovery additionally requires sync after the matching
+full readback SHA; failed final flush cannot report success (25 focused tests).
+
 ## REDFIN corrected keybag root verified; automatic boot — 2026-10-22
 
 The corrected16GiB root transfer lost its ADB acknowledgement and failed the
