@@ -27,6 +27,14 @@ establishes firmware entry, architectural capability and mailbox visibility.
 It does not prove secondary XNU startup, coherency under SMP load, IRQs,
 cross-IPIs, timers or scheduling.
 
+V2 on 2026-10-23 establishes CPU6 entry and 16K support in an authenticated,
+image-matched capture (`logs/redfin/cpu-cap-v2/`): PSCI1.1 CPU_ON returns0;
+MIDR0x51ff804e, MPIDR0x81000600, MMFR0x101122, CurrentEL4 (EL1),
+TGran16=1. CPU6 parks outside XNU. Kernel SHA256
+`e2770bcc5077056f357d00630c7df6e7c40209b0ce04912138bfb8462418b4f4`,
+local build `build-20261023-002659.log`, code commit `5f34df2`.
+PID1 heartbeats and automatic recovery/fastboot return succeed without panic.
+
 ## Before enabling XNU SMP
 
 The current ADT, loader and SweetCPU restrict the profile to one CPU.

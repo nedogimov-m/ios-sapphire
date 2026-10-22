@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CPU6 V2: PSCI entry and 16K capability confirmed — 2026-10-23
+
+Commit `5f34df2` fixes the mailbox alignment. Kernel local ARM64 build
+`research/redfin-build/build-20261023-002659.log`, SHA256
+`e2770bcc5077056f357d00630c7df6e7c40209b0ce04912138bfb8462418b4f4`.
+Image `ports/redfin/out/cpu-cap-v2/redfin-xnu.img`, SHA256
+`bf7521057ce2c70b7d3d1645fb630d0ba412622b1435a695edaa6246d4254581`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfincpu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x2c53796a7d06bae3`.
+Authenticated, image-matched `logs/redfin/cpu-cap-v2/`: return armed first;
+PSCI1.1 reports CPU6 OFF, CPU_ON64 returns0, mailbox publishes
+MIDR0x51ff804e, MPIDR0x81000600, MMFR0x101122, CurrentEL4 (EL1),
+SCTLR0x30500800, CTR0x9444c004. TGran16=1, valid1, probe result0.
+CPU6 remains parked outside XNU with exceptions/MMU/caches off until reset.
+This proves firmware entry and architectural16K support, not SMP scheduling.
+md0 PID1 alive/11 heartbeats, no panic; recovery authenticated, metadata
+primed and fastboot return verified. Phone left in fastboot; no Android boot.
+Next: test shared early-return helper behind existing UP return, then the
+same helper in shim before kernel/topology validation. Only after that
+permit isolated md0 CPU0+CPU6 XNU startup with synchronized logging and
+cross-IPI/timer/progress proof. GPU power remains gated on ARC vote ownership.
+
 ## REDFIN CPU6 V1 refused misaligned mailbox; V2 kernel ready — 2026-10-23
 
 Commit `eace595` records the guarded capability probe. V1 image SHA256
