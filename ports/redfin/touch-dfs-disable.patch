@@ -1,0 +1,18 @@
+diff --git a/bsd/dev/redfin_touch_setup.c b/bsd/dev/redfin_touch_setup.c
+--- a/bsd/dev/redfin_touch_setup.c
++++ b/bsd/dev/redfin_touch_setup.c
+@@ -137,6 +137,14 @@
+ {
+ 	/* Own idle host only: disable the generated serial clock before rate switching. */
+ 	redfin_setup_update(s->se,0x48,1,0);
++	/* V6: SE DFS_IF301 remained enabled after GCC DFS20 was disabled.
++	 * Coreboot abf9c3b6 qupv3_config.c:52 clears SE DFS_IF bit0 before
++	 * clock configuration. Disable the request interface before GCC DFS.
++	 * Retain all other fields; failed/unknown readback stops before pads/reset. */
++	uint32_t se_dfs=redfin_setup_rd(s->se,0x80);
++	if (se_dfs==0xffffffffu) return EIO;
++	if (se_dfs&1u) redfin_setup_wr(s->se,0x80,se_dfs&~1u);
++	if (redfin_setup_rd(s->se,0x80)!=(se_dfs&~1u)) return EIO;
+ 	redfin_setup_update(s->gcc,0x17024,1,0); /* Disable DFS, preserve other fields. */
+ 	if (redfin_setup_rd(s->gcc,0x17024) & 1) return EIO;
+ 	redfin_setup_update(s->gcc,0x17014,0x10371f,1); /* XO source0, HID1, integer, SW control. */

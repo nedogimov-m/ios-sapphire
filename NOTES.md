@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V7: TX now completes, RX notification falsely rejected — 2026-10-22
+
+Commit070f6ad records V6 DFS mismatch and the private base-firmware inventory.
+Minimal DFS correction clears only SE80 bit0 when set, after MCLK-off and
+before existing GCC DFS-off/XO setup. It preserves all other fields and
+requires exact readback; all-ones/mismatch stops before GCC/GPIO/reset/ID.
+Five actual-C tests/independent review PASS;57 combined touch tests PASS;
+full suite457 PASS (logs/redfin/peripherals-host-tests-v15.txt).
+Local ARM64 build research/redfin-build/build-20261022-190306.log passed;
+kernel 4dc7fe054712eac2ae5225a7d35f56c31a6274d75c7d6fb022b353b546a7bd6e.
+Image ports/redfin/out/touch-id-v7/redfin-xnu.img SHA256
+d8d33104d3563521d001e2095e1922e190e04216f7ebfc2fc440cd6c6debc6b2.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xbd1f9325ac0f615d`.
+Authenticated/image-matched logs/redfin/touch-id-v7/ reached PID1, no panic,
+metadata primed and verified fastboot. SE DFS300/GCCDFS20 now both disabled.
+First TX completed; failing opcode is RX10000000/length10 with STATUS41 and
+M_IRQ80 (bit7 M_RX_IRQ), not the former TX timeout. Our blanket unknown-bit
+guard returns EIO5. Cancel now completes: STATUS0, IRQ4000080, RXFIFOc0000003.
+Pinned qcom-geni-se.h names RX notification bit7; spi-geni-qcom.c ISR handles
+FIFO WM/LAST and DONE/CANCEL/ABORT, then acknowledges raw M_IRQ, without
+treating bit7 as fatal. Next: narrowly accept/ack that notification while
+preserving the programmed interrupt mask, real-fault/unknown-bit refusal,
+FIFO bounds/checksum/ID checks; then repeat ID-only RAM boot. ID unproved.
+
 ## REDFIN V6 proves GENI/GCC DFS mismatch; firmware assets inventoried — 2026-10-22
 
 Commit20bd079 records V5 clocks/pads, RO USB contexts and bounded liblp parser.

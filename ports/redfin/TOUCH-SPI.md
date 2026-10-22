@@ -147,3 +147,10 @@ DFS=20 (enabled0), unchanged across the TX timeout. Protection readbacks are0;
 wrapper version20070000/AHB1/COMMON7. A minimal source-backed correction must
 disable only the SE DFS enable before the existing manual XO configuration,
 preserve other bits and stop on failed readback. Its effect is still untested.
+
+V7 confirms that correction takes SE80 from301 to300 and the first TX now
+completes. RX opcode10000000 then exposes bit7 (`M_RX_IRQ`), which our old
+unknown-status guard falsely rejects with EIO. Cancel succeeds; ID remains
+unproved. Pinned Linux acknowledges this notification without treating it
+as a transfer failure. The next change must accept/ack only that extra bit,
+preserving IRQ enable programming and all real-fault/FIFO/protocol guards.
