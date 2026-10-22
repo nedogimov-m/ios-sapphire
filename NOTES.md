@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN repeat60Hz touch session passes; next GPU and geometry — 2026-10-23
+
+Source `ddff37b`; local ARM64 build024851/kernel
+`9e64446032a61cad8fdefc1057cf61a9830b962b3b027101718cdf7839c6c576`.
+Image `gui8-60hz-touch-v2` SHA256 `ea43b29ff0ed8f2c2c9f30ccc24be28ca77905fb7eecc1a4c317e0416cfdd7d3`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa886a8a1c2c18f12 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Authenticated/image-matched capture:8/8 CPUs,60Hz copy setting, Apple userspace
+and180s HID session.4205batches/114contacts/114releases; stopped error0,
+overflows0/recovered0. User confirms touch continues working after the previous
+failure point. No panic, clean journaled HFSX/unmounted=true/inconsistent=false,
+metadata primed and fastboot return verified. Real clear command was not
+exercised in this run; recovery behavior is currently covered by host tests.
+User now requests overnight GPU work, full-screen fit and front-camera cutout
+handling from HackiOS. Primary most-stable upstream source preference recorded
+in AGENTS/README/UPSTREAM: oosexgang/hackios-xnu-kernel and
+ oosexgang/hackios-xnu-userland, as explicitly designated by the user.
+Next: refresh upstream review, inspect geometry/cutout support and A620 power/
+GMU/firmware/SMMU prerequisites; maintain temporary boots and intact backups.
+
 ## REDFIN source-backed touch overflow recovery prepared — 2026-10-23
 
 Adds `touch-overflow.patch` after GUI8. Pinned native SEC code at

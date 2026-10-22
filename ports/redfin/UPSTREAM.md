@@ -1,5 +1,11 @@
 # HackiOS upstream review — 2026-10-22
 
+Project upstream preference, 2026-10-23: the user designates
+[oosexgang/hackios-xnu-kernel][kernel] and
+[oosexgang/hackios-xnu-userland][userland] as the most stable source repositories.
+These are the primary references for ongoing GPU, display geometry/camera-cutout
+and userland work. The review below identifies the exact snapshots already read.
+
 Read-only review of two release snapshots, kept under ignored
 `research/hackios-upstream/`. No upstream patch, prebuilt library or Apple
 artifact was installed by this review.

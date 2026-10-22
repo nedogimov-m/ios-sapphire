@@ -1,5 +1,11 @@
 # Working on ios-sapphire
 
+- The user designates these as the most stable upstream sources for this port:
+  https://github.com/oosexgang/hackios-xnu-kernel and
+  https://github.com/oosexgang/hackios-xnu-userland. Prioritize their implementations
+  when continuing GPU, display/camera-cutout and userland work; record reviewed
+  commits in `ports/redfin/UPSTREAM.md` and adapt hardware/ABI details for Redfin.
+
 - Read `README.md` and the newest entries of `NOTES.md` first: hardware facts, what works,
   boot args, the current blocker and the next concrete action.
 - After each milestone and before stopping, add a dated entry to `NOTES.md`: commits, kernel

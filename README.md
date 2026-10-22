@@ -1,5 +1,9 @@
 # ios-redfin — Pixel 5 bring-up
 
+Primary stable upstream sources, selected by the user:
+[oosexgang/hackios-xnu-kernel](https://github.com/oosexgang/hackios-xnu-kernel) and
+[oosexgang/hackios-xnu-userland](https://github.com/oosexgang/hackios-xnu-userland).
+
 Pixel 5 boots XNU 8796 and Apple's iOS 16.7.16 launchd, backboardd and
 SpringBoard from a journaled HFSX root in the approved first 16 GiB of
 userdata. CPU0, IRQ/SGI, BSD, static Darwin PID1 heartbeats, bounded
