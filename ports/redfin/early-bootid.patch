@@ -1,0 +1,46 @@
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -879,6 +879,18 @@
+  .init=redfin_log_init,.transmit_ready=redfin_log_ready,.transmit_data=redfin_log_transmit,
+  .receive_ready=redfin_log_receive_ready,.receive_data=redfin_log_receive,.device=SERIAL_SWEET_FBCON
+ };
++/* REDFIN_EARLY_BOOT_ID_BEGIN */
++static void redfin_log_boot_id(void)
++{
++ uint64_t boot_id=0;
++ if(!PE_parse_boot_argn("redfinbootid",&boot_id,sizeof(boot_id)) || !boot_id) return;
++ const char *prefix="REDFIN BOOT ID: ";
++ while(*prefix) redfin_log_putc(*prefix++);
++ for(int shift=60;shift>=0;shift-=4) redfin_log_putc("0123456789abcdef"[(boot_id>>shift)&15]);
++ redfin_log_putc('\n');
++}
++/* REDFIN_EARLY_BOOT_ID_END */
++
+ static void
+ redfin_log_probe(void)
+ {
+@@ -952,6 +964,7 @@
+  redfin_log_leave(daif);
+  const char *banner="\n[REDFIN RAMLOG v1: serial and console]\n";
+  while(*banner) redfin_log_putc(*banner++);
++ redfin_log_boot_id();
+ }
+ #endif /* SWEET */
+ 
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -126,12 +126,6 @@
+ static void
+ redfin_peripherals_observe(void)
+ {
+- static uint32_t boot_id_reported;
+- if (!__atomic_exchange_n(&boot_id_reported, 1, __ATOMIC_RELAXED)) {
+-  uint64_t boot_id = 0;
+-  if (PE_parse_boot_argn("redfinbootid", &boot_id, sizeof(boot_id)) && boot_id)
+-   IOLog("REDFIN BOOT ID: %016llx\n", (unsigned long long)boot_id);
+- }
+  /* REDFIN_EARLY_RETURN_DISPATCH_BEGIN */
+  const char *early_args=PE_boot_args();
+  bool early_requested=false;

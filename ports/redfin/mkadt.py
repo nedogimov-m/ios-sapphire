@@ -120,7 +120,7 @@ def add_linear_display(root, reservation_base, reservation_bytes, framebuffer_ba
     return root
 
 
-def build(memory_base, memory_size, boot_mpidr=0, seed=None):
+def build(memory_base, memory_size, boot_mpidr=0, seed=None, *, smp=False):
     """Return an ADT node; address validation does not prove a RAM window safe."""
     for name, value in (('memory-base', memory_base), ('memory-size', memory_size)):
         if type(value) is not int or value <= 0 or value % PAGE_SIZE:
@@ -129,6 +129,10 @@ def build(memory_base, memory_size, boot_mpidr=0, seed=None):
         raise ValueError('RAM window exceeds the 36-bit physical address limit')
     if type(boot_mpidr) is not int or boot_mpidr not in MPIDRS:
         raise ValueError('boot-mpidr must be 0x0..0x700 in steps of 0x100')
+    if type(smp) is not bool:
+        raise ValueError('smp must be a boolean')
+    if smp and (memory_base, memory_size, boot_mpidr) != (0x180000000, 0x80000000, 0):
+        raise ValueError('SMP probe requires canonical Redfin RAM and boot CPU0')
     seed = os.urandom(64) if seed is None else seed
     if not isinstance(seed, bytes) or len(seed) != 64:
         raise ValueError('random seed must contain exactly 64 bytes')
@@ -165,7 +169,23 @@ def build(memory_base, memory_size, boot_mpidr=0, seed=None):
         ('timebase-frequency', u32(TIMEBASE)),
         ('fixed-frequency', u32(TIMEBASE)),
     ])
-    cpus = node('cpus', [ph(), ('#address-cells', u32(1)), ('#size-cells', u32(0))], [cpu])
+    cpu_nodes = [cpu]
+    if smp:
+        # CPU6's EL1 entry and 16K granule are independently measured. These
+        # are two logical cores in SWEET's single generic cluster, not a claim
+        # about Redfin's physical cache/cluster hierarchy. Cache sizes unknown.
+        cpu.props.extend((key, 0, u32(0)) for key in ('l2-cache-size', 'l3-cache-size'))
+        secondary = node('cpu1', [ph()])
+        for key, flag, value in cpu.props[2:]:
+            if key == 'reg':
+                value = u32(0x600)
+            elif key in ('cpu-id', 'cluster-core-id', 'l2-cache-id'):
+                value = u32(1)
+            elif key == 'state':
+                value = cstr('stopped')
+            secondary.props.append((key, flag, value))
+        cpu_nodes.append(secondary)
+    cpus = node('cpus', [ph(), ('#address-cells', u32(1)), ('#size-cells', u32(0))], cpu_nodes)
     gic = node('gic', [
         ph(),
         ('compatible', cstr('arm,gic-v3')),

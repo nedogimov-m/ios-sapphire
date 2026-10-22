@@ -1,0 +1,102 @@
+diff --git a/bsd/dev/redfin_cpu_probe.c b/bsd/dev/redfin_cpu_probe.c
+--- a/bsd/dev/redfin_cpu_probe.c
++++ b/bsd/dev/redfin_cpu_probe.c
+@@ -1,4 +1,4 @@
+-/* One-shot Redfin CPU6 capability observer. The secondary never joins XNU.
++/* One-shot Redfin secondary capability observer (CPU6 by default). The secondary never joins XNU.
+  * PSCI: Arm DEN0022D, CPU_ON64/AFFINITY_INFO64/FEATURES, SMC conduit.
+  * Target: pinned Lito DTS afc98e2bb0716a57bf4f8d2b6191378dd7123ce4,
+  * MPIDR 0x600 (Kryo 475 gold), independently captured Android CPU part0x804.
+@@ -44,6 +44,7 @@
+ static char rf_cpu_frozen[RF_CPU_ARGS];
+ static unsigned rf_cpu_frozen_bytes;
+ static uint64_t rf_cpu_boot_id;
++static uint64_t rf_cpu_target=RF_CPU_TARGET;
+ extern int redfin_spmi_return_ready(void);
+ extern vm_offset_t ml_static_vtop(vm_offset_t);
+ extern void CleanPoC_DcacheRegion_Force(vm_offset_t,size_t);
+@@ -101,6 +102,8 @@
+   "redfinroot","redfinufs","redfinfb","redfinscreen","redfinshutdown","redfinstacks","redfintrace",
+   "ufsrw","rootrw","sweethw","sweetusblog"};
+  uint32_t seen=0,optional_seen=0;
++ bool target_seen=false;
++ rf_cpu_target=RF_CPU_TARGET;
+  uint64_t nonce=0;
+  if (!args || !bytes || bytes>RF_CPU_ARGS || args[bytes-1]) return false;
+  for (unsigned pos=0;pos<bytes-1;) {
+@@ -112,6 +115,11 @@
+   const char *value=args+key+(key<end);
+   unsigned length=end-key-(key<end);
+   if (rf_cpu_word(args+start,key-start,"ufsroot") || rf_cpu_word(args+start,key-start,"cpumask")) return false;
++  if (rf_cpu_word(args+start,key-start,"redfincputarget")) {
++   if(target_seen || key==end || length!=5 || value[0]!='0' || value[1]!='x' ||
++      value[2]<'1' || value[2]>'7' || value[3]!='0' || value[4]!='0') return false;
++   target_seen=true; rf_cpu_target=(uint64_t)(value[2]-'0')<<8;
++  }
+   for (unsigned i=0;i<sizeof(required)/sizeof(required[0]);i++) {
+    if (!rf_cpu_word(args+start,key-start,required[i])) continue;
+    if ((seen&(1u<<i)) || key==end) return false;
+@@ -245,18 +253,18 @@
+  if (version<0 || (unsigned)version>>16<1) return ENOTSUP;
+  if ((int32_t)rf_cpu_smc(0x8400000au,RF_CPU_ON,0,0)<0 ||
+      (int32_t)rf_cpu_smc(0x8400000au,RF_CPU_AFFINITY,0,0)<0) return ENOTSUP;
+- int32_t affinity=(int32_t)rf_cpu_smc(RF_CPU_AFFINITY,RF_CPU_TARGET,0,0);
+- printf("REDFIN CPU PROBE: PSCI version=%#x target=%#llx affinity=%d (OFF=1)\n",version,RF_CPU_TARGET,affinity);
++ int32_t affinity=(int32_t)rf_cpu_smc(RF_CPU_AFFINITY,rf_cpu_target,0,0);
++ printf("REDFIN CPU PROBE: PSCI version=%#x target=%#llx affinity=%d (OFF=1)\n",version,rf_cpu_target,affinity);
+  if (affinity!=1) return EBUSY;
+  if (!rf_cpu_frozen_valid()) return EPERM;
+  memset(rf_cpu_mailbox,0,RF_CPU_PAGE);
+- rf_cpu_mailbox->magic=RF_CPU_MAGIC; rf_cpu_mailbox->target=RF_CPU_TARGET; rf_cpu_mailbox->boot_id=rf_cpu_boot_id;
++ rf_cpu_mailbox->magic=RF_CPU_MAGIC; rf_cpu_mailbox->target=rf_cpu_target; rf_cpu_mailbox->boot_id=rf_cpu_boot_id;
+  CleanPoC_DcacheRegion_Force(va,RF_CPU_PAGE);
+  CleanPoC_DcacheRegion_Force(entry_va,end_va-entry_va);
+  rf_cpu_barrier();
+  if (!rf_cpu_frozen_valid()) return EPERM;
+- printf("REDFIN CPU PROBE: CPU_ON target=%#llx entry=%#llx mailbox=%#llx; secondary parks outside XNU\n",RF_CPU_TARGET,entry,pa);
+- int32_t result=(int32_t)rf_cpu_smc(RF_CPU_ON,RF_CPU_TARGET,entry,pa);
++ printf("REDFIN CPU PROBE: CPU_ON target=%#llx entry=%#llx mailbox=%#llx; secondary parks outside XNU\n",rf_cpu_target,entry,pa);
++ int32_t result=(int32_t)rf_cpu_smc(RF_CPU_ON,rf_cpu_target,entry,pa);
+  __atomic_store_n(&rf_cpu_attempted,2,__ATOMIC_RELEASE);
+  printf("REDFIN CPU PROBE: CPU_ON result=%d; no retry/free/CPU_OFF\n",result);
+  if (result) return EIO;
+@@ -268,10 +276,10 @@
+    uint64_t el=rf_cpu_mailbox->current_el,sctlr=rf_cpu_mailbox->sctlr,ctr=rf_cpu_mailbox->ctr;
+    printf("REDFIN CPU PROBE: ready MIDR=%#llx MPIDR=%#llx MMFR0=%#llx CurrentEL=%#llx SCTLR-current=%#llx CTR=%#llx\n",midr,mpidr,mmfr0,el,sctlr,ctr);
+    unsigned granule=(unsigned)((mmfr0>>20)&15);
+-   bool valid=(mpidr&0xff00ffffffULL)==RF_CPU_TARGET && (el==4 || el==8) && !(sctlr&0x1005) &&
+-    ((midr>>24)&255)==0x51 && ((midr>>4)&0xfff)==0x804 && ((ctr>>16)&15)==4 && (ctr&15)==4 &&
++   bool valid=(mpidr&0xff00ffffffULL)==rf_cpu_target && (el==4 || el==8) && !(sctlr&0x1005) &&
++    ((midr>>24)&255)==0x51 && ((midr>>4)&0xfff)==(rf_cpu_target<0x600?0x805u:0x804u) && ((ctr>>16)&15)==4 && (ctr&15)==4 &&
+     (granule==1 || granule==2) && rf_cpu_frozen_valid();
+-   printf("REDFIN CPU PROBE: target CPU6 TGran16=%u valid=%u; parked until hardware watchdog reset\n",granule,valid);
++   printf("REDFIN CPU PROBE: target CPU%u TGran16=%u valid=%u; parked until hardware watchdog reset\n",(unsigned)(rf_cpu_target>>8),granule,valid);
+    return valid?0:ENOTSUP;
+   }
+   delay(1000);
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -328,7 +328,7 @@
+ 	msr		SPSel, #1
+ 	b		EXT(LowResetVectorBase)
+ 
+-/* CPU6 PSCI entry: x0 is the permanent mailbox PA. No stack, MMU setup,
++/* Secondary capability PSCI entry: x0 is the permanent mailbox PA. No stack, MMU setup,
+  * GIC, IRQ enabling, XNU entry or logging. Private reports begin at offset64.
+  * Refuse unknown EL, active translation/cache or a foreign context before any store.
+  */
+@@ -357,8 +357,12 @@
+  cmp x3, x4
+  b.ne Lrf_cpu_probe_park
+  ldr x3, [x0, #8]
+- cmp x3, #0x600
++ tst x3, #0xff
+  b.ne Lrf_cpu_probe_park
++ cmp x3, #0x100
++ b.lo Lrf_cpu_probe_park
++ cmp x3, #0x700
++ b.hi Lrf_cpu_probe_park
+  mrs x4, MPIDR_EL1
+  MOV64 x6, 0xff00ffffff
+  and x5, x4, x6

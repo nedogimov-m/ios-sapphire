@@ -50,7 +50,7 @@ static int overlap(uint64_t a, uint64_t n, uint64_t b, uint64_t m)
 { return n && m && a < b + m && b < a + n; }
 
 /* Parse a bounded ADT, including its shape, boot CPU and RAM properties. */
-static int adt_valid(const volatile unsigned char *b, uint64_t size,
+static int adt_valid_up(const volatile unsigned char *b, uint64_t size,
     uint64_t mpidr, uint64_t base, uint64_t memory)
 {
     uint32_t pending[32], kinds[32];
@@ -99,6 +99,223 @@ static int adt_valid(const volatile unsigned char *b, uint64_t size,
     }
 }
 
+
+/* SMP is a separate frozen md0 experiment. Merely asking cpus=2 cannot
+ * bypass either compiled shim ownership or the unchanged UP validator. */
+#if defined(SHIM_EARLY_RETURN) && SHIM_EARLY_RETURN == 1 && \
+    defined(REDFIN_SMP_PROBE) && REDFIN_SMP_PROBE == 1
+#define REDFIN_SMP_BUILD_READY 1
+#else
+#define REDFIN_SMP_BUILD_READY 0
+#endif
+
+static int smp_token(const char *p, unsigned size, const char *s)
+{
+    unsigned i = 0;
+    while (i < size && s[i] && p[i] == s[i]) i++;
+    return i == size && !s[i];
+}
+
+static int smp_requested(const char command[608])
+{
+    unsigned off = 0;
+    while (off < 608 && command[off]) {
+        while (off < 608 && command[off] && (unsigned char)command[off] <= ' ') off++;
+        unsigned first = off;
+        while (off < 608 && command[off] && (unsigned char)command[off] > ' ') off++;
+        unsigned size = off - first;
+        if (size >= 9 && smp_token(command + first, 9, "redfinsmp") &&
+            (size == 9 || command[first + 9] == '=')) return 1;
+    }
+    return 0;
+}
+
+static int smp_command(const char command[608])
+{
+    static const char required[][24] = {
+        "debug=0xc", "serial=3", "cpus=2", "keepsyms=1", "-noprogress", "rd=md0",
+        "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0",
+        "sweetbattery=0", "modem=0", "wifi=0", "gpu=0", "redfinsmp=1",
+        "redfinshim=1", "redfinspmi=0", "redfinreturn=0"
+    };
+    if (!REDFIN_SMP_BUILD_READY) return 0;
+    unsigned off = 0, seen = 0, id_seen = 0;
+    const unsigned count = sizeof(required) / sizeof(required[0]);
+    while (off < 608 && command[off]) {
+        if (command[off] == ' ') { off++; continue; }
+        unsigned first = off;
+        while (off < 608 && command[off] && command[off] != ' ') {
+            if ((unsigned char)command[off] < 33 || (unsigned char)command[off] > 126) return 0;
+            off++;
+        }
+        unsigned size = off - first, matched = 0;
+        for (unsigned i = 0; i < count; i++) {
+            if (smp_token(command + first, size, required[i])) {
+                if (seen & (1U << i)) return 0;
+                seen |= 1U << i; matched = 1; break;
+            }
+        }
+        if (matched) continue;
+        if (smp_token(command + first, size, "-enable_kprintf_spam")) {
+            if (seen & (1U << count)) return 0;
+            seen |= 1U << count; continue;
+        }
+        if (size != 31 || !smp_token(command + first, 15, "redfinbootid=0x") || id_seen) return 0;
+        uint64_t id = 0;
+        for (unsigned i = 15; i < 31; i++) {
+            unsigned c = (unsigned char)command[first + i], digit;
+            if (c >= '0' && c <= '9') digit = c - '0';
+            else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+            else return 0;
+            id = (id << 4) | digit;
+        }
+        if (!id) return 0;
+        id_seen = 1;
+    }
+    if (off == 608 || !id_seen || (seen & ((1U << count) - 1)) != (1U << count) - 1) return 0;
+    /* No hidden second command after the terminator in the payload field. */
+    while (off < 608) if (command[off++]) return 0;
+    return 1;
+}
+
+static int smp_string(const volatile unsigned char *p, uint64_t size, const char *s)
+{
+    unsigned i = 0;
+    while (s[i]) { if (i >= size || p[i] != (unsigned char)s[i]) return 0; i++; }
+    return size == (uint64_t)i + 1 && !p[i];
+}
+
+static int smp_key(const volatile unsigned char *p, const char *s)
+{
+    unsigned i = 0;
+    while (i < 32 && s[i]) { if (p[i] != (unsigned char)s[i]) return 0; i++; }
+    if (i == 32) return 0;
+    while (i < 32) if (p[i++]) return 0;
+    return 1;
+}
+
+static int smp_key_well_formed(const volatile unsigned char *p)
+{
+    unsigned i = 0;
+    if (!p[0]) return 0;
+    while (i < 32 && p[i]) { if (p[i] < 33 || p[i] > 126) return 0; i++; }
+    if (i == 32) return 0;
+    while (i < 32) if (p[i++]) return 0;
+    return 1;
+}
+
+static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
+{
+    enum { ROOT = 1, CHOSEN, CPUS, CPU, ARMIO, GIC, LEAF };
+    static const char root_names[][24] = {
+        "chosen", "cpus", "arm-io", "defaults", "product", "redfin-spmi",
+        "redfin-return", "redfin-log", "redfin-watchdog", "pram"
+    };
+    static const char cpu_u32[][24] = {
+        "reg", "cpu-id", "cluster-id", "cluster-type", "die-cluster-id",
+        "cluster-core-id", "l2-cache-id", "l3-cache-id", "l2-cache-size",
+        "l3-cache-size", "timebase-frequency", "fixed-frequency"
+    };
+    static const unsigned char cpu_compatible[] = "qcom,kryo475\0qcom,kryo470\0ARM,v8";
+    uint32_t pending[32], kinds[32], handles[2] = {0, 0};
+    unsigned depth = 0, cpus = 0, root_seen = 0, chosen_children = 0;
+    uint64_t off = 0;
+    pending[0] = 1; kinds[0] = 0;
+    for (;;) {
+        while (!pending[depth]) {
+            if (!depth) return off == size && cpus == 2 && (root_seen & 15) == 15 &&
+                (chosen_children & 1) && chosen_children <= 3 && handles[0] != handles[1];
+            depth--;
+        }
+        pending[depth]--;
+        if (depth == 31 || off > size || size - off < 8) return 0;
+        uint32_t props = word(b + off, 0), children = word(b + off + 4, 0);
+        unsigned kind = 0, seen = 0, cpu = 2;
+        off += 8;
+        if (!props || props > 1024 || children > 1024) return 0;
+        for (uint32_t i = 0; i < props; i++) {
+            if (size - off < 36) return 0;
+            const volatile unsigned char *key = b + off;
+            uint32_t len = word(key + 32, 0);
+            off += 36;
+            uint64_t padded = ((uint64_t)len + 3) & ~3ULL;
+            if ((len & 0x80000000U) || padded > size - off || !smp_key_well_formed(key)) return 0;
+            const volatile unsigned char *value = b + off;
+            if (!i) {
+                if (!smp_key(key, "name")) return 0;
+                if (!depth) {
+                    if (!smp_string(value, len, "device-tree")) return 0;
+                    kind = ROOT;
+                } else if (depth == 1 && kinds[depth] == ROOT) {
+                    unsigned n = 0;
+                    for (; n < sizeof(root_names) / sizeof(root_names[0]); n++)
+                        if (smp_string(value, len, root_names[n])) break;
+                    if (n == sizeof(root_names) / sizeof(root_names[0]) || (root_seen & (1U << n))) return 0;
+                    root_seen |= 1U << n;
+                    kind = n == 0 ? CHOSEN : n == 1 ? CPUS : n == 2 ? ARMIO : LEAF;
+                } else if (depth == 2 && kinds[depth] == CPUS) {
+                    if (smp_string(value, len, "cpu0")) cpu = 0;
+                    else if (smp_string(value, len, "cpu1")) cpu = 1;
+                    else return 0;
+                    if (cpu != cpus) return 0;
+                    kind = CPU;
+                } else if (depth == 2 && kinds[depth] == ARMIO && smp_string(value, len, "gic")) kind = GIC;
+                else if (depth == 2 && kinds[depth] == CHOSEN) {
+                    unsigned bit;
+                    if (smp_string(value, len, "memory-map")) bit = 1;
+                    else if (smp_string(value, len, "asmb")) bit = 2;
+                    else return 0;
+                    if (chosen_children & bit) return 0;
+                    chosen_children |= bit; kind = LEAF;
+                } else return 0;
+                if ((kind == CPUS && children != 2) || (kind == ARMIO && children != 1) ||
+                    (kind == CHOSEN && (children < 1 || children > 2)) ||
+                    ((kind == CPU || kind == GIC || kind == LEAF) && children)) return 0;
+            } else {
+                if (smp_key(key, "name")) return 0;
+                if (kind == CPU) {
+                    unsigned n = 0;
+                    uint32_t values[] = { cpu ? 0x600U : 0U, cpu, 0, 0, 0, cpu, cpu, 0, 0, 0, 19200000, 19200000 };
+                    for (; n < sizeof(cpu_u32) / sizeof(cpu_u32[0]); n++)
+                        if (smp_key(key, cpu_u32[n])) break;
+                    if (n < sizeof(cpu_u32) / sizeof(cpu_u32[0])) {
+                        if (len != 4 || word(value, 0) != values[n]) return 0;
+                    } else if (smp_key(key, "device_type")) {
+                        n = 12; if (!smp_string(value, len, "cpu")) return 0;
+                    } else if (smp_key(key, "compatible")) {
+                        n = 13;
+                        if (len != sizeof(cpu_compatible)) return 0;
+                        for (unsigned j = 0; j < len; j++) if (value[j] != cpu_compatible[j]) return 0;
+                    } else if (smp_key(key, "state")) {
+                        n = 14; if (!smp_string(value, len, cpu ? "stopped" : "running")) return 0;
+                    } else if (smp_key(key, "AAPL,phandle")) {
+                        n = 15; if (len != 4 || !word(value, 0)) return 0;
+                        handles[cpu] = word(value, 0);
+                    } else return 0;
+                    if (seen & (1U << n)) return 0;
+                    seen |= 1U << n;
+                } else if (kind == CPUS) {
+                    unsigned bit, expected;
+                    if (smp_key(key, "#address-cells")) { bit = 1; expected = 1; }
+                    else if (smp_key(key, "#size-cells")) { bit = 2; expected = 0; }
+                    else if (smp_key(key, "AAPL,phandle")) { bit = 4; if (len != 4) return 0; expected = word(value, 0); if (!expected) return 0; }
+                    else return 0;
+                    if (len != 4 || word(value, 0) != expected || (seen & bit)) return 0;
+                    seen |= bit;
+                } else if (kind == CHOSEN && (smp_key(key, "dram-base") || smp_key(key, "dram-size"))) {
+                    unsigned bit = smp_key(key, "dram-base") ? 1 : 2;
+                    if (len != 8 || quad(value) != (bit == 1 ? 0x180000000ULL : 0x80000000ULL) || (seen & bit)) return 0;
+                    seen |= bit;
+                }
+            }
+            off += padded;
+        }
+        if ((kind == CPU && seen != 0xffff) || (kind == CPUS && seen != 7) || (kind == CHOSEN && seen != 3)) return 0;
+        if (kind == CPU) cpus++;
+        depth++; pending[depth] = children; kinds[depth] = kind;
+    }
+}
+
 static const char *validate(const void *data, uint64_t size, uint64_t image,
     uint64_t image_end, uint64_t dtb, const struct hardware *hw, uint64_t mpidr, struct plan *q)
 {
@@ -132,6 +349,9 @@ static const char *validate(const void *data, uint64_t size, uint64_t image,
     unsigned nul = 0, entry = 0;
     for (unsigned i = 0; i < sizeof(p->command); i++) if (!p->command[i]) nul = 1;
     if (!nul || mpidr > 0x700 || (mpidr & 0xff)) return "command or CPU affinity";
+    int smp = smp_requested(p->command);
+    if (smp && (!smp_command(p->command) || mpidr || p->phys != 0x180000000ULL ||
+        p->memory != 0x80000000ULL)) return "SMP command or RAM profile";
     if ((p->adt_offset & 15) || (p->adt_size & 3) || p->adt_size < 8 || p->adt_size > UINT32_MAX ||
         p->adt_offset < table || p->adt_offset > size || p->adt_size > size - p->adt_offset) return "ADT bounds";
     uint64_t last = p->virt;
@@ -158,7 +378,9 @@ static const char *validate(const void *data, uint64_t size, uint64_t image,
     q->top = (q->args + sizeof(struct boot_args) + PAGE - 1) & ~(PAGE - 1);
     if (q->top > p->phys + p->memory) return "boot args outside RAM";
     q->entry = p->phys + (p->entry - p->virt);
-    if (!adt_valid((const volatile unsigned char *)data + p->adt_offset, p->adt_size, mpidr, p->phys, p->memory)) return "ADT CPU or RAM mismatch";
+    const volatile unsigned char *tree = (const volatile unsigned char *)data + p->adt_offset;
+    if (!(smp ? adt_valid_smp(tree, p->adt_size) :
+        adt_valid_up(tree, p->adt_size, mpidr, p->phys, p->memory))) return "ADT CPU or RAM mismatch";
     return NULL;
 }
 

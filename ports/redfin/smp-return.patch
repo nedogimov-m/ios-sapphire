@@ -1,0 +1,203 @@
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -375,6 +375,199 @@
+ }
+ /* REDFIN_EARLY_RETURN_PROBE_END */
+ 
++/* REDFIN_SMP_RETURN_BEGIN: independent read-only proof of shim prearming.
++ * Never sets the old UP return_ready or maps a PMIC write channel. Only
++ * EXT_READL observer commands are issued; PON/IMEM are never written.
++ * Caller binds the coordinator to physicalCPU0 before any CPU_ON. */
++static uint32_t rf_smr_state; /* 0 unattempted,1 in progress,2 failed,3 proved. */
++static char rf_smr_frozen[608];
++static unsigned rf_smr_bytes;
++static uint64_t rf_smr_nonce;
++static struct redfin_er_report rf_smr_report;
++static struct redfin_er_target rf_smr_target;
++static bool rf_smr_space(char c) { return c==' ' || c=='\t' || c=='\r' || c=='\n'; }
++static bool rf_smr_word(const char *word,unsigned bytes,const char *wanted)
++{ return strlen(wanted)==bytes && !memcmp(word,wanted,bytes); }
++static bool rf_smr_flags(const char *args,unsigned bytes,uint64_t *nonce)
++{
++ static const char *required[]={"debug=0xc","serial=3","cpus=2","keepsyms=1","-noprogress","rd=md0",
++  "sweettouch=0","sweetkeys=0","sweetusb=0","sweetcpufreq=0","sweetbattery=0","modem=0","wifi=0","gpu=0",
++  "redfinsmp=1","redfinshim=1","redfinspmi=0","redfinreturn=0"};
++ uint64_t seen=0,value=0;
++ bool id_seen=false,trace_seen=false;
++ if(!args || !nonce || !bytes || bytes>sizeof(rf_smr_frozen) || args[bytes-1]) return false;
++ for(unsigned pos=0;pos<bytes-1;) {
++  if(rf_smr_space(args[pos])) { pos++; continue; }
++  unsigned start=pos;
++  while(pos<bytes-1 && !rf_smr_space(args[pos])) pos++;
++  unsigned length=pos-start;
++  bool known=false;
++  for(unsigned i=0;i<sizeof(required)/sizeof(required[0]);i++) {
++   if(!rf_smr_word(args+start,length,required[i])) continue;
++   if(seen&(1ULL<<i)) return false;
++   seen|=1ULL<<i; known=true;
++  }
++  if(length==31 && !memcmp(args+start,"redfinbootid=0x",15)) {
++   if(id_seen) return false;
++   for(unsigned n=15;n<31;n++) {
++    unsigned digit=(unsigned)(args[start+n]-'0');
++    if(digit>9) { if(args[start+n]<'a' || args[start+n]>'f') return false; digit=(unsigned)(args[start+n]-'a'+10); }
++    value=(value<<4)|digit;
++   }
++   if(!value) return false;
++   id_seen=true; known=true;
++  }
++  if(rf_smr_word(args+start,length,"-enable_kprintf_spam")) {
++   if(trace_seen) return false;
++   trace_seen=true; known=true;
++  }
++  if(!known) return false; /* Includes every unreviewed writer/observer flag. */
++ }
++ if(seen!=((1ULL<<(sizeof(required)/sizeof(required[0])))-1) || !id_seen) return false;
++ *nonce=value;
++ return true;
++}
++/* RF_SMR_RUNTIME_HW_BEGIN */
++static uint64_t rf_smr_mpidr(void) { return __builtin_arm_rsr64("MPIDR_EL1"); }
++static uint64_t rf_smr_el(void) { return __builtin_arm_rsr64("CurrentEL"); }
++static uint64_t rf_smr_sctlr(void) { return __builtin_arm_rsr64("SCTLR_EL1"); }
++/* RF_SMR_RUNTIME_HW_END */
++static bool rf_smr_runtime(void)
++{
++ const ml_topology_info_t *t=ml_get_topology_info();
++ if(PAGE_SIZE!=16384 || !t || t->version!=CPU_TOPOLOGY_VERSION || t->num_cpus!=2 ||
++    t->max_cpu_id!=1 || t->num_clusters!=1 || t->max_cluster_id || t->max_die_id || !t->cpus || !t->clusters ||
++    t->boot_cpu!=&t->cpus[0] || t->boot_cluster!=&t->clusters[0] ||
++    rf_smr_el()!=4 || (rf_smr_mpidr()&0xff00ffffffULL) || (rf_smr_sctlr()&5)!=5) return false;
++ const ml_topology_cpu_t *a=&t->cpus[0],*b=&t->cpus[1];
++ const ml_topology_cluster_t *c=&t->clusters[0];
++ return a->cpu_id==0 && a->phys_id==0 && b->cpu_id==1 && b->phys_id==0x600 &&
++  !a->cluster_id && !b->cluster_id && !a->die_id && !b->die_id &&
++  a->cluster_type==CLUSTER_TYPE_SMP && b->cluster_type==CLUSTER_TYPE_SMP &&
++  !a->l2_cache_id && b->l2_cache_id==1 && !a->l3_cache_id && !b->l3_cache_id &&
++  !a->l2_cache_size && !b->l2_cache_size && !a->l3_cache_size && !b->l3_cache_size &&
++  !c->cluster_id && c->cluster_type==CLUSTER_TYPE_SMP && c->num_cpus==2 &&
++  c->first_cpu_id==0 && c->cpu_mask==3;
++}
++static bool rf_smr_frozen_valid(void)
++{
++ const char *args=PE_boot_args();
++ return args && rf_smr_bytes && !memcmp(args,rf_smr_frozen,rf_smr_bytes) && rf_smr_runtime();
++}
++static bool rf_smr_property(const char *path,const char *name,void *out,unsigned expected)
++{
++ DTEntry node;
++ const void *raw=NULL;
++ unsigned bytes=0;
++ if(SecureDTLookupEntry(NULL,path,&node)!=kSuccess ||
++    SecureDTGetProperty(node,name,&raw,&bytes)!=kSuccess || !raw || bytes!=expected) return false;
++ memcpy(out,raw,expected); return true;
++}
++static bool rf_smr_contract(uint64_t *spmi,uint64_t *reason)
++{
++ DTEntry root;
++ const char *list=NULL;
++ unsigned bytes=0;
++ bool redfin=false,lito=false;
++ if(SecureDTLookupEntry(NULL,"/",&root)!=kSuccess ||
++    SecureDTGetProperty(root,"compatible",(const void **)&list,&bytes)!=kSuccess ||
++    !list || !bytes || bytes>256 || list[bytes-1]) return false;
++ for(unsigned pos=0;pos<bytes;) {
++  unsigned end=pos;
++  while(end<bytes && list[end]) end++;
++  if(end==bytes || end==pos) return false;
++  if(rf_smr_word(list+pos,end-pos,"google,redfin")) redfin=true;
++  if(rf_smr_word(list+pos,end-pos,"qcom,sm7250")) lito=true;
++  pos=end+1;
++ }
++ uint64_t base=0,size=0;
++ uint32_t ee=1,cpu0=1,cpu1=0;
++ if(!redfin || !lito || !rf_smr_property("/chosen","dram-base",&base,8) || base!=0x180000000ULL ||
++    !rf_smr_property("/chosen","dram-size",&size,8) || size!=0x80000000ULL ||
++    !rf_smr_property("/cpus/cpu0","reg",&cpu0,4) || cpu0!=0 ||
++    !rf_smr_property("/cpus/cpu1","reg",&cpu1,4) || cpu1!=0x600 ||
++    !rf_smr_property("/redfin-spmi","reg",spmi,48) ||
++    !rf_smr_property("/redfin-spmi","ee",&ee,4) || ee!=0 ||
++    !rf_smr_property("/redfin-return","reg",reason,32)) return false;
++ return spmi[0]==0x0c440000 && spmi[1]==0x1100 && spmi[2]==0x0e600000 && spmi[3]==0x100000 &&
++  spmi[4]==0x0c40a000 && spmi[5]==0x26000 && reason[0]==0x0c600000 && reason[1]==0x2000000 &&
++  reason[2]==0x146ab65c && reason[3]==4;
++}
++static int rf_smr_live(const struct redfin_er_io *io)
++{
++ struct redfin_er_report *r=&rf_smr_report;
++ r->stage=REDFIN_ER_PREFLIGHT;
++ if(!rf_smr_frozen_valid()) return REDFIN_ER_INVALID;
++ if(redfin_er_frequency()!=19200000u || redfin_er_wait_us()) return REDFIN_ER_CLOCK;
++ int error=redfin_er_find(io->core,io->config,&rf_smr_target);
++ if(error) return error;
++ if(!redfin_er_matches(io,&rf_smr_target)) return REDFIN_ER_CHANGED;
++ r->stage=REDFIN_ER_SUBTYPE;
++ error=redfin_er_observe(io,&rf_smr_target,0x0805,&r->subtype);
++ if(error) return error;
++ if(r->subtype!=4) return REDFIN_ER_UNSUPPORTED;
++ if(!redfin_er_matches(io,&rf_smr_target)) return REDFIN_ER_CHANGED;
++ r->stage=REDFIN_ER_SPARE;
++ error=redfin_er_observe(io,&rf_smr_target,0x088f,&r->before);
++ if(error) return error;
++ if((r->before&0xfe)!=4) return REDFIN_ER_IO;
++ if(redfin_er_rd(io->imem,0)!=0x77665500u) return REDFIN_ER_IO;
++ if(!redfin_er_matches(io,&rf_smr_target)) return REDFIN_ER_CHANGED;
++ r->stage=REDFIN_ER_VERIFY;
++ error=redfin_er_observe(io,&rf_smr_target,0x088f,&r->after);
++ if(error) return error;
++ if(r->after!=r->before) return REDFIN_ER_CHANGED; /* Includes bit0 stability. */
++ r->stage=REDFIN_ER_IMEM;
++ r->imem=redfin_er_rd(io->imem,0);
++ if(r->imem!=0x77665500u) return REDFIN_ER_IO;
++ if(!redfin_er_matches(io,&rf_smr_target) || !rf_smr_frozen_valid()) return REDFIN_ER_CHANGED;
++ r->stage=REDFIN_ER_DONE;
++ return REDFIN_ER_OK;
++}
++int redfin_smp_return_ready(void);
++int redfin_smp_return_ready(void)
++{
++ uint32_t state=__atomic_load_n(&rf_smr_state,__ATOMIC_ACQUIRE);
++ if(state==3) {
++  if(rf_smr_frozen_valid()) return 1;
++  __atomic_store_n(&rf_smr_state,2,__ATOMIC_RELEASE); return 0;
++ }
++ if(state) return 0;
++ bool acquired=false;
++ for(unsigned i=0;i<256;i++) {
++  uint32_t expected=0;
++  if(__atomic_compare_exchange_n(&rf_smr_state,&expected,1,true,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) { acquired=true; break; }
++  if(expected) return 0;
++ }
++ if(!acquired) {
++  __atomic_store_n(&rf_smr_state,2,__ATOMIC_RELEASE);
++  return 0; /* Finite budget, final failure; no MMIO has been issued. */
++ }
++ const char *args=PE_boot_args();
++ unsigned bytes=0;
++ int error=REDFIN_ER_INVALID;
++ if(!args) goto done;
++ while(bytes<sizeof(rf_smr_frozen) && args[bytes]) bytes++;
++ if(bytes==sizeof(rf_smr_frozen) || !rf_smr_flags(args,bytes+1,&rf_smr_nonce) || !rf_smr_runtime()) goto done;
++ memcpy(rf_smr_frozen,args,bytes+1); rf_smr_bytes=bytes+1;
++ uint64_t spmi[6],reason[4];
++ if(!rf_smr_contract(spmi,reason)) goto done;
++ struct redfin_er_io io={ml_io_map(spmi[0],spmi[1]),ml_io_map(spmi[2],spmi[3]),
++  ml_io_map(spmi[4],spmi[5]),0,ml_io_map(reason[2],reason[3])};
++ if(!redfin_er_base(io.core,0x1100) || !redfin_er_base(io.observer,0x100000) ||
++    !redfin_er_base(io.config,0x26000) || !redfin_er_base(io.imem,4)) goto done;
++ bool irq_enabled=ml_set_interrupts_enabled(false);
++ error=rf_smr_live(&io);
++ (void)ml_set_interrupts_enabled(irq_enabled);
++done:
++ __atomic_store_n(&rf_smr_state,error?2:3,__ATOMIC_RELEASE);
++ printf("REDFIN SMP RETURN: nonce=%016llx leaf=%d stage=%u APID=%u subtype=%#x spare=%#x/%#x imem=%#x ready=%u\n",
++  (unsigned long long)rf_smr_nonce,error,rf_smr_report.stage,rf_smr_target.apid,rf_smr_report.subtype,
++  rf_smr_report.before,rf_smr_report.after,rf_smr_report.imem,error?0:1);
++ return error?0:1;
++}
++/* REDFIN_SMP_RETURN_END */
++
+ /* Redfin physical-PMIC evidence only; append inside redfin_spmi.c.
+  * No rail-ready API, indexed-L17 claim, PMIC writes or new mappings.
+  * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8:

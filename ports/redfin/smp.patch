@@ -1,0 +1,579 @@
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -20,6 +20,12 @@
+ 
+ extern "C" void sweet_secondary_entry(void);
+ extern "C" boolean_t sweet_cpu_signal_is_enabled(unsigned int cpu);
++extern "C" void redfin_smp_secondary_entry(void);
++extern "C" int redfin_smp_mode(void);
++extern "C" int redfin_smp_topology_valid(void);
++extern "C" void redfin_smp_prepare(void);
++extern "C" int redfin_smp_start(unsigned, vm_offset_t);
++extern "C" int redfin_smp_prove(void);
+ 
+ class SweetCPU;
+ static SweetCPU *sweet_cpus[MAX_CPUS];
+@@ -78,7 +84,7 @@
+ 	}
+ 	/* REDFIN: one CPU only; lito affinities are 0x000..0x700. */
+ 	if (cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0 ||
+-	    topology->num_cpus != 1) {
++	    (redfin_smp_mode() ? !redfin_smp_topology_valid() : topology->num_cpus != 1)) {
+ 		panic("SWEET CPU: invalid topology cpu=%u mpidr=0x%x count=%u",
+ 		    cpu->cpu_id, cpu->phys_id, topology->num_cpus);
+ 	}
+@@ -161,6 +167,10 @@
+ 		panic("REDFIN CPU: ADT boot MPIDR 0x%x does not match running MPIDR 0x%x",
+ 		    topology->boot_cpu->phys_id, boot_mpidr);
+ 	}
++	/* This opt-in also binds the coordinator before the sole CPU_ON. */
++	if (redfin_smp_mode()) {
++		redfin_smp_prepare();
++	}
+ 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
+ 		SweetCPU *cpu = __atomic_load_n(&sweet_cpus[i], __ATOMIC_ACQUIRE);
+ 		kern_return_t kr = processor_start(cpu->machProcessor);
+@@ -181,6 +191,12 @@
+ 		IOLog("SWEET CPU: cpu=%u mpidr=0x%x came alive; SGI1 OK\n",
+ 		    i, topology->cpus[i].phys_id);
+ 	}
++	if (redfin_smp_mode()) {
++		int proof = redfin_smp_prove();
++		if (proof != 0) {
++			panic("REDFIN SMP2: IRQ/timer/progress proof failed=%d", proof);
++		}
++	}
+ 	/* Publish exactly once, after every selected CPU has completed initCPU(). */
+ 	ml_cpu_init_completed();
+ 	__atomic_load_n(&sweet_cpus[topology->boot_cpu->cpu_id], __ATOMIC_ACQUIRE)->cpusRunning();
+@@ -213,9 +229,12 @@
+ 	 * Waiting here with DAIF.I set would deadlock every secondary. */
+ 	signalCPU(this);
+ 	setCPUState(kIOCPUStateRunning);
+-	kprintf("SWEET CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u\n",
+-	    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL,
+-	    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled());
++	/* Keep the isolated secondary silent until logger quiescence is proved. */
++	if (!redfin_smp_mode() || getCPUNumber() == 0) {
++		kprintf("SWEET CPU: cpu=%u entered initCPU mpidr=0x%llx EL%llu IRQs=%u\n",
++		    getCPUNumber(), __builtin_arm_rsr64("MPIDR_EL1") & 0xffffULL,
++		    __builtin_arm_rsr64("CurrentEL") >> 2, ml_get_interrupts_enabled());
++	}
+ 	__atomic_store_n(&initialized, 1, __ATOMIC_RELEASE);
+ }
+ 
+@@ -250,6 +269,14 @@
+ 	if (start_paddr != 0 || arg_paddr != 0 || cpu == ml_get_topology_info()->boot_cpu ||
+ 	    __atomic_load_n(&initialized, __ATOMIC_ACQUIRE) != 0) {
+ 		panic("SWEET CPU: cpu=%u unsupported restart", getCPUNumber());
++	}
++	if (redfin_smp_mode()) {
++		vm_offset_t entry = ml_static_vtop((vm_offset_t)&redfin_smp_secondary_entry);
++		int rc = redfin_smp_start(getCPUNumber(), entry);
++		if (rc != 0) {
++			panic("REDFIN SMP2: fresh return/OFF/CPU_ON gate failed=%d", rc);
++		}
++		return KERN_SUCCESS;
+ 	}
+ 	vm_offset_t entry = ml_static_vtop((vm_offset_t)&sweet_secondary_entry);
+ 	IOLog("SWEET CPU: cpu=%u CPU_ON target=0x%x entry_pa=0x%llx context=%u\n",
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -285,6 +285,53 @@
+  * Firmware may return at EL1 or EL2; check before accessing EL1 state.
+  * The EL2 path assumes no resident hypervisor and CNTVOFF_EL2=0 on boot.
+  */
++	.align 2
++	.globl EXT(redfin_smp_secondary_entry)
++LEXT(redfin_smp_secondary_entry)
++	/* Separate opt-in trampoline. Redfin CPU6 was observed at EL1 only.
++	 * No stack or stores before EL/MMU/cache/affinity/capability validation.
++	 * Any unsupported entry remains parked until the prearmed hardware reset. */
++	msr	DAIFSet, #0xf
++	mrs	x1, CurrentEL
++	cmp	x1, #4
++	b.ne	Lredfin_smp_park
++	mrs	x1, SCTLR_EL1
++	mov	x2, #0x1005
++	tst	x1, x2
++	b.ne	Lredfin_smp_park
++	cmp	x0, #1
++	b.ne	Lredfin_smp_park
++	mrs	x1, MPIDR_EL1
++	MOV64	x2, 0xff00ffffff
++	and	x1, x1, x2
++	cmp	x1, #0x600
++	b.ne	Lredfin_smp_park
++	mrs	x1, MIDR_EL1
++	ubfx	x2, x1, #24, #8
++	cmp	x2, #0x51
++	b.ne	Lredfin_smp_park
++	ubfx	x1, x1, #4, #12
++	cmp	x1, #0x804
++	b.ne	Lredfin_smp_park
++	mrs	x1, ID_AA64MMFR0_EL1
++	ubfx	x1, x1, #20, #4
++	sub	x1, x1, #1
++	cmp	x1, #1
++	b.hi	Lredfin_smp_park
++	mrs	x1, CTR_EL0
++	and	x2, x1, #15
++	cmp	x2, #4
++	b.ne	Lredfin_smp_park
++	ubfx	x1, x1, #16, #4
++	cmp	x1, #4
++	b.ne	Lredfin_smp_park
++	msr	SPSel, #1
++	b	EXT(LowResetVectorBase)
++Lredfin_smp_park:
++	wfe
++	b	Lredfin_smp_park
++	.globl EXT(redfin_smp_secondary_entry_end)
++LEXT(redfin_smp_secondary_entry_end)
+ 	.align 2
+ 	.globl EXT(sweet_secondary_entry)
+ LEXT(sweet_secondary_entry)
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1925,6 +1925,11 @@
+ 	__builtin_unreachable();
+ }
+ 
++#if defined(SWEET)
++extern void redfin_smp_irq(unsigned);
++extern int redfin_smp_sgi_selected(void);
++#endif
++
+ void
+ sleh_irq(arm_saved_state_t *state)
+ {
+@@ -1951,7 +1956,13 @@
+ 		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
+ 		rtclock_intr(TRUE);
+ 		INTERRUPT_MASKED_DEBUG_END();
++		redfin_smp_irq(0); /* completed local timer handler; bounded stores only */
+ 		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
++	} else if (intid == 2 && redfin_smp_sgi_selected()) {
++		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_IPI);
++		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
++		__builtin_arm_isb(ISB_SY);
++		redfin_smp_irq(1); /* isolated probe SGI, no scheduler signal payload */
+ 	} else if (intid < 16) {
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_IPI);
+ 		/* Ack before handling so an IPI raised meanwhile is not lost */
+diff --git a/osfmk/conf/files.arm64 b/osfmk/conf/files.arm64
+--- a/osfmk/conf/files.arm64
++++ b/osfmk/conf/files.arm64
+@@ -33,6 +33,7 @@
+ osfmk/arm64/caches_asm.s		optional nos_arm_asm
+ osfmk/arm64/copyio.c	standard
+ osfmk/arm64/cpu.c		standard
++osfmk/arm64/redfin_smp.c		standard
+ osfmk/arm/cpu_common.c		standard
+ osfmk/arm/cpuid.c   standard
+ osfmk/arm/data.s	standard
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -800,6 +800,20 @@
+  if(__atomic_load_n(&redfin_log_counts_uncertain,__ATOMIC_RELAXED)) b=r=UINT64_MAX;
+  if(busy) *busy=b;
+  if(reentrant) *reentrant=r;
++}
++/* Acquire snapshots, no owner stealing or counter reset. SMP callers must
++ * first stop workers and drain IRQ observers; a busy/unknown logger fails. */
++int redfin_log_smp_quiescent(void);
++int
++redfin_log_smp_quiescent(void)
++{
++ for(unsigned sample=0;sample<2;sample++) {
++  if(__atomic_load_n(&redfin_log_owner,__ATOMIC_ACQUIRE) ||
++     __atomic_load_n(&redfin_log_busy_drops,__ATOMIC_ACQUIRE) ||
++     __atomic_load_n(&redfin_log_reentrant_drops,__ATOMIC_ACQUIRE) ||
++     __atomic_load_n(&redfin_log_counts_uncertain,__ATOMIC_ACQUIRE)) return 0;
++ }
++ return 1;
+ }
+ /* REDFIN_SMP_LOG_OWNER_END */
+ 
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -18,6 +18,7 @@
+ MACHINE_TIMEOUT(gicr_wake_timeout_ns, "gicr-wake-timeout", GICR_WAKE_TIMEOUT_NS, MACHINE_TIMEOUT_UNIT_NSEC, NULL);
+ 
+ #if defined(SWEET)
++extern int redfin_smp_mode(void);
+ /* Phone default; QEMU virt wires the architected virtual timer to INTID 27. */
+ SECURITY_READ_ONLY_LATE(uint32_t) sweet_vtimer_intid = SWEET_VTIMER_INTID;
+ #endif
+@@ -175,7 +176,8 @@
+ 	for (unsigned int i = 0; i < 32; i += 4) {
+ 		gicr_write32(GICR_IPRIORITYR0 + i, 0xA0A0A0A0);
+ 	}
+-	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << SWEET_IPI_SGI));
++	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << SWEET_IPI_SGI) |
++	    (redfin_smp_mode() ? (1U << 2) : 0));
+ #else
+ 	// Configure timers and legacy FIQ to be group 0
+ 	gicr_write32(GICR_IGROUPR0, 0x81FFFFFF);
+diff --git a/osfmk/arm64/redfin_smp.c b/osfmk/arm64/redfin_smp.c
+new file mode 100644
+--- /dev/null
++++ b/osfmk/arm64/redfin_smp.c
+@@ -0,0 +1,352 @@
++/* Isolated CPU0+CPU6 md0 experiment. No bootarg is return-to-bootloader proof.
++ * CPU0 owns startup, diagnostics and watchdog; CPU6 only joins this kernel once.
++ * IRQ observers do bounded atomic loads/stores, never allocation/logging/waiting.
++ * This proves specified IRQ/timer/progress facts, not TLB shootdowns or full SMP.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(SWEET)
++#include <stdint.h>
++#include <stdbool.h>
++#include <string.h>
++#include <kern/ast.h>
++#include <kern/clock.h>
++#include <kern/debug.h>
++#include <kern/processor.h>
++#include <kern/sched_prim.h>
++#include <kern/thread.h>
++#include <machine/machine_routines.h>
++#include <mach/mach_time.h>
++#include <mach/thread_act.h>
++#include <pexpert/pexpert.h>
++
++#define RF_SMP_ARGS 608u
++#define RF_SMP_ROUNDS 32u
++#define RF_SMP_POLLS 20000u
++#define RF_SMP_SGI 2u
++#define RF_SMP_TARGET 0x600ULL
++#define RF_SMP_ON 0xc4000003u
++#define RF_SMP_AFFINITY 0xc4000004u
++static char rf_smp_frozen[RF_SMP_ARGS];
++static unsigned rf_smp_frozen_bytes;
++static uint64_t rf_smp_boot_id;
++static uint32_t rf_smp_prepared,rf_smp_started,rf_smp_selected;
++/* phase ACTIVE permits IRQ facts, DRAIN acknowledges the final SGI only. */
++enum { RF_SMP_IDLE,RF_SMP_ACTIVE,RF_SMP_DRAIN,RF_SMP_DONE };
++static uint32_t rf_smp_phase,rf_smp_fault;
++static uint64_t rf_smp_request[2],rf_smp_ack[2],rf_smp_timers[2],rf_smp_progress[2];
++static uint32_t rf_smp_ready[2],rf_smp_finished[2],rf_smp_drained[2];
++static uint64_t rf_smp_deadline;
++extern int redfin_smp_return_ready(void);
++extern int redfin_log_smp_quiescent(void);
++extern void redfin_shutdown_watchdog_tick(unsigned);
++extern unsigned char redfin_smp_secondary_entry[],redfin_smp_secondary_entry_end[];
++extern vm_offset_t ml_static_vtop(vm_offset_t);
++int redfin_smp_mode(void);
++int redfin_smp_sgi_selected(void);
++int redfin_smp_topology_valid(void);
++void redfin_smp_prepare(void);
++int redfin_smp_start(unsigned,vm_offset_t);
++void redfin_smp_irq(unsigned);
++int redfin_smp_prove(void);
++
++enum { RF_SMP_MPIDR,RF_SMP_EL,RF_SMP_MIDR,RF_SMP_MMFR0,RF_SMP_CTR,RF_SMP_SCTLR };
++/* REDFIN_SMP_HW_BEGIN */
++static uint64_t rf_smp_reg(unsigned n)
++{
++ switch(n) {
++ case RF_SMP_MPIDR:return __builtin_arm_rsr64("MPIDR_EL1");
++ case RF_SMP_EL:return __builtin_arm_rsr64("CurrentEL");
++ case RF_SMP_MIDR:return __builtin_arm_rsr64("MIDR_EL1");
++ case RF_SMP_MMFR0:return __builtin_arm_rsr64("ID_AA64MMFR0_EL1");
++ case RF_SMP_CTR:return __builtin_arm_rsr64("CTR_EL0");
++ default:return __builtin_arm_rsr64("SCTLR_EL1");
++ }
++}
++static int32_t rf_smp_psci(uint32_t fn,uint64_t a,uint64_t b,uint64_t c)
++{
++ register uint64_t x0 __asm__("x0")=fn,x1 __asm__("x1")=a;
++ register uint64_t x2 __asm__("x2")=b,x3 __asm__("x3")=c;
++ __asm__ volatile("smc #0" : "+r"(x0),"+r"(x1),"+r"(x2),"+r"(x3) : :
++  "x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","x14","x15",
++  "x16","x17","cc","memory");
++ return (int32_t)x0;
++}
++static void rf_smp_send(unsigned logical)
++{
++ uint64_t physical=logical?RF_SMP_TARGET:0;
++ uint64_t sgi=((physical>>8)<<16)|((uint64_t)RF_SMP_SGI<<24)|1;
++ __builtin_arm_dsb(DSB_ISHST);
++ __builtin_arm_wsr64("ICC_SGI1R_EL1",sgi);
++ __builtin_arm_isb(ISB_SY);
++}
++static bool rf_smp_entry_ok(vm_offset_t entry)
++{
++ vm_offset_t first=ml_static_vtop((vm_offset_t)redfin_smp_secondary_entry);
++ vm_offset_t last=ml_static_vtop((vm_offset_t)redfin_smp_secondary_entry_end);
++ return entry==first && last>first && last-first<=512 && last<=0x200000000ULL;
++}
++static void rf_smp_barrier(void) { __builtin_arm_dsb(DSB_SY); }
++static void rf_smp_pause(void) { delay(50); }
++static void rf_smp_round_delay(void) { delay(1000); }
++/* REDFIN_SMP_HW_END */
++
++static bool rf_smp_space(char c) { return c==' ' || c=='\t' || c=='\r' || c=='\n'; }
++static bool rf_smp_word(const char *a,unsigned n,const char *b)
++{ return strlen(b)==n && !memcmp(a,b,n); }
++static unsigned rf_smp_bytes(const char *args)
++{
++ if(!args) return 0;
++ for(unsigned i=0;i<RF_SMP_ARGS;i++) if(!args[i]) return i+1;
++ return 0;
++}
++static bool rf_smp_present(const char *args,unsigned bytes)
++{
++ if(!bytes) return false;
++ for(unsigned p=0;p<bytes-1;) {
++  if(rf_smp_space(args[p])) { p++;continue; }
++  unsigned s=p;while(p<bytes-1 && !rf_smp_space(args[p])) p++;
++  unsigned k=s;while(k<p && args[k]!='=') k++;
++  if(rf_smp_word(args+s,k-s,"redfinsmp")) return true;
++ }
++ return false;
++}
++/* A complete allowlist, deliberately narrower than normal UP bring-up. */
++static bool rf_smp_flags(const char *args,unsigned bytes,uint64_t *boot_id)
++{
++ static const char *tokens[]={"debug=0xc","serial=3","cpus=2","keepsyms=1","-noprogress",
++  "rd=md0","sweettouch=0","sweetkeys=0","sweetusb=0","sweetcpufreq=0","sweetbattery=0",
++  "modem=0","wifi=0","gpu=0","redfinsmp=1","redfinshim=1","redfinspmi=0","redfinreturn=0"};
++ uint32_t seen=0;bool nonce_seen=false,spam_seen=false;uint64_t boot_nonce=0;
++ if(!args || !bytes || bytes>RF_SMP_ARGS || args[bytes-1]) return false;
++ for(unsigned p=0;p<bytes-1;) {
++  if(!args[p]) return false;
++  if(rf_smp_space(args[p])) { p++;continue; }
++  unsigned s=p;while(p<bytes-1 && !rf_smp_space(args[p])) p++;
++  unsigned n=p-s;bool known=false;
++  for(unsigned i=0;i<sizeof(tokens)/sizeof(tokens[0]);i++) {
++   if(!rf_smp_word(args+s,n,tokens[i])) continue;
++   if(seen&(1u<<i)) return false;
++   seen|=1u<<i;known=true;break;
++  }
++  if(known) continue;
++  if(rf_smp_word(args+s,n,"-enable_kprintf_spam")) {
++   if(spam_seen) return false;
++   spam_seen=true;continue;
++  }
++  if(n==31 && !memcmp(args+s,"redfinbootid=0x",15)) {
++   if(nonce_seen) return false;
++   uint64_t nonce=0;
++   /* Fifteen prefix bytes and sixteen lowercase hex digits. */
++   for(unsigned j=15;j<31;j++) {
++    unsigned d=(unsigned)(args[s+j]-'0');
++    if(d>9) { if(args[s+j]<'a' || args[s+j]>'f') return false;d=(unsigned)(args[s+j]-'a'+10); }
++    nonce=(nonce<<4)|d;
++   }
++   if(!nonce) return false;
++   boot_nonce=nonce;nonce_seen=true;continue;
++  }
++  return false;
++ }
++ if(seen!=((1u<<(sizeof(tokens)/sizeof(tokens[0])))-1) || !nonce_seen) return false;
++ if(boot_id) *boot_id=boot_nonce;
++ return true;
++}
++int redfin_smp_mode(void)
++{
++ const char *args=PE_boot_args();unsigned bytes=rf_smp_bytes(args);
++ if(!bytes) panic("REDFIN SMP: unterminated boot args");
++ if(!rf_smp_present(args,bytes)) return 0;
++ if(!rf_smp_flags(args,bytes,NULL)) panic("REDFIN SMP: rejected frozen boot args");
++ __atomic_store_n(&rf_smp_selected,1,__ATOMIC_RELEASE);
++ return 1;
++}
++int redfin_smp_sgi_selected(void)
++{ return __atomic_load_n(&rf_smp_selected,__ATOMIC_ACQUIRE)==1; }
++int redfin_smp_topology_valid(void)
++{
++ const ml_topology_info_t *t=ml_get_topology_info();
++ if(!t || t->version!=CPU_TOPOLOGY_VERSION || t->num_cpus!=2 || t->max_cpu_id!=1 || t->num_clusters!=1 ||
++    t->max_cluster_id || t->max_die_id || !t->cpus || !t->clusters ||
++    t->boot_cpu!=&t->cpus[0] || t->boot_cluster!=&t->clusters[0] ||
++    t->clusters[0].cluster_id || t->clusters[0].cluster_type!=CLUSTER_TYPE_SMP ||
++    t->clusters[0].num_cpus!=2 || t->clusters[0].first_cpu_id || t->clusters[0].cpu_mask!=3) return 0;
++ for(unsigned i=0;i<2;i++) {
++  const ml_topology_cpu_t *c=&t->cpus[i];
++  if(c->cpu_id!=i || c->phys_id!=(i?RF_SMP_TARGET:0) || c->cluster_id || c->die_id ||
++     c->cluster_type!=CLUSTER_TYPE_SMP || c->die_cluster_id || c->cluster_core_id!=i ||
++     c->l2_cache_id!=i || c->l3_cache_id || c->l2_cache_size || c->l3_cache_size) return 0;
++ }
++ return 1;
++}
++static bool rf_smp_boot_cpu(void)
++{
++ uint64_t ctr=rf_smp_reg(RF_SMP_CTR),midr=rf_smp_reg(RF_SMP_MIDR);
++ unsigned granule=(unsigned)((rf_smp_reg(RF_SMP_MMFR0)>>20)&15);
++ return PAGE_SIZE==16384 && rf_smp_reg(RF_SMP_EL)==4 &&
++  !(rf_smp_reg(RF_SMP_MPIDR)&0xff00ffffffULL) &&
++  ((midr>>24)&255)==0x51 && ((midr>>4)&0xfff)==0x805 &&
++  (ctr&15)==4 && ((ctr>>16)&15)==4 && (granule==1 || granule==2) &&
++  (rf_smp_reg(RF_SMP_SCTLR)&5)==5;
++}
++static bool rf_smp_unchanged(void)
++{
++ const char *args=PE_boot_args();
++ return args && rf_smp_frozen_bytes && rf_smp_bytes(args)==rf_smp_frozen_bytes &&
++  !memcmp(args,rf_smp_frozen,rf_smp_frozen_bytes) && redfin_smp_topology_valid() && rf_smp_boot_cpu();
++}
++void redfin_smp_prepare(void)
++{
++ if(!redfin_smp_mode() || !redfin_smp_topology_valid()) panic("REDFIN SMP: topology refused");
++ thread_bind(cpu_to_processor(0));thread_block(THREAD_CONTINUE_NULL);
++ if(!rf_smp_boot_cpu()) panic("REDFIN SMP: coordinator not physical CPU0");
++ uint32_t expected=0;
++ if(!__atomic_compare_exchange_n(&rf_smp_prepared,&expected,1,true,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))
++  panic("REDFIN SMP: preparation repeated");
++ rf_smp_frozen_bytes=rf_smp_bytes(PE_boot_args());
++ memcpy(rf_smp_frozen,PE_boot_args(),rf_smp_frozen_bytes);
++ if(!rf_smp_flags(rf_smp_frozen,rf_smp_frozen_bytes,&rf_smp_boot_id)) panic("REDFIN SMP: frozen flags changed");
++}
++int redfin_smp_start(unsigned logical,vm_offset_t entry)
++{
++ uint32_t expected=0;
++ /* Consume even failed requests: no retry or second CPU_ON is permitted. */
++ if(!__atomic_compare_exchange_n(&rf_smp_started,&expected,1,true,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return -100;
++ if(logical!=1 || !__atomic_load_n(&rf_smp_prepared,__ATOMIC_ACQUIRE) || !rf_smp_unchanged() ||
++    entry<0x180000000ULL || entry>=0x200000000ULL || (entry&3) || !rf_smp_entry_ok(entry)) return -101;
++ int32_t version=rf_smp_psci(0x84000000u,0,0,0);
++ if(((uint32_t)version>>16)!=1 || ((uint32_t)version&0xffff)<1 ||
++    rf_smp_psci(0x8400000au,RF_SMP_ON,0,0)!=0 ||
++    rf_smp_psci(0x8400000au,RF_SMP_AFFINITY,0,0)!=0 ||
++    rf_smp_psci(RF_SMP_AFFINITY,RF_SMP_TARGET,0,0)!=1) return -102;
++ /* RO PMIC/IMEM proof is fresh and authoritative, never inferred from flags. */
++ if(redfin_smp_return_ready()!=1 || !rf_smp_unchanged()) return -103;
++ rf_smp_barrier();
++ int32_t rc=rf_smp_psci(RF_SMP_ON,RF_SMP_TARGET,entry,1);
++ if(!rc) __atomic_store_n(&rf_smp_started,2,__ATOMIC_RELEASE);
++ return rc;
++}
++static int rf_smp_local(void)
++{
++ uint64_t affinity=rf_smp_reg(RF_SMP_MPIDR)&0xff00ffffffULL;
++ return affinity==0?0:(affinity==RF_SMP_TARGET?1:-1);
++}
++/* kind0 means a completed architected timer IRQ, kind1 our dedicated SGI2. */
++void redfin_smp_irq(unsigned kind)
++{
++ uint32_t phase=__atomic_load_n(&rf_smp_phase,__ATOMIC_ACQUIRE);
++ if(phase!=RF_SMP_ACTIVE && phase!=RF_SMP_DRAIN) return;
++ int cpu=rf_smp_local();
++ if(cpu<0) { __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);return; }
++ if(phase==RF_SMP_DRAIN) {
++  if(kind==1) __atomic_store_n(&rf_smp_drained[cpu],1,__ATOMIC_RELEASE);
++  return;
++ }
++ if(kind==0) {
++  uint64_t n=__atomic_load_n(&rf_smp_timers[cpu],__ATOMIC_RELAXED);
++  if(n==UINT64_MAX) __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);
++  else __atomic_store_n(&rf_smp_timers[cpu],n+1,__ATOMIC_RELEASE);
++ } else if(kind==1) {
++  uint64_t n=__atomic_load_n(&rf_smp_request[cpu],__ATOMIC_ACQUIRE);
++  uint64_t before=__atomic_load_n(&rf_smp_ack[cpu],__ATOMIC_RELAXED);
++  if(n==1 || ((n>>2)>=1 && (n>>2)<=RF_SMP_ROUNDS && (n&3)==(uint64_t)((1-cpu)+2))) {
++   if(n>before) __atomic_store_n(&rf_smp_ack[cpu],n,__ATOMIC_RELEASE);
++  }
++ }
++}
++static bool rf_smp_alive(unsigned cpu)
++{
++ if(rf_smp_local()!=(int)cpu || __atomic_load_n(&rf_smp_fault,__ATOMIC_ACQUIRE) ||
++    mach_absolute_time()>rf_smp_deadline) return false;
++ if(!cpu) redfin_shutdown_watchdog_tick(0);
++ return true;
++}
++static bool rf_smp_wait64(uint64_t *value,uint64_t expected,unsigned cpu)
++{
++ for(unsigned i=0;i<RF_SMP_POLLS;i++) {
++  if(!rf_smp_alive(cpu)) return false;
++  if(__atomic_load_n(value,__ATOMIC_ACQUIRE)==expected) return true;
++  rf_smp_pause();
++ }
++ return false;
++}
++static bool rf_smp_wait32(uint32_t *value,uint32_t expected,unsigned cpu)
++{
++ for(unsigned i=0;i<RF_SMP_POLLS;i++) {
++  if(!rf_smp_alive(cpu)) return false;
++  if(__atomic_load_n(value,__ATOMIC_ACQUIRE)==expected) return true;
++  rf_smp_pause();
++ }
++ return false;
++}
++static bool rf_smp_worker(unsigned cpu)
++{
++ if(!rf_smp_alive(cpu)) return false;
++ __atomic_store_n(&rf_smp_request[cpu],1,__ATOMIC_RELEASE);rf_smp_send(cpu);
++ if(!rf_smp_wait64(&rf_smp_ack[cpu],1,cpu)) return false;
++ __atomic_store_n(&rf_smp_ready[cpu],1,__ATOMIC_RELEASE);
++ if(!rf_smp_wait32(&rf_smp_ready[1-cpu],1,cpu)) return false;
++ for(unsigned round=1;round<=RF_SMP_ROUNDS;round++) {
++  uint64_t sequence=((uint64_t)round<<2)|(cpu+2);
++  __atomic_store_n(&rf_smp_request[1-cpu],sequence,__ATOMIC_RELEASE);rf_smp_send(1-cpu);
++  if(!rf_smp_wait64(&rf_smp_ack[1-cpu],sequence,cpu)) return false;
++  rf_smp_round_delay();
++  if(!rf_smp_alive(cpu)) return false;
++  __atomic_store_n(&rf_smp_progress[cpu],round,__ATOMIC_RELEASE);
++ }
++ __atomic_store_n(&rf_smp_finished[cpu],1,__ATOMIC_RELEASE);
++ return true;
++}
++static void rf_smp_secondary(void *arg __unused,wait_result_t result __unused)
++{
++ thread_bind(cpu_to_processor(1));thread_block(THREAD_CONTINUE_NULL);
++ if(!rf_smp_worker(1)) __atomic_store_n(&rf_smp_fault,1,__ATOMIC_RELEASE);
++ thread_terminate(current_thread());
++}
++int redfin_smp_prove(void)
++{
++ if(!rf_smp_unchanged() || __atomic_load_n(&rf_smp_started,__ATOMIC_ACQUIRE)!=2 ||
++    __atomic_load_n(&rf_smp_phase,__ATOMIC_ACQUIRE)!=RF_SMP_IDLE) return -110;
++ nanoseconds_to_deadline(5*NSEC_PER_SEC,&rf_smp_deadline);
++ __atomic_store_n(&rf_smp_phase,RF_SMP_ACTIVE,__ATOMIC_RELEASE);
++ thread_t worker=THREAD_NULL;
++ kern_return_t kr=kernel_thread_start(rf_smp_secondary,NULL,&worker);
++ if(kr!=KERN_SUCCESS) return -111;
++ if(!rf_smp_worker(0) || !rf_smp_wait32(&rf_smp_finished[1],1,0)) { thread_deallocate(worker);return -112; }
++ bool exited=false;
++ for(unsigned i=0;i<RF_SMP_POLLS;i++) {
++  if(!rf_smp_alive(0)) break;
++  if(!thread_is_active(worker)) { exited=true;break; }
++  rf_smp_pause();
++ }
++ thread_deallocate(worker);
++ if(!exited) return -113;
++ /* Each PE's drain acknowledgement follows all previous local IRQ hooks. */
++ __atomic_store_n(&rf_smp_phase,RF_SMP_DRAIN,__ATOMIC_RELEASE);rf_smp_send(0);rf_smp_send(1);
++ if(!rf_smp_wait32(&rf_smp_drained[0],1,0) || !rf_smp_wait32(&rf_smp_drained[1],1,0)) return -114;
++ __atomic_store_n(&rf_smp_phase,RF_SMP_DONE,__ATOMIC_RELEASE);
++ if(__atomic_load_n(&rf_smp_fault,__ATOMIC_ACQUIRE)) return -115;
++ for(unsigned cpu=0;cpu<2;cpu++) {
++  if(__atomic_load_n(&rf_smp_timers[cpu],__ATOMIC_ACQUIRE)<2 ||
++     __atomic_load_n(&rf_smp_progress[cpu],__ATOMIC_ACQUIRE)!=RF_SMP_ROUNDS ||
++     __atomic_load_n(&rf_smp_ack[cpu],__ATOMIC_ACQUIRE)!=(((uint64_t)RF_SMP_ROUNDS<<2)|((1-cpu)+2))) return -116;
++ }
++ /* CPU6 test thread is inactive; instrumentation drained; no diagnostics yet. */
++ if(redfin_log_smp_quiescent()!=1) return -117;
++ rf_smp_pause();
++ if(redfin_log_smp_quiescent()!=1 || !rf_smp_unchanged()) return -118;
++ /* Only the pinned CPU0 coordinator reports, after worker/IRQ quiescence. */
++ kprintf("REDFIN SMP2: bootid=0x%016llx cpu0 timer=%llu progress=%llu self=%u cross=%llu "
++  "cpu6 timer=%llu progress=%llu self=%u cross=%llu log_busy=0 log_reentrant=0 "
++  "worker_exited=1 irq_drained=1 tlb=untested\n",
++  (unsigned long long)rf_smp_boot_id,
++  (unsigned long long)__atomic_load_n(&rf_smp_timers[0],__ATOMIC_ACQUIRE),
++  (unsigned long long)__atomic_load_n(&rf_smp_progress[0],__ATOMIC_ACQUIRE),
++  __atomic_load_n(&rf_smp_ready[0],__ATOMIC_ACQUIRE),
++  (unsigned long long)__atomic_load_n(&rf_smp_ack[0],__ATOMIC_ACQUIRE),
++  (unsigned long long)__atomic_load_n(&rf_smp_timers[1],__ATOMIC_ACQUIRE),
++  (unsigned long long)__atomic_load_n(&rf_smp_progress[1],__ATOMIC_ACQUIRE),
++  __atomic_load_n(&rf_smp_ready[1],__ATOMIC_ACQUIRE),
++  (unsigned long long)__atomic_load_n(&rf_smp_ack[1],__ATOMIC_ACQUIRE));
++ return 0;
++}
++#endif /* SWEET */

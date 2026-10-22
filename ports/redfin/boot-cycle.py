@@ -37,7 +37,7 @@ def recovery_proof(image):
 
 
 def xnu_return_proof(image):
-    """Require a matching build that arms the single-CPU PMIC bootloader return."""
+    """Require a matching UP return or the isolated compiled-shim SMP profile."""
     manifest = json.loads(image.with_name("manifest.json").read_text())
     checksum = hashlib.sha256(image.read_bytes()).hexdigest()
     if not isinstance(manifest, dict):
@@ -45,6 +45,8 @@ def xnu_return_proof(image):
     checksums = manifest.get("sha256")
     arguments = manifest.get("boot_args")
     tokens = arguments.split() if isinstance(arguments, str) else []
+    if isinstance(checksums, dict) and checksums.get("redfin-xnu.img") == checksum and manifest.get("smp_probe") is True:
+        return smp_return_profile(image, manifest, arguments, tokens, checksum)
     if (not isinstance(checksums, dict) or checksums.get("redfin-xnu.img") != checksum
             or [token for token in tokens if token.startswith("redfinreturn=")] != ["redfinreturn=1"]
             or [token for token in tokens if token.startswith("cpus=")] != ["cpus=1"]):
@@ -58,6 +60,35 @@ def xnu_return_proof(image):
             raise ValueError("redfinbootid requires exactly one nonzero 16-digit lowercase hexadecimal token")
         proof["boot_id"] = match[1]
     return proof
+
+
+def smp_return_profile(image, manifest, arguments, tokens, checksum):
+    """Admit only the frozen md0 experiment whose shim owns early PMIC return.
+
+    This validates host build provenance; the kernel independently reads the
+    actual PMIC/IMEM reason before CPU_ON. It is not a hardware success verdict.
+    """
+    required = set(('debug=0xc serial=3 cpus=2 keepsyms=1 -noprogress rd=md0 '
+                    'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 '
+                    'modem=0 wifi=0 gpu=0 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0').split())
+    flags = [token for token in tokens if not token.startswith('redfinbootid=') and token != '-enable_kprintf_spam']
+    ids = [token for token in tokens if token.startswith('redfinbootid=')]
+    match = re.fullmatch(r'redfinbootid=0x([0-9a-f]{16})', ids[0]) if len(ids) == 1 else None
+    if (arguments != ' '.join(tokens) or len(flags) != len(required) or set(flags) != required or
+            tokens.count('-enable_kprintf_spam') > 1 or match is None or not int(match[1], 16) or
+            manifest.get('shim_early_return') is not True or manifest.get('root_device') != 'md0' or
+            any(manifest.get(name) is not False for name in ('root_writable', 'cpu_copy_display',
+                'capture_screen', 'userspace_stacks', 'syscall_tracing', 'splash_reservation_assumption')) or
+            type(manifest.get('shutdown_seconds')) is not int or manifest['shutdown_seconds'] != 0):
+        raise ValueError('SMP recovery cycle requires the exact isolated md0 shim-return profile')
+    config = image.with_name('config.h').read_bytes()
+    if (len(config) > 4096 or b'\0' in config or
+            hashlib.sha256(config).hexdigest() != manifest['sha256'].get('config.h') or
+            re.findall(rb'^#define SHIM_EARLY_RETURN[^\n]*$', config, re.MULTILINE) != [b'#define SHIM_EARLY_RETURN 1'] or
+            re.findall(rb'^#define REDFIN_SMP_PROBE[^\n]*$', config, re.MULTILINE) != [b'#define REDFIN_SMP_PROBE 1']):
+        raise ValueError('SMP recovery cycle requires matching compiled shim/SMP configuration')
+    return {'sha256': checksum, 'pmic_bootloader_return': True, 'armed_by': 'shim',
+            'cpus': 2, 'root_device': 'md0', 'boot_id': match[1]}
 
 
 def verify_recovery_mounts(data):

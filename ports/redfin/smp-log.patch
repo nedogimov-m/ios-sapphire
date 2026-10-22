@@ -1,0 +1,422 @@
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -697,163 +697,265 @@
+ 	fns->next = gPESF;
+ 	gPESF = fns;
+ }
+ 
+ 
+-/* Linux persistent_ram console ABI (ECC disabled): DBGC, start, size, data.
+- * The builder supplies verified reserved console ranges through /redfin-log.
+- * The redfin bring-up kernel supports one CPU; mask local exceptions while
+- * publishing a character so a panic/IRQ cannot interrupt header updates.
+- */
+-#if defined(SWEET)
+-struct redfin_ramlog {
+-	volatile uint32_t signature, start, size;
+-	volatile unsigned char data[];
+-};
+-static struct redfin_ramlog *redfin_logs[2];
+-static uint32_t redfin_log_capacity[2];
+-static unsigned redfin_log_count;
+-/* Only RESET is written, for at most 60 seconds after RAM serial setup. */
+-static volatile uint32_t *redfin_watchdog_reset;
+-static uint64_t redfin_watchdog_deadline, redfin_watchdog_last, redfin_watchdog_frequency;
+-
+-/* REDFIN_SHUTDOWN_WATCHDOG_TEST_BEGIN: RESET only, no shutdown from console/IRQ. */
+-int redfin_shutdown_watchdog_start(uint32_t seconds);
+-void redfin_shutdown_watchdog_tick(unsigned final);
+-int
+-redfin_shutdown_watchdog_start(uint32_t seconds)
+-{
+-	if (seconds < 5 || seconds > 300 || !redfin_watchdog_reset ||
+-	    !redfin_watchdog_frequency || redfin_watchdog_frequency >= 1000000000ULL)
+-		return 0;
+-	uint64_t now = __builtin_arm_rsr64("CNTPCT_EL0");
+-	uint64_t duration = redfin_watchdog_frequency * seconds;
+-	if (now > UINT64_MAX - duration) return 0;
+-	uint64_t daif = __builtin_arm_rsr64("DAIF");
+-	__builtin_arm_wsr64("DAIF", daif | 0x3c0);
+-	redfin_watchdog_deadline = now + duration;
+-	redfin_watchdog_last = now;
+-	*redfin_watchdog_reset = 1;
+-	__asm__ volatile("dsb sy" ::: "memory");
+-	__builtin_arm_wsr64("DAIF", daif);
+-	return 1;
+-}
+-
+-void
+-redfin_shutdown_watchdog_tick(unsigned final)
+-{
+-	uint64_t daif = __builtin_arm_rsr64("DAIF");
+-	__builtin_arm_wsr64("DAIF", daif | 0x3c0);
+-	uint64_t now = __builtin_arm_rsr64("CNTPCT_EL0");
+-	if (redfin_watchdog_reset && now < redfin_watchdog_deadline &&
+-	    now - redfin_watchdog_last >= redfin_watchdog_frequency) {
+-		*redfin_watchdog_reset = 1;
+-		redfin_watchdog_last = now;
+-	}
+-	/* Never feed past the cap, even if this worker was scheduled late.
+-	 * Console progress cannot extend the hardware fallback during shutdown. */
+-	if (final) redfin_watchdog_deadline = 0;
+-	__asm__ volatile("dsb sy" ::: "memory");
+-	__builtin_arm_wsr64("DAIF", daif);
+-}
+-/* REDFIN_SHUTDOWN_WATCHDOG_TEST_END */
+-
+-void
+-redfin_log_putc(char c)
+-{
+-	uint64_t daif = __builtin_arm_rsr64("DAIF");
+-	__asm__ volatile("msr daifset, #3" ::: "memory");
+-	for (unsigned i = 0; i < redfin_log_count; i++) {
+-		struct redfin_ramlog *log = redfin_logs[i];
+-		uint32_t capacity = redfin_log_capacity[i], start = log->start, size = log->size;
+-		if (start >= capacity || size > capacity) continue;
+-		log->data[start] = (unsigned char)c;
+-		__asm__ volatile("dsb sy" ::: "memory");
+-		start++;
+-		if (start == capacity) start = 0;
+-		log->start = start;
+-		if (size < capacity) log->size = size + 1;
+-	}
+-	if (c == '\n' && redfin_watchdog_reset) {
+-		uint64_t now = __builtin_arm_rsr64("CNTPCT_EL0");
+-		if (now < redfin_watchdog_deadline &&
+-		    now - redfin_watchdog_last >= redfin_watchdog_frequency) {
+-			*redfin_watchdog_reset = 1;
+-			redfin_watchdog_last = now;
+-		}
+-	}
+-	__asm__ volatile("dsb sy" ::: "memory");
+-	__builtin_arm_wsr64("DAIF", daif);
+-}
+-
+-static void redfin_log_init(void) {}
+-static unsigned int redfin_log_ready(void) { return 1; }
+-static unsigned int redfin_log_receive_ready(void) { return 0; }
+-static uint8_t redfin_log_receive(void) { return 0; }
+-static void redfin_log_transmit(uint8_t c) { redfin_log_putc((char)c); }
+-
+-SECURITY_READ_ONLY_LATE(static struct pe_serial_functions) redfin_log_serial = {
+-	.init = redfin_log_init,
+-	.transmit_ready = redfin_log_ready,
+-	.transmit_data = redfin_log_transmit,
+-	.receive_ready = redfin_log_receive_ready,
+-	.receive_data = redfin_log_receive,
+-	.device = SERIAL_SWEET_FBCON
+-};
+-
+-static void
+-redfin_log_probe(void)
+-{
+-	DTEntry entry;
+-	const uint64_t *reg;
+-	unsigned int size;
+-	if (redfin_log_count || SecureDTLookupEntry(NULL, "/redfin-log", &entry) != kSuccess ||
+-	    SecureDTGetProperty(entry, "reg", (const void **)&reg, &size) != kSuccess ||
+-	    (size != 2 * sizeof(uint64_t) && size != 4 * sizeof(uint64_t))) return;
+-	unsigned count = size / (2 * sizeof(uint64_t));
+-	for (unsigned i = 0; i < count; i++) {
+-		uint64_t base = reg[2 * i], length = reg[2 * i + 1];
+-		if (!base || (base & 0xfff) || length < 0x1000 || length > 0x1000000 ||
+-		    base >= (1ULL << 36) || length > (1ULL << 36) - base) return;
+-	}
+-	if (count == 2 && reg[0] < reg[2] + reg[3] && reg[2] < reg[0] + reg[1]) return;
+-	for (unsigned i = 0; i < count; i++) {
+-		redfin_logs[i] = (struct redfin_ramlog *)ml_io_map(reg[2 * i], reg[2 * i + 1]);
+-		if (redfin_logs[i] == NULL) return;
+-		redfin_log_capacity[i] = (uint32_t)reg[2 * i + 1] - 12;
+-	}
+-	for (unsigned i = 0; i < count; i++) {
+-		redfin_logs[i]->signature = 0;
+-		redfin_logs[i]->start = redfin_logs[i]->size = 0;
+-		__asm__ volatile("dsb sy" ::: "memory");
+-		redfin_logs[i]->signature = 0x43474244;
+-	}
+-	redfin_log_count = count;
+-	DTEntry watchdog;
+-	const uint64_t *watchdog_reg;
+-	unsigned int watchdog_size;
+-	if (SecureDTLookupEntry(NULL, "/redfin-watchdog", &watchdog) == kSuccess &&
+-	    SecureDTGetProperty(watchdog, "reg", (const void **)&watchdog_reg, &watchdog_size) == kSuccess &&
+-	    watchdog_size == 2 * sizeof(uint64_t) &&
+-	    watchdog_reg[0] == 0x17c10000ULL && watchdog_reg[1] == 0x1000) {
+-		uint64_t frequency = __builtin_arm_rsr64("CNTFRQ_EL0");
+-		uint64_t now = __builtin_arm_rsr64("CNTPCT_EL0");
+-		if (frequency && frequency < 1000000000ULL && now < UINT64_MAX - frequency * 60) {
+-			vm_offset_t mapping = ml_io_map(watchdog_reg[0], watchdog_reg[1]);
+-			if (mapping) {
+-				redfin_watchdog_reset = (volatile uint32_t *)(mapping + 4);
+-				redfin_watchdog_frequency = frequency;
+-				redfin_watchdog_last = now;
+-				redfin_watchdog_deadline = now + frequency * 60;
+-			}
+-		}
+-	}
+-	register_serial_functions(&redfin_log_serial);
+-	const char *banner = "\n[REDFIN RAMLOG v1: serial and console]\n";
+-	while (*banner) redfin_log_putc(*banner++);
+-}
+-#endif /* SWEET */
++/* Linux persistent_ram console ABI (ECC disabled): DBGC, start, size, data.
++ * One serialized owner publishes both rings and watchdog state. Recovery owns
++ * capture encryption; no encrypted format or key material lives in this logger.
++ */
++#if defined(SWEET)
++struct redfin_ramlog {
++ volatile uint32_t signature, start, size;
++ volatile unsigned char data[];
++};
++static struct redfin_ramlog *redfin_logs[2];
++static uint32_t redfin_log_capacity[2];
++static unsigned redfin_log_count;
++static volatile uint32_t *redfin_watchdog_reset;
++static uint64_t redfin_watchdog_deadline,redfin_watchdog_last,redfin_watchdog_frequency;
++static uint64_t redfin_log_owner;
++static uint64_t redfin_log_busy_drops,redfin_log_reentrant_drops;
++static uint32_t redfin_log_counts_uncertain;
++static uint32_t redfin_log_init_attempted;
++#define REDFIN_LOG_OWNER_TRIES 256u
++
++/* REDFIN_SMP_LOG_HW_BEGIN */
++static uint64_t redfin_log_cpu(void)
++{ return (__builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL) + 1; }
++static uint64_t redfin_log_counter(void)
++{ return __builtin_arm_rsr64("CNTPCT_EL0"); }
++static uint64_t redfin_log_frequency(void)
++{ return __builtin_arm_rsr64("CNTFRQ_EL0"); }
++static uint64_t
++redfin_log_irq_save(bool all)
++{
++ uint64_t daif=__builtin_arm_rsr64("DAIF");
++ __builtin_arm_wsr64("DAIF",daif | (all?0x3c0:0xc0));
++ __asm__ volatile("" ::: "memory");
++ return daif;
++}
++static void redfin_log_irq_restore(uint64_t daif)
++{ __builtin_arm_wsr64("DAIF",daif); __asm__ volatile("" ::: "memory"); }
++static void redfin_log_barrier(void)
++{ __asm__ volatile("dsb sy" ::: "memory"); }
++static void redfin_log_relax(void)
++{ __asm__ volatile("yield" ::: "memory"); }
++/* REDFIN_SMP_LOG_HW_END */
++
++/* REDFIN_SMP_LOG_OWNER_BEGIN */
++/* Mask local interrupts before reading affinity: owner identity cannot migrate.
++ * Panic/NMI reentry drops immediately. Another CPU waits a finite number of
++ * tries, then drops. Never steal a dead owner's partially published ring.
++ * This may lose panic text, but neither corrupts its predecessor nor deadlocks.
++ * Weak CAS is required: strong LL/SC CAS can retry outside this finite budget.
++ */
++static void
++redfin_log_drop(bool reentrant)
++{
++ uint64_t *counter=reentrant?&redfin_log_reentrant_drops:&redfin_log_busy_drops;
++ for(unsigned attempt=0;attempt<REDFIN_LOG_OWNER_TRIES;attempt++) {
++  uint64_t value=__atomic_load_n(counter,__ATOMIC_RELAXED);
++  if(value==UINT64_MAX) return;
++  if(__atomic_compare_exchange_n(counter,&value,value+1,true,
++       __ATOMIC_RELAXED,__ATOMIC_RELAXED)) return;
++ }
++ /* Counter contention/spurious failures cannot turn a drop into a false zero.
++  * Stats report UINT64_MAX thereafter; positive checkpoints must reject it. */
++ __atomic_store_n(&redfin_log_counts_uncertain,1,__ATOMIC_RELAXED);
++}
++static bool
++redfin_log_enter(uint64_t *daif,bool all,bool character)
++{
++ *daif=redfin_log_irq_save(all);
++ uint64_t cpu=redfin_log_cpu();
++ for(unsigned attempt=0;attempt<REDFIN_LOG_OWNER_TRIES;attempt++) {
++  uint64_t expected=0;
++  if(__atomic_compare_exchange_n(&redfin_log_owner,&expected,cpu,true,
++       __ATOMIC_ACQUIRE,__ATOMIC_RELAXED)) return true;
++  if(expected==cpu) {
++   if(character) redfin_log_drop(true);
++   redfin_log_irq_restore(*daif);
++   return false;
++  }
++  redfin_log_relax();
++ }
++ if(character) redfin_log_drop(false);
++ redfin_log_irq_restore(*daif);
++ return false;
++}
++static void
++redfin_log_leave(uint64_t daif)
++{
++ redfin_log_barrier();
++ __atomic_store_n(&redfin_log_owner,0,__ATOMIC_RELEASE);
++ redfin_log_irq_restore(daif);
++}
++/* UINT64_MAX means saturated/unknown, never evidence of zero lost chars. */
++void redfin_log_smp_stats(uint64_t *busy,uint64_t *reentrant);
++void
++redfin_log_smp_stats(uint64_t *busy,uint64_t *reentrant)
++{
++ uint64_t b=__atomic_load_n(&redfin_log_busy_drops,__ATOMIC_RELAXED);
++ uint64_t r=__atomic_load_n(&redfin_log_reentrant_drops,__ATOMIC_RELAXED);
++ if(__atomic_load_n(&redfin_log_counts_uncertain,__ATOMIC_RELAXED)) b=r=UINT64_MAX;
++ if(busy) *busy=b;
++ if(reentrant) *reentrant=r;
++}
++/* REDFIN_SMP_LOG_OWNER_END */
++
++/* REDFIN_SHUTDOWN_WATCHDOG_TEST_BEGIN: RESET only, boot CPU0 only.
++ * In an SMP profile the shutdown worker must be bound to physical CPU0.
++ * A parked/dead non-owner cannot feed or extend the boot CPU's deadline.
++ */
++int redfin_shutdown_watchdog_start(uint32_t seconds);
++void redfin_shutdown_watchdog_tick(unsigned final);
++int
++redfin_shutdown_watchdog_start(uint32_t seconds)
++{
++ uint64_t daif;
++ if(seconds<5 || seconds>300 || !redfin_log_enter(&daif,true,false)) return 0;
++ int accepted=0;
++ if(redfin_log_cpu()!=1 || !redfin_watchdog_reset || !redfin_watchdog_frequency ||
++     redfin_watchdog_frequency>=1000000000ULL) goto done;
++ uint64_t now=redfin_log_counter(),duration=redfin_watchdog_frequency*seconds;
++ if(now>UINT64_MAX-duration) goto done;
++ redfin_watchdog_deadline=now+duration;
++ redfin_watchdog_last=now;
++ *redfin_watchdog_reset=1;
++ accepted=1;
++done:
++ redfin_log_leave(daif);
++ return accepted;
++}
++void
++redfin_shutdown_watchdog_tick(unsigned final)
++{
++ uint64_t daif;
++ if(!redfin_log_enter(&daif,true,false)) return;
++ if(redfin_log_cpu()==1) {
++  uint64_t now=redfin_log_counter();
++  if(redfin_watchdog_reset && now<redfin_watchdog_deadline &&
++      now-redfin_watchdog_last>=redfin_watchdog_frequency) {
++   *redfin_watchdog_reset=1;
++   redfin_watchdog_last=now;
++  }
++  if(final) redfin_watchdog_deadline=0;
++ }
++ redfin_log_leave(daif);
++}
++/* REDFIN_SHUTDOWN_WATCHDOG_TEST_END */
++
++void
++redfin_log_putc(char c)
++{
++ uint64_t daif;
++ if(!redfin_log_enter(&daif,false,true)) return;
++ for(unsigned i=0;i<redfin_log_count;i++) {
++  struct redfin_ramlog *log=redfin_logs[i];
++  uint32_t capacity=redfin_log_capacity[i],start=log->start,size=log->size;
++  if(start>=capacity || size>capacity) continue;
++  log->data[start]=(unsigned char)c;
++  redfin_log_barrier();
++  if(++start==capacity) start=0;
++  log->start=start;
++  if(size<capacity) log->size=size+1;
++ }
++ if(c=='\n' && redfin_log_cpu()==1 && redfin_watchdog_reset) {
++  uint64_t now=redfin_log_counter();
++  if(now<redfin_watchdog_deadline && now-redfin_watchdog_last>=redfin_watchdog_frequency) {
++   *redfin_watchdog_reset=1;
++   redfin_watchdog_last=now;
++  }
++ }
++ redfin_log_leave(daif);
++}
++
++static void redfin_log_init(void) {}
++static unsigned int redfin_log_ready(void) { return 1; }
++static unsigned int redfin_log_receive_ready(void) { return 0; }
++static uint8_t redfin_log_receive(void) { return 0; }
++static void redfin_log_transmit(uint8_t c) { redfin_log_putc((char)c); }
++SECURITY_READ_ONLY_LATE(static struct pe_serial_functions) redfin_log_serial={
++ .init=redfin_log_init,.transmit_ready=redfin_log_ready,.transmit_data=redfin_log_transmit,
++ .receive_ready=redfin_log_receive_ready,.receive_data=redfin_log_receive,.device=SERIAL_SWEET_FBCON
++};
++static void
++redfin_log_probe(void)
++{
++ /* Only boot CPU0 prepares mappings. They are private until owner publication;
++  * no allocation, DT lookup, mapping or banner output holds the ring owner.
++  */
++ if(redfin_log_cpu()!=1 || __atomic_exchange_n(&redfin_log_init_attempted,1,__ATOMIC_RELAXED)) return;
++ DTEntry entry;
++ const uint64_t *raw;
++ unsigned size;
++ if(SecureDTLookupEntry(NULL,"/redfin-log",&entry)!=kSuccess ||
++     SecureDTGetProperty(entry,"reg",(const void **)&raw,&size)!=kSuccess || !raw ||
++     (size!=2*sizeof(uint64_t) && size!=4*sizeof(uint64_t))) return;
++ uint64_t reg[4]={0};
++ memcpy(reg,raw,size);
++ unsigned count=size/(2*sizeof(uint64_t));
++ for(unsigned i=0;i<count;i++) {
++  uint64_t base=reg[2*i],length=reg[2*i+1];
++  if(!base || (base&0xfff) || length<0x1000 || length>0x1000000 ||
++      base>=(1ULL<<36) || length>(1ULL<<36)-base) return;
++ }
++ if(count==2 && reg[0]<reg[2]+reg[3] && reg[2]<reg[0]+reg[1]) return;
++ struct redfin_ramlog *mapped[2]={NULL,NULL};
++ uint32_t capacity[2]={0,0};
++ for(unsigned i=0;i<count;i++) {
++  mapped[i]=(struct redfin_ramlog *)ml_io_map(reg[2*i],reg[2*i+1]);
++  if(!mapped[i]) return;
++  capacity[i]=(uint32_t)reg[2*i+1]-12;
++ }
++ volatile uint32_t *watchdog_reset=NULL;
++ uint64_t frequency=0;
++ DTEntry watchdog;
++ const uint64_t *watchdog_raw;
++ unsigned watchdog_size;
++ if(SecureDTLookupEntry(NULL,"/redfin-watchdog",&watchdog)==kSuccess &&
++     SecureDTGetProperty(watchdog,"reg",(const void **)&watchdog_raw,&watchdog_size)==kSuccess &&
++     watchdog_raw && watchdog_size==2*sizeof(uint64_t)) {
++  uint64_t wd[2];
++  memcpy(wd,watchdog_raw,sizeof(wd));
++  if(wd[0]==0x17c10000ULL && wd[1]==0x1000) {
++   frequency=redfin_log_frequency();
++   uint64_t now=redfin_log_counter();
++   if(frequency && frequency<1000000000ULL && now<=UINT64_MAX-frequency*60) {
++    vm_offset_t mapping=ml_io_map(wd[0],wd[1]);
++    if(mapping) watchdog_reset=(volatile uint32_t *)(mapping+4);
++   }
++  }
++ }
++ uint64_t daif;
++ if(!redfin_log_enter(&daif,true,false)) return;
++ if(redfin_log_count) { redfin_log_leave(daif); return; }
++ for(unsigned i=0;i<count;i++) {
++  mapped[i]->signature=0;
++  mapped[i]->start=mapped[i]->size=0;
++  redfin_log_barrier();
++  mapped[i]->signature=0x43474244;
++  redfin_logs[i]=mapped[i];
++  redfin_log_capacity[i]=capacity[i];
++ }
++ if(watchdog_reset) {
++  uint64_t now=redfin_log_counter();
++  if(now<=UINT64_MAX-frequency*60) {
++   redfin_watchdog_reset=watchdog_reset;
++   redfin_watchdog_frequency=frequency;
++   redfin_watchdog_last=now;
++   redfin_watchdog_deadline=now+frequency*60;
++  }
++ }
++ redfin_log_count=count;
++ register_serial_functions(&redfin_log_serial);
++ redfin_log_leave(daif);
++ const char *banner="\n[REDFIN RAMLOG v1: serial and console]\n";
++ while(*banner) redfin_log_putc(*banner++);
++}
++#endif /* SWEET */
+ 
+ /*****************************************************************************/
+ 
+ /*
+  * sweet: framebuffer "serial" for boards with no usable UART (the Redmi Note

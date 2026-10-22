@@ -45,6 +45,14 @@ TGran16=1. CPU6 parks outside XNU. Kernel SHA256
 local build `build-20261023-002659.log`, code commit `5f34df2`.
 PID1 heartbeats and automatic recovery/fastboot return succeed without panic.
 
+`--cpu-capability-target 0x100..0x700` selects one secondary in that
+separate profile; CPU0 cannot be selected. The default remains CPU6.
+CPU1..5 and CPU7 each pass fresh authenticated EL1/16K/mailbox tests on
+2026-10-23 (`logs/redfin/cpuN-cap-v1/`, build `build-20261023-011946.log`).
+CPU1..5 identify as part0x805; CPU6..7 as0x804. Thus all8cores support
+the required granule. The target is all8in XNU; CPU0+CPU6 is the first
+concurrent proof stage, not a limit on the final port.
+
 ## Before enabling XNU SMP
 
 `--early-return-probe` rehearses a freestanding PMIC/IMEM return helper
@@ -68,3 +76,14 @@ secondary startup, synchronized logging with explicit loss accounting,
 topology/loader validation and positive cross-CPU/timer/progress checks.
 UFS/GUI must stay gated until the isolated md0 stage succeeds. CPU suspend,
 halt and hotplug remain unsupported.
+
+The isolated `--smp-probe --shim-early-return --return-bootloader` profile
+currently admits exactly CPU0+CPU6, canonical RAM and md0. It disables
+legacy SPMI/return writers with `redfinspmi=0 redfinreturn=0`; the shim
+prearms PMIC/IMEM and a separate read-only kernel verifier checks that
+hardware state before CPU_ON. Loader and kernel independently reject other
+profiles. `smp-log.patch`, `smp-return.patch`, `smp.patch` and
+`early-bootid.patch` are required; host recovery verifies both compiled
+configuration gates and image hashes. The proof exercises dedicated SGI2,
+per-core timers, bound worker progress and zero logger drops before CPU
+publication. TLB shootdowns and GUI/UFS SMP need separate validation.

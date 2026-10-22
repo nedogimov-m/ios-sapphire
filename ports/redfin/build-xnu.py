@@ -226,8 +226,10 @@ def main(argv=None):
                                          'usb-context-format-status.patch',
                                          'usb-network-worker.patch', 'usb-network-start.patch',
                                          'peripheral-start.patch', 'touch-event-start.patch',
-                                         'cpu-probe.patch', 'cpu-probe-start.patch',
-                                         'early-return.patch', 'early-return-start.patch'), 21):
+                                         'cpu-probe.patch', 'cpu-probe-start.patch', 'cpu-target.patch',
+                                         'early-return.patch', 'early-return-start.patch',
+                                         'smp-log.patch', 'smp-return.patch', 'smp.patch',
+                                         'early-bootid.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

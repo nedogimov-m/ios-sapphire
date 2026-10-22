@@ -60,6 +60,23 @@ class BuildFlagTests(unittest.TestCase):
         self.refused(['--shim-early-return', '--cpu-capability-probe'],
                      '--shim-early-return requires --early-return-probe')
 
+    def test_selected_secondary_requires_capability_profile_and_exact_affinity(self):
+        self.refused(['--cpu-capability-target', '0x700'],
+                     '--cpu-capability-target requires --cpu-capability-probe')
+        for value in ('0', '0x101', '0x800', '0x100000600'):
+            self.refused(['--cpu-capability-probe', '--cpu-capability-target', value],
+                         '--cpu-capability-target must be 0x100..0x700 in steps of 0x100')
+
+    def test_smp_requires_shim_return_cpu0_and_separate_profile(self):
+        self.refused(['--smp-probe'],
+                     '--smp-probe requires --kernel, --dtb, --return-bootloader and --shim-early-return')
+        base = ['--smp-probe', '--kernel', '/missing-kernel', '--dtb', '/missing-dtb',
+                '--return-bootloader', '--shim-early-return']
+        self.refused([*base, '--boot-mpidr', '0x600'], '--smp-probe requires boot CPU0')
+        for option in ('--cpu-capability-probe', '--early-return-probe', '--spmi-probe',
+                       '--ufs-probe', '--ufs-root', '--touch-events', '--gpu-probe', '--splash'):
+            self.refused([*base, option], '--smp-probe requires a separate RAM-only profile')
+
     def test_shutdown_needs_recovery_return(self):
         self.refused(['--kernel', '/missing-kernel', '--ufs-root', '--shutdown-seconds', '120'],
                      '--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')

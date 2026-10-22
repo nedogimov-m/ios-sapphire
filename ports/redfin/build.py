@@ -58,8 +58,10 @@ def main():
     p.add_argument('--trace', action='store_true', help='enable verbose kernel kprintf tracing')
     p.add_argument('--trace-syscalls', action='store_true', help='enable PID1 syscall and pathname diagnostics')
     p.add_argument('--cpu-capability-probe', action='store_true', help='wake and park CPU6 to record architectural capabilities; RAM root and verified return only')
+    p.add_argument('--cpu-capability-target', type=lambda x: int(x, 0), help='select one secondary MPIDR 0x100..0x700 for --cpu-capability-probe; default CPU6')
     p.add_argument('--early-return-probe', action='store_true', help='rehearse the shared bootloader-return leaf after existing verified return; separate RAM-only CPU0 test')
     p.add_argument('--shim-early-return', action='store_true', help='prearm the same return leaf before payload validation; requires the isolated --early-return-probe rehearsal profile')
+    p.add_argument('--smp-probe', action='store_true', help='isolated md0 CPU0+CPU6 XNU proof; requires compiled shim prearm and bootloader return')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
     p.add_argument('--display-hz', type=int, help='software display copy cadence, 1..10 Hz; requires --display; omitted keeps kernel default')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
@@ -95,8 +97,25 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
-    if a.shim_early_return and not a.early_return_probe:
-        p.error('--shim-early-return requires --early-return-probe')
+    if a.cpu_capability_target is not None:
+        if not a.cpu_capability_probe:
+            p.error('--cpu-capability-target requires --cpu-capability-probe')
+        if a.cpu_capability_target not in range(0x100, 0x800, 0x100):
+            p.error('--cpu-capability-target must be 0x100..0x700 in steps of 0x100')
+    if a.shim_early_return and not (a.early_return_probe or a.smp_probe):
+        p.error('--shim-early-return requires --early-return-probe or --smp-probe')
+    if a.smp_probe:
+        if not (a.kernel and a.dtb and a.return_bootloader and a.shim_early_return):
+            p.error('--smp-probe requires --kernel, --dtb, --return-bootloader and --shim-early-return')
+        if a.boot_mpidr != 0:
+            p.error('--smp-probe requires boot CPU0')
+        competing = ('display', 'splash', 'touch_events', 'usb_aarch64_context',
+                     'usb_live_log', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
+                     'userspace_stacks', 'capture_screen', 'trace_syscalls', 'spmi_probe')
+        if (any(getattr(a, name) for name in competing) or
+                any(value for name, value in vars(a).items()
+                    if name.endswith('_probe') and name != 'smp_probe')):
+            p.error('--smp-probe requires a separate RAM-only profile')
     if a.early_return_probe:
         if not (a.kernel and a.dtb and a.return_bootloader):
             p.error('--early-return-probe requires --kernel, --dtb and --return-bootloader')
@@ -185,7 +204,7 @@ def main():
         p.error('--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')
     if a.userspace_stacks and not a.shutdown_seconds:
         p.error('--userspace-stacks requires --shutdown-seconds')
-    if a.return_bootloader or a.touch_rail_probe:
+    if (a.return_bootloader and not a.smp_probe) or a.touch_rail_probe:
         a.spmi_probe = True
     ufs_mode = 3 if a.ufs_wake_probe or a.ufs_root_probe or a.ufs_root else 2 if a.ufs_read_probe else int(a.ufs_probe)
     if a.touch_id_probe and ufs_mode:
@@ -241,7 +260,8 @@ def main():
         import mkadt
         from tools import adt
         validate_window(a.dtb.read_bytes(), a.memory_base, a.memory_size)
-        tree = mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr)
+        tree = (mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr, smp=True)
+                if a.smp_probe else mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr))
         if a.apple_adt:
             mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes())
         from memory import _tree
@@ -254,7 +274,7 @@ def main():
                           usb_bypass=a.usb_bypass_probe, rpmh=a.rpmh_probe)
         except ValueError as error:
             p.error(str(error))
-        if a.spmi_probe:
+        if a.spmi_probe or a.smp_probe:
             spmi = nodes.get('/soc/qcom,spmi@c440000', {})
             names = spmi.get('reg-names', b'').rstrip(b'\0').split(b'\0')
             ranges = []
@@ -338,8 +358,13 @@ def main():
             command_line += ' redfintrace=1'
         if a.cpu_capability_probe:
             command_line += ' redfincpu=1'
+        if a.cpu_capability_target is not None:
+            command_line += f' redfincputarget=0x{a.cpu_capability_target:03x}'
         if a.early_return_probe:
             command_line += ' redfinearlyreturn=1'
+        if a.smp_probe:
+            command_line = command_line.replace('cpus=1', 'cpus=2')
+            command_line += ' redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0'
         if a.display:
             command_line += ' redfinfb=1 sweetfb_noconsole=1'
         if a.display_hz is not None:
@@ -381,7 +406,7 @@ def main():
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:
             command_line += ' redfinspmi=1'
-        if a.return_bootloader:
+        if a.return_bootloader and not a.smp_probe:
             command_line += ' redfinreturn=1'
         # A per-image nonce binds authenticated RAM logs to this build.
         boot_id = int.from_bytes(os.urandom(8), 'big') or 1
@@ -397,6 +422,7 @@ def main():
         f'#define DIAG_STRIDE {a.stride}\n#define DIAG_SECONDS {a.seconds}\n'
         f'#define WATCHDOG_SECONDS {a.watchdog_seconds}\n'
         f'#define SHIM_EARLY_RETURN {int(a.shim_early_return)}\n'
+        f'#define REDFIN_SMP_PROBE {int(a.smp_probe)}\n'
         f'#define XNU_PAYLOAD_SIZE {len(payload)}ULL\n')
     flags = ['-O2', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-pic',
         '-mgeneral-regs-only', '-mstrict-align', '-fno-stack-protector',
@@ -450,10 +476,15 @@ def main():
         manifest['display_hz'] = a.display_hz
     if a.cpu_capability_probe:
         manifest['cpu_capability_probe'] = True
+    if a.cpu_capability_target is not None:
+        manifest['cpu_capability_target'] = a.cpu_capability_target
     if a.early_return_probe:
         manifest['early_return_probe'] = True
     if a.shim_early_return:
         manifest['shim_early_return'] = True
+    if a.smp_probe:
+        manifest['smp_probe'] = True
+        manifest['sha256']['config.h'] = hashlib.sha256((out / 'config.h').read_bytes()).hexdigest()
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')
     print(f'{out}/init: static arm64 Darwin PID1')

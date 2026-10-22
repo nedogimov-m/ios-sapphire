@@ -1,5 +1,69 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN SMP-capable kernel UP regression passes — 2026-10-23
+
+Kernel d1521723/full local ARM64 build013354, all new SMP overlays
+compiled but disabled. Image `ports/redfin/out/up-smp-regression-v1/redfin-xnu.img`
+SHA256 `93a6cc35236e5d6664741bd8a3ffe99b8bc75c5257de96335234fdb47d696683`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinearlyreturn=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xc4e45afec808203b`.
+Authenticated/image-matched `logs/redfin/up-smp-regression-v1/`: exactly
+one boot-ID marker before IOKitCPU startup; shim PON prearm and protected
+leaf succeed, PID1 alive/11heartbeats, no panic, metadata primed and
+fastboot return verified. This is a UP regression result, not SMP proof.
+First isolated `smp2-v1` test now running with UFS/GUI/writers disabled;
+actual C validation of its complete payload/ADT/liveFDT and host return
+policy passes. Concurrent SMP result pending; all8remains the target.
+
+## REDFIN all eight cores have16K capability; SMP2 kernel prepared — 2026-10-23
+
+User requires all8cores; CPU0+CPU6 is an intermediate XNU proof, not the
+final target. Selectable CPU capability overlay keeps the default CPU6
+profile and accepts only explicit0x100..0x700 affinities; each separate
+boot wakes one secondary, checks its actual part and parks it outside XNU.
+20 actual-C/default-regression/target/ARM64 tests PASS. Local ARM64 build
+`research/redfin-build/build-20261023-011946.log`, kernel SHA256
+`5cf3cd58aa283913816be14993c38662937199aa347d33c23879a97271e3607a`.
+Six frozen temporary images use exact common prefix:
+`debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfincpu=1`
+then exactly ` redfincputarget=TARGET redfinspmi=1 redfinreturn=1 redfinbootid=0xNONCE`
+using each row below (no other args):
+
+| Core | TARGET | NONCE | Image SHA256 |
+| --- | --- | --- | --- |
+| CPU1 | 0x100 | 4288788d3cf63094 | 8474bd7410c2609369c09fb2677d3cd70ef9b961245dde1d65d48bb6909c7842 |
+| CPU2 | 0x200 | 0a295f223d482666 | 94484fdd8a5900444e4bf64ef8c8e6dd82e05131b3043ada228db92891dc0bf4 |
+| CPU3 | 0x300 | 7b3f6b989b110f9d | 0194cfde33cecf04b8e3d92d098054a580c0a48afa51de0d8180e0072bf9259d |
+| CPU4 | 0x400 | 02aecf21ac379a30 | bf89dfd3ae2afb630366804f6c6ccdb4ccdb6e7e3257f64691bf35b6faacf849 |
+| CPU5 | 0x500 | 3f99b9029d15522a | 11da1a3683b99e99ce2b50b1d1a16bfd42d2c6878343f0f9cfacaf8834b3a554 |
+| CPU7 | 0x700 | c32374aa711634fc | daa3000d8128ddb7debcfec06167cc5ad2b67271fd4205bdcd8f7f168a39822b |
+
+`logs/redfin/cpuN-cap-v1/` for each row: authenticated/image-matched,
+PSCI CPU_ON0, actual EL1, MMFR0x101122/TGran16=1/valid1; CPU1..5
+MIDR0x51df805e, CPU7 MIDR0x51ff804e. Each has11PID1 heartbeats, no
+panic, verified recovery/fastboot return. Together with existing CPU0
+XNU and CPU6CAP this proves required16K support on all8cores. It does
+not establish concurrent XNU execution, cross-core coherency or scheduling.
+
+New isolated SMP2 overlays add synchronized RAM logging, an independent
+read-only PMIC/IMEM proof before CPU_ON, strict CPU0+CPU6 topology and
+EL1 trampoline, and bounded self/crossSGI2, timer and pinned-progress proof.
+The unique boot-ID marker now appears at RAM-log initialization, before
+IOKitCPU startup. Source/host policy keeps UFS/GUI and legacy PMIC writers
+off in this profile; shim alone prearms return before payload validation.
+Loader string tables changed to inline arrays after actual GCC caught
+absolute-address relocations. Real GCC relocation test and14topology
+checks PASS. Logger patch gained external context so git-apply/reverse
+verification works without special flags; actual C bodies are unchanged.
+Host SMP simulation fixed a missing IRQ delivery after its worker exits;
+real PEs retain IRQ delivery, so production proof did not change. Full758
+PASS (`peripherals-host-tests-v33.txt`); subsequent loader changes pass
+its14targeted tests. Tests previously failed on that host-model race and
+on comparing a logger with later overlays still applied; both corrected.
+Local full ARM64 build `research/redfin-build/build-20261023-013354.log`
+succeeds, kernel `d1521723f01a43deb0972f088440943c05c009885aedc8559206c393f9d33ba9`.
+The two-CPU profile has not yet passed hardware proof. TLB shootdowns,
+all8concurrent XNU cores, GUI/UFS SMP and GPU remain unverified.
+
 ## REDFIN shim return V2: early PON reason and UP boot verified — 2026-10-23
 
 Commit `21c435e`; same kernel9a2d87a5/local ARM64 build004936 as V1 and
