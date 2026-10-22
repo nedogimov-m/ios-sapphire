@@ -180,7 +180,8 @@ def main(argv=None):
              'usb-context-format-status.patch',
              'usb-network-worker.patch', 'usb-network-start.patch',
              'peripheral-start.patch', 'touch-event-start.patch',
-             'cpu-probe.patch', 'cpu-probe-start.patch')]
+             'cpu-probe.patch', 'cpu-probe-start.patch',
+             'early-return.patch', 'early-return-start.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

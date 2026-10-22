@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN shim return V1 inconclusive; V2 comparison started — 2026-10-23
+
+Same kernel9a2d87a5/build004936 as the successful protected leaf test.
+V1 image `ports/redfin/out/shim-return-v1/redfin-xnu.img` SHA256
+`47093dc5857c9920bc2db5fc672aa7e1e014aad64326c0ad66f855b77cdbb75f`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinearlyreturn=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xf43ca06682e803ff`.
+Compiled opt-in shim invokes the identical leaf after live FDT validation,
+before payload/kernel/ADT validation. V1 also armed watchdog before relocation.
+`logs/redfin/shim-return-v1/`: fastboot/recovery return verified, capture
+authenticated, but expected boot-ID missing; no PID1 proof. Console ends
+after CPU0 init and BSD buffer setup, no panic visible. Without the nonce
+this is not an image-matched kernel result, and does not prove early PON4.
+Removed the redundant pre-relocation watchdog programming; existing loader
+still arms it just before XNU. Early bark/timing is a hypothesis, not a
+diagnosis. V2 same-kernel/leaf comparison started, result pending. Do not
+enable SMP hardware before shim proof succeeds. Isolated source preparation
+for strict SMP2 proceeds separately; no additional CPU has entered XNU.
+
+## REDFIN shared early-return leaf passes protected UP test — 2026-10-23
+
+Kernel local ARM64 build `research/redfin-build/build-20261023-004936.log`,
+SHA256 `9a2d87a56915830e4d600c2201e79428c7ca648aa0b1a25b7925b0c56e57ec6b`.
+Shared header SHA256 `ddb78cb215e6f6ed070e6ad3d3da96c8d289e931a7276b65a507aa7f2befb7c7`;
+early-return overlay `c1288edaafd60907d9b8e2cb445b53490456c85563fe5be3ee3f5f2f96daf4c1`.
+15 actual-C/backend/dispatch tests, including fault/timeout/order, all256
+prior spare bytes, header identity and native ARM64 compilation PASS.
+Full682 PASS (`logs/redfin/peripherals-host-tests-v31.txt`); independent review.
+Image `ports/redfin/out/early-return-v1/redfin-xnu.img` SHA256
+`c20628664088541b7a6384f883008eafbfd414143f8f5bdf82b75e8982f2ce16`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinearlyreturn=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x5b4e86d27301bfd7`.
+Authenticated/image-matched `logs/redfin/early-return-v1/`: existing return
+arms first; shared leaf finds APID210/EE0, subtype4, spare4->4/readback4,
+IMEM0x77665500, issued1/1, leaf0/stage6/probe0. md0 PID1 heartbeats,
+no panic, metadata primed and fastboot return verified. CPU count remains1.
+Next: same exact leaf in opt-in shim before loader validation, known UP
+kernel and no UFS/GUI. Shim wrapper's7 actual-C/native checks PASS; no
+shim hardware result yet. No new GPU power/firmware writes.
+
 ## REDFIN CPU6 V2: PSCI entry and 16K capability confirmed — 2026-10-23
 
 Commit `5f34df2` fixes the mailbox alignment. Kernel local ARM64 build

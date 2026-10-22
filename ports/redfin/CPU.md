@@ -5,6 +5,16 @@ single-finger UI interaction work, but the user reports about 1 FPS and
 slow app opening. A 10 Hz software-copy cadence with screenshots and verbose
 kprintf disabled did not noticeably improve responsiveness.
 
+Source audit on 2026-10-23 found two unmeasured costs: the guarded Redfin
+UFS path forces `su.cache=false; su.wait=false` and busy-polls command
+completion, while each full display present copies 10,108,800 bytes and
+rearms the timer after copying. Neither establishes the dominant bottleneck.
+The legacy `ufswait`/`ufscache` parser, process sampler and `sweetbusy`
+initialization are bypassed by Redfin's early-return paths; adding their
+boot arguments alone does not enable them. V3's continuing presents,
+touch-worker exit and scheduled clean unmount exclude a whole-kernel
+lockup for that capture, but do not identify the About UI wait chain.
+
 ## CPU6 capability probe
 
 `--cpu-capability-probe` is a separate md0/CPU1 test. It requires
@@ -36,6 +46,15 @@ local build `build-20261023-002659.log`, code commit `5f34df2`.
 PID1 heartbeats and automatic recovery/fastboot return succeed without panic.
 
 ## Before enabling XNU SMP
+
+`--early-return-probe` rehearses a freestanding PMIC/IMEM return helper
+after the current kernel's verified return has armed. It is an exclusive
+md0/CPU0 profile requiring `--kernel --dtb --return-bootloader` and the
+`early-return.patch`/`early-return-start.patch` overlays. It never starts a
+secondary CPU. A successful protected rehearsal must precede using the
+same helper in the shim before kernel or topology validation.
+`--shim-early-return` opts into that second rehearsal and currently requires
+`--early-return-probe`; it keeps all UP, md0 and peripheral exclusions.
 
 The current ADT, loader and SweetCPU restrict the profile to one CPU.
 PMIC return currently arms after CPU initialization, and RAM logging masks

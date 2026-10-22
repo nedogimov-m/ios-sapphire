@@ -1,8 +1,13 @@
-/* Pixel 5 first stage. No storage, power-domain, clock or GIC writes. */
+/* Pixel 5 first stage. Optional verified PMIC/IMEM bootloader prearm;
+ * no storage, power-domain, clock or GIC writes. */
 #include <stdint.h>
 #include "fdt.h"
 #include "config.h"
 #include "loader.h"
+#if SHIM_EARLY_RETURN
+#include "shim-return.h"
+static struct redfin_shim_er_report early_return_report;
+#endif
 #include "../../shim/font.h"
 
 #define MRS(reg) ({ uint64_t v; __asm__ volatile("mrs %0, " #reg : "=r"(v)); v; })
@@ -74,6 +79,15 @@ void shim_main(uint64_t dtb)
         redfin_report.status = 1;
         return;
     }
+#if SHIM_EARLY_RETURN
+    /* Protected UP rehearsal of the identical leaf must succeed first.
+     * Arm before any payload/kernel/ADT validation can fail. Other CPUs
+     * remain parked; start.S masks exceptions and leaves MMU/cache off. */
+    if (redfin_shim_prearm(&hw, &early_return_report)) {
+        redfin_report.status = 0x200 + early_return_report.error;
+        return;
+    }
+#endif
     /* Explicit build option: reservation start/stride are scanout hypotheses.
      * All framebuffer stores must remain within the live FDT's splash range. */
     uint64_t size = (uint64_t)DIAG_STRIDE * 2340;

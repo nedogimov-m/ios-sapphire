@@ -1,0 +1,328 @@
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -14,5 +14,6 @@
+ #include <pexpert/device_tree.h>
+ #include <machine/machine_routines.h>
++#include "redfin_early_return.h"
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ 
+ static bool redfin_spmi_attempted;
+@@ -233,6 +234,137 @@
+  out:
+ 	return error;
+ }
++
++/* REDFIN_EARLY_RETURN_PROBE_BEGIN: protected UP rehearsal of the shim leaf.
++ * Existing return_ready must already be true; it is never set by this test.
++ * Keep the existing PMIC arm and every other UP fence unchanged. */
++static uint32_t rf_er_attempted;
++static char rf_er_frozen[608];
++static unsigned rf_er_frozen_bytes;
++static bool rf_er_space(char c) { return c==' ' || c=='\t' || c=='\r' || c=='\n'; }
++static bool rf_er_word(const char *word,unsigned bytes,const char *wanted)
++{ return strlen(wanted)==bytes && !memcmp(word,wanted,bytes); }
++static bool rf_er_flags(const char *args,unsigned bytes,uint64_t *boot_id)
++{
++ static const char *required[]={"redfinearlyreturn","cpus","redfinspmi","redfinreturn",
++  "sweettouch","sweetkeys","sweetusb","sweetcpufreq","sweetbattery","modem","wifi","gpu","rd","redfinbootid"};
++ static const char *disabled[]={"redfintouch","redfintouchsetup","redfintouchscan","redfintouchevents",
++  "redfinrpmhtouch","redfinrpmh","redfinrail","redfinwifi","redfingpu","redfinusb","redfinusbowned",
++  "redfinusbcontexts","redfinusbbypass","redfinusbrw64","redfinusbgadget","redfinusbnet","redfinusblog",
++  "redfinroot","redfinufs","redfinfb","redfinscreen","redfinshutdown","redfinstacks","redfintrace",
++  "ufsrw","rootrw","sweethw","sweetusblog","sweetlog","redfincpu","redfinsmp"};
++ uint64_t seen=0,disabled_seen=0,nonce=0;
++ if(!args || !boot_id || !bytes || bytes>sizeof(rf_er_frozen) || args[bytes-1]) return false;
++ for(unsigned pos=0;pos<bytes-1;) {
++  if(rf_er_space(args[pos])) { pos++; continue; }
++  unsigned start=pos;
++  while(pos<bytes-1 && !rf_er_space(args[pos])) pos++;
++  unsigned end=pos,key=start;
++  while(key<end && args[key]!='=') key++;
++  const char *value=args+key+(key<end);
++  unsigned length=end-key-(key<end);
++  bool known=false;
++  if(rf_er_word(args+start,key-start,"ufsroot") || rf_er_word(args+start,key-start,"cpumask")) return false;
++  for(unsigned i=0;i<sizeof(required)/sizeof(required[0]);i++) {
++   if(!rf_er_word(args+start,key-start,required[i])) continue;
++   known=true;
++   if((seen&(1ULL<<i)) || key==end) return false;
++   seen|=1ULL<<i;
++   if(i<12) { if(length!=1 || value[0]!=(i<4?'1':'0')) return false; }
++   else if(i==12) { if(length!=3 || memcmp(value,"md0",3)) return false; }
++   else {
++    if(length!=18 || value[0]!='0' || value[1]!='x') return false;
++    for(unsigned n=2;n<18;n++) {
++     unsigned digit=(unsigned)(value[n]-'0');
++     if(digit>9) { if(value[n]<'a' || value[n]>'f') return false; digit=(unsigned)(value[n]-'a'+10); }
++     nonce=(nonce<<4)|digit;
++    }
++    if(!nonce) return false;
++   }
++  }
++  for(unsigned i=0;i<sizeof(disabled)/sizeof(disabled[0]);i++) {
++   if(!rf_er_word(args+start,key-start,disabled[i])) continue;
++   known=true;
++   if((disabled_seen&(1ULL<<i)) || key==end || length!=1 || value[0]!='0') return false;
++   disabled_seen|=1ULL<<i;
++  }
++  /* Future native writers fail closed until explicitly reviewed here. */
++  if(!known && key-start>=6 && !memcmp(args+start,"redfin",6)) return false;
++ }
++ if(seen!=((1ULL<<(sizeof(required)/sizeof(required[0])))-1)) return false;
++ *boot_id=nonce;
++ return true;
++}
++static bool rf_er_platform(void)
++{
++ DTEntry root;
++ const char *list=NULL;
++ unsigned bytes=0;
++ bool redfin=false,lito=false;
++ if(SecureDTLookupEntry(NULL,"/",&root)!=kSuccess ||
++    SecureDTGetProperty(root,"compatible",(const void **)&list,&bytes)!=kSuccess ||
++    !list || !bytes || bytes>256 || list[bytes-1]) return false;
++ for(unsigned pos=0;pos<bytes;) {
++  unsigned end=pos;
++  while(end<bytes && list[end]) end++;
++  if(end==bytes || end==pos) return false;
++  if(rf_er_word(list+pos,end-pos,"google,redfin")) redfin=true;
++  if(rf_er_word(list+pos,end-pos,"qcom,sm7250")) lito=true;
++  pos=end+1;
++ }
++ return redfin && lito;
++}
++/* RF_ER_RUNTIME_HW_BEGIN */
++static uint64_t rf_er_mpidr(void) { return __builtin_arm_rsr64("MPIDR_EL1"); }
++static uint64_t rf_er_el(void) { return __builtin_arm_rsr64("CurrentEL"); }
++/* RF_ER_RUNTIME_HW_END */
++static bool rf_er_runtime(void)
++{
++ const ml_topology_info_t *topology=ml_get_topology_info();
++ return topology && topology->num_cpus==1 && topology->boot_cpu &&
++  topology->boot_cpu->cpu_id==0 && topology->boot_cpu->phys_id==0 &&
++  rf_er_el()==4 && !(rf_er_mpidr()&0xff00ffffffULL) && redfin_spmi_return_ready()==1;
++}
++int redfin_early_return_probe(void);
++int redfin_early_return_probe(void)
++{
++ uint32_t expected=0;
++ if(!__atomic_compare_exchange_n(&rf_er_attempted,&expected,1,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return EBUSY;
++ const char *args=PE_boot_args();
++ unsigned count=0;
++ uint64_t boot_id=0;
++ if(!args) return ENOTSUP;
++ while(count<sizeof(rf_er_frozen) && args[count]) count++;
++ if(count==sizeof(rf_er_frozen) || !rf_er_flags(args,count+1,&boot_id) || !rf_er_runtime()) return ENOTSUP;
++ memcpy(rf_er_frozen,args,count+1); rf_er_frozen_bytes=count+1;
++ if(!rf_er_platform() || !redfin_spmi_proof.ready || !redfin_spmi_proof.core ||
++    !redfin_spmi_proof.observer || !redfin_spmi_proof.config || redfin_spmi_proof.subtype!=4 ||
++    redfin_spmi_proof.owner!=0 || redfin_spmi_proof.apid>=512) return ENXIO;
++ DTEntry node;
++ const uint64_t *reg=NULL;
++ unsigned bytes=0;
++ if(SecureDTLookupEntry(NULL,"/redfin-return",&node)!=kSuccess ||
++    SecureDTGetProperty(node,"reg",(const void **)&reg,&bytes)!=kSuccess || !redfin_return_ranges(reg,bytes)) return ENXIO;
++ struct redfin_er_target target;
++ int leaf=redfin_er_find(redfin_spmi_proof.core,redfin_spmi_proof.config,&target);
++ if(leaf || target.version!=redfin_spmi_proof.version || target.apid!=redfin_spmi_proof.apid ||
++    target.owner!=redfin_spmi_proof.owner) return ENXIO;
++ struct redfin_er_io io={redfin_spmi_proof.core,redfin_spmi_proof.observer,redfin_spmi_proof.config,
++  ml_io_map(reg[0]+target.apid*0x10000ULL,0x20),ml_io_map(reg[2],reg[3])};
++ if(!io.channel || !io.imem) return ENOMEM;
++ args=PE_boot_args();
++ if(!args || memcmp(args,rf_er_frozen,rf_er_frozen_bytes) || !rf_er_runtime()) return ENOTSUP;
++ struct redfin_er_report report;
++ bool irq_enabled=ml_set_interrupts_enabled(false);
++ leaf=redfin_er_arm(&io,&target,&report);
++ (void)ml_set_interrupts_enabled(irq_enabled);
++ printf("REDFIN EARLY RETURN: nonce=%016llx APID=%u leaf=%d stage=%u subtype=%#x spare=%#x->%#x check=%#x imem=%#x issued=%u/%u\n",
++  (unsigned long long)boot_id,target.apid,leaf,report.stage,report.subtype,report.before,
++  report.intended,report.after,report.imem,report.pon_issued,report.imem_issued);
++ if(!leaf) return 0;
++ return leaf==REDFIN_ER_TIMEOUT?ETIMEDOUT:leaf==REDFIN_ER_CLOCK?ENOTSUP:leaf==REDFIN_ER_CHANGED?EAGAIN:EIO;
++}
++/* REDFIN_EARLY_RETURN_PROBE_END */
+ 
+ /* Redfin physical-PMIC evidence only; append inside redfin_spmi.c.
+  * No rail-ready API, indexed-L17 claim, PMIC writes or new mappings.
+diff --git a/bsd/dev/redfin_early_return.h b/bsd/dev/redfin_early_return.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_early_return.h
+@@ -0,0 +1,175 @@
++/* Shared, freestanding Redfin bootloader-return leaf.
++ * Google kernel/msm 500b3a2059c1eec0fec08ec56add06320ea901a8:
++ * spmi-pmic-arb.c v5 offset/fmt_cmd/read/write; qpnp-power-on.c gen2
++ * SOFT_RB_SPARE; msm-poweroff.c bootloader command. No reset is issued.
++ *
++ * Caller owns one-shot use, CPU0/UP policy, local interrupt exclusion and
++ * validated Device mappings: core0xc440000+0x1100, observer0xe600000+0x100000,
++ * config0xc40a000+0x26000, selected write0xc600000+APID*0x10000+0x20,
++ * IMEM0x146ab65c+4. Find first, map that one write channel, then arm.
++ * Shim uses those physical bases; the protected kernel uses ml_io_map VAs.
++ * On any error STOP: an observer/write may still complete after timeout.
++ * No retry, allocation, diagnostics, IRQ ack, channel setup or reset here.
++ */
++#ifndef REDFIN_EARLY_RETURN_H
++#define REDFIN_EARLY_RETURN_H
++#include <stdint.h>
++#include <stddef.h>
++#include <stdbool.h>
++
++enum redfin_er_error {
++ REDFIN_ER_OK, REDFIN_ER_INVALID, REDFIN_ER_UNSUPPORTED, REDFIN_ER_NO_TARGET,
++ REDFIN_ER_IO, REDFIN_ER_TIMEOUT, REDFIN_ER_CLOCK, REDFIN_ER_CHANGED
++};
++enum redfin_er_stage {
++ REDFIN_ER_PREFLIGHT, REDFIN_ER_SUBTYPE, REDFIN_ER_SPARE, REDFIN_ER_WRITE,
++ REDFIN_ER_VERIFY, REDFIN_ER_IMEM, REDFIN_ER_DONE
++};
++struct redfin_er_target { uint32_t version,mapping; unsigned apid,owner; };
++struct redfin_er_io { uintptr_t core,observer,config,channel,imem; };
++struct redfin_er_report {
++ unsigned stage;
++ uint8_t subtype,before,intended,after;
++ uint32_t imem;
++ bool pon_issued,imem_issued;
++};
++
++/* REDFIN_EARLY_RETURN_HW_BEGIN */
++static inline uint32_t redfin_er_rd(uintptr_t base,unsigned offset)
++{
++ uint32_t value=*(volatile uint32_t *)(base+offset);
++ __asm__ volatile("dmb oshld" ::: "memory");
++ return value;
++}
++static inline void redfin_er_wr(uintptr_t base,unsigned offset,uint32_t value)
++{ *(volatile uint32_t *)(base+offset)=value; }
++static inline void redfin_er_read_start(void)
++{ __asm__ volatile("dmb oshst" ::: "memory"); }
++static inline void redfin_er_data_done(void)
++{ __asm__ volatile("dsb oshst" ::: "memory"); }
++static inline void redfin_er_command_done(void)
++{ __asm__ volatile("dsb osh" ::: "memory"); }
++static inline void redfin_er_imem_done(void)
++{ __asm__ volatile("dsb sy" ::: "memory"); }
++static inline uint64_t redfin_er_counter(void)
++{ uint64_t n; __asm__ volatile("mrs %0, cntpct_el0" : "=r"(n) :: "memory"); return n; }
++static inline uint64_t redfin_er_frequency(void)
++{ uint64_t n; __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(n) :: "memory"); return n; }
++static inline void redfin_er_relax(void)
++{ __asm__ volatile("yield" ::: "memory"); }
++/* REDFIN_EARLY_RETURN_HW_END */
++
++static inline bool redfin_er_base(uintptr_t base,size_t bytes)
++{ return base && !(base&3) && bytes<=UINTPTR_MAX-base; }
++static inline bool redfin_er_target_valid(const struct redfin_er_target *t)
++{
++ return t && t->version>=0x50000000u && t->version<0x70000000u &&
++  t->apid<512 && t->owner==0 && t->mapping && ((t->mapping>>8)&0xfff)==0x008;
++}
++/* Discovery is read-only and preserves the existing Linux EE0 preference. */
++static inline int
++redfin_er_find(uintptr_t core,uintptr_t config,struct redfin_er_target *out)
++{
++ if(!out || !redfin_er_base(core,0x1100) || !redfin_er_base(config,0x26000)) return REDFIN_ER_INVALID;
++ uint32_t version=redfin_er_rd(core,0);
++ if(version<0x50000000u || version>=0x70000000u) return REDFIN_ER_UNSUPPORTED;
++ struct redfin_er_target found={version,0,512,0xff};
++ for(unsigned i=0;i<512;i++) {
++  uint32_t mapping=redfin_er_rd(core,0x900+4*i);
++  if(!mapping || ((mapping>>8)&0xfff)!=0x008) continue;
++  unsigned owner=redfin_er_rd(config,0x700+4*i)&7;
++  if(found.apid==512 || owner==0) { found.apid=i; found.owner=owner; found.mapping=mapping; }
++ }
++ if(!redfin_er_target_valid(&found)) return REDFIN_ER_NO_TARGET;
++ *out=found;
++ return REDFIN_ER_OK;
++}
++static inline bool
++redfin_er_matches(const struct redfin_er_io *io,const struct redfin_er_target *t)
++{
++ return redfin_er_rd(io->core,0)==t->version &&
++  redfin_er_rd(io->core,0x900+4*t->apid)==t->mapping &&
++  (redfin_er_rd(io->config,0x700+4*t->apid)&7)==0;
++}
++/* ceil(19.2 ticks/us), with a second finite bound if the counter stalls.
++ * Each transaction has at most1000 status polls and at most4097 counter
++ * samples per wait, including the initial sample. Subtraction tolerates wrap. */
++static inline int redfin_er_wait_us(void)
++{
++ uint64_t start=redfin_er_counter();
++ for(unsigned i=0;i<4096;i++) {
++  if(redfin_er_counter()-start>=20) return REDFIN_ER_OK;
++  redfin_er_relax();
++ }
++ return REDFIN_ER_CLOCK;
++}
++static inline int redfin_er_poll(uintptr_t base,unsigned offset)
++{
++ for(unsigned i=0;i<1000;i++) {
++  uint32_t status=redfin_er_rd(base,offset);
++  if(status&1) return (status&0x0e)?REDFIN_ER_IO:REDFIN_ER_OK;
++  int error=redfin_er_wait_us();
++  if(error) return error;
++ }
++ return REDFIN_ER_TIMEOUT;
++}
++/* Cannot encode another SID, peripheral, register or byte count. */
++static inline int
++redfin_er_observe(const struct redfin_er_io *io,const struct redfin_er_target *t,
++ unsigned address,uint8_t *out)
++{
++ if(!out || !redfin_er_target_valid(t) || (address!=0x0805 && address!=0x088f)) return REDFIN_ER_INVALID;
++ unsigned offset=t->apid*0x80;
++ redfin_er_read_start();
++ redfin_er_wr(io->observer,offset,(1u<<27)|((address&255u)<<4));
++ redfin_er_command_done();
++ int error=redfin_er_poll(io->observer,offset+8);
++ if(error) return error;
++ *out=(uint8_t)redfin_er_rd(io->observer,offset+0x18);
++ return REDFIN_ER_OK;
++}
++static inline int
++redfin_er_arm(const struct redfin_er_io *io,const struct redfin_er_target *t,
++ struct redfin_er_report *report)
++{
++ if(!report) return REDFIN_ER_INVALID;
++ report->stage=REDFIN_ER_PREFLIGHT;
++ report->subtype=report->before=report->intended=report->after=0;
++ report->imem=0; report->pon_issued=report->imem_issued=false;
++ if(!io || !redfin_er_target_valid(t) || !redfin_er_base(io->core,0x1100) ||
++    !redfin_er_base(io->config,0x26000) || !redfin_er_base(io->observer,0x100000) ||
++    !redfin_er_base(io->channel,0x20) || !redfin_er_base(io->imem,4)) return REDFIN_ER_INVALID;
++ if(redfin_er_frequency()!=19200000u || redfin_er_wait_us()) return REDFIN_ER_CLOCK;
++ if(!redfin_er_matches(io,t)) return REDFIN_ER_CHANGED;
++ report->stage=REDFIN_ER_SUBTYPE;
++ int error=redfin_er_observe(io,t,0x0805,&report->subtype);
++ if(error) return error;
++ if(report->subtype!=4) return REDFIN_ER_UNSUPPORTED;
++ report->stage=REDFIN_ER_SPARE;
++ error=redfin_er_observe(io,t,0x088f,&report->before);
++ if(error) return error;
++ report->intended=(report->before&1u)|4u;
++ if(!redfin_er_matches(io,t)) return REDFIN_ER_CHANGED;
++ report->stage=REDFIN_ER_WRITE;
++ redfin_er_wr(io->channel,0x10,report->intended);
++ redfin_er_data_done();
++ redfin_er_wr(io->channel,0,0x8f0);
++ report->pon_issued=true;
++ redfin_er_command_done();
++ error=redfin_er_poll(io->channel,8);
++ if(error) return error;
++ report->stage=REDFIN_ER_VERIFY;
++ error=redfin_er_observe(io,t,0x088f,&report->after);
++ if(error) return error;
++ if(report->after!=report->intended) return REDFIN_ER_IO;
++ if(!redfin_er_matches(io,t)) return REDFIN_ER_CHANGED;
++ report->stage=REDFIN_ER_IMEM;
++ redfin_er_wr(io->imem,0,0x77665500u);
++ report->imem_issued=true;
++ redfin_er_imem_done();
++ report->imem=redfin_er_rd(io->imem,0);
++ if(report->imem!=0x77665500u) return REDFIN_ER_IO;
++ report->stage=REDFIN_ER_DONE;
++ return REDFIN_ER_OK;
++}
++#endif /* REDFIN_EARLY_RETURN_H */

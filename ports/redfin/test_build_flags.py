@@ -40,6 +40,26 @@ class BuildFlagTests(unittest.TestCase):
                 self.refused(['--display', '--display-hz', value],
                              '--display-hz must be in [1, 10]')
 
+    def test_early_return_probe_is_exclusive_ram_cpu0_with_existing_return(self):
+        self.refused(['--early-return-probe'],
+                     '--early-return-probe requires --kernel, --dtb and --return-bootloader')
+        base = ['--early-return-probe', '--kernel', '/missing-kernel',
+                '--dtb', '/missing-dtb', '--return-bootloader']
+        self.refused([*base, '--boot-mpidr', '0x600'],
+                     '--early-return-probe requires boot CPU0')
+        for option in ('--cpu-capability-probe', '--usb-probe', '--touch-events',
+                       '--ufs-probe', '--ufs-root', '--gpu-probe', '--splash',
+                       '--trace-syscalls', '--usb-live-log'):
+            with self.subTest(option=option):
+                self.refused([*base, option],
+                             '--early-return-probe requires a separate RAM-only profile')
+
+    def test_shim_prearm_requires_the_isolated_rehearsal(self):
+        self.refused(['--shim-early-return'],
+                     '--shim-early-return requires --early-return-probe')
+        self.refused(['--shim-early-return', '--cpu-capability-probe'],
+                     '--shim-early-return requires --early-return-probe')
+
     def test_shutdown_needs_recovery_return(self):
         self.refused(['--kernel', '/missing-kernel', '--ufs-root', '--shutdown-seconds', '120'],
                      '--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')

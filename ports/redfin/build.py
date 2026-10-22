@@ -58,6 +58,8 @@ def main():
     p.add_argument('--trace', action='store_true', help='enable verbose kernel kprintf tracing')
     p.add_argument('--trace-syscalls', action='store_true', help='enable PID1 syscall and pathname diagnostics')
     p.add_argument('--cpu-capability-probe', action='store_true', help='wake and park CPU6 to record architectural capabilities; RAM root and verified return only')
+    p.add_argument('--early-return-probe', action='store_true', help='rehearse the shared bootloader-return leaf after existing verified return; separate RAM-only CPU0 test')
+    p.add_argument('--shim-early-return', action='store_true', help='prearm the same return leaf before payload validation; requires the isolated --early-return-probe rehearsal profile')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
     p.add_argument('--display-hz', type=int, help='software display copy cadence, 1..10 Hz; requires --display; omitted keeps kernel default')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
@@ -93,6 +95,21 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.shim_early_return and not a.early_return_probe:
+        p.error('--shim-early-return requires --early-return-probe')
+    if a.early_return_probe:
+        if not (a.kernel and a.dtb and a.return_bootloader):
+            p.error('--early-return-probe requires --kernel, --dtb and --return-bootloader')
+        if a.boot_mpidr != 0:
+            p.error('--early-return-probe requires boot CPU0')
+        competing = ('display', 'splash', 'touch_events', 'usb_aarch64_context',
+                     'usb_live_log', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
+                     'userspace_stacks', 'capture_screen', 'trace_syscalls')
+        if (any(getattr(a, name) for name in competing) or
+                any(value for name, value in vars(a).items()
+                    if name.endswith('_probe') and name not in
+                    ('early_return_probe', 'spmi_probe'))):
+            p.error('--early-return-probe requires a separate RAM-only profile')
     if a.cpu_capability_probe:
         if not (a.kernel and a.dtb and a.return_bootloader):
             p.error('--cpu-capability-probe requires --kernel, --dtb and --return-bootloader')
@@ -321,6 +338,8 @@ def main():
             command_line += ' redfintrace=1'
         if a.cpu_capability_probe:
             command_line += ' redfincpu=1'
+        if a.early_return_probe:
+            command_line += ' redfinearlyreturn=1'
         if a.display:
             command_line += ' redfinfb=1 sweetfb_noconsole=1'
         if a.display_hz is not None:
@@ -377,6 +396,7 @@ def main():
     (out / 'config.h').write_text(f'#define DIAG_SPLASH {int(a.splash)}\n'
         f'#define DIAG_STRIDE {a.stride}\n#define DIAG_SECONDS {a.seconds}\n'
         f'#define WATCHDOG_SECONDS {a.watchdog_seconds}\n'
+        f'#define SHIM_EARLY_RETURN {int(a.shim_early_return)}\n'
         f'#define XNU_PAYLOAD_SIZE {len(payload)}ULL\n')
     flags = ['-O2', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-pic',
         '-mgeneral-regs-only', '-mstrict-align', '-fno-stack-protector',
@@ -430,6 +450,10 @@ def main():
         manifest['display_hz'] = a.display_hz
     if a.cpu_capability_probe:
         manifest['cpu_capability_probe'] = True
+    if a.early_return_probe:
+        manifest['early_return_probe'] = True
+    if a.shim_early_return:
+        manifest['shim_early_return'] = True
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{out}/{image_name}: Android boot v3, execution unverified')
     print(f'{out}/init: static arm64 Darwin PID1')
