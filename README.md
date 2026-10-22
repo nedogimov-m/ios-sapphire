@@ -6,8 +6,9 @@ UFS read/write, Apple mount phases and FIPS checks are observed. Launchd
 passes keybag initialization and cache loading, starts system daemons, and
 backboardd makes IOKit calls. The opt-in CPU framebuffer publishes AppleCLCD;
 backboardd opens it, allocates an iPhone X canvas and submits swaps. The earlier
-SpringBoard `main CADisplay` trap is absent in that test. Visible GUI output
-still needs verification. Timed process shutdown leaves HFS clean; the
+SpringBoard `main CADisplay` trap is absent in that test. Authenticated RAM
+captures show an Apple logo rendered into the framebuffer; the lock and home
+screens remain unverified. Timed process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
 
 Kernel logs are collected automatically through temporary Linux recovery and

@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN logo persists; bounded wait-stack probe prepared — 2026-10-22
+
+Finalv3 completed with clean HFS/write_count364664 and verified fastboot.
+Final snapshot: present4/positive4/powerOff0, still Apple logo plus console
+text; no lock/home screen proved. Found direct kprintf→UART fanout→fbcon
+bypassing _cnputs. quiet-display.patch gates only framebuffer drawing, keeps
+RAM and panic; actual ARM64 compile and 16 UBSan scenarios pass.
+userspace-stacks.patch opt-in redfinstacks1 samples named SpringBoard,
+backboardd and launchd: <=16 threads/8 frames,2s budget, resident managed WB
+RAM only, pmap try-lock, no suspension/faulting reads. Independent final peer review passed before device boot. Full actual kernel build passed: /Users/spiceberries/redfin_ios/research/redfin-build/build-20261022-095803.log
+Kernel SHA256 c74e581caed78e520c9cea6ef39dbacee79fad7649ce35320b0fe71e9927e9d4
+Image SHA256 f7bb7e12b7e864bd2f20262cf1de21077db78e7038f7e86f059eb4f67d5b035e
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 -enable_kprintf_spam redfinfb=1 sweetfb_noconsole=1 redfinscreen=1 redfinshutdown=120 redfinstacks=1 redfinufs=3 redfinspmi=1 redfinreturn=1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+206 host tests pass. ios-stacks-v4 is now temporarily booted; collector
+running at logs/redfin/ios-stacks-v4/, timeout300, leave-bootloader.
+Local ipsw3.1.739 release digest verified; dyld symbol cache built privately.
+Historical CADisplay trap resolved to FrontBoardServices FBSDisplayMonitor
+_initWithBookendObserver:transformer:+1160; current wait unknown until stacks.
+
+## REDFIN late framebuffer capture running — 2026-10-22
+
+Added final-frame.patch after screen-capture: budget remains three captures,
+selected at first/fifth positive CPU presentations and immediately before
+reboot_kernel after watchdog feed cutoff. One retained opt-in service and a
+dedicated copy/fade/capture lock protect lifetime and complete snapshots;
+final lock acquisition is finite and never rearms the watchdog. Logs include
+actual present count and powerOff. Decoder permits equal final present counts
+while keeping capture IDs ordered and CRC strict.
+200 host tests, actual full ARM64 kernel build and peer review pass.
+Build research/redfin-build/build-20261022-092936.log, kernel SHA256
+dbbe819c9a850a836cbae73ce64258890c4dbd1daa2b3ea5dafda9822f91b7e6.
+Image ports/redfin/out/ios-display-final-v3/redfin-xnu.img; exact boot args
+unchanged from capturev2 below. Automatic test logs/redfin/ios-display-final-v3/
+is running, timeout300, leave-bootloader. Previous capturev2 completed with
+authenticated Apple-logo pixels and clean HFS; its collector primed public
+ramoops metadata before verified fastboot, which is the starting state here.
+No device boot/GPT/modem/persist/EFS partitions have been written.
+
 ## REDFIN CPU-copy display and graceful shutdown test — 2026-10-22
 
 User requested continuing after the launchd/backboardd milestone. Added a
@@ -75,6 +113,20 @@ metadata SHA were checked again before boot. Automatic test/capture running
 under logs/redfin/ios-display-capture-v2/, timeout300, leave-bootloader.
 Uncertain-ACK installer recovery additionally requires sync after the matching
 full readback SHA; failed final flush cannot report success (25 focused tests).
+
+Capturev2 actual result authenticated and decoded: all three120x260 PNGs pass
+CRC32, value6750410c; they show a white Apple logo on black. Each presentation
+copied10108800 bytes into the physical Redfin framebuffer.381 exec events/176
+unique names; SpringBoard and backboardd each exec once, no SpringBoard crash
+or kernel panic observed. Contextstored SIGTRAP occurred during SIGTERM shutdown.
+Complete reboot_kernel/proc shutdown/HFS unmount messages are now retained.
+Collector automatically observes HFSX clean=true/inconsistent=false,
+write_count362104, and verified final fastboot. No additional fsck needed.
+Screens are local under logs/redfin/ios-display-capture-v2/screens/.
+These are the first three presentations, so they do not establish whether the
+home screen appears later. A bounded pre-shutdown capture is the next test;
+do not claim a working lock/home screen from the early Apple-logo frames.
+Source milestone committed as62f1280; binaries, screen PNGs and logs ignored.
 
 ## REDFIN corrected keybag root verified; automatic boot — 2026-10-22
 

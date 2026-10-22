@@ -1,0 +1,214 @@
+diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -6583,6 +6583,36 @@
+ 	return ppn;
+ }
+ 
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++/* REDFIN_STACK_RESIDENT_TEST_BEGIN: one resident frame; never fault or touch I/O. */
++int redfin_user_frame_read(pmap_t pmap, uint64_t source, uint64_t frame[2]);
++int
++redfin_user_frame_read(pmap_t pmap, uint64_t source, uint64_t frame[2])
++{
++#if XNU_MONITOR
++	(void)pmap; (void)source; (void)frame;
++	return 0;
++#else
++	if (!pmap || pmap == kernel_pmap || !source || (source & 15) ||
++	    source > MACH_VM_MAX_ADDRESS - 16 || ((uintptr_t)frame & 15) ||
++	    (source & PAGE_MASK) > PAGE_SIZE - 16 ||
++	    ((uintptr_t)frame & PAGE_MASK) > PAGE_SIZE - 16)
++		return 0;
++	if (!pmap_try_lock(pmap, PMAP_LOCK_SHARED)) return 0;
++	pmap_paddr_t src = pmap_vtophys(pmap, source);
++	pmap_paddr_t dst = kvtophys((vm_offset_t)frame);
++	int valid = src && dst && pmap_valid_address(src) && pmap_valid_address(dst) &&
++	    (pmap_cache_attributes((ppnum_t)atop(src)) & VM_WIMG_MASK) == VM_WIMG_DEFAULT &&
++	    (pmap_cache_attributes((ppnum_t)atop(dst)) & VM_WIMG_MASK) == VM_WIMG_DEFAULT;
++	if (valid) bcopy_phys(src, dst, 16);
++	pmap_unlock(pmap, PMAP_LOCK_SHARED);
++	return valid;
++#endif
++}
++/* REDFIN_STACK_RESIDENT_TEST_END */
++#endif
++
+ /**
+  * Translate a kernel virtual address into a physical address.
+  *
+diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
+--- a/osfmk/kern/exception.c
++++ b/osfmk/kern/exception.c
+@@ -1040,6 +1040,87 @@
+ 	task_unlock(task);
+ }
+ 
++
++#include <kern/task_ref.h>
++#include <kern/clock.h>
++#include <machine/machine_routines.h>
++#include <vm/pmap.h>
++
++/* REDFIN_STACK_TASK_TEST_BEGIN: live, observational saved state; no thread stop. */
++extern int redfin_user_frame_read(pmap_t pmap, uint64_t source, uint64_t frame[2]);
++void redfin_stack_task(const char *name, int pid, task_t task, uint64_t deadline);
++void
++redfin_stack_task(const char *name, int pid, task_t task, uint64_t deadline)
++{
++	thread_t threads[16];
++	unsigned count = 0;
++	vm_map_t map = VM_MAP_NULL;
++	if (task == TASK_NULL || task == kernel_task || mach_absolute_time() >= deadline) return;
++	task_reference(task);
++	if (!task_lock_try(task)) {
++		printf("RSTACK SKIP name=%s pid=%d reason=task-busy\n", name, pid);
++		task_deallocate(task);
++		return;
++	}
++	uint64_t slide = task->task_shared_region_slide;
++	uint64_t mh = task->mach_header_vm_address;
++	if (task->active && (map = get_task_map(task)) != VM_MAP_NULL) {
++		vm_map_reference(map);
++		thread_t thread;
++		queue_iterate(&task->threads, thread, thread_t, task_threads) {
++			if (count == 16) break;
++			thread_reference(thread);
++			threads[count++] = thread;
++		}
++	}
++	task_unlock(task);
++	printf("RSTACK TASK name=%s pid=%d slide=0x%llx slide_valid=%u mh=0x%llx threads=%u\n",
++	    name, pid, slide, slide != UINT32_MAX, mh, count);
++	for (unsigned t = 0; t < count; t++) {
++		thread_t thread = threads[t];
++		if (mach_absolute_time() >= deadline) break;
++		uint64_t pc = 0, lr = 0, sp = 0, fp = 0, wait = 0, continuation = 0;
++		unsigned state;
++		/* cpus=1: another user thread cannot change its PCB in this window.
++		 * No print, allocation, lock acquisition or user read while preempt-disabled. */
++		disable_preemption();
++		state = thread->state;
++		wait = thread->wait_event;
++		continuation = (uint64_t)(uintptr_t)thread->continuation;
++		arm_saved_state_t *ss = find_user_regs(thread);
++		if (ss && is_saved_state64(ss)) {
++			pc = get_saved_state_pc(ss); lr = get_saved_state_lr(ss);
++			sp = get_saved_state_sp(ss); fp = get_saved_state_fp(ss);
++		}
++		enable_preemption();
++		uint64_t tid = thread_tid(thread);
++		printf("RSTACK THREAD name=%s pid=%d tid=0x%llx state=0x%x wait=0x%llx continuation=0x%llx pc=0x%llx lr=0x%llx sp=0x%llx fp=0x%llx\n",
++		    name, pid, tid, state, wait, continuation, pc, lr, sp, fp);
++		unsigned frames = 0;
++		const char *stop = "cap";
++		uint64_t base = fp;
++		for (; frames < 8; frames++) {
++			if (mach_absolute_time() >= deadline) { stop = "budget"; break; }
++			if (!fp) { stop = "end"; break; }
++			if ((fp & 15) || fp < base || fp - base > (8ULL << 20)) { stop = "invalid-fp"; break; }
++			uint64_t frame[2] __attribute__((aligned(16)));
++			if (!redfin_user_frame_read(vm_map_pmap(map), fp, frame)) { stop = "unmapped-or-busy"; break; }
++			printf("RSTACK FRAME name=%s pid=%d tid=0x%llx index=%u fp=0x%llx lr=0x%llx next_fp=0x%llx\n",
++			    name, pid, tid, frames, fp, frame[1], frame[0]);
++			if (frame[0] && (frame[0] <= fp || frame[0] - fp > (1ULL << 20))) {
++				frames++; stop = "invalid-fp"; break;
++			}
++			fp = frame[0];
++		}
++		printf("RSTACK END name=%s pid=%d tid=0x%llx frames=%u stop=%s\n", name, pid, tid, frames, stop);
++	}
++	for (unsigned t = 0; t < count; t++) thread_deallocate(threads[t]);
++	if (map != VM_MAP_NULL) vm_map_deallocate(map);
++	task_deallocate(task);
++}
++/* REDFIN_STACK_TASK_TEST_END */
++
++
+ #endif /* ARM64_BOARD_CONFIG_SWEET */
+ 
+ kern_return_t
+diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
+--- a/bsd/kern/kern_proc.c
++++ b/bsd/kern/kern_proc.c
+@@ -761,6 +761,60 @@
+ 	return p;
+ }
+ 
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <pexpert/pexpert.h>
++#include <kern/clock.h>
++
++/* REDFIN_STACK_PROC_TEST_BEGIN: fixed names, no proc transition waits/allocations. */
++extern void redfin_stack_task(const char *name, int pid, task_t task, uint64_t deadline);
++void redfin_userspace_stacks(void);
++void
++redfin_userspace_stacks(void)
++{
++	uint32_t enabled = 0, cpus = 0;
++	if (!PE_parse_boot_argn("redfinstacks", &enabled, sizeof(enabled)) || enabled != 1 ||
++	    !PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1) return;
++	const char *names[3] = { "SpringBoard", "backboardd", "launchd" };
++	proc_t selected[3] = { PROC_NULL, PROC_NULL, PROC_NULL };
++	uint64_t interval, now = mach_absolute_time();
++	nanoseconds_to_absolutetime(2ULL * NSEC_PER_SEC, &interval);
++	if (now > UINT64_MAX - interval) return;
++	uint64_t deadline = now + interval;
++	if (!lck_mtx_try_lock(&proc_list_mlock)) {
++		printf("RSTACK SKIP reason=proc-list-busy\n");
++		return;
++	}
++	proc_t p;
++	unsigned scanned = 0;
++	ALLPROC_FOREACH(p) {
++		if (scanned++ == 512) break;
++		for (unsigned i = 0; i < 3; i++) {
++			if (selected[i] != PROC_NULL || strncmp(p->p_comm, names[i], sizeof(p->p_comm))) continue;
++			uint32_t bits = proc_ref_try_fast(p);
++			if (!bits) continue;
++			if (proc_ref_needs_wait_for_exec(bits)) { proc_rele(p); continue; }
++			selected[i] = p;
++		}
++	}
++	proc_list_unlock();
++	printf("RSTACK BEGIN cap_processes=3 cap_threads=16 cap_frames=8 budget_ms=2000 resident_only=1\n");
++	for (unsigned i = 0; i < 3; i++) {
++		if (selected[i] == PROC_NULL) {
++			printf("RSTACK SKIP name=%s reason=not-found-or-exec\n", names[i]);
++			continue;
++		}
++		p = selected[i];
++		/* The proc ref prevents exec from replacing proc_task while sampled. */
++		redfin_stack_task(names[i], proc_pid(p), proc_task(p), deadline);
++		proc_rele(p);
++	}
++	printf("RSTACK DONE\n");
++}
++/* REDFIN_STACK_PROC_TEST_END */
++#endif
++
++
+ static void
+ proc_free(void *_p)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -469,6 +469,7 @@
+ extern int redfin_shutdown_watchdog_start(uint32_t seconds);
+ extern void redfin_shutdown_watchdog_tick(unsigned final);
+ extern void redfin_fb_capture_final(void);
++extern void redfin_userspace_stacks(void);
+ static uint32_t redfin_shutdown_seconds;
+ 
+ static void
+@@ -499,6 +500,7 @@
+ 			thread_block(THREAD_CONTINUE_NULL);
+ 	}
+ 	redfin_shutdown_watchdog_tick(1);
++	redfin_userspace_stacks();
+ 	redfin_fb_capture_final();
+ 	printf("REDFIN SHUTDOWN: entering reboot_kernel(0,NULL)\n");
+ 	int error = reboot_kernel(0, NULL);

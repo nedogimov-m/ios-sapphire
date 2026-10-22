@@ -35,6 +35,9 @@ class BuildFlagTests(unittest.TestCase):
     def test_screen_capture_requires_display(self):
         self.refused(['--capture-screen'], '--capture-screen requires --display')
 
+    def test_userspace_stacks_need_timed_shutdown(self):
+        self.refused(['--userspace-stacks'], '--userspace-stacks requires --shutdown-seconds')
+
 
 if __name__ == '__main__':
     unittest.main()

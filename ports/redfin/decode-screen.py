@@ -47,7 +47,7 @@ def decode(data):
         if begin:
             number, present = map(int, begin.groups())
             if (active is not None or len(frames) >= MAX_FRAMES or present > (1 << 64) - 1 or
-                    frames and (number <= frames[-1].number or present <= frames[-1].present)):
+                    frames and (number <= frames[-1].number or present < frames[-1].present)):
                 raise ValueError('nested, duplicated or out-of-order screen frame')
             active = {'number': number, 'present': present, 'chunks': 0, 'rgb': bytearray()}
         elif chunk:

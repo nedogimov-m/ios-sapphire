@@ -1,0 +1,173 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -229,6 +229,9 @@
+ 	bool          fRedfinCopyOnly;
+ 	uint64_t      fRedfinFrames;
+ 	uint32_t      fRedfinCaptures;
++	IOLock       *fRedfinCaptureLock; /* independent of fLock, boot lifetime */
++	uint64_t      fRedfinPositivePresents;
++	bool          fRedfinFinalDone;
+ 	void          captureRedfin(uint32_t frame, uint64_t present);
+ 	bool          startRedfinCopy(IOService *provider);
+ 	/* topaz direct MDP scanout (VIG0 / CTL0 from TopazGpuW disp.c) */
+@@ -337,6 +340,61 @@
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++/* REDFIN_FINAL_TEST_BEGIN: one retained opt-in service, finite capture budget. */
++static AppleCLCD *redfin_capture_fb;
++static bool
++redfin_capture_publish(AppleCLCD *fb)
++{
++	if (!fb->fRedfinCopyOnly || fb->fRedfinCaptureLock == NULL || fb->fRedfinCaptures != 0) return false;
++	/* One permanent reference pins the complete service and lock until reboot. */
++	fb->retain();
++	AppleCLCD *expected = NULL;
++	if (__atomic_compare_exchange_n(&redfin_capture_fb, &expected, fb, false,
++	    __ATOMIC_RELEASE, __ATOMIC_RELAXED)) return true;
++	fb->release();
++	return false;
++}
++static uint32_t
++redfin_capture_early(AppleCLCD *fb)
++{
++	/* Caller holds the dedicated lock after a completed positive CPU copy. */
++	if (fb->fRedfinCaptureLock == NULL) return 0;
++	++fb->fRedfinPositivePresents;
++	if (fb->fRedfinFinalDone || fb->fRedfinCaptures >= 2) return 0;
++	if (fb->fRedfinCaptures == 0 || fb->fRedfinPositivePresents >= 5) return ++fb->fRedfinCaptures;
++	return 0;
++}
++extern "C" void
++redfin_fb_capture_final(void)
++{
++	AppleCLCD *fb = __atomic_load_n(&redfin_capture_fb, __ATOMIC_ACQUIRE);
++	if (fb == NULL || fb->fRedfinCaptureLock == NULL) return;
++	/* A stalled renderer must not consume the shutdown watchdog fallback. */
++	unsigned attempt = 0;
++	while (!IOLockTryLock(fb->fRedfinCaptureLock)) {
++		if (++attempt >= 250) {
++			IOLog("REDFIN FB: final snapshot skipped: capture lock busy\n");
++			return;
++		}
++		IOSleep(1);
++	}
++	if (fb->fRedfinFinalDone || fb->fRedfinCaptures >= 3) {
++		IOLockUnlock(fb->fRedfinCaptureLock);
++		return;
++	}
++	fb->fRedfinFinalDone = true; /* suppress later early captures even on failure */
++	IOLog("REDFIN FB: final snapshot present %llu positive %llu powerOff %u\n",
++	    fb->fRedfinFrames, fb->fRedfinPositivePresents,
++	    (unsigned)__atomic_load_n(&fb->fPowerOff, __ATOMIC_RELAXED));
++	if (fb->fRedfinPositivePresents != 0) {
++		uint32_t frame = ++fb->fRedfinCaptures; /* reserve once before allocation */
++		__builtin_arm_dsb(0xf);
++		fb->captureRedfin(frame, fb->fRedfinFrames); /* no invented present */
++	}
++	IOLockUnlock(fb->fRedfinCaptureLock);
++}
++/* REDFIN_FINAL_TEST_END */
++
+ /* Snapshot before logging: framebuffer workloop is sleepable and fLock is not held. */
+ void
+ AppleCLCD::captureRedfin(uint32_t frame, uint64_t present)
+@@ -385,6 +443,9 @@
+ 	if (!IOService::start(provider)) return false;
+ 	fRedfinCopyOnly = true;
+ 	fRedfinFrames = 0;
++	fRedfinCaptureLock = NULL;
++	fRedfinPositivePresents = 0;
++	fRedfinFinalDone = false;
+ 	fRedfinCaptures = 3; /* Screen capture is independently opt-in. */
+ 	uint32_t capture = 0;
+ 	if (PE_parse_boot_argn("redfinscreen", &capture, sizeof(capture)) && capture == 1) {
+@@ -435,6 +496,15 @@
+ 	(void)PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
+ 	if (hz < 1 || hz > 10) hz = 5;
+ 	fFlushTicks = 60 / hz;
++	/* Publish only after all resources exist, before timer or clients can run. */
++	if (fRedfinCaptures == 0) {
++		fRedfinCaptureLock = IOLockAlloc();
++		if (fRedfinCaptureLock == NULL || !redfin_capture_publish(this)) {
++			if (fRedfinCaptureLock != NULL) IOLockFree(fRedfinCaptureLock);
++			fRedfinCaptureLock = NULL;
++			fRedfinCaptures = 3;
++		}
++	}
+ 	fVsync->setTimeoutUS(SWEET_FB_VSYNC_US);
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+ 	setProperty("external", false);
+@@ -673,6 +743,7 @@
+ 			fb->fFadeStep = step + 1;
+ 		}
+ 		IOLockUnlock(fb->fLock);
++		if (fb->fRedfinCaptureLock != NULL) IOLockLock(fb->fRedfinCaptureLock);
+ 		if (step <= 6) {
+ 			for (uint32_t y = 0; y < fb->fHeight; y++) {
+ 				volatile uint32_t *row = (volatile uint32_t *)(fb->fPixels + (uint64_t)y * fb->fRowBytes);
+@@ -682,6 +753,7 @@
+ 			}
+ 		}
+ 		if (fb->fRedfinCopyOnly) __asm__ volatile("dsb sy" ::: "memory");
++		if (fb->fRedfinCaptureLock != NULL) IOLockUnlock(fb->fRedfinCaptureLock);
+ 		sender->setTimeoutUS(SWEET_FB_VSYNC_US);
+ 		return;
+ 	}
+@@ -1138,6 +1210,7 @@
+ 	 * flip, like the direct path. Composing into the scanned, uncached boot
+ 	 * framebuffer showed every multi-layer frame (dims, apps) drawn top-down.
+ 	 */
++	if (fRedfinCaptureLock != NULL) IOLockLock(fRedfinCaptureLock);
+ 	uint8_t *dst = fFlip[0] != NULL ? backBuffer() : (uint8_t *)fPixels;
+ 	if (fFlip[0] == NULL && fVig0 != NULL && fScanPhys != fBootSrc) {
+ 		scanFrom(fBootSrc, fBootStride);
+@@ -1234,12 +1307,16 @@
+ 		flipBack();
+ 	} else if (fRedfinCopyOnly) {
+ 		__asm__ volatile("dsb sy" ::: "memory");
+-		/* Three attempts maximum, only on a positive CPU copy; no capture timer. */
+-		if (copied > 0 && fRedfinCaptures < 3) captureRedfin(++fRedfinCaptures, fRedfinFrames + 1);
+-		if (++fRedfinFrames <= 3 || (fRedfinFrames % 60) == 0) {
++		++fRedfinFrames;
++		if (copied > 0) {
++			uint32_t frame = redfin_capture_early(this);
++			if (frame != 0) captureRedfin(frame, fRedfinFrames);
++		}
++		if (fRedfinFrames <= 3 || (fRedfinFrames % 60) == 0) {
+ 			IOLog("REDFIN FB: CPU present %llu copied %llu bytes\n", fRedfinFrames, copied);
+ 		}
+ 	}
++	if (fRedfinCaptureLock != NULL) IOLockUnlock(fRedfinCaptureLock);
+ }
+ 
+ bool
+@@ -1388,7 +1465,7 @@
+ 			IOLockLock(fFB->fLock);
+ 			bool changed = off != fFB->fPowerOff;
+ 			if (changed) {
+-				fFB->fPowerOff = off;
++				__atomic_store_n(&fFB->fPowerOff, off, __ATOMIC_RELAXED);
+ 				fFB->fFadeStep = 0;
+ 				fFB->fDirty = true;     /* on: redraw the latest frame */
+ 			}
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -468,6 +468,7 @@
+ extern int redfin_spmi_return_ready(void);
+ extern int redfin_shutdown_watchdog_start(uint32_t seconds);
+ extern void redfin_shutdown_watchdog_tick(unsigned final);
++extern void redfin_fb_capture_final(void);
+ static uint32_t redfin_shutdown_seconds;
+ 
+ static void
+@@ -498,6 +499,7 @@
+ 			thread_block(THREAD_CONTINUE_NULL);
+ 	}
+ 	redfin_shutdown_watchdog_tick(1);
++	redfin_fb_capture_final();
+ 	printf("REDFIN SHUTDOWN: entering reboot_kernel(0,NULL)\n");
+ 	int error = reboot_kernel(0, NULL);
+ 	printf("REDFIN SHUTDOWN: reboot_kernel returned %d; waiting for watchdog fallback\n", error);

@@ -205,7 +205,9 @@ def main(argv=None):
                         ufs_probe_patch, ufs_read_patch, ufs_sense_patch, ufs_root_patch, ufs_raw_patch,
                         spmi_patch, return_patch, ufs_rw_patch]
             for rank, name in enumerate(('trace-gate.patch', 'shutdown.patch', 'display.patch',
-                                         'muted-log.patch', 'screen-capture.patch'), 21):
+                                         'muted-log.patch', 'screen-capture.patch',
+                                         'final-frame.patch', 'quiet-display.patch',
+                                         'userspace-stacks.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

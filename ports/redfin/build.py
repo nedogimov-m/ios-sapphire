@@ -59,6 +59,7 @@ def main():
     p.add_argument('--trace-syscalls', action='store_true', help='enable PID1 syscall and pathname diagnostics')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
+    p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
     p.add_argument('--shutdown-seconds', type=int, default=0,
         help='gracefully stop iOS after 5..300 seconds; requires --ufs-root and --return-bootloader')
     p.add_argument('--spmi-probe', action='store_true', help='read PM8150 subtype and reboot-reason spare through the SPMI observer')
@@ -87,6 +88,8 @@ def main():
         p.error('--shutdown-seconds must be zero or in [5, 300]')
     if a.shutdown_seconds and not (a.kernel and a.ufs_root and a.return_bootloader):
         p.error('--shutdown-seconds requires --kernel, --ufs-root and --return-bootloader')
+    if a.userspace_stacks and not a.shutdown_seconds:
+        p.error('--userspace-stacks requires --shutdown-seconds')
     if a.return_bootloader:
         a.spmi_probe = True
     ufs_mode = 3 if a.ufs_wake_probe or a.ufs_root_probe or a.ufs_root else 2 if a.ufs_read_probe else int(a.ufs_probe)
@@ -228,6 +231,8 @@ def main():
             command_line += ' redfinscreen=1'
         if a.shutdown_seconds:
             command_line += f' redfinshutdown={a.shutdown_seconds}'
+        if a.userspace_stacks:
+            command_line += ' redfinstacks=1'
         if ufs_mode:
             command_line += f' redfinufs={ufs_mode}'
         if a.spmi_probe:
@@ -283,6 +288,7 @@ def main():
         root_writable=bool(a.ufs_rw),
         cpu_copy_display=bool(a.display), shutdown_seconds=a.shutdown_seconds,
         capture_screen=bool(a.capture_screen),
+        userspace_stacks=bool(a.userspace_stacks),
         syscall_tracing=bool(a.trace_syscalls),
         splash_reservation_assumption=a.splash, stride=a.stride, seconds=a.seconds,
         linux_text_offset='0x80000', kernel_encoding='LZ4 frame + LE32 size',

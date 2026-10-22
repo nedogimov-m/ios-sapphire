@@ -124,6 +124,100 @@ class ScreenCaptureTests(unittest.TestCase):
                 self.assertEqual(decoder.main([str(log), '--out', str(output)]), 1)
             self.assertFalse(output.exists())
 
+    def test_final_snapshot_can_repeat_present_but_not_capture_id_or_regress(self):
+        first = capture(self.RGB, 1, 7)
+        final = capture(self.RGB, 2, 7)
+        frames = decoder.decode(b'\n'.join(first + final))
+        self.assertEqual([(frame.number, frame.present) for frame in frames], [(1, 7), (2, 7)])
+        for records in (first + capture(self.RGB, 2, 6), first + first, first + final + final):
+            with self.assertRaises(ValueError):
+                decoder.decode(b'\n'.join(records))
+
+    def test_actual_final_callback_ownership_gates_and_capture_policy(self):
+        compiler = shutil.which('c++')
+        if not compiler:
+            self.skipTest('host C++ compiler unavailable')
+        patch = (HERE / 'final-frame.patch').read_text()
+        added = '\n'.join(line[1:] for line in patch.splitlines()
+                          if line.startswith('+') and not line.startswith('+++'))
+        actual = added.split('/* REDFIN_FINAL_TEST_BEGIN:', 1)[1].split('/* REDFIN_FINAL_TEST_END */', 1)[0]
+        actual = actual.split('*/', 1)[1]
+        harness = r'''
+#include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+struct IOLock { bool held; };
+static unsigned sleeps,release_after,attempts,calls,barriers,diagnostics,busy;
+static uint32_t ids[4]; static uint64_t presents[4];
+static IOLock *waiting;
+static bool IOLockTryLock(IOLock *lock) { attempts++; if(lock->held)return false;lock->held=true;return true; }
+static void IOLockUnlock(IOLock *lock) { assert(lock->held);lock->held=false; }
+static void IOSleep(unsigned ms) { assert(ms==1);sleeps++;if(release_after && sleeps==release_after)waiting->held=false; }
+static void IOLog(const char *format,...) { if(strstr(format,"lock busy"))busy++;else diagnostics++; }
+static void barrier(unsigned value) { assert(value==15);barriers++; }
+#define __builtin_arm_dsb(x) barrier(x)
+class AppleCLCD {
+public:
+ bool fRedfinCopyOnly=true;
+ IOLock *fRedfinCaptureLock;
+ uint32_t fRedfinCaptures=0;
+ uint64_t fRedfinPositivePresents=0,fRedfinFrames=0;
+ bool fRedfinFinalDone=false,fPowerOff=false;
+ unsigned references=1;
+ explicit AppleCLCD(IOLock *lock):fRedfinCaptureLock(lock){}
+ void retain(){references++;}
+ void release(){assert(references>1);references--;}
+ void captureRedfin(uint32_t frame,uint64_t present){
+  assert(fRedfinCaptureLock->held && calls<3);ids[calls]=frame;presents[calls++]=present;
+ }
+};
+ACTUAL
+static void positive(AppleCLCD *fb,uint64_t present) {
+ fb->fRedfinFrames=present;fb->fRedfinCaptureLock->held=true;
+ uint32_t frame=redfin_capture_early(fb);if(frame)fb->captureRedfin(frame,present);
+ fb->fRedfinCaptureLock->held=false;
+}
+int main(int argc,char **argv) {
+ assert(argc==2);unsigned test=(unsigned)strtoul(argv[1],NULL,10);
+ IOLock lock={false},second={false};AppleCLCD fb(&lock),other(&second);waiting=&lock;
+ if(test==0){redfin_fb_capture_final();assert(!calls && !attempts);return 0;}
+ if(test==1){fb.fRedfinCaptureLock=NULL;fb.fRedfinCaptures=3;assert(!redfin_capture_publish(&fb));
+  redfin_fb_capture_final();assert(fb.references==1 && !calls && !attempts);return 0;}
+ if(test==2){fb.fRedfinCopyOnly=false;assert(!redfin_capture_publish(&fb));
+  fb.fRedfinCopyOnly=true;fb.fRedfinCaptures=3;assert(!redfin_capture_publish(&fb));assert(fb.references==1);return 0;}
+ assert(redfin_capture_publish(&fb) && fb.references==2);
+ if(test==3){assert(!redfin_capture_publish(&other) && other.references==1);
+  assert(!redfin_capture_publish(&fb) && fb.references==2);assert(redfin_capture_fb==&fb);return 0;}
+ if(test==4){for(unsigned i=1;i<=7;i++)positive(&fb,i);
+  assert(calls==2 && ids[0]==1 && ids[1]==2 && presents[0]==1 && presents[1]==5);
+  assert(fb.fRedfinPositivePresents==7 && fb.fRedfinCaptures==2);return 0;}
+ if(test==5){positive(&fb,7);redfin_fb_capture_final();
+  assert(calls==2 && ids[1]==2 && presents[1]==7 && fb.fRedfinFrames==7 && fb.fRedfinFinalDone);
+  redfin_fb_capture_final();positive(&fb,8);assert(calls==2 && !lock.held && barriers==1);return 0;}
+ if(test==6){for(unsigned i=1;i<=5;i++)positive(&fb,i);redfin_fb_capture_final();
+  assert(calls==3 && ids[2]==3 && presents[2]==5 && fb.fRedfinFrames==5 && !lock.held);return 0;}
+ if(test==7){fb.fRedfinFrames=12;redfin_fb_capture_final();
+  assert(!calls && fb.fRedfinFinalDone && fb.fRedfinFrames==12 && !barriers && !lock.held);
+  positive(&fb,13);assert(!calls);return 0;}
+ if(test==8){lock.held=true;redfin_fb_capture_final();
+  assert(attempts==250 && sleeps==249 && busy==1 && !calls && !fb.fRedfinFinalDone);return 0;}
+ if(test==9){positive(&fb,4);lock.held=true;release_after=5;redfin_fb_capture_final();
+  assert(attempts==6 && sleeps==5 && calls==2 && presents[1]==4 && !lock.held && diagnostics==1);return 0;}
+ return 2;
+}
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            source, executable = Path(temporary) / 'final.cpp', Path(temporary) / 'final'
+            source.write_text(harness.replace('ACTUAL', actual))
+            subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                            '-fsanitize=undefined', str(source), '-o', str(executable)], check=True)
+            for scenario in range(10):
+                with self.subTest(scenario=scenario):
+                    result = subprocess.run([str(executable), str(scenario)], capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+
     def test_actual_kernel_sampler_encoder_and_crc_match_rgb_contract(self):
         compiler = shutil.which('cc')
         if not compiler:
