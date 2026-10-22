@@ -169,8 +169,36 @@ The first network run (`usb-net-v2`) creates XNU `ue0` at 192.168.7.2/24
 with errno 0, starts ECM+log and stops/halt cleanly at the lease deadline.
 The host sees 1209:0001 but sends no SET_CONFIGURATION; no host interface
 or UDP packets are observed. Network packet exchange and live logs remain
-unproved. macOS has matching ECM drivers; the host configuration/access path
-needs investigation. The earlier `usb-net-v1` image was never booted.
+unproved. The earlier `usb-net-v1` image was never booted.
+
+The V4 host kernel log establishes the host blocker: macOS enumerates the
+gadget at 480 Mbps, then says `device functionality blocked by transport
+restrictions` and `device will not be registered for matching`. This explains
+why the IOUSB plane shows it while IOService matching, ECM and libusb do not.
+macOS has matching ECM drivers. The test changing only Redfin's device class
+to per-interface class 0 did not resolve the block and was reverted.
+Unlock the Mac and approve the named `Sweet iOS (USB Ethernet)` accessory
+when macOS requests it, then repeat the temporary boot.
+
+`usb-host.py` can perform standard USB configuration and a bounded direct
+CDC packet probe without changing host IP settings. Start it while Pixel is
+still in fastboot, before starting the separate boot cycle:
+
+```
+python3 ports/redfin/usb-host.py --image-manifest ports/redfin/out/usb-net-v5/manifest.json --seconds 120 --out logs/redfin/usb-host-next
+```
+
+It pins the one Google device's bus/port path, opens only 1209:0001 on that
+path, selects configuration 1 if needed, claims interface 1/alternate 1,
+and checks ARP, ICMP with the image nonce and UDP kernel logs on port 5140.
+No driver detach, device reset or host network edits are performed. ACCESS
+or BUSY errors stop the attempt. Output is private and bounded to 8 MiB;
+the log marker must match the exact image nonce. Direct USB evidence is
+explicitly not cryptographically authenticated; the recovery collector
+continues to provide authenticated, image-matched ground truth.
+Darwin discovery is maintained by libusb's own CFRunLoop; adding an event
+pump does not fix a device that macOS refuses to register for matching.
+The host probe has 27 independent packet, lifecycle and FFI transfer tests.
 
 Host validation:
 

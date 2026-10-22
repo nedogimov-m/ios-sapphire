@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN direct USB probe ready; macOS transport restriction confirmed — 2026-10-22
+
+Commit `c54d35d` records bounded ECM/log startup. New `usb-host.py` uses
+typed libusb FFI, pins the pre-boot Google bus/port and opens only 1209:0001
+there. Standard configuration/interface/alternate selection plus bounded
+ARP, nonce-bearing ICMP and checksum-checked UDP logging; no detach, reset,
+host IP edits, serial descriptor requests or retry after ACCESS/BUSY.
+Private output capped8MiB; USB nonce evidence explicitly not cryptographic
+authentication. Native libusb1.0.30 ABI/descriptor18 and Google baseline
+check pass. 27 packet/lifecycle/FFI tests and independent reviews PASS.
+Source SHA256 `3005772474bc62e40b6d5ff66fed62fcff23fb19a802ef1ce2d18efbe965bed1`;
+tests SHA256 `0015a1dc15a63ccc82dda6651fa28a19d5294bab558bdfbb1f9bc087d99efb76`.
+Earlier full suite599 PASS (`peripherals-host-tests-v25.txt`); final suite
+after bounded discovery telemetry: 604 PASS (`peripherals-host-tests-v26.txt`).
+V3 reuses build205957/kernel1387206c (full hash above); image SHA256
+`57a9831095bdd50d029b68453dc61d5291e84e3e61ac0d71e02b538927fa3b54`.
+Exact V3 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xf70dc82c59b0045e`.
+Authenticated/image-matched V3 again ue0 up0, gadget0, no panic, halted1,
+metadata primed and fastboot verified. Host IOUSB sees1209:0001 but libusb
+never sees it and the direct probe times out before open, not ACCESS/BUSY.
+V4 experiments only with Redfin bDeviceClass2->0 (interfaces unchanged).
+ARM64 build `build-20261022-213406.log`, kernel SHA256
+`50f088a96d8517b13bf1c96832fe9ecc994e4854f4c4411ee25b916b1a52b032`;
+image SHA256 `76307a0ca691284e97c0151894fcfe1d1e1cbdba3988776a1f807141c7cb747b`.
+Exact V4 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xf6f96de49059d593`.
+Authenticated/image-matched V4 again ue0 up0/gadget0, no panic, halted1 and
+verified fastboot; host IOUSB sees gadget, both IOService class queries and
+libusb miss it. The descriptor-class change did not resolve publication.
+Host `usb-net-v4-host-kernel-usb.txt` lines137/150/151 prove the cause:
+480Mbps enumeration, then `device functionality blocked by transport
+restrictions` and `device will not be registered for matching`.
+Darwin libusb owns a hotplug CFRunLoop and matches IOUSBDevice; an application
+event pump is not a fix. The class experiment was reverted; its source is
+preserved privately as `research/redfin-usb/usb-interface-class-v4.patch`.
+Build214248 refused the removed overlay's stale prepared fingerprint; after
+reverse-apply, only that matching experiment hash was removed, and the full
+reverse-overlay verifier/new ARM64 build `build-20261022-214311.log` pass.
+Restored kernel SHA256 `7da40f41a772c11bbcc3b5c1dd4dee7d987dca49aeb5fc0ecf05e844faf76fc9`.
+Prepared V5 image SHA256 `d871edc7b7325c0d15405e4ebbbbde83d9b104bc5d3e36ac1915934f28e5d7aa`.
+Exact V5 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x2e8c9bed7d6abe6a`.
+V5 is prepared, not booted. Next required external action: user unlocks Mac
+and approves the named Sweet iOS USB accessory when macOS requests it;
+then repeat V5 with the direct receiver. Do not change global OS security
+settings or device identity to bypass the host restriction. Phone left in
+verified fastboot. ARP/ICMP/live logs, physical touch, Wi-Fi/GPU unproved.
+
 ## REDFIN ECM/log startup validated; host configuration still missing — 2026-10-22
 
 Commit `e6de11b` records V5 host enumeration. New typed startup modes
