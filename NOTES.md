@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V8: SEC identity read succeeds — 2026-10-22
+
+Commit69dda92 contains the DFS correction; the first TX is now operational.
+New touch-rx-irq overlay adds bit7 only to accepted/acknowledged status;
+the programmed hardware interrupt mask remains7f003e3f. All other unknown/
+fatal status, DONE/FIFO bounds/LAST-valid/checksum/identity checks stay strict.
+Six actual-C tests and independent review PASS;63 combined touch tests PASS.
+Full suite465 PASS (logs/redfin/peripherals-host-tests-v16.txt), including
+draft bypass builder/NS-contract gates; the four-store USB driver is pending.
+The RX test then gained the exact V7 partial-FIFO pattern and was repeated:
+six tests PASS. Both builders include the RX overlay.
+Local ARM64 build research/redfin-build/build-20261022-191420.log passed;
+kernel c1874ce0fc0b521b23ce416448ed9db04fc330d73b3f7bdb3bea0482d9a7fcdd.
+Image ports/redfin/out/touch-id-v8/redfin-xnu.img SHA256
+26e9178e36b6dacb4f1637fbb4ea2d30ee197dc50355480e244592c0b968420e.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 -enable_kprintf_spam redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x09ae8f1b9f6b61a6`.
+Authenticated/image-matched logs/redfin/touch-id-v8/ reached PID1, no panic,
+metadata primed and verified fastboot. SEC ID result0, exact53:45:37:91:00 at
+960kHz; caller returned0. This proves physical power/cold SPI TX/RX and the
+SEC response/checksum/identity path, not contact events or iOS HID. No event
+worker/UFS/gadget/DMA ran. Next: source-backed event startup and HID callback
+connection, explicitly address the existing md0-only RPMh software lease
+before enabling touch alongside UFS-backed iOS.
+
+USB source audit resolves the ordinary non-static NS allocator contract:
+pinned arm-smmu.c1158/4988 directly allocates a software bitmap and5007 seeds
+handoff; no raw-SCTLR-zero requirement or per-bank secure grant. Actual DT
+has skip-init, no static-CB/secure aliases/USB VMID and USB atomic DMA. New
+builder-only attestation tests plus actual captured FDT validation PASS.
+Controlled dedicated-CB lease draft preserves active/latent refs and configured
+banks, first-fit candidate4, exact4stores/noDMA. Peer review found inherited
+DSTSallones accepted as HALT; fix/regression required before hardware run.
+
 ## REDFIN V7: TX now completes, RX notification falsely rejected — 2026-10-22
 
 Commit070f6ad records V6 DFS mismatch and the private base-firmware inventory.

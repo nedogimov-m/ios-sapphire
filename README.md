@@ -9,8 +9,10 @@ backboardd makes IOKit calls. The opt-in CPU framebuffer publishes AppleCLCD;
 backboardd opens it, allocates an iPhone X canvas and submits swaps. The earlier
 SpringBoard `main CADisplay` trap is absent in that test. Authenticated RAM
 captures show the Apple logo and lock screen rendered into the framebuffer.
-Fresh physical panel scanout and the home screen remain unverified; physical
-touch is unported. Timed process shutdown leaves HFS clean; the
+Fresh physical panel scanout and the home screen remain unverified. Physical
+SEC touch identity53:45:37:91:00 now reads successfully over native cold SPI;
+contact-event startup and iOS HID connection remain in progress. Timed
+process shutdown leaves HFS clean; the
 recovery collector records its volume-header state automatically.
 The minimal MobileGestalt Wi-Fi identity fix is validated on the device.
 Authenticated peripheral observers now cover SEC SPI/GPIO, warm DWC3,

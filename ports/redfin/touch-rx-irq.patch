@@ -1,0 +1,59 @@
+diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
+--- a/bsd/dev/redfin_touch_spi.c
++++ b/bsd/dev/redfin_touch_spi.c
+@@ -17,6 +17,10 @@
+ 
+ #define RF_SPI_DONE 1u
+ #define RF_SPI_EVENTS ((1u << 0) | (1u << 26) | (1u << 27) | (1u << 30))
++/* V7 latched M_RX_IRQ(bit7) despite its enable bit being zero. Pinned
++ * qcom-geni-se.h names it; spi-geni-qcom.c:1548..1605 ignores/acks it.
++ * Accept/ack this status without changing the native FIFO IRQ enables. */
++#define RF_SPI_STATUS_EVENTS (RF_SPI_EVENTS | (1u << 7))
+ #define RF_SPI_ERRORS (0x3eu | (0x1fu << 9) | (3u << 24) | (3u << 28))
+ #define RF_SPI_PACK0 0x0007f8feu
+ #define RF_SPI_PACK1 0x000ffefeu
+@@ -133,7 +137,7 @@
+ 			for (unsigned n = 0; n < 1000; n++) {
+ 				uint32_t irq = redfin_spi_rd(s, 0x610);
+ 				if (!(redfin_spi_rd(s, 0x40) & 1)) {
+-					redfin_spi_wr(s, 0x618, irq & (RF_SPI_EVENTS | RF_SPI_ERRORS));
++					redfin_spi_wr(s, 0x618, irq & (RF_SPI_STATUS_EVENTS | RF_SPI_ERRORS));
+ 					goto stopped;
+ 				}
+ 				delay(1);
+@@ -178,7 +182,7 @@
+   return ENOTSUP;
+  }
+ 	uint32_t irq = redfin_spi_rd(s, 0x610);
+-	if (irq & ~RF_SPI_EVENTS) {
++	if (irq & ~RF_SPI_STATUS_EVENTS) {
+   redfin_spi_diag_error(s,"prepare-irq-error",EIO);
+   return EIO;
+  }
+@@ -206,7 +210,7 @@
+ 	    (redfin_spi_rd(s, 0x800) & 0x0fffffff) ||
+ 	    (redfin_spi_rd(s, 0x804) & 0x01ffffff)) return redfin_spi_failed(s, EBUSY);
+ 	uint32_t irq = redfin_spi_rd(s, 0x610);
+-	if (irq & ~RF_SPI_EVENTS) return redfin_spi_failed(s, EIO);
++	if (irq & ~RF_SPI_STATUS_EVENTS) return redfin_spi_failed(s, EIO);
+ 	redfin_spi_wr(s, 0x618, irq);
+ 	redfin_spi_wr(s, tx ? 0x26c : 0x270, count); /* 8 bits per SPI word. */
+  redfin_spi_diag_once(s,tx!=NULL);
+@@ -222,7 +226,7 @@
+ 	}
+ 	for (unsigned us = 0; us < 10000; us++) {
+ 		irq = redfin_spi_rd(s, 0x610);
+-		if (irq & ~RF_SPI_EVENTS) return redfin_spi_failed(s, EIO);
++		if (irq & ~RF_SPI_STATUS_EVENTS) return redfin_spi_failed(s, EIO);
+ 		uint32_t fifo = redfin_spi_rd(s, 0x804);
+ 		unsigned words = fifo & 0x01ffffff;
+ 		unsigned valid = (fifo >> 28) & 7;
+@@ -233,7 +237,7 @@
+ 			uint32_t word = redfin_spi_rd(s, 0x780);
+ 			for (unsigned b = 0; b < 4; b++) rx[received++] = (uint8_t)(word >> (8 * b));
+ 		}
+-		redfin_spi_wr(s, 0x618, irq & RF_SPI_EVENTS);
++		redfin_spi_wr(s, 0x618, irq & RF_SPI_STATUS_EVENTS);
+ 		if (irq & RF_SPI_DONE) {
+ 			if ((redfin_spi_rd(s, 0x40) & 1) ||
+ 			    (redfin_spi_rd(s, 0x800) & 0x0fffffff) ||

@@ -154,3 +154,10 @@ unknown-status guard falsely rejects with EIO. Cancel succeeds; ID remains
 unproved. Pinned Linux acknowledges this notification without treating it
 as a transfer failure. The next change must accept/ack only that extra bit,
 preserving IRQ enable programming and all real-fault/FIFO/protocol guards.
+
+V8 validates that RX-status correction on hardware: exact SEC ID
+53:45:37:91:00, transport/caller result0 at960kHz, authenticated image-matched
+capture and automatic verified fastboot return. No contact event/HID worker
+or UFS was enabled in that md0 test. `touch-rx-irq.patch` preserves IRQ enable
+programming and handles only the extra bit7 status. Event/HID activation is
+the next stage; identity success alone does not prove usable touch input.
