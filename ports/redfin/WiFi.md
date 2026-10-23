@@ -844,3 +844,12 @@ and post-power dynamic mask1 (QMI0x3b), with checked previous/current masks.
 It records power/PHY/RF pin results and quarantines an actual rejuvenation
 indication until full reset. CAP identity and dynamic-feature results remain
 separate observations; host services keep running while awaiting readiness.
+
+The optional host asset inventory can now serve the observed
+`image/modem_pr/so/549_38_0.mbn` from the same hash-verified captured modem
+source. The module-v1 hardware capture confirms TFTP requests for that file
+and its ELF ranges succeed. Native MSA/CAP, supply requests and dynamic
+mask still succeed, but FW_READY and pin-result indications remain absent
+through the captured30-second timeout. Making this file available does not
+establish RF initialization. The next diagnostic checks native readiness
+prerequisites and physical supply/pin state; association/data remain pending.

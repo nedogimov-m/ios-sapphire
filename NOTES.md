@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN observed RF module served; WLAN readiness still absent — 2026-10-24
+
+Resumed from `1c8d763` and assessed the already completed 2026-10-23
+module-v1 capture before scheduling another device run. Native kernel is
+unchanged from `d65dd2d`, local `build-20261023-191352.log`; no new kernel
+build or CI run. The authenticated capture matches image/boot ID
+`419972dcc1891799`. TFTP serves the actual963,644-byte
+`image/modem_pr/so/549_38_0.mbn` and its requested ELF ranges from the verified
+read-only modem snapshot. Later WLAN firmware requests also succeed.
+This confirms the previously missing module is available to MPSS; it does
+not establish that the RF hardware is initialized.
+
+Native MSA/CAP, all15 supply requests (accepted0x7fff, quarantine0) and
+dynamic feature mask1 succeed again. No FW_READY or pin-result indication
+arrives before the captured30s transport timeout: resultETIMEDOUT60,
+phase12, SMP2P stage4. Final counters:45 services,1314 QRTR packets,
+1171 TFTP read blocks,2 volatile writes; RMTFS10 requests/0 failures.
+Recovery authentication and boot-ID matching pass; HFSX is still clean
+with unchanged write_count462335, and final hardware fastboot is verified.
+The phone remains available in fastboot at this resume.
+
+Kernel `73e7c5de5c4f1d93ac991470881b4a654180c2d8124dad28989ae37974779a3b`;
+image `e5c76982ea92f42c39be5a6e2851bb337674915b6aa24f7d493aa6c7a4cc701c`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x419972dcc1891799`.
+
+Next: recheck native post-CAP/power readiness prerequisites and derive a
+bounded physical GPIO/PMIC observer if needed. Missing later MCFG paths
+remain observations rather than an established WLAN blocker. Association/
+data, GPU/Metal and Bluetooth remain unfinished. Captures/firmware/EFS stay
+private and ignored; no persistent partition changes in this milestone.
+
 ## REDFIN native feature-mask hardware PASS; requested RF module prepared — 2026-10-23
 
 Source `d65dd2d`, native `build-20261023-191352.log`. Authenticated matched
