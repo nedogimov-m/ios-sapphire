@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN announced nonsecure hang window hardware PASS; no hang payload — 2026-10-24
+
+Source `5c5ffee`, native `build-20261024-021219.log`, authenticated
+module-pmic-state-hang-v4 capture matched boot ID `4a401ca6db20f93f`.
+MSA_READY actually advertises both optional fields: offset197e80,
+length384. The accepted nonsecure window permits the bounded local read at
+8bb97e80; both samples agree and contain zero bytes only. No hang payload
+or native WLAN error bits are observed. All three PMIC snapshots, MSA/CAP,
+15 supply ACKs and dynamic mask1 repeat their prior results. FW_READY is
+still absent; finalETIMEDOUT60/phase12/SMP2P stage4/rawWLAN1/0.
+Zero hang data does not prove healthy firmware or explain the readiness wait.
+
+Recovery authenticates the log, verifies image/nonce, observes clean HFSX
+with unchanged write_count462335, primes public RAM metadata and leaves
+verified hardware fastboot. No persistent partition change. Kernel
+`132af60dd26bced72f986d7e039ef897d4d06c147742a218becf61aa7f2a6c24`;
+image `24d820c38c0801e5826d8e71d90af3a3b6fef6887e8bc645afd2276eb43d8d21`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x4a401ca6db20f93f`.
+
+Next: source-backed BDF/calibration host protocol. Linux v6.12
+`adc218676eef25575469234709c2d87185ca223a` ath10k/qmi.c sends HOST_CAP,
+BDF_DOWNLOAD and CAL_REPORT around MSA readiness; these are absent from
+our current kernel-only native ICNSS flow. Review the actual Android
+daemon and Redfin BDF selection before implementing or transmitting them.
+Their absence is a protocol lead, not yet an established root cause.
+The captured live SKU isG5NZ6; keep its identity separate from absent QMI
+board_info. Immediate user goal remains GUI with working Wi-Fi, then
+GPU/Metal; neither is complete on this diagnostic milestone.
+
 ## REDFIN bounded native MSA hang-data observer prepared — 2026-10-24
 
 Continues `20fe609`. User reaffirms the immediate goal: GUI with working

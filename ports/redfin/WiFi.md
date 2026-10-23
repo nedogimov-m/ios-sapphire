@@ -897,3 +897,9 @@ native worker takes two bounded read-only Normal-NC samples and prints
 bytes only when they agree. The local alias is then released; the original
 MSA, MPSS and power resources stay retained until reset. Other profiles
 continue to omit this MSA CPU mapping.
+
+Hardware hang-v4 advertises offset197e80/length384 inside the accepted
+nonsecure region. The bounded read completes with two stable all-zero
+samples; raw WLAN SMP2P remains present/0 and FW_READY remains absent.
+No hang reason is established. The next protocol review covers the host's
+BDF/calibration exchanges and actual Redfin board-file selection.

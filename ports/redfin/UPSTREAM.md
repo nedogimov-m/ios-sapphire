@@ -391,5 +391,14 @@ and releases only its local alias. It introduces no MSA clearing, permission
 assignment, DMA grant, power write or readiness decision. Default setup and
 PMIC profiles do not perform this MSA CPU read.
 
+Reviewed Linux v6.12 `adc218676eef25575469234709c2d87185ca223a`
+`drivers/net/wireless/ath/ath10k/{qmi.c,snoc.c}` after the zero hang result.
+For WCN3990, this client sends HOST_CAP daemon_support0 and, after MSA,
+downloads the selected BDF and sends CAL_REPORT before firmware readiness.
+Native Google's kernel ICNSS flow does not contain those transfers, so its
+Android userspace host service and actual Redfin board selection are the
+next references. No generic ath10k BDF, CRC-error workaround, permission
+assignment or hardware geometry has been imported by this comparison.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772
