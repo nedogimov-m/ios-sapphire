@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN RMTFS OPEN observed before MPSS fatal — 2026-10-23
+
+Source `6ec6c89`, local native build `build-20261023-171716.log` (no CI run).
+Authenticated/image/nonce-matched `wifi-host-v3-20261023-171848`, boot ID
+`9800081ed3ee5de7`, repeats PAS4 authentication, fresh SMP2P ready `0x6`,
+GLINK/IPCRTR negotiation and the two remote services. The native RMTFS
+observer receives OPEN `/boot/modem_fs1` and returns its explicit failure.
+The next recorded startup result is SMP2P fatal (`result=9`, stage8), phase12.
+This ordering establishes demand for the native EFS host service; it does
+not by itself prove the refusal is the sole cause of the fatal.
+
+Recovery authenticates the log, observes clean/unmodified HFSX with
+`write_count=462335`, and verifies the final hardware bootloader. No EFS,
+modem, recovery or boot partition was written. Kernel SHA256
+`7acfeb07e8bd0e9d97e48bcfe5fbed620a7d71d17cdf38b23394fdb7bbcbdf60`;
+image SHA256 `3fd3c7b597d4fc7737bb8bac8965007c394e99db751519aa7f2fded6a375eb45`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x9800081ed3ee5de7`.
+
+Next: provide the observed RMTFS contract using verified read-only device
+snapshots and volatile RAM shadows, with an independently reserved low
+DMA buffer and checked HLOS/MSS sharing. Persistent EFS writes remain
+excluded. Then repeat the temporary boot and observe requests/WLFW. Wi-Fi
+data, GPU/native Metal and Bluetooth remain unfinished.
+
 ## REDFIN IPA absent; captured domains reconciled; RMTFS demand observer — 2026-10-23
 
 Source92b40b0/native170237, authenticated matched `wifi-host-v2-20261023-170430`,
