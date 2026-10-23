@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native MPSS authentication and fresh ready hardware PASS — 2026-10-23
+
+Source0a026f4 / local native build155300. Fresh authenticated/image/nonce
+matched `wifi-fw-start-v5-20261023-155408`, bootid9a1be342d624d81a, repeats
+all native power/bandwidth/AOP and source proofs. INIT0/0 after3calls/2resumes;
+MEM_SETUP0/0 in1call; SMP2P preparation0,92stores/1kick. All4478metadata/
+load/BSS copy/readback chunks complete, payload99,384,626 and BSS191,553,563.
+PAS4 AUTH_AND_RESET succeeds with status0/value0 after53calls/52resumes,
+no busy retry. A newly created inbound435 passes native identity/ABI/restart
+checks and reports fresh slave-kernel0x6: ready1,proxy-handover1. Final
+result0/phase11,init1/setup1/auth1,SMPstage4. This is actual MPSS execution
+and fresh native readiness, not association, a WLAN RF identity or packets.
+
+Authenticated recovery observes HFSX clean/unmounted, inconsistent=false,
+unchanged write_count462335 and verifies final fastboot. No media/flash/EFS
+access was added. All captures, firmware and device information remain private.
+Kernel`c88c3b62bd960a55a2a247694b05f96a05bfc0bb98badd0dadd469920ef1c053`; image`a83307f37412206f70cea14ce4907704f88431ab797bcb382de3dad30fe2c391`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=2 redfinspmi=1 redfinreturn=1 redfinbootid=0x9a1be342d624d81a`.
+
+Continue directly: establish this ready session's native GLINK descriptor/
+APPS FIFO under lock3, negotiate version/open IPCRTR, then QRTR services,
+WLFW capabilities/native MSA/power, association and iOS network interface.
+Do not repeat the old cold-shutdown sequence or infer WCN6750/PAS6 geometry.
+
 ## REDFIN entire MPSS copy/readback hardware PASS; AUTH continuation bound — 2026-10-23
 
 Source5b2bf74 / native build154749. Fresh authenticated/image/nonce-matched

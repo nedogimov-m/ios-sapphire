@@ -692,3 +692,12 @@ Current v5 gives AUTH a bounded1024continuations/10seconds, preserving all
 returned arguments/cookie; other PAS calls retain16continuations/2seconds.
 Busy retries, ownership guards and retained uncertain state remain unchanged.
 There is still no final successful AUTH or remote-ready observation.
+
+V5 hardware completes PAS4 authentication: status0/value0 after53calls and
+52native interrupted continuations. A new inbound SMP2P435 reports the exact
+native PID/ABI/feature/restart contract and fresh slave-kernel0x6, with ready
+and proxy-handover asserted. Final firmware result0/phase11 follows the
+entire4478chunk copy/readback. Authenticated recovery matches image/nonce,
+observes unchanged clean HFSX and leaves verified fastboot. This establishes
+native MPSS execution. GLINK/QRTR/WLFW, WLAN identity, association and packets
+remain the next work; firmware readiness is not a Wi-Fi connection.
