@@ -966,3 +966,9 @@ wrapper. The same native adapter is exercised by host tests: missing mode
 ACK, incomplete readiness/ownership or an unexpired deadline cannot map
 or read CE registers. No SMMU/CE write, ring, DMA buffer or association is
 introduced by this profile.
+
+The mission-v1 device run acknowledges both native requests and completes
+all414 CE reads with stable values. The firmware's CE2 source ring has64
+entries and source write index1; the host destination is unconfigured.
+No packet has been received yet. A separately owned context, shim-validated
+DMA32 memory and host CE2 destination are the next transport stage.

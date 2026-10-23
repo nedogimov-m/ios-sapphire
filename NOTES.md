@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN actual WLAN_CFG/mission ACKs and CE register observation PASS — 2026-10-24
+
+Source `51c1c03`, local native build031516, authenticated mission-v1 capture
+matches boot ID93fc05e09c7924a5. Native WLAN_CFG23/transaction6 succeeds;
+WLAN_MODE22/transaction7 succeeds. After the serviced100ms settle, all414
+CE reads are stable, result0/stage3. Wrapper and RRI are0. Firmware-owned
+CE2 source is programmed in MSA with64 entries and source write index1;
+its host destination base/size/write/read indexes are still0. This pending
+source entry is a transport lead, not an observed HTC packet yet. Firmware
+also programs its other target-side CEs; the host touches none of them.
+All fresh SMMU comparisons preserve inherited state and WLAN remains
+unmatched. Final worker result0; mission stage3/two ACKs; DMON readiness
+also arrives this time independently of the real kernel FW_READY.
+
+All1262 full host tests PASS (3 optional private cases skipped). Recovery
+authenticates the capture, matches nonce/image, observes clean HFSX with
+unchanged write_count462335, primes public metadata and leaves verified
+fastboot. Kernel/image hashes match the prepared entry below. Exact args:
+`debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x93fc05e09c7924a5`.
+
+Next: permanently leased WLAN-only context, separately shim-validated
+guarded DMA32 RAM and CE2 receive path, preserving all firmware source
+rings and foreign mappings. Then HTC/WMI/HTT, association/data and iOS
+GUI integration. GPU/Metal follows working GUI Wi-Fi; neither is complete.
+No persistent partition/EFS/backup change.
+
 ## REDFIN acknowledged mission protocol and bounded CE observer prepared — 2026-10-24
 
 Continues `4c337b7`. Explicit `--wifi-snoc-mission` requires the existing
@@ -20,8 +46,8 @@ changed second-pass CE registers and native QMI wire/error/order checks.
 The first combined run found a test-harness extraction boundary swallowing
 the new include; placing that independent include outside the existing
 observer fixes it. Native local `build-20261024-031516.log` and complete
-Image/live-FDT/loader/return preflight PASS; no CI run. Full host suite is
-running; hardware remains pending. Decompressed Image130087728 bytes is
+Image/live-FDT/loader/return preflight PASS; no CI run. Full1262 host tests
+subsequently PASS; hardware results above. Decompressed Image130087728 bytes is
 below the explicit128MiB cap.
 
 Kernel `42b8e0011adfb37238468decb9f0b9be76e6532853f9896316f8dac1878844df`;
