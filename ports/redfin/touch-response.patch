@@ -1,8 +1,18 @@
 diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
 --- a/bsd/dev/redfin_touch_spi.c
 +++ b/bsd/dev/redfin_touch_spi.c
-@@ -266,7 +266,24 @@
- 	delay(redfin_touch_read_delay(reg));
+@@ -263,10 +263,33 @@
+ 	if (!out || !bytes || !redfin_touch_read_request(reg, count, request)) return EINVAL;
+ 	int error = redfin_spi_transfer(s, request, NULL, sizeof(request));
+ 	if (error) return error;
+-	delay(redfin_touch_read_delay(reg));
++	unsigned settle = redfin_touch_read_delay(reg);
++    /* Native SEC uses a scheduled wait with this minimum. A tight busy wait
++     * on an idle/waking controller needs margin; keep the existing 500us
++     * READ_ALL_EVENT floor for both event commands after sensing starts. */
++    if (s == &redfin_spi_event_context && redfin_spi_event_open && redfin_spi_event_sensing &&
++        (reg == 0x60 || reg == 0x61) && settle < 500) settle = 500;
++	delay(settle);
  	error = redfin_spi_transfer(s, NULL, response, bytes);
  	if (error) return error;
 -	if (!redfin_touch_response_valid(reg, count, response, bytes)) return redfin_spi_failed(s, EIO);
@@ -27,7 +37,7 @@ diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
  	memcpy(out, response + 7, count);
  	return 0;
  }
-@@ -346,7 +363,7 @@
+@@ -346,7 +369,7 @@
  		return EINVAL;
  	}
  	int error = redfin_spi_read(&redfin_spi_event_context,reg,count,out);
@@ -39,9 +49,24 @@ diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
 diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
 --- a/bsd/dev/redfin_touch_events.c
 +++ b/bsd/dev/redfin_touch_events.c
-@@ -123,6 +123,13 @@
+@@ -94,7 +94,7 @@
+ 	uint64_t deadline;
+ 	clock_interval_to_deadline(redfin_events_seconds,NSEC_PER_SEC,&deadline);
+ 	int error = 0;
+-	unsigned ticks = 0,batches = 0;
++	unsigned batches = 0;
+ 	/* No SPI events consumed and no DOWN emitted before a real callback consumer. */
+ 	while (!sweet_hid_redfin_touch_ready()) {
+ 		if (!redfin_touch_boot_lease_valid(REDFIN_TOUCH_UFS_EVENTS)) { error = EPERM; goto done; }
+@@ -121,8 +121,18 @@
+ 	while (mach_absolute_time() < deadline) {
+ 		if (!sweet_hid_redfin_touch_ready()) { error = EPIPE; break; }
  		if (!redfin_events_owned()) { error = EBUSY; break; }
- 		if (!(redfin_events_rd(redfin_events_gpio,0x1004) & 1) || state.down || (ticks++ % 13) == 0) {
+-		if (!(redfin_events_rd(redfin_events_gpio,0x1004) & 1) || state.down || (ticks++ % 13) == 0) {
++		/* SEC's native handler is level-low IRQ driven. Do not consume an
++		 * idle controller's event reply merely because time passed or a
++		 * stationary finger is down; its next event keeps IRQ9 asserted. */
++		if (!(redfin_events_rd(redfin_events_gpio,0x1004) & 1)) {
  			error = redfin_events_batch(&state,&ops,true);
 +			if (error == EILSEQ) {
 +				/* No DOWN from this batch was committed. Release old contacts,

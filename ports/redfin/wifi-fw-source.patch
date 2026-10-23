@@ -4364,7 +4364,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_snoc_lease.h b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_snoc_lease.h
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,151 @@
 +/* SPDX-License-Identifier: MIT
 + * Sole-worker APPS SMMU lease for WLANc0/mask1, adapted from the native
 + * non-static NS allocator and the proven Redfin USB AArch64 bypass context.
@@ -4387,6 +4387,32 @@ new file mode 100644
 +    unsigned attempted, leased, active, poisoned, stores, bank, slot, polls;
 +    struct rf_snoc_snapshot expected, fresh;
 +};
++/* First difference in the already sampled hardware state, with no new MMIO.
++ * Keep owned and foreign changes equally visible; neither is auto-accepted. */
++static inline bool rf_snoc_lease_difference(const struct rf_snoc_lease *s,
++    unsigned *block, uint32_t *at, uint32_t *expected, uint32_t *observed)
++{
++    if (!s || !block || !at || !expected || !observed) return false;
++#define RF_SNOC_DIFF(b, offset, field) do { \
++    if (s->expected.field != s->fresh.field) { \
++        *block = b; *at = offset; *expected = s->expected.field; *observed = s->fresh.field; return true; \
++    } \
++} while (0)
++    RF_SNOC_DIFF(0, 0, control); RF_SNOC_DIFF(0, 0x48, fault);
++    for (unsigned i = 0; i < 3; ++i) {
++        RF_SNOC_DIFF(0, 0x20 + 4u*i, id[i]);
++        RF_SNOC_DIFF(0, 0x50 + 4u*i, syndrome[i]);
++    }
++    for (unsigned i = 0; i < RF_SNOC_STREAMS; ++i) {
++        RF_SNOC_DIFF(0, 0x800 + 4u*i, smr[i]); RF_SNOC_DIFF(0, 0xc00 + 4u*i, s2cr[i]);
++    }
++    for (unsigned i = 0; i < RF_SNOC_CONTEXTS; ++i) {
++        RF_SNOC_DIFF(0, 0x1000 + 4u*i, bank[i].cbar); RF_SNOC_DIFF(0, 0x1800 + 4u*i, bank[i].cba2r);
++        RF_SNOC_DIFF(1, 0x1000u*i, bank[i].sctlr); RF_SNOC_DIFF(1, 0x1000u*i + 0x58, bank[i].fault);
++    }
++#undef RF_SNOC_DIFF
++    return false;
++}
 +static inline bool rf_snoc_raw_equal(const struct rf_snoc_snapshot *a, const struct rf_snoc_snapshot *b)
 +{
 +    return a && b && a->stable && b->stable && a->stage == 4 && b->stage == 4 && !a->error && !b->error &&
@@ -4494,7 +4520,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_packets.inc b/iokit/Kernel/arm/redfin_
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_packets.inc
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,217 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin hardware owner for the complete ath10k-compatible packet and
 + * station engine. One bound worker owns routes, MMIO and fresh DMA32 memory.
@@ -4665,7 +4691,15 @@ new file mode 100644
 +    error = rf_snoc_lease_claim(&context->packet_lease, &context->packet_lease_ops, &context->snoc);
 +    IOLog("REDFIN WIFI PACKETS: context lease=%d bank=%u slot=%u stores=%u retained=1\n", error,
 +        context->packet_lease.bank, context->packet_lease.slot, context->packet_lease.stores);
-+    if (error) return error;
++    if (error) {
++        unsigned block = 0; uint32_t at = 0, expected = 0, observed = 0;
++        bool changed = rf_snoc_lease_difference(&context->packet_lease, &block, &at, &expected, &observed);
++        const rf_snoc_snapshot *fresh = &context->packet_lease.fresh;
++        IOLog("REDFIN WIFI PACKETS: lease refusal sample=%u/%u stable=%u changed=%u block=%u at=%#x expected=%#x observed=%#x unstable=%u/%#x\n",
++            fresh->stage, fresh->error, fresh->stable, changed, block, at, expected, observed,
++            fresh->changed_block, fresh->changed_offset);
++        return error;
++    }
 +    memcpy(context->packet_expected, context->ce.ce, sizeof(context->packet_expected));
 +    const redfin_wifi_radio_ops ops = {context, fw_start_packet_bus_check, fw_start_packet_allocate,
 +        fw_start_packet_ce_read, fw_start_packet_ce_write, fw_start_packet_shadow};

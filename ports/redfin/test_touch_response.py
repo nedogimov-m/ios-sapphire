@@ -30,8 +30,8 @@ class TouchResponseTests(unittest.TestCase):
 struct redfin_spi{uintptr_t se;unsigned tx_depth,rx_depth;bool dead,command_owned;};
 static struct redfin_spi redfin_spi_event_context;
 static bool redfin_spi_event_open,redfin_spi_event_sensing;
-static unsigned fault,commands,failed,closed,requested,requested_count;
-static void delay(unsigned us){(void)us;}
+static unsigned fault,commands,failed,closed,requested,requested_count,settled;
+static void delay(unsigned us){settled+=us;}
 static uint32_t redfin_spi_rd(struct redfin_spi *s,unsigned at){
  (void)s;if(fault==9 && at==0x40)return 1;
  if(fault==10 && at==0x800)return 1;
@@ -56,7 +56,7 @@ static int redfin_spi_transfer(struct redfin_spi *s,const uint8_t *tx,uint8_t *r
         wrapper = r'''
 static uint8_t output[248];
 int run(unsigned issue,unsigned reg,unsigned count){
- fault=issue;commands=failed=closed=0;memset(output,0x5a,sizeof(output));
+ fault=issue;commands=failed=closed=settled=0;memset(output,0x5a,sizeof(output));
  redfin_spi_event_context=(struct redfin_spi){1,16,16,false,false};
  redfin_spi_event_open=redfin_spi_event_sensing=true;
  if(issue==5)redfin_spi_event_sensing=false;
@@ -64,7 +64,7 @@ int run(unsigned issue,unsigned reg,unsigned count){
  if(issue==7)redfin_spi_event_context.dead=true;
  return redfin_touch_spi_event_read(reg,count,output);
 }
-unsigned stat(unsigned n){const unsigned v[]={commands,failed,closed,redfin_spi_event_open,redfin_spi_event_context.dead,output[0]};return n<6?v[n]:0;}
+unsigned stat(unsigned n){const unsigned v[]={commands,failed,closed,redfin_spi_event_open,redfin_spi_event_context.dead,output[0],settled};return n<7?v[n]:0;}
 '''
         cls.lib = compile_shared(root, stub + read + event + wrapper, 'response')
         cls.lib.run.argtypes = [C.c_uint] * 3
@@ -89,6 +89,9 @@ unsigned stat(unsigned n){const unsigned v[]={commands,failed,closed,redfin_spi_
     def test_valid_response_is_delivered_once(self):
         self.assertEqual(self.lib.run(0, 0x60, 8), 0)
         self.assertEqual([self.lib.stat(i) for i in range(6)], [2, 0, 0, 1, 0, 1])
+        self.assertEqual(self.lib.stat(6), 500)
+        self.assertEqual(self.lib.run(0, 0x55, 1), 0)
+        self.assertEqual(self.lib.stat(6), 100)
 
 
 if __name__ == '__main__':

@@ -195,6 +195,15 @@ int redfin_touch_spi_events_sense_init(void){return 0;}
                 text = text.replace('if(fault==3 || fault==14)return EIO;',
                     'if(fault==3 || fault==14)return EIO; if(fault>=22 && fault<=24)return EILSEQ;')
                 text = text.replace('read60++;', 'read60++;if(fault==24 && read60>=5)return EILSEQ;')
+                text = text.replace('if(base==1 && offset==0x1004)return 0;', '''if(base==1 && offset==0x1004){
+                    if(fault==25)return 1;
+                    if(fault==26){
+                        if(read60<3)return now<700000000ull;
+                        if(read60==3)return now<900000000ull;
+                        return read60>=5;
+                    }
+                    return 0;
+                }''')
                 text = text.replace('redfin_events_attempted=false;',
                     'redfin_events_attempted=false;test_clears=0;test_clear_error=(fault==20||fault==23)?EIO:fault==21?EBUSY:0;')
                 text += '\nunsigned clear_calls(void){return test_clears;}\n'
@@ -246,6 +255,16 @@ int redfin_touch_spi_events_sense_init(void){return 0;}
             self.assertEqual(self.lib.stat(6), 1)
             self.assertEqual(self.lib.stat(7), 1)
             self.assertEqual(self.lib.stat(9), 0)
+
+    def test_idle_high_irq_never_consumes_events_and_low_irq_drains_finger_updates(self):
+        self.assertEqual(self.lib.run(25, 1, 1), 0)
+        self.assertEqual(self.lib.stat(4), 2)  # Initial synchronization only.
+        self.assertEqual(self.lib.stat(8), 0)
+        self.assertEqual(self.lib.clear_calls(), 0)
+        self.assertEqual(self.lib.run(26, 1, 1), 0)
+        self.assertEqual(self.lib.stat(4), 5)  # Initial2 + DOWN/MOVE/UP, no idle reads.
+        self.assertEqual(self.lib.stat(8), 3)
+        self.assertEqual(self.lib.stat(10), 0)
 
 
 if __name__ == '__main__':

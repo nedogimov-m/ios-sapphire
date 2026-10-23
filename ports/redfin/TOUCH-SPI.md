@@ -1,6 +1,12 @@
 # Stage 2 draft: SEC SPI identity
 
 Current GUI event-session update, 2026-10-24: `touch-response.patch`
+uses native level-low IRQ9 dispatch; an idle/high IRQ and a stationary
+contact no longer trigger speculative event reads. After sensing starts,
+both event requests wait at least500us before RX (native READ_ONE_EVENT's
+scheduled100us minimum allows a longer wait). This is a conservative
+settling margin for the observed zero headers, pending device validation.
+The patch
 logs the header and computed/received checksum of a rejected complete reply.
 Only an already sensed event session with an idle GENI host, empty FIFOs
 and no fault status can return `EILSEQ` without closing SPI. The HID worker

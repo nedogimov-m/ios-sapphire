@@ -20,6 +20,32 @@ struct rf_snoc_lease {
     unsigned attempted, leased, active, poisoned, stores, bank, slot, polls;
     struct rf_snoc_snapshot expected, fresh;
 };
+/* First difference in the already sampled hardware state, with no new MMIO.
+ * Keep owned and foreign changes equally visible; neither is auto-accepted. */
+static inline bool rf_snoc_lease_difference(const struct rf_snoc_lease *s,
+    unsigned *block, uint32_t *at, uint32_t *expected, uint32_t *observed)
+{
+    if (!s || !block || !at || !expected || !observed) return false;
+#define RF_SNOC_DIFF(b, offset, field) do { \
+    if (s->expected.field != s->fresh.field) { \
+        *block = b; *at = offset; *expected = s->expected.field; *observed = s->fresh.field; return true; \
+    } \
+} while (0)
+    RF_SNOC_DIFF(0, 0, control); RF_SNOC_DIFF(0, 0x48, fault);
+    for (unsigned i = 0; i < 3; ++i) {
+        RF_SNOC_DIFF(0, 0x20 + 4u*i, id[i]);
+        RF_SNOC_DIFF(0, 0x50 + 4u*i, syndrome[i]);
+    }
+    for (unsigned i = 0; i < RF_SNOC_STREAMS; ++i) {
+        RF_SNOC_DIFF(0, 0x800 + 4u*i, smr[i]); RF_SNOC_DIFF(0, 0xc00 + 4u*i, s2cr[i]);
+    }
+    for (unsigned i = 0; i < RF_SNOC_CONTEXTS; ++i) {
+        RF_SNOC_DIFF(0, 0x1000 + 4u*i, bank[i].cbar); RF_SNOC_DIFF(0, 0x1800 + 4u*i, bank[i].cba2r);
+        RF_SNOC_DIFF(1, 0x1000u*i, bank[i].sctlr); RF_SNOC_DIFF(1, 0x1000u*i + 0x58, bank[i].fault);
+    }
+#undef RF_SNOC_DIFF
+    return false;
+}
 static inline bool rf_snoc_raw_equal(const struct rf_snoc_snapshot *a, const struct rf_snoc_snapshot *b)
 {
     return a && b && a->stable && b->stable && a->stage == 4 && b->stage == 4 && !a->error && !b->error &&

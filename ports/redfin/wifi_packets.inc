@@ -168,7 +168,15 @@ static int fw_start_packets_start(fw_start_context *context)
     error = rf_snoc_lease_claim(&context->packet_lease, &context->packet_lease_ops, &context->snoc);
     IOLog("REDFIN WIFI PACKETS: context lease=%d bank=%u slot=%u stores=%u retained=1\n", error,
         context->packet_lease.bank, context->packet_lease.slot, context->packet_lease.stores);
-    if (error) return error;
+    if (error) {
+        unsigned block = 0; uint32_t at = 0, expected = 0, observed = 0;
+        bool changed = rf_snoc_lease_difference(&context->packet_lease, &block, &at, &expected, &observed);
+        const rf_snoc_snapshot *fresh = &context->packet_lease.fresh;
+        IOLog("REDFIN WIFI PACKETS: lease refusal sample=%u/%u stable=%u changed=%u block=%u at=%#x expected=%#x observed=%#x unstable=%u/%#x\n",
+            fresh->stage, fresh->error, fresh->stable, changed, block, at, expected, observed,
+            fresh->changed_block, fresh->changed_offset);
+        return error;
+    }
     memcpy(context->packet_expected, context->ce.ce, sizeof(context->packet_expected));
     const redfin_wifi_radio_ops ops = {context, fw_start_packet_bus_check, fw_start_packet_allocate,
         fw_start_packet_ce_read, fw_start_packet_ce_write, fw_start_packet_shadow};

@@ -1,5 +1,30 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native level-driven SEC events and exact WLAN lease refusal evidence prepared — 2026-10-24
+
+Continues `5b4109d`. Touch now reads events only while native IRQ9 is low;
+periodic idle reads and speculative reads for a stationary DOWN are removed.
+Sensed event requests use a500us response floor, retaining native100us
+identity/sensing timing. This conservative margin and native IRQ dispatch
+address the observed zero headers; hardware effectiveness remains pending.
+Existing validation, release/resync and fatal-host rules are unchanged.
+WLAN lease refusal now reports the first raw expected/fresh difference and
+any unstable second-pass address from its already captured snapshot. No
+foreign or owned mismatch is accepted, no extra MMIO or retry is added.
+
+All45 focused touch/SNOC/GLINK/GUI tests PASS, including no idle event reads,
+level-low DOWN/MOVE/UP delivery and both response timing floors. Full1271
+suite passed before this focused batch. Local native
+`build-20261024-045148.log` PASS; no CI run. Actual loader/live-FDT/GUI8
+return/DMA32/shim guard preflight PASS, Image130216768 bytes.
+Kernel `ad532113a35dabace06f70d2454ea21663b52d1e2c9153bf6cddb7a88c91380a`;
+image `901ea4ae2b400fe29c6cbf84972945511ca592ab795f366cae585c9638678121`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x9d751a3511553458 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Next: combined temporary GUI/station-v4 capture. Verify touch response and
+resolve the exact WLAN SMMU refusal without weakening foreign-state checks;
+association/data/DHCP and GPU/Metal remain unfinished in that priority order.
+
 ## REDFIN station-v3 hardware: native readiness within54s, idle touch replies invalid — 2026-10-24
 
 Source `e0e7643`, local native `build-20261024-043743.log`; no CI run.
