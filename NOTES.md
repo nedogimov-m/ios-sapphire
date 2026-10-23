@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN RMTFS/EFS volatile backend hardware PASS; native WLFW appears — 2026-10-23
+
+Source `846fcbb`, local native `build-20261023-175333.log`. Authenticated,
+image/nonce-matched `wifi-host-rmtfs-v3-20261023-175500`, boot ID
+`56b8c26894474c8d`, proves successful HLOS/MSS sharing, three OPENs and the
+native global-buffer ALLOC/IOVEC sequence:10 requests,5248 read sectors and
+10240 volatile write sectors,0 failures. MPSS remains SMP2P ready (stage4),
+without the prior fatal. TFTP receives real firmware requests and serves the
+3,811,096-byte captured WLAN image; new native service0x45/v1/instance0
+announces at QRTR node0/port0x64. CAP0x24 returns valid QMI failure1/error90,
+with no RF IDs. This establishes actual WLAN firmware/service execution,
+not association, MSA readiness, a chipset identity or an iOS interface.
+
+After capturing the log, a fresh read-only recovery session independently
+reads all four EFS partitions twice again. Every exact byte count/hash and
+GPT proof equals the original pre-RMTFS snapshot, despite the modem's5MiB
+of writes to RAM shadows. Final hardware fastboot verified. HFSX remains
+clean/unmodified at write_count462335. All data, logs and manifests stay
+private/ignored. Kernel
+`1608609f56c8a33a8278ef329a0e735e47a2b47505064c7ce9ce8ad891ddda91`;
+image `647db9b93f4cecf9b2f11c513e66ec51310e64e2934b02c2e283415fc77bcbe6`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x56b8c26894474c8d`.
+
+Next: follow native legacy ICNSS ordering: WLFW indication registration,
+MSA_INFO with validated native reserved memory, exact returned-region
+permissions, MSA_READY, then CAP and firmware-ready indication. Error90
+before that setup is consistent with incompatible state, pending native
+QMI enum confirmation. Optional modem_pr/so/549_38_0.mbn and vendor OTA-path
+lookups were absent; WLAN still loaded through its captured image fallback.
+Wi-Fi association/data, GPU/native Metal and Bluetooth remain unfinished.
+
 ## REDFIN native ALLOC and first sector hardware PASS; global buffer semantics — 2026-10-23
 
 Source `5da3452`, native `build-20261023-174735.log`. Authenticated and
