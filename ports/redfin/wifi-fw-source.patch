@@ -1,0 +1,583 @@
+diff --git a/bsd/dev/redfin_wifi_fw_source.h b/bsd/dev/redfin_wifi_fw_source.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_wifi_fw_source.h
+@@ -0,0 +1,95 @@
++/* SPDX-License-Identifier: MIT
++ * Immutable boot-blob ingestion and guarded MPSS copy/readback. No device I/O,
++ * power, SCM/PAS or filesystem interface is provided by this module.
++ */
++#ifndef REDFIN_WIFI_FW_SOURCE_H
++#define REDFIN_WIFI_FW_SOURCE_H
++#include "../../iokit/Kernel/arm/redfin_wifi_firmware.h"
++
++#define RF_WIFI_FW_PAGE UINT64_C(16384)
++#define RF_WIFI_FW_BOOT_ARGS_BYTES 736u
++#define RF_WIFI_FW_MAX_ADT 0x200000u
++
++enum rf_wifi_fw_error {
++    RF_WIFI_FW_OK, RF_WIFI_FW_ARGUMENT, RF_WIFI_FW_LAYOUT, RF_WIFI_FW_STATE,
++    RF_WIFI_FW_PLATFORM, RF_WIFI_FW_HASH, RF_WIFI_FW_PLAN, RF_WIFI_FW_CHANGED,
++    RF_WIFI_FW_READBACK
++};
++enum rf_wifi_fw_stage {
++    RF_WIFI_FW_IDLE, RF_WIFI_FW_PINNED, RF_WIFI_FW_VERIFIED,
++    RF_WIFI_FW_METADATA, RF_WIFI_FW_SEGMENTS, RF_WIFI_FW_QUARANTINED,
++    RF_WIFI_FW_CLOSED
++};
++struct rf_wifi_fw_blob {
++    uint64_t physical, bytes, reserved, boot_id;
++    uint8_t sha256[32];
++};
++struct rf_wifi_fw_layout {
++    struct redfin_mpss_range ram, adt, arguments, ramdisk;
++    uint64_t kernel_end, top;
++};
++struct rf_wifi_fw_source_ops {
++    void *context;
++    /* Native source lease: current worker/CPU and boot generation, exact
++     * immutable boot data and mappings, with the full blob pinned read-only.
++     * Host fixtures must instead own the entire backing storage. A DT flag or
++     * raw reset boolean cannot establish native destination-write authority. */
++    int (*check)(void *, const struct rf_wifi_fw_blob *, const struct rf_wifi_fw_layout *);
++    /* Pin the exact reserved extent, including zero page padding. Failure
++     * cleans its own partial acquisition. No fallback/remap/retry is allowed. */
++    int (*pin)(void *, uint64_t physical, uint64_t reserved, const uint8_t **);
++    /* Release only this session's read-only mapping, including cancellation. */
++    void (*unpin)(void *);
++    redfin_mpss_sha256_fn sha256;
++};
++struct rf_wifi_fw_copy_ops {
++    void *context;
++    /* Separate destination authority. Native implementation must prove the
++     * same exclusive MPSS lease and appropriate PAS reset/INIT/MEM_SETUP state
++     * for this phase; source ownership never grants an MPSS write lease.
++     * This offline module does not query or change PAS state itself. */
++    int (*check)(void *, const struct redfin_mpss_plan *, unsigned phase);
++    /* Native callbacks supply the memory attributes and architecture/cache
++     * barriers. read() must observe the actual destination, not a software
++     * mirror; sync() must complete the required clean/publish before returning. */
++    int (*write)(void *, uint64_t, const uint8_t *, uint32_t);
++    int (*zero)(void *, uint64_t, uint32_t);
++    int (*read)(void *, uint64_t, uint8_t *, uint32_t);
++    int (*sync)(void *, uint64_t, uint64_t);
++};
++struct rf_wifi_fw_source {
++    uint32_t attempted, stage, poisoned, pinned;
++    int error, platform_error, planner_error;
++    struct rf_wifi_fw_blob blob;
++    struct rf_wifi_fw_layout layout;
++    struct rf_wifi_fw_source_ops operations;
++    const uint8_t *data;
++    struct redfin_mpss_workspace *workspace;
++    uint8_t workspace_sha256[32];
++    uint64_t metadata_written, copied_bytes, zeroed_bytes, readback_bytes;
++};
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++int rf_wifi_fw_layout_valid(const struct rf_wifi_fw_blob *, const struct rf_wifi_fw_layout *);
++/* One attempt. Uses the actual redfin_mpss_bundle_open() implementation, all
++ * original PHDR indices, per-asset hashes and exact live exclusion list.
++ * Workspace is new caller-owned unpublished memory, not a kernel stack item;
++ * keep it pinned and unchanged for the entire source lease. */
++int rf_wifi_fw_source_open(struct rf_wifi_fw_source *, const struct rf_wifi_fw_blob *,
++    const struct rf_wifi_fw_layout *, const struct redfin_mpss_range *, size_t,
++    struct redfin_mpss_workspace *, const struct rf_wifi_fw_source_ops *);
++/* Staged copy mechanism for the real native platform manager: metadata first,
++ * then segments only after the caller's independently proven PAS setup. Every
++ * write/zero is bounded to 64KiB and read back before progress is published.
++ * The 64KiB readback buffer is caller-owned private storage. No SMC is invoked. */
++int rf_wifi_fw_copy_metadata(struct rf_wifi_fw_source *, const struct rf_wifi_fw_source_ops *,
++    const struct rf_wifi_fw_copy_ops *, uint8_t *readback, size_t readback_bytes);
++int rf_wifi_fw_copy_segments(struct rf_wifi_fw_source *, const struct rf_wifi_fw_source_ops *,
++    const struct rf_wifi_fw_copy_ops *, uint8_t *readback, size_t readback_bytes);
++void rf_wifi_fw_source_close(struct rf_wifi_fw_source *, const struct rf_wifi_fw_source_ops *);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/bsd/dev/redfin_wifi_fw_source.c b/bsd/dev/redfin_wifi_fw_source.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_wifi_fw_source.c
+@@ -0,0 +1,243 @@
++/* SPDX-License-Identifier: MIT
++ * Source ingestion wraps the existing native parser/planner without another
++ * ELF/bundle parser or an allocation proportional to the firmware size.
++ */
++#include "redfin_wifi_fw_source.h"
++
++static int ops_valid(const struct rf_wifi_fw_source_ops *o)
++{ return o && o->check && o->pin && o->unpin && o->sha256; }
++static int fail(struct rf_wifi_fw_source *s, int error)
++{ s->poisoned = 1; s->stage = RF_WIFI_FW_QUARANTINED; s->error = error; return error; }
++static int source_check(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o)
++{
++    if (o->context != s->operations.context || o->check != s->operations.check ||
++        o->pin != s->operations.pin || o->unpin != s->operations.unpin || o->sha256 != s->operations.sha256)
++        return RF_WIFI_FW_CHANGED;
++    int error = o->check(o->context, &s->blob, &s->layout);
++    if (error) s->platform_error = error;
++    return error ? RF_WIFI_FW_PLATFORM : RF_WIFI_FW_OK;
++}
++static int inside(struct redfin_mpss_range outer, struct redfin_mpss_range inner)
++{
++    return redfin_mpss_valid_range(outer.base, outer.bytes) && redfin_mpss_valid_range(inner.base, inner.bytes) &&
++        inner.base >= outer.base && inner.base - outer.base < outer.bytes &&
++        inner.bytes <= outer.bytes - (inner.base - outer.base);
++}
++static int pointer_overlap(const void *a, size_t n, const void *b, size_t m)
++{
++    uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
++    return x > UINTPTR_MAX - n || y > UINTPTR_MAX - m || (x < y + m && y < x + n);
++}
++
++int rf_wifi_fw_layout_valid(const struct rf_wifi_fw_blob *b, const struct rf_wifi_fw_layout *l)
++{
++    if (!b || !l || !b->boot_id || !b->bytes || b->bytes > REDFIN_MPSS_MAX_BUNDLE ||
++        b->bytes > UINT64_MAX - (RF_WIFI_FW_PAGE - 1u) ||
++        b->reserved != ((b->bytes + RF_WIFI_FW_PAGE - 1u) & ~(RF_WIFI_FW_PAGE - 1u)) ||
++        (b->physical & (RF_WIFI_FW_PAGE - 1u)) ||
++        l->ram.base != UINT64_C(0x180000000) || l->ram.bytes != UINT64_C(0x80000000) ||
++        !inside(l->ram, (struct redfin_mpss_range){b->physical, b->reserved}) ||
++        l->kernel_end <= l->ram.base || l->kernel_end > b->physical ||
++        (l->kernel_end & (RF_WIFI_FW_PAGE - 1u)) ||
++        l->adt.base != b->physical + b->reserved || !l->adt.bytes || l->adt.bytes > RF_WIFI_FW_MAX_ADT ||
++        !inside(l->ram, l->adt) || !inside(l->ram, l->arguments) ||
++        l->arguments.bytes != RF_WIFI_FW_BOOT_ARGS_BYTES ||
++        l->arguments.base != ((l->adt.base + l->adt.bytes + 15u) & ~UINT64_C(15)) ||
++        l->top != ((l->arguments.base + l->arguments.bytes + RF_WIFI_FW_PAGE - 1u) & ~(RF_WIFI_FW_PAGE - 1u)) ||
++        l->top > l->ram.base + l->ram.bytes)
++        return 0;
++    if (l->ramdisk.base || l->ramdisk.bytes) {
++        if (!inside(l->ram, l->ramdisk) || l->ramdisk.base < l->kernel_end ||
++            l->ramdisk.base + l->ramdisk.bytes > b->physical ||
++            ((l->ramdisk.base | l->ramdisk.bytes) & (RF_WIFI_FW_PAGE - 1u))) return 0;
++    }
++    unsigned digest = 0;
++    for (unsigned i = 0; i < 32; ++i) digest |= b->sha256[i];
++    return digest != 0;
++}
++
++static int blob_hash(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o)
++{
++    uint8_t digest[32];
++    int error = source_check(s, o);
++    if (error) return error;
++    error = o->sha256(o->context, s->data, (size_t)s->blob.bytes, digest);
++    if (error) { s->platform_error = error; return RF_WIFI_FW_PLATFORM; }
++    if (!redfin_mpss_equal(digest, s->blob.sha256, sizeof(digest))) return RF_WIFI_FW_HASH;
++    for (uint64_t i = s->blob.bytes; i < s->blob.reserved; ++i)
++        if (s->data[(size_t)i]) return RF_WIFI_FW_CHANGED;
++    return source_check(s, o);
++}
++
++static int workspace_hash(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o, int capture)
++{
++    uint8_t digest[32];
++    int error = source_check(s, o);
++    if (error) return error;
++    error = o->sha256(o->context, (const uint8_t *)s->workspace, sizeof(*s->workspace), digest);
++    if (error) { s->platform_error = error; return RF_WIFI_FW_PLATFORM; }
++    if (capture) for (unsigned i = 0; i < 32; ++i) s->workspace_sha256[i] = digest[i];
++    else if (!redfin_mpss_equal(digest, s->workspace_sha256, sizeof(digest))) return RF_WIFI_FW_CHANGED;
++    return source_check(s, o);
++}
++
++int rf_wifi_fw_source_open(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_blob *b,
++    const struct rf_wifi_fw_layout *l, const struct redfin_mpss_range *excluded, size_t count,
++    struct redfin_mpss_workspace *workspace, const struct rf_wifi_fw_source_ops *o)
++{
++    if (!s || !b || !l || !workspace || !ops_valid(o) || !excluded || count < 2 ||
++        count > REDFIN_MPSS_MAX_EXCLUSIONS) return RF_WIFI_FW_ARGUMENT;
++    if (pointer_overlap(workspace, sizeof(*workspace), s, sizeof(*s)) ||
++        pointer_overlap(workspace, sizeof(*workspace), b, sizeof(*b)) ||
++        pointer_overlap(workspace, sizeof(*workspace), l, sizeof(*l)) ||
++        pointer_overlap(workspace, sizeof(*workspace), o, sizeof(*o)) ||
++        pointer_overlap(workspace, sizeof(*workspace), excluded, count * sizeof(*excluded))) return RF_WIFI_FW_ARGUMENT;
++    if (s->attempted || s->stage != RF_WIFI_FW_IDLE) return RF_WIFI_FW_STATE;
++    s->attempted = 1; s->blob = *b; s->layout = *l; s->workspace = workspace; s->operations = *o;
++    if (!rf_wifi_fw_layout_valid(b, l)) return fail(s, RF_WIFI_FW_LAYOUT);
++    int kernel = 0, framebuffer = 0;
++    for (size_t i = 0; i < count; ++i) {
++        kernel |= excluded[i].base == l->ram.base && excluded[i].bytes == l->ram.bytes;
++        framebuffer |= excluded[i].base == UINT64_C(0xa0000000) && excluded[i].bytes == UINT64_C(0x02300000);
++    }
++    if (!kernel || !framebuffer) return fail(s, RF_WIFI_FW_LAYOUT);
++    int error = source_check(s, o);
++    if (!error) {
++        error = o->pin(o->context, b->physical, b->reserved, &s->data);
++        if (error) { s->platform_error = error; error = RF_WIFI_FW_PLATFORM; }
++        else { s->pinned = 1; s->stage = RF_WIFI_FW_PINNED; }
++    }
++    if (!error && (!s->data || (uintptr_t)s->data > UINTPTR_MAX - b->reserved)) error = RF_WIFI_FW_LAYOUT;
++    if (!error && ((uintptr_t)workspace > UINTPTR_MAX - sizeof(*workspace) ||
++        ((uintptr_t)workspace < (uintptr_t)s->data + b->reserved &&
++         (uintptr_t)s->data < (uintptr_t)workspace + sizeof(*workspace)))) error = RF_WIFI_FW_LAYOUT;
++    if (!error) error = blob_hash(s, o);
++    if (!error) {
++        redfin_mpss_clear(workspace, sizeof(*workspace));
++        s->planner_error = redfin_mpss_bundle_open(s->data, (size_t)b->bytes, excluded, count,
++            o->sha256, o->context, &workspace->plan, &workspace->image, &workspace->scratch);
++        if (s->planner_error) error = RF_WIFI_FW_PLAN;
++    }
++    if (!error) error = workspace_hash(s, o, 1);
++    if (error) {
++        if (s->pinned) { o->unpin(o->context); s->pinned = 0; s->data = NULL; }
++        return fail(s, error);
++    }
++    s->stage = RF_WIFI_FW_VERIFIED;
++    return RF_WIFI_FW_OK;
++}
++
++static int copy_valid(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
++    const struct rf_wifi_fw_copy_ops *c, uint8_t *readback, size_t bytes)
++{
++    if (!s || !ops_valid(o) || !c || !c->check || !c->write || !c->zero || !c->read || !c->sync ||
++        !readback || bytes != REDFIN_MPSS_COPY_CHUNK || (uintptr_t)readback > UINTPTR_MAX - bytes)
++        return RF_WIFI_FW_ARGUMENT;
++    if (!s->pinned || !s->data || !s->workspace || s->poisoned) return RF_WIFI_FW_STATE;
++    uintptr_t start = (uintptr_t)readback, source = (uintptr_t)s->data, workspace = (uintptr_t)s->workspace;
++    if ((start < source + s->blob.reserved && source < start + bytes) ||
++        (start < workspace + sizeof(*s->workspace) && workspace < start + bytes) ||
++        pointer_overlap(readback, bytes, s, sizeof(*s)) || pointer_overlap(readback, bytes, o, sizeof(*o)) ||
++        pointer_overlap(readback, bytes, c, sizeof(*c))) return RF_WIFI_FW_ARGUMENT;
++    return workspace_hash(s, o, 0);
++}
++static int copy_check(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
++    const struct rf_wifi_fw_copy_ops *c, unsigned phase)
++{
++    int error = source_check(s, o);
++    if (error) return error;
++    error = c->check(c->context, &s->workspace->plan, phase);
++    if (error) { s->platform_error = error; return RF_WIFI_FW_PLATFORM; }
++    return RF_WIFI_FW_OK;
++}
++
++static int copy_chunk(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
++    const struct rf_wifi_fw_copy_ops *c, unsigned phase, uint64_t physical,
++    const uint8_t *data, uint32_t bytes, uint8_t *readback)
++{
++    int error = workspace_hash(s, o, 0);
++    if (!error) error = copy_check(s, o, c, phase);
++    if (!error) {
++        int platform = data ? c->write(c->context, physical, data, bytes) : c->zero(c->context, physical, bytes);
++        if (platform) { s->platform_error = platform; error = RF_WIFI_FW_PLATFORM; }
++    }
++    if (!error) error = copy_check(s, o, c, phase);
++    if (!error) {
++        int platform = c->read(c->context, physical, readback, bytes);
++        if (platform) { s->platform_error = platform; error = RF_WIFI_FW_PLATFORM; }
++    }
++    if (!error) {
++        if (data) {
++            if (!redfin_mpss_equal(data, readback, bytes)) error = RF_WIFI_FW_READBACK;
++        } else for (uint32_t i = 0; i < bytes; ++i) if (readback[i]) { error = RF_WIFI_FW_READBACK; break; }
++    }
++    if (!error) error = copy_check(s, o, c, phase);
++    if (!error) s->readback_bytes += bytes;
++    return error;
++}
++static int copy_sync(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
++    const struct rf_wifi_fw_copy_ops *c, unsigned phase, uint64_t physical, uint64_t bytes)
++{
++    int error = copy_check(s, o, c, phase);
++    if (!error) {
++        int platform = c->sync(c->context, physical, bytes);
++        if (platform) { s->platform_error = platform; error = RF_WIFI_FW_PLATFORM; }
++    }
++    if (!error) error = copy_check(s, o, c, phase);
++    return error;
++}
++
++int rf_wifi_fw_copy_metadata(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
++    const struct rf_wifi_fw_copy_ops *c, uint8_t *readback, size_t bytes)
++{
++    int error = copy_valid(s, o, c, readback, bytes);
++    if (error) return error == RF_WIFI_FW_ARGUMENT || error == RF_WIFI_FW_STATE ? error : fail(s, error);
++    if (s->stage != RF_WIFI_FW_VERIFIED) return RF_WIFI_FW_STATE;
++    error = blob_hash(s, o);
++    if (!error) error = copy_chunk(s, o, c, RF_WIFI_FW_METADATA, s->workspace->plan.physical_base,
++        s->workspace->image.asset[0].data, s->workspace->image.asset[0].bytes, readback);
++    if (!error) error = copy_sync(s, o, c, RF_WIFI_FW_METADATA, s->workspace->plan.physical_base,
++        s->workspace->image.asset[0].bytes);
++    if (error) return fail(s, error);
++    s->metadata_written = s->workspace->image.asset[0].bytes; s->stage = RF_WIFI_FW_METADATA;
++    return RF_WIFI_FW_OK;
++}
++
++int rf_wifi_fw_copy_segments(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
++    const struct rf_wifi_fw_copy_ops *c, uint8_t *readback, size_t bytes)
++{
++    int error = copy_valid(s, o, c, readback, bytes);
++    if (error) return error == RF_WIFI_FW_ARGUMENT || error == RF_WIFI_FW_STATE ? error : fail(s, error);
++    if (s->stage != RF_WIFI_FW_METADATA) return RF_WIFI_FW_STATE;
++    error = blob_hash(s, o);
++    uint32_t asset = 1;
++    for (uint32_t i = 0; i < s->workspace->plan.segments && !error; ++i) {
++        const struct redfin_mpss_segment *segment = &s->workspace->plan.segment[i];
++        const uint8_t *data = segment->file_bytes ? s->workspace->image.asset[asset++].data : NULL;
++        uint32_t offset = 0;
++        while (offset < segment->memory_bytes && !error) {
++            uint32_t limit = offset < segment->file_bytes ? segment->file_bytes : segment->memory_bytes;
++            uint32_t take = limit - offset;
++            if (take > REDFIN_MPSS_COPY_CHUNK) take = REDFIN_MPSS_COPY_CHUNK;
++            int file = offset < segment->file_bytes;
++            error = copy_chunk(s, o, c, RF_WIFI_FW_SEGMENTS, segment->physical_address + offset,
++                file ? data + offset : NULL, take, readback);
++            if (!error) { if (file) s->copied_bytes += take; else s->zeroed_bytes += take; offset += take; }
++        }
++    }
++    if (!error) error = copy_sync(s, o, c, RF_WIFI_FW_SEGMENTS, s->workspace->plan.physical_base,
++        s->workspace->plan.memory_bytes);
++    if (error) return fail(s, error);
++    s->stage = RF_WIFI_FW_SEGMENTS;
++    return RF_WIFI_FW_OK;
++}
++
++void rf_wifi_fw_source_close(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o)
++{
++    (void)o;
++    if (!s) return;
++    if (s->pinned && s->operations.unpin) {
++        s->operations.unpin(s->operations.context); s->pinned = 0; s->data = NULL;
++    }
++    if (s->attempted) s->stage = RF_WIFI_FW_CLOSED;
++}
+diff --git a/iokit/Kernel/arm/redfin_wifi_fw_boot.h b/iokit/Kernel/arm/redfin_wifi_fw_boot.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_fw_boot.h
+@@ -0,0 +1,39 @@
++/* SPDX-License-Identifier: MIT
++ * Optional native boot-blob source. No startup hook or destination access.
++ */
++#ifndef REDFIN_WIFI_FW_BOOT_H
++#define REDFIN_WIFI_FW_BOOT_H
++#include "../../../bsd/dev/redfin_wifi_fw_source.h"
++
++struct rf_wifi_fw_boot_policy {
++    void *context;
++    /* Actual platform worker lease, not a host/DT marker. Must remain failed
++     * after loss and bind the same freshly validated live exclusion set. */
++    int (*check)(void *, uint64_t boot_id);
++    const struct redfin_mpss_range *excluded;
++    size_t exclusions;
++};
++/* Allocate in the platform worker's private context, never on the entry stack.
++ * Workspace and 64KiB readback storage are separately caller-owned. */
++struct rf_wifi_fw_boot {
++    struct rf_wifi_fw_source source;
++    struct rf_wifi_fw_source_ops source_ops;
++    struct rf_wifi_fw_boot_policy policy;
++    struct redfin_mpss_range excluded[REDFIN_MPSS_MAX_EXCLUSIONS];
++    struct rf_wifi_fw_blob native_blob;
++    struct rf_wifi_fw_layout native_layout;
++    struct redfin_mpss_workspace *workspace;
++    void *memory, *mapping, *owner, *arguments;
++    uint8_t boot_args[RF_WIFI_FW_BOOT_ARGS_BYTES];
++    uint32_t attempted, active, poisoned;
++};
++#ifdef __cplusplus
++extern "C" {
++#endif
++int redfin_wifi_fw_boot_open(struct rf_wifi_fw_boot *, struct redfin_mpss_workspace *,
++    const struct rf_wifi_fw_boot_policy *);
++void redfin_wifi_fw_boot_close(struct rf_wifi_fw_boot *);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/iokit/Kernel/arm/RedfinWiFiFWSource.cpp b/iokit/Kernel/arm/RedfinWiFiFWSource.cpp
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinWiFiFWSource.cpp
+@@ -0,0 +1,186 @@
++/* SPDX-License-Identifier: MIT
++ * The preferred HackiOS kernel 8e61187098f2c26c5daee8f9f72b6416aa64b9ab
++ * redwood_image.c/redwood_wifi.c use firmware in a resident boot image. Redfin
++ * uses a dedicated flat segment, avoiding another filesystem and heap copy.
++ * Only source RAM is mapped read-only. No UFS, MPSS mapping, SCM/PAS or startup.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <IOKit/IOLib.h>
++#include <IOKit/IOMemoryDescriptor.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include <pexpert/arm64/boot.h>
++#include <mach/vm_param.h>
++#include <machine/machine_routines.h>
++#include <kern/thread.h>
++#include <sys/errno.h>
++#include "redfin_wifi_fw_boot.h"
++
++extern "C" int redfin_spmi_return_ready(void);
++extern "C" int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32]);
++static_assert(sizeof(boot_args) == RF_WIFI_FW_BOOT_ARGS_BYTES, "Redfin boot-args ABI");
++
++static bool fw_property(DTEntry node, const char *key, void *out, unsigned expected)
++{
++    const void *raw = NULL;
++    unsigned bytes = 0;
++    if (SecureDTGetProperty(node, key, &raw, &bytes) != kSuccess || !raw || bytes != expected) return false;
++    memcpy(out, raw, bytes); return true;
++}
++static bool fw_identity(void)
++{
++    DTEntry root;
++    const char *raw = NULL;
++    unsigned bytes = 0;
++    bool redfin = false, lito = false;
++    if (SecureDTLookupEntry(NULL, "/", &root) != kSuccess ||
++        SecureDTGetProperty(root, "compatible", (const void **)&raw, &bytes) != kSuccess ||
++        !raw || !bytes || bytes > 256 || raw[bytes - 1]) return false;
++    for (unsigned at = 0; at < bytes;) {
++        unsigned end = at;
++        while (end < bytes && raw[end]) ++end;
++        if (end == bytes || at == end) return false;
++        if (end - at == 13 && !memcmp(raw + at, "google,redfin", 13)) redfin = true;
++        if (end - at == 11 && !memcmp(raw + at, "qcom,sm7250", 11)) lito = true;
++        at = end + 1;
++    }
++    return redfin && lito;
++}
++static bool fw_profile(uint64_t *boot_id)
++{
++    int cpus = 0, spmi = 0, returned = 0;
++    char root[16] = {};
++    if (!fw_identity() || !PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
++        !PE_parse_boot_argn("rd", root, sizeof(root)) || root[15] || strcmp(root, "md0") ||
++        !PE_parse_boot_argn("redfinspmi", &spmi, sizeof(spmi)) || spmi != 1 ||
++        !PE_parse_boot_argn("redfinreturn", &returned, sizeof(returned)) || returned != 1 ||
++        !PE_parse_boot_argn("redfinbootid", boot_id, sizeof(*boot_id)) || !*boot_id) return false;
++    const char *const disabled[] = {"modem", "wifi", "gpu", "sweetusb"};
++    for (unsigned i = 0; i < sizeof(disabled) / sizeof(disabled[0]); ++i) {
++        int value = -1;
++        if (!PE_parse_boot_argn(disabled[i], &value, sizeof(value)) || value) return false;
++    }
++    return true;
++}
++static bool fw_handoff(rf_wifi_fw_blob *blob, rf_wifi_fw_layout *layout)
++{
++    const boot_args *args = (const boot_args *)PE_state.bootArgs;
++    uint64_t reg[2] = {}, mapped[2] = {}, base = 0, bytes = 0;
++    uint32_t contract[4] = {}, expected[4] = {1, 4, 16384, 0x10000000};
++    DTEntry firmware, memory_map, chosen;
++    if (!args || args->Revision != 2 || args->Version != 2 || args->memSizeActual != args->memSize ||
++        !fw_profile(&blob->boot_id) ||
++        SecureDTLookupEntry(NULL, "/redfin-wifi-fw", &firmware) != kSuccess ||
++        !fw_property(firmware, "reg", reg, sizeof(reg)) ||
++        !fw_property(firmware, "bundle-bytes", &blob->bytes, sizeof(blob->bytes)) ||
++        !fw_property(firmware, "bundle-sha256", blob->sha256, sizeof(blob->sha256)) ||
++        !fw_property(firmware, "source-contract", contract, sizeof(contract)) || memcmp(contract, expected, sizeof(contract)) ||
++        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory_map) != kSuccess ||
++        !fw_property(memory_map, "RedfinWiFiFirmware", mapped, sizeof(mapped)) || memcmp(mapped, reg, sizeof(reg)) ||
++        SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
++        !fw_property(chosen, "dram-base", &base, sizeof(base)) || base != args->physBase ||
++        !fw_property(chosen, "dram-size", &bytes, sizeof(bytes)) || bytes != args->memSize)
++        return false;
++    blob->physical = reg[0]; blob->reserved = reg[1];
++    layout->ram = {base, bytes};
++    uint64_t kernel_end = (uint64_t)ml_static_vtop(vm_kernel_top);
++    if (!kernel_end || kernel_end > UINT64_MAX - (RF_WIFI_FW_PAGE - 1u)) return false;
++    layout->kernel_end = (kernel_end + RF_WIFI_FW_PAGE - 1u) & ~(RF_WIFI_FW_PAGE - 1u);
++    layout->adt = {(uint64_t)ml_static_vtop((vm_offset_t)args->deviceTreeP), args->deviceTreeLength};
++    if (!redfin_mpss_valid_range(layout->adt.base, layout->adt.bytes) ||
++        layout->adt.base + layout->adt.bytes > UINT64_MAX - 15u) return false;
++    /* XNU arm_init copies the incoming boot_args into const_boot_args. Its
++     * current address is therefore not the original reserved handoff address.
++     * Derive that original extent from the validated SWEETXNU v1 layout. */
++    layout->arguments = {(layout->adt.base + layout->adt.bytes + 15u) & ~UINT64_C(15), sizeof(boot_args)};
++    layout->top = args->topOfKernelData;
++    const void *raw = NULL;
++    unsigned length = 0;
++    if (SecureDTGetProperty(memory_map, "RAMDisk", &raw, &length) == kSuccess) {
++        if (!raw || length != sizeof(layout->ramdisk)) return false;
++        memcpy(&layout->ramdisk, raw, length);
++    }
++    return rf_wifi_fw_layout_valid(blob, layout) != 0;
++}
++static int fw_check(void *opaque, const rf_wifi_fw_blob *blob, const rf_wifi_fw_layout *layout)
++{
++    rf_wifi_fw_boot *boot = (rf_wifi_fw_boot *)opaque;
++    rf_wifi_fw_blob fresh_blob = {};
++    rf_wifi_fw_layout fresh_layout = {};
++    bool valid = boot && boot->active && !boot->poisoned && boot->owner &&
++        boot->workspace && boot->source.workspace == boot->workspace &&
++        (void *)current_thread() == boot->owner && PE_state.bootArgs == boot->arguments &&
++        !memcmp(PE_state.bootArgs, boot->boot_args, sizeof(boot->boot_args)) &&
++        __builtin_arm_rsr64("CurrentEL") == 4 && !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
++        redfin_spmi_return_ready() == 1 && boot->policy.check &&
++        !boot->policy.check(boot->policy.context, blob->boot_id) &&
++        fw_handoff(&fresh_blob, &fresh_layout) && !memcmp(blob, &boot->native_blob, sizeof(*blob)) &&
++        !memcmp(layout, &boot->native_layout, sizeof(*layout)) &&
++        !memcmp(&fresh_blob, blob, sizeof(*blob)) && !memcmp(&fresh_layout, layout, sizeof(*layout));
++    if (valid && boot->source.pinned) {
++        IOMemoryMap *mapping = (IOMemoryMap *)boot->mapping;
++        valid = mapping && mapping->getLength() == blob->reserved &&
++            mapping->getVirtualAddress() == (uintptr_t)boot->source.data;
++    }
++    if (!valid && boot) boot->poisoned = 1;
++    return valid ? 0 : EPERM;
++}
++static void fw_unpin(void *opaque)
++{
++    rf_wifi_fw_boot *boot = (rf_wifi_fw_boot *)opaque;
++    IOMemoryMap *mapping = (IOMemoryMap *)boot->mapping;
++    IOMemoryDescriptor *memory = (IOMemoryDescriptor *)boot->memory;
++    boot->mapping = boot->memory = NULL;
++    OSSafeReleaseNULL(mapping); OSSafeReleaseNULL(memory);
++}
++static int fw_pin(void *opaque, uint64_t physical, uint64_t reserved, const uint8_t **out)
++{
++    rf_wifi_fw_boot *boot = (rf_wifi_fw_boot *)opaque;
++    if (!out || boot->memory || boot->mapping || physical != boot->native_blob.physical ||
++        reserved != boot->native_blob.reserved || fw_check(boot, &boot->native_blob, &boot->native_layout)) return EPERM;
++    IOMemoryDescriptor *memory = IOMemoryDescriptor::withPhysicalAddress(physical, reserved, kIODirectionIn);
++    boot->memory = memory;
++    IOMemoryMap *mapping = memory ? memory->map(kIOMapReadOnly | kIOMapDefaultCache) : NULL;
++    boot->mapping = mapping;
++    if (!mapping || !mapping->getVirtualAddress() || mapping->getLength() != reserved) { fw_unpin(boot); return ENOMEM; }
++    *out = (const uint8_t *)mapping->getVirtualAddress(); return 0;
++}
++static int fw_sha256(void *opaque, const uint8_t *data, size_t bytes, uint8_t digest[32])
++{
++    rf_wifi_fw_boot *boot = (rf_wifi_fw_boot *)opaque;
++    int error = fw_check(boot, &boot->native_blob, &boot->native_layout);
++    if (!error) error = redfin_mpss_kernel_sha256(NULL, data, bytes, digest);
++    return error ? error : fw_check(boot, &boot->native_blob, &boot->native_layout);
++}
++
++extern "C" int redfin_wifi_fw_boot_open(rf_wifi_fw_boot *boot, redfin_mpss_workspace *workspace,
++    const rf_wifi_fw_boot_policy *policy)
++{
++    if (!boot || !workspace || !policy || !policy->check || !policy->excluded ||
++        policy->exclusions < 2 || policy->exclusions > REDFIN_MPSS_MAX_EXCLUSIONS) return RF_WIFI_FW_ARGUMENT;
++    uintptr_t owner = (uintptr_t)boot, scratch = (uintptr_t)workspace;
++    if (owner > UINTPTR_MAX - sizeof(*boot) || scratch > UINTPTR_MAX - sizeof(*workspace) ||
++        (owner < scratch + sizeof(*workspace) && scratch < owner + sizeof(*boot))) return RF_WIFI_FW_ARGUMENT;
++    if (boot->attempted) return RF_WIFI_FW_STATE;
++    boot->attempted = 1;
++    if (!fw_handoff(&boot->native_blob, &boot->native_layout)) return RF_WIFI_FW_LAYOUT;
++    boot->policy = *policy;
++    memcpy(boot->excluded, policy->excluded, policy->exclusions * sizeof(*policy->excluded));
++    boot->policy.excluded = boot->excluded;
++    boot->owner = (void *)current_thread(); boot->arguments = PE_state.bootArgs; boot->workspace = workspace;
++    memcpy(boot->boot_args, PE_state.bootArgs, sizeof(boot->boot_args));
++    boot->source_ops = {boot, fw_check, fw_pin, fw_unpin, fw_sha256};
++    boot->active = 1;
++    int error = rf_wifi_fw_source_open(&boot->source, &boot->native_blob, &boot->native_layout,
++        boot->excluded, boot->policy.exclusions, workspace, &boot->source_ops);
++    if (error) { boot->active = 0; boot->poisoned = 1; }
++    return error;
++}
++extern "C" void redfin_wifi_fw_boot_close(rf_wifi_fw_boot *boot)
++{
++    if (!boot) return;
++    rf_wifi_fw_source_close(&boot->source, &boot->source_ops);
++    boot->active = 0;
++}
++#endif

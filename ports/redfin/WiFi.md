@@ -497,3 +497,80 @@ existing overlay exports this code with no new source-list entry. No Wi-Fi
 power/AOP write has run on hardware. Device testing is currently unavailable;
 SCM capability proof, PAS4 start, bandwidth/remaining proxy integration,
 SMP2P hardware operation, GLINK/WLFW, association and data remain unfinished.
+
+## Immutable boot-blob firmware source prepared — 2026-10-23
+
+The reviewed primary HackiOS kernel snapshot
+`8e61187098f2c26c5daee8f9f72b6416aa64b9ab` keeps plain firmware files in its
+resident image (`redwood_image.c`, `redwood_wifi.c`). Redfin now has a dedicated
+flat boot-blob source with the same benefit: the kernel reads firmware in
+place, without a second 99 MB allocation or a filesystem dependency. The current
+UFS implementation is fenced to approved userdata; no new partition/extent
+access, media placement or UFS interface is introduced here.
+
+`wifi_fw_blob.py` appends one segment to an existing SWEETXNU v1 payload,
+preserving kernel/PID1 segments and command line. The segment lives after the
+old final segment, immediately before the relocated ADT and original boot
+arguments, below `topOfKernelData`. The producer invokes
+`wifi-fw-source-check.c` and the actual native source/bundle planner; it never
+implements another ELF or asset parser. The selected whole-bundle SHA256 is
+mandatory and must come from the recorded verified inventory. Files are
+published mode 0600 without replacing an existing file or symlink.
+
+The new ADT leaf `/redfin-wifi-fw` has `reg` = native u64(physical,reserved),
+`bundle-bytes` = u64(logical bytes), `bundle-sha256` = 32 raw bytes, and
+`source-contract` = u32(1,4,16384,0x10000000). The matching
+`/chosen/memory-map/RedfinWiFiFirmware` is u64(physical,reserved). Reserved
+length is logical length rounded to 16 KiB, and every padding byte must be zero.
+The native source checks the actual BootArgs RAM/top, kernel end, ADT,
+original argument extent and optional RAMDisk. XNU copies BootArgs into kernel
+data; its current pointer is not the original argument physical address.
+
+`wifi_fw_boot.cpp` requires an explicit live platform worker policy, physical
+CPU0/EL1, unchanged current thread and copied BootArgs, native md0/return
+profile, actual cached PMIC/IMEM proof, exact ADT source and immutable mapping.
+It maps the full reserved source read-only with `IOMemoryDescriptor`, avoiding
+the small `ml_io_map` aperture. It calls the existing native
+`redfin_mpss_bundle_open` with all live exclusions, original PHDR indices and
+per-asset hashes. Ownership failure is sticky; close releases only its own
+source map. This source lease grants no MPSS destination authority.
+
+`wifi_fw_source.c` exposes separate metadata and segment copy mechanisms for
+the future platform manager. Destination callbacks must independently prove
+the appropriate native PAS reset/INIT/MEM_SETUP phase. The module itself has
+no SCM, power, device or media operation. Each write/zero is at most 64 KiB and
+is read back before progress is published. The planner workspace remains
+fingerprinted, source hashes are rechecked between phases, and aliased
+control/readback buffers fail. Any uncertain operation quarantines the copy;
+the caller retains responsibility for its destination lease and safe teardown.
+
+Future kernel link dependencies are explicit: apply existing
+`wifi-firmware.patch`, then `wifi-fw-source.patch`; add
+`bsd/dev/redfin_wifi_fw_source.c` to BSD sources, and
+`iokit/Kernel/arm/RedfinWiFiFWSource.cpp` plus existing
+`iokit/Kernel/arm/RedfinWiFiFirmware.cpp` to IOKit C++ sources. The latter
+provides the kernel SHA256 adapter. No startup hook/source-list integration is
+installed by this milestone. The caller owns persistent `rf_wifi_fw_boot`,
+the existing 6352-byte workspace and a separate 64 KiB readback buffer; keep
+them outside the kernel entry stack and do not embed that buffer in OSObject.
+
+Observation: the private bundle's recorded inventory hash passes through the
+actual producer ADT, native CPP read-only source adapter, existing planner and
+guard-page host-owned destination. It copies 9420 metadata bytes,
+99,384,626 payload bytes, and zeros 191,553,563 BSS bytes, reading back every
+chunk; 35 PHDRs / 33 loads / 31 assets and exact 0x11800000 span pass. The generated
+private payload is 116,933,776 bytes with 12 segments (previously 11). Source is
+`0x1825e4000+99,401,728`; ADT `0x1884b0000`, original arguments
+`0x1884b0f00`, top `0x1884b4000`. Its full C loader preflight passes. Both
+source files compile with actual XNU ARM64 flags/headers under `-Werror`
+(only the existing system-header C++ designator warnings are suppressed);
+maximum source/native frames are 192/272 bytes. All 133 focused Wi-Fi tests pass,
+including the three explicitly enabled private-bundle cases.
+
+Limits: source bundle <= 256 MiB; SWEETXNU <= 64 segments (one free slot required);
+producer implementation bound 512 MiB with an explicit caller cap. The private
+payload uses a 128 MiB host cap. These are software bounds, not measured Redfin
+ABL download/decompressed-Image placement limits. No larger Image was built or
+booted; source pinning, MPSS copy/readback and power remain untested on device.
+SCM/PAS start, complete proxy/bandwidth, native SMP2P/GLINK/WLFW, association
+and data remain unfinished. Firmware/payload/check reports remain private.
