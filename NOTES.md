@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN Wi-Fi power hardware PASS; GMU IOKit root cause fixed — 2026-10-23
+
+Source parentdab3c2c. Authenticated/image/nonce-matched SCM615a203339d75f5f
+selects64-bit ABI; five PAS-function availability queries return status0/value1
+in one call each. PAS_SUPPORTED4/13 returns status0/value0: no positive firmware
+support claim and no INIT/MEM_SETUP/AUTH_RESET/SHUTDOWN/assignment issued.
+Static PID1, no panic, clean HFS header and verified fastboot return PASS.
+
+Authenticated/image/nonce-matched Wi-Fi4a14fbcc4f02878b power test PASS:
+CX7/MSS6/XO3 complete in1/3/4polls; allIRQ1/CMD0x10101. Native AOP opens,
+modem-on acknowledged,21stores/4notifications/pending0. Final result0/phase4,
+held_mask7,64writes/quarantine0; votes/channel retained until reset. PID1 lives;
+fastboot return and unchanged HFSX clean_unmounted=true/inconsistent=false,
+write_count462335. No PAS/SMEM/firmware/media operation. Association/data and
+firmware activation remain unfinished.
+
+GMUv3 reproduces the early stop on the USB-proven053033kernel/29sbark.
+Progress build114947/v4 proves PE image/progress setup completes and execution
+enters InitIOKit, then stops before return. Source review finds the diagnostic
+leaf's plain `interrupts` is consumed by IODTMapInterruptsSharing during registry
+import; IODTMapOneInterrupt does not advance when its root parent has neither
+interrupt-controller nor map. This is before GPU startup, not a GMU result.
+Root renames only the two private ADT IRQ metadata keys to `gic-intids`, keeps
+native Linux interrupt validation/IRQs and all MMIO contracts unchanged.
+C/Python/overlay and actual-adapter fixtures match;103focusedGMUtestsPASS.
+Both builders include bounded CPU-only preinit/IOKit progress markers for
+isolated GPU/Wi-Fi/SCM selectors. Builds121042/121348PASS. Corrected v6 is
+running; v5 was prepared only and not booted. Earlier v2..v4images retain the
+bad metadata key and must not be reused. Host full regressionv43is running.
+All device runs use temporary fastboot boot/md0; no flash or root write.
+
+`scm-query-v2` build `build-20261023-053033.log`; kernel `2ba70c080e479452574f626998d68844e65747bf40a3992de690c2c7443153c7`; image `b278b2b9ab21957a5702d78b72da267a43a86190181c1af608b717e9a91637ca`. Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=3 redfinscm=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x615a203339d75f5f`.
+
+`wifi-power-v2` build `build-20261023-114947.log`; kernel `8c799db20ebf5f2ec6941bdab5d40b2d6b7dafd845e09bd27a2df5ad0cb70a03`; image `5d694ae5d3fab0359087e81714d34e746dbea16cdcc535fe66892e5bebc65e0f`. Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwifipower=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x4a14fbcc4f02878b`.
+
+`gmu-tcm-v3` build `build-20261023-053033.log`; kernel `2ba70c080e479452574f626998d68844e65747bf40a3992de690c2c7443153c7`; image `6269b200eeaffa8b6cf1be9f84d5d129ef338dc6a58e3a0ed22e3be0efbea162`. Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xe9bc976fb20e5740`.
+
+`gmu-tcm-v4` build `build-20261023-114947.log`; kernel `8c799db20ebf5f2ec6941bdab5d40b2d6b7dafd845e09bd27a2df5ad0cb70a03`; image `a3c23b34e365bbace4ea0d64b1ff8248b845ce22f81b912ab94b685a4df081d9`. Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x9c783462e7e20fef`.
+
+`gmu-tcm-v6` build `build-20261023-121348.log`; kernel `ed2cc8d17a5d7f00c43721ae1c892747aeec4d05c5564c266f2649fd0f1497ac`; image `2db58fd554fd4989c4118630bc71b72cca9cc4871bc948d997c450345cc6cc1b`. Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x1fca65afc80113a7`.
+
 ## REDFIN access restored; USB TX completed on hardware — 2026-10-23
 
 Source11fcd6e. User returned the device to fastboot. Temporary safe recovery

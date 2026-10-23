@@ -187,7 +187,8 @@ def main(argv=None):
          'smp-eight.patch', 'smp-gui.patch', 'touch-overflow.patch', 'gpu-power.patch',
          'display-fit.patch', 'wifi-aop.patch', 'wifi-native-probe.patch',
          'wifi-native-start.patch', 'gmu-probe.patch', 'gmu-start.patch', 'scm-query.patch',
-         'wifi-firmware.patch', 'wifi-fw-source.patch', 'wifi-fw-build.patch')]
+         'wifi-firmware.patch', 'wifi-fw-source.patch', 'wifi-fw-build.patch',
+         'preinit-progress.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

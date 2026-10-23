@@ -500,6 +500,18 @@ SMP2P hardware operation, GLINK/WLFW, association and data remain unfinished.
 
 ## Immutable boot-blob firmware source prepared — 2026-10-23
 
+Hardware milestone, 2026-10-23: `wifi-power-v2` on local build114947 passes
+authenticated, image/nonce-matched capture and verified fastboot return.
+CX selector7, MSS6 and XO3 complete in1/3/4polls respectively, each with
+IRQ1/CMD0x10101. AOP opens the native channel and acknowledges modem-on:
+21stores/4notifications/no pending payload. Final result0/phase4/held_mask7,
+64writes, quarantine0; state is retained until reset. Static PID1 lives;
+HFSX remains clean/unmounted and its write count is unchanged. This proves
+the retained power/AOP stage, not MPSS firmware execution or Wi-Fi connection.
+SCM's separate PAS_SUPPORTED4/13 queries return0; this remains an explicit
+capability question before firmware activation. Exact boot arguments and
+build/image/kernel identities are recorded in `NOTES.md`.
+
 The reviewed primary HackiOS kernel snapshot
 `8e61187098f2c26c5daee8f9f72b6416aa64b9ab` keeps plain firmware files in its
 resident image (`redwood_image.c`, `redwood_wifi.c`). Redfin now has a dedicated

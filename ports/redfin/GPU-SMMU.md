@@ -5,6 +5,8 @@ read-only global-register snapshot. It has no write callback, reads no
 context-bank page and grants no DMA/context ownership. The optional adapter
 mode below requires this call's fresh held-CX and successful reset-held TCM
 proof from [GMU.md](GMU.md). Its hardware result remains unobserved.
+The private IRQ list uses `gic-intids`; a standard `interrupts` property here
+would enter IOKit's interrupt resolver before the observer can run.
 [`include/redfin_gmu_pagetables.h`](include/redfin_gmu_pagetables.h) separately
 constructs CPU-only 4KiB tables from owned allocations. It installs no table
 or route and is also unwired.

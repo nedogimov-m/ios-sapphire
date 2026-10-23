@@ -30,7 +30,7 @@ targets, native resume state, bounded busy/interrupt paths, SMC32 errors,
 elapsed-time and ownership failures. Local ARM64 build045451 passes.
 `scm-query-v1` passes complete real payload/ADT/live-FDT validation and
 the compiled shim plus kernel return policy. No hardware query result is
-available: the earlier GMU attempt left device access unavailable.
+available for that original image. A later hardware run is recorded below.
 
 New GPU/GMU/native-Wi-Fi/SCM diagnostic images prearm the proven shim's
 PMIC/IMEM bootloader reason before payload or XNU initialization. Kernel
@@ -38,3 +38,13 @@ return verification remains required. The host cycle binds this to the
 exact config/image hashes, arguments, nonce and isolated md0 profile;
 modern-probe images lacking prearm are rejected. This changes the software
 failure boundary; the combined new profiles still require a device test.
+
+Hardware observation, 2026-10-23: `scm-query-v2` on local build053033 returns
+authenticated, image/nonce-matched logs, static PID1 heartbeats and verified
+fastboot return. ABI detection selects64bit. Each of the five availability
+queries returns status0/value1 in one call, without busy/interrupt retries.
+`PAS_SUPPORTED` for4 and13 returns status0/value0. That is a negative
+capability response, not evidence that firmware authentication will work.
+No INIT/MEM_SETUP/AUTH_RESET/SHUTDOWN/assignment was attempted. HFSX remains
+clean/unmounted with its existing write count. Exact image/kernel/arguments
+are recorded in `NOTES.md`; device logs stay private.

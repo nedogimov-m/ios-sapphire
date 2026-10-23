@@ -84,7 +84,7 @@ gm_contract(struct gm_context *context, bool smmu)
         gm_property(context, "/redfin-gmu", "clock-policy", gm_clock, sizeof(gm_clock)) &&
         gm_property(context, "/redfin-gmu", "tcm-policy", gm_tcm, sizeof(gm_tcm)) &&
         gm_property(context, "/redfin-gmu", "cx-parent", gm_parent, sizeof(gm_parent)) &&
-        gm_property(context, "/redfin-gmu", "interrupts", gm_irqs, sizeof(gm_irqs));
+        gm_property(context, "/redfin-gmu", "gic-intids", gm_irqs, sizeof(gm_irqs));
     if (!base || !smmu)
         return base;
     return gm_property(context, "/redfin-gpu-smmu", "reg", gm_smmu_reg, sizeof(gm_smmu_reg)) &&
@@ -92,7 +92,7 @@ gm_contract(struct gm_context *context, bool smmu)
         gm_property(context, "/redfin-gpu-smmu", "stream-map", gm_smmu_streams, sizeof(gm_smmu_streams)) &&
         gm_property(context, "/redfin-gpu-smmu", "format-policy", gm_smmu_format, sizeof(gm_smmu_format)) &&
         gm_property(context, "/redfin-gpu-smmu", "clock-policy", gm_smmu_clocks, sizeof(gm_smmu_clocks)) &&
-        gm_property(context, "/redfin-gpu-smmu", "interrupts", gm_smmu_irqs, sizeof(gm_smmu_irqs));
+        gm_property(context, "/redfin-gpu-smmu", "gic-intids", gm_smmu_irqs, sizeof(gm_smmu_irqs));
 }
 
 int

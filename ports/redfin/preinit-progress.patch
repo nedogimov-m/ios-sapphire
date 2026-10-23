@@ -1,0 +1,138 @@
+diff --git a/pexpert/arm/pe_init.c b/pexpert/arm/pe_init.c
+--- a/pexpert/arm/pe_init.c
++++ b/pexpert/arm/pe_init.c
+@@ -232,6 +232,20 @@
+ 	return 0;
+ }
+ 
++/* Bounded CPU-only progress for the isolated Redfin md0 diagnostics. */
++static void
++redfin_preinit_mark(const char *stage)
++{
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++ int gpu=0,wifi=0;
++ (void)PE_parse_boot_argn("redfingpu",&gpu,sizeof(gpu));
++ (void)PE_parse_boot_argn("redfinwifi",&wifi,sizeof(wifi));
++ if(gpu==2 || gpu==3 || wifi==2)printf("REDFIN PREINIT: %s\n",stage);
++#else
++ (void)stage;
++#endif
++}
++
+ void
+ PE_init_iokit(void)
+ {
+@@ -252,6 +266,7 @@
+ #if defined(TARGET_OS_OSX) && defined(__arm64__)
+ 	printf("iBoot Stage 2 version: %s\n", iBoot_Stage_2_version);
+ #endif /* defined(TARGET_OS_OSX) && defined(__arm64__) */
++	redfin_preinit_mark("before memory-map images");
+ 
+ 	if (kSuccess == SecureDTLookupEntry(0, "/chosen/memory-map", &entry)) {
+ 		boot_progress_element const *bootPict;
+@@ -270,7 +285,9 @@
+ 		}
+ 	}
+ 
++	redfin_preinit_mark("before pe_prepare_images");
+ 	pe_prepare_images();
++	redfin_preinit_mark("after pe_prepare_images");
+ 
+ 	scale = PE_state.video.v_scale;
+ 	flip = 1;
+@@ -288,6 +305,7 @@
+ 	show_progress = FALSE;
+ 	PE_parse_boot_argn("-progress", &show_progress, sizeof(show_progress));
+ #endif /* XNU_TARGET_OS_OSX */
++	redfin_preinit_mark("progress policy parsed");
+ 	if (show_progress) {
+ 		/* Rotation: 0:normal, 1:right 90, 2:left 180, 3:left 90 */
+ 		switch (PE_state.video.v_rotate) {
+@@ -359,8 +377,11 @@
+ 		KDBG_RELEASE(IOKDBG_CODE(DBG_BOOTER, 0), start_time_value, debug_wait_start_value, load_kernel_start_value, populate_registry_time_value);
+ 	}
+ 
++	redfin_preinit_mark("before InitIOKit");
+ 	InitIOKit(PE_state.deviceTreeHead);
++	redfin_preinit_mark("after InitIOKit; before ConfigureIOKit");
+ 	ConfigureIOKit();
++	redfin_preinit_mark("after ConfigureIOKit");
+ }
+ 
+ void
+diff --git a/iokit/Kernel/IOStartIOKit.cpp b/iokit/Kernel/IOStartIOKit.cpp
+--- a/iokit/Kernel/IOStartIOKit.cpp
++++ b/iokit/Kernel/IOStartIOKit.cpp
+@@ -47,6 +47,7 @@
+ #include <IOKit/IOInterruptAccountingPrivate.h>
+ #include <IOKit/assert.h>
+ #include <sys/conf.h>
++#include <pexpert/pexpert.h>
+ 
+ #include "IOKitKernelInternal.h"
+ 
+@@ -130,6 +131,19 @@
+  */
+ void (*record_startup_extensions_function)(void) = NULL;
+ 
++/* CPU-only stage markers for the isolated Redfin peripheral diagnostics. */
++static void redfin_iokit_mark(const char *stage)
++{
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++ int gpu=0,wifi=0;
++ (void)PE_parse_boot_argn("redfingpu",&gpu,sizeof(gpu));
++ (void)PE_parse_boot_argn("redfinwifi",&wifi,sizeof(wifi));
++ if(gpu==2 || gpu==3 || wifi==2)printf("REDFIN IOKIT: %s\n",stage);
++#else
++ (void)stage;
++#endif
++}
++
+ void
+ InitIOKit(void *dtTop)
+ {
+@@ -143,31 +157,43 @@
+ 	// of iokit basic service initialisation, or better we have IOLib stuff
+ 	// initialise as basic OS services.
+ 	//
++	redfin_iokit_mark("before IOLibInit");
+ 	IOLibInit();
++	redfin_iokit_mark("after IOLibInit; before OSlibkernInit");
+ 	OSlibkernInit();
++	redfin_iokit_mark("after OSlibkernInit; before IOMachPortInitialize");
+ 	IOMachPortInitialize();
++	redfin_iokit_mark("after IOMachPortInitialize");
+ 
+ 	gIOProgressBackbufferKey  = OSSymbol::withCStringNoCopy(kIOProgressBackbufferKey);
+ 	gIORemoveOnReadProperties = OSSet::withObjects((const OSObject **) &gIOProgressBackbufferKey, 1);
+ 
++	redfin_iokit_mark("before interruptAccountingInit");
+ 	interruptAccountingInit();
+-
++	redfin_iokit_mark("after interruptAccountingInit");
++
++	redfin_iokit_mark("before root allocation");
+ 	gRootNub = new IOPlatformExpertDevice;
+ 	if (__improbable(gRootNub == NULL)) {
+ 		panic("Failed to allocate IOKit root nub");
+ 	}
++	redfin_iokit_mark("before root init");
+ 	bool ok = gRootNub->init(dtTop);
++	redfin_iokit_mark("after root init");
+ 	if (__improbable(!ok)) {
+ 		panic("Failed to initialize IOKit root nub");
+ 	}
+ 	gRootNub->attach(NULL);
++	redfin_iokit_mark("after root attach");
+ 
+ 	/* If the bootstrap segment set up a function to record startup
+ 	 * extensions, call it now.
+ 	 */
++	redfin_iokit_mark("before startup extensions");
+ 	if (record_startup_extensions_function) {
+ 		record_startup_extensions_function();
+ 	}
++	redfin_iokit_mark("after startup extensions");
+ }
+ 
+ void

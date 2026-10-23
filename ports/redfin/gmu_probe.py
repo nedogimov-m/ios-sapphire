@@ -92,7 +92,7 @@ def add_contract(tree, nodes, *, smmu=False):
         ('clock-policy', mkadt.u32(*CLOCK_POLICY)),
         ('tcm-policy', mkadt.u32(*TCM_POLICY)),
         ('cx-parent', mkadt.u32(*CX_PARENT)),
-        ('interrupts', mkadt.u32(*INTERRUPTS)),
+        ('gic-intids', mkadt.u32(*INTERRUPTS)),
     ])]
     if smmu:
         modern, legacy = '/soc/kgsl-smmu@3da0000', '/soc/qcom,kgsl-iommu@3da0000'
@@ -135,6 +135,6 @@ def add_contract(tree, nodes, *, smmu=False):
             ('stream-map', mkadt.u32(*SMMU_STREAM_MAP)),
             ('format-policy', mkadt.u32(*SMMU_FORMAT_POLICY)),
             ('clock-policy', mkadt.u32(*SMMU_CLOCK_POLICY)),
-            ('interrupts', mkadt.u32(*SMMU_INTERRUPTS)),
+            ('gic-intids', mkadt.u32(*SMMU_INTERRUPTS)),
         ]))
     tree.children.extend(additions)

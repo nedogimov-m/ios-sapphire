@@ -6,6 +6,15 @@ They do not enable a GPU driver. Physical CX power, clocks, GMU execution,
 owned SMMU translations and accelerated rendering require separate tests.
 Keep the inherited Sapphire `gpu=0`; its A610 wrapper is incompatible.
 
+The diagnostic ADT carries IRQ ownership metadata as `gic-intids`, not the
+standard `interrupts` key. XNU imports the latter through
+`IODTMapOneInterrupt` while creating the registry, before driver startup. A
+diagnostic leaf beneath the root has no interrupt-controller/map parent;
+the existing mapper does not advance in that case. Actual hardware captures
+localized the early stop to `InitIOKit`. The same private key is used for the
+optional SMMU leaf. Native Linux FDT `interrupts` properties are still validated
+unchanged before constructing the diagnostic contract.
+
 ## Reviewed sources
 
 The user's preferred [HackiOS kernel snapshot][hackios] at

@@ -89,11 +89,11 @@ def properties(smmu=False):
     leaf = next(n for n in tree.children if n.name == 'redfin-gmu')
     result = [mkadt.u64(0x180000000), mkadt.u64(0x80000000)] + [
         leaf.prop(name) for name in ('reg', 'chip-id', 'clock-policy',
-                                     'tcm-policy', 'cx-parent', 'interrupts')]
+                                     'tcm-policy', 'cx-parent', 'gic-intids')]
     if smmu:
         leaf = next(n for n in tree.children if n.name == 'redfin-gpu-smmu')
         result += [leaf.prop(name) for name in ('reg', 'chip-id', 'stream-map',
-                                              'format-policy', 'clock-policy', 'interrupts')]
+                                              'format-policy', 'clock-policy', 'gic-intids')]
     return result
 
 
@@ -125,10 +125,13 @@ class RedfinGMUContractTests(unittest.TestCase):
                          (0x100000, 0x1F0000, 0x3D90000, 0x9000,
                           0x3D6A000, 0x30000, 0x17A00000, 0x4000))
         self.assertNotEqual(struct.unpack('<8Q', leaf.prop('reg'))[6], 0x017A0000)
-        self.assertEqual(leaf.prop('interrupts'), mkadt.u32(336, 337))
+        self.assertEqual(leaf.prop('gic-intids'), mkadt.u32(336, 337))
+        # Ownership metadata must not invoke IOKit's interrupt mapper.
+        self.assertIsNone(leaf.prop('interrupts'))
+        self.assertIsNone(leaf.prop('interrupt-parent'))
         self.assertEqual({name for name, _, _ in leaf.props},
                          {'name', 'reg', 'chip-id', 'clock-policy', 'tcm-policy',
-                          'cx-parent', 'interrupts'})
+                          'cx-parent', 'gic-intids'})
 
     def test_each_checked_native_property_corruption_or_omission_is_atomic(self):
         tree, nodes = fixture()
@@ -182,7 +185,7 @@ class RedfinGMUContractTests(unittest.TestCase):
             'format-policy': mkadt.u32(0x1000, 0x8000, 128, 8, 39, 36),
             'clock-policy': mkadt.u32(0, 0x7100C, 0x80000001, 1, 0, 0x71018, 0x80000001, 1,
                                       1, 0x1078, 1, 1, 1, 0x5000, 0x80000001, 1),
-            'interrupts': mkadt.u32(705, *range(710, 718)),
+            'gic-intids': mkadt.u32(705, *range(710, 718)),
         }
         self.assertEqual({k for k, _, _ in leaf.props}, {'name', *expected})
         for key, value in expected.items():
@@ -295,8 +298,8 @@ static unsigned event_clock,events[6],logs,log_events[512];
 static char log_lines[512][320];
 struct property {uint8_t data[128];unsigned bytes;bool present;};
 static struct property props[14];
-static const char *keys[14]={"dram-base","dram-size","reg","chip-id","clock-policy","tcm-policy","cx-parent","interrupts",
- "reg","chip-id","stream-map","format-policy","clock-policy","interrupts"};
+static const char *keys[14]={"dram-base","dram-size","reg","chip-id","clock-policy","tcm-policy","cx-parent","gic-intids",
+ "reg","chip-id","stream-map","format-policy","clock-policy","gic-intids"};
 static int log_sink(const char *text,...) {
  if(logs>=512){bad++;return 0;}
  va_list ap;va_start(ap,text);vsnprintf(log_lines[logs],sizeof(log_lines[logs]),text,ap);va_end(ap);

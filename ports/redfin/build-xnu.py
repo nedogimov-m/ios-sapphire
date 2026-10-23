@@ -235,7 +235,7 @@ def main(argv=None):
                                          'wifi-aop.patch', 'wifi-native-probe.patch', 'wifi-native-start.patch',
                                          'gmu-probe.patch', 'gmu-start.patch', 'scm-query.patch',
                                          'wifi-firmware.patch', 'wifi-fw-source.patch',
-                                         'wifi-fw-build.patch'), 21):
+                                         'wifi-fw-build.patch', 'preinit-progress.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)
