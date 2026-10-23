@@ -740,7 +740,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,1225 @@
+@@ -0,0 +1,1272 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -760,6 +760,8 @@ new file mode 100644
 +#include "redfin_wifi_wlfw.h"
 +#include "redfin_wifi_bdf.h"
 +#include "redfin_wifi_snoc.h"
++#include "redfin_wifi_mission.h"
++#include "redfin_wifi_ce.h"
 +
 +extern "C" int redfin_wifi_power_start(void);
 +extern "C" int redfin_wifi_power_held(void);
@@ -820,6 +822,13 @@ new file mode 100644
 +    bool snoc_mode, snoc_attempted;
 +    fw_start_map snoc_maps[2];
 +    rf_snoc_snapshot snoc;
++    bool mission_mode, wlan_ready_observed;
++    rf_snoc_snapshot snoc_fresh;
++    rf_mission mission;
++    rf_mission_ops mission_ops;
++    uint64_t mission_settle_ns;
++    fw_start_map ce_map;
++    rf_ce_snapshot ce;
 +};
 +static fw_start_context fw_start;
 +static const uint8_t fw_start_bdf_digest[32] = {
@@ -984,7 +993,7 @@ new file mode 100644
 +    const uint64_t expected_smmu[2] = {RF_SNOC_SMMU_BASE, RF_SNOC_SMMU_BYTES};
 +    const uint64_t expected_wlan[2] = {0x18800000, 0x800000};
 +    const uint64_t expected_iova[2] = {0xa0000000, 0x10000000};
-+    return fw_start.snoc_mode && fw_start.wlan_bdf_mode && fw_start.wlan_power_mode &&
++    bool valid = fw_start.snoc_mode && fw_start.wlan_bdf_mode && fw_start.wlan_power_mode &&
 +        SecureDTLookupEntry(NULL, "/redfin-wifi-snoc", &node) == kSuccess &&
 +        fw_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
 +        fw_property(node, "ce-intids", irqs, sizeof(irqs)) && !memcmp(irqs, expected_irqs, sizeof(irqs)) &&
@@ -992,6 +1001,13 @@ new file mode 100644
 +        fw_property(node, "wlan-reg", wlan, sizeof(wlan)) && !memcmp(wlan, expected_wlan, sizeof(wlan)) &&
 +        fw_property(node, "wlan-iova", iova, sizeof(iova)) && !memcmp(iova, expected_iova, sizeof(iova)) &&
 +        fw_property(node, "observe-only", &observe, sizeof(observe)) && observe == 1;
++    if (valid && fw_start.mission_mode) {
++        const uint32_t expected_mission[10] = {1, 0x23, 0x22, 6, 12, 21, 12, 0, 0x240000, 0x1000};
++        uint32_t mission[10] = {}, enabled = 0;
++        valid = fw_property(node, "mission-enable", &enabled, sizeof(enabled)) && enabled == 1 &&
++            fw_property(node, "mission-contract", mission, sizeof(mission)) && !memcmp(mission, expected_mission, sizeof(mission));
++    }
++    return valid;
 +}
 +
 +static int fw_start_check(void *opaque)
@@ -1005,7 +1021,8 @@ new file mode 100644
 +        (!context->rmtfs_mode || (!context->rmtfs.poisoned && fw_start_rmtfs_contract(context, false))) &&
 +        (!context->wlfw_mode || (!context->wlfw_setup.poisoned && fw_start_wlfw_contract())) &&
 +        (!context->wlan_observe_mode || fw_start_wlan_contract()) &&
-+        (!context->snoc_mode || fw_start_snoc_contract());
++        (!context->snoc_mode || fw_start_snoc_contract()) &&
++        (!context->mission_mode || !context->mission.poisoned);
 +    if (valid) for (unsigned i = 0; i < FW_START_MAPS; ++i) {
 +        const fw_start_map *entry = &context->mapping[i];
 +        if (!entry->map && !entry->memory && !entry->base) continue;
@@ -1460,6 +1477,7 @@ new file mode 100644
 +    (void)opaque;
 +    IOLog("REDFIN WIFI HOST: event=%u file/service=%s bytes=%u; RAM only\n", kind, name, bytes);
 +}
++#include "redfin_wifi_mission.inc"
 +static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t length)
 +{
 +    fw_start_context *context = (fw_start_context *)opaque;
@@ -1514,7 +1532,14 @@ new file mode 100644
 +            if (error < 0) { context->poisoned = true; return; }
 +        }
 +        else if (type == 1 && to == 0x4004 && source == context->wlfw_node && from == context->wlfw_port) {
-+            if (context->wlan_power_mode && context->dynamic_sent && size >= 7 && rf_qmi_u16(data + at + 3) == 0x3b) {
++            if (context->mission_mode && context->mission.attempted && size >= 7 &&
++                (rf_qmi_u16(data + at + 3) == 0x23 || rf_qmi_u16(data + at + 3) == 0x22)) {
++                error = rf_mission_receive(&context->mission, &context->mission_ops, data + at, size);
++                IOLog("REDFIN WIFI MISSION: received=%#x stage=%u transaction=%u result=%u error=%u parsed=%d\n",
++                    (unsigned)rf_qmi_u16(data + at + 3), context->mission.stage, context->mission.transaction,
++                    context->mission.result, context->mission.error, error);
++                if (error < 0) { context->poisoned = true; return; }
++            } else if (context->wlan_power_mode && context->dynamic_sent && size >= 7 && rf_qmi_u16(data + at + 3) == 0x3b) {
 +                error = rf_wlfw_dynamic_parse(&context->dynamic, data + at, size);
 +                if (error) { context->poisoned = true; return; }
 +                context->dynamic_received = 1;
@@ -1601,6 +1626,7 @@ new file mode 100644
 +        fw_start_rmtfs_send, fw_start_rmtfs_event};
 +    if (context->wlfw_mode) context->wlfw_ops = {context, fw_start_wlfw_check, fw_start_wlfw_send};
 +    if (context->wlan_bdf_mode) context->bdf_ops = {context, fw_start_bdf_check, fw_start_bdf_send};
++    if (context->mission_mode) context->mission_ops = {context, fw_start_mission_check, fw_start_mission_send};
 +    int error = rf_gl_init(&context->glink, &context->glink_ops);
 +    IOLog("REDFIN WIFI GLINK: init=%d descriptor=%#x TX=%#x stores=%u\n",
 +        error, context->glink.descriptor, context->glink.tx, context->glink.stores);
@@ -1706,10 +1732,24 @@ new file mode 100644
 +                    bool bdf_done = !context->wlan_bdf_mode || context->bdf.stage == RF_BDF_COMPLETE ||
 +                        (!context->bdf.attempted && context->wlfw_setup.fw_ready);
 +                    if (bdf_done && (context->wlfw_setup.fw_ready || context->bdf.fw_ready)) {
-+                        error = context->wlan_pmic_mode ?
-+                            redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
-+                        if (!error && context->snoc_mode) error = fw_start_snoc_observe(context);
-+                        return error;
++                        if (!context->wlan_ready_observed) {
++                            error = context->wlan_pmic_mode ?
++                                redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
++                            if (!error && context->snoc_mode) error = fw_start_snoc_observe(context);
++                            if (error) return error;
++                            context->wlan_ready_observed = true;
++                        }
++                        if (!context->mission_mode) return 0;
++                        if (!context->mission.attempted) {
++                            error = rf_mission_begin(&context->mission, &context->mission_ops, &context->cap, &context->snoc);
++                            if (error) return error;
++                            IOLog("REDFIN WIFI MISSION: native CFG transaction6 queued; WLAN remains unmatched, no host DMA\n");
++                        }
++                        if (context->mission.stage == RF_MISSION_FAILED) return EIO;
++                        if (context->mission.stage == RF_MISSION_COMPLETE) {
++                            if (!context->mission_settle_ns) context->mission_settle_ns = now + UINT64_C(100000000);
++                            if (now >= context->mission_settle_ns) return fw_start_ce_observe(context);
++                        }
 +                    }
 +                }
 +            } else if (!context->cap_sent) {
@@ -1921,6 +1961,9 @@ new file mode 100644
 +    DTEntry snoc_node;
 +    bool snoc_present = SecureDTLookupEntry(NULL, "/redfin-wifi-snoc", &snoc_node) == kSuccess;
 +    fw_start.snoc_mode = snoc_present && fw_start.wlan_bdf_mode;
++    const void *mission_property = NULL; unsigned mission_bytes = 0; uint32_t mission_enabled = 0;
++    bool mission_present = snoc_present && SecureDTGetProperty(snoc_node, "mission-enable", &mission_property, &mission_bytes) == kSuccess;
++    fw_start.mission_mode = mission_present && fw_property(snoc_node, "mission-enable", &mission_enabled, sizeof(mission_enabled)) && mission_enabled == 1;
 +    if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
 +    if (!args || bytes == sizeof(fw_probe.args) ||
 +        !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
@@ -1930,7 +1973,8 @@ new file mode 100644
 +        (wlfw_present && (!fw_start.wlfw_mode || !fw_start_wlfw_contract())) ||
 +        (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract())) ||
 +        (pmic_present && !fw_start.wlan_pmic_mode) || (hang_present && !fw_start.wlan_hang_mode) ||
-+        (bdf_present && !fw_start.wlan_bdf_mode) || (snoc_present && !fw_start_snoc_contract())) {
++        (bdf_present && !fw_start.wlan_bdf_mode) || (snoc_present && !fw_start_snoc_contract()) ||
++        (mission_present && !fw_start.mission_mode)) {
 +        IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
 +        thread_terminate_self();
 +        __builtin_unreachable();
@@ -1946,6 +1990,9 @@ new file mode 100644
 +        (unsigned long long)fw_probe.boot.source.zeroed_bytes,
 +        fw_start.smp2p.wlan_found, fw_start.smp2p.wlan_state,
 +        fw_start.bdf.stage, fw_start.bdf.offset, fw_start.bdf.bdf_acks, fw_start.bdf.cal_reported, fw_start.bdf.fw_ready);
++    if (fw_start.mission_mode) IOLog("REDFIN WIFI MISSION: final stage=%u requests=%u ACKs=%u result=%u error=%u CE=%u/%u; host DMA ungranted\n",
++        fw_start.mission.stage, fw_start.mission.requests, fw_start.mission.responses, fw_start.mission.result,
++        fw_start.mission.error, fw_start.ce.stage, fw_start.ce.stable);
 +    /* This bounded diagnostic never frees remote-visible state or retries.
 +     * The shim/PMIC watchdog resets the complete platform back to fastboot. */
 +    if (error) fw_start.poisoned = true;
@@ -3943,3 +3990,276 @@ new file mode 100644
 +    }
 +    return 0;
 +}
+diff --git a/iokit/Kernel/arm/redfin_wifi_mission.h b/iokit/Kernel/arm/redfin_wifi_mission.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_mission.h
+@@ -0,0 +1,115 @@
++/* SPDX-License-Identifier: MIT
++ * WCN3990-class WLAN_CFG -> acknowledged mission mode, no CE/DMA operations.
++ * Wire: native Google msm500b3a2 wlan_firmware_service_v01.{c,h}; layout:
++ * Linux v6.12 adc21867 ath10k/snoc.c, also used by inherited TopazModem.cpp.
++ * Include after wifi_bdf.h and wifi_snoc.h.
++ */
++#ifndef REDFIN_WIFI_MISSION_H
++#define REDFIN_WIFI_MISSION_H
++#define RF_MISSION_CFG_BYTES 559u
++#define RF_MISSION_FIRST_TRANSACTION 6u
++enum { RF_MISSION_IDLE, RF_MISSION_CONFIG, RF_MISSION_MODE, RF_MISSION_COMPLETE, RF_MISSION_FAILED };
++static const uint32_t rf_mission_target[12][5] = {
++    {0, 2, 32, 2048, 0}, {1, 1, 32, 2048, 0}, {2, 1, 64, 2048, 0}, {3, 2, 32, 2048, 0},
++    {4, 2, 256, 256, 8}, {5, 2, 1024, 64, 8}, {6, 3, 32, 16384, 0}, {7, 4, 0, 0, 8},
++    {8, 1, 32, 2048, 0}, {9, 1, 32, 2048, 0}, {10, 1, 32, 2048, 0}, {11, 1, 32, 2048, 0}};
++static const uint32_t rf_mission_service[21][3] = {
++    {0x104, 2, 3}, {0x104, 1, 2}, {0x102, 2, 3}, {0x102, 1, 2}, {0x101, 2, 3}, {0x101, 1, 2},
++    {0x103, 2, 3}, {0x103, 1, 2}, {0x100, 2, 3}, {0x100, 1, 2}, {1, 2, 0}, {1, 1, 2},
++    {0xfe00, 2, 0}, {0xfe00, 1, 2}, {0x300, 2, 4}, {0x300, 1, 1}, {0xfe00, 2, 5},
++    {0x301, 1, 9}, {0x302, 1, 10}, {0x600, 1, 11}, {0, 0, 0}};
++static const uint16_t rf_mission_shadow[12][2] = {
++    {0, 0x3c}, {3, 0x3c}, {4, 0x3c}, {5, 0x3c}, {7, 0x3c}, {1, 0x40},
++    {2, 0x40}, {7, 0x40}, {8, 0x40}, {9, 0x40}, {10, 0x40}, {11, 0x40}};
++struct rf_mission_ops {
++    void *context;
++    int (*check)(void *);
++    int (*send)(void *, const uint8_t *, uint32_t);
++};
++struct rf_mission {
++    uint32_t attempted, stage, poisoned, requests, responses, ignored;
++    uint16_t transaction, waiting, result, error;
++    uint8_t packet[RF_MISSION_CFG_BYTES];
++};
++static inline int rf_mission_gate(struct rf_mission *s, const struct rf_mission_ops *o)
++{
++    if (!s || !o || !o->check || !o->send || s->poisoned) return -1;
++    if (o->check(o->context)) { s->poisoned = 1; s->stage = RF_MISSION_FAILED; return -1; }
++    return 0;
++}
++static inline int rf_mission_send(struct rf_mission *s, const struct rf_mission_ops *o, unsigned stage)
++{
++    if (rf_mission_gate(s, o) || !s->attempted || s->waiting ||
++        !((stage == RF_MISSION_CONFIG && s->stage == RF_MISSION_IDLE && !s->transaction) ||
++          (stage == RF_MISSION_MODE && s->stage == RF_MISSION_CONFIG && s->transaction == RF_MISSION_FIRST_TRANSACTION))) return -1;
++    memset(s->packet, 0, sizeof(s->packet));
++    uint32_t used = 7;
++    s->transaction = (uint16_t)(stage == RF_MISSION_CONFIG ? RF_MISSION_FIRST_TRANSACTION : RF_MISSION_FIRST_TRANSACTION + 1u);
++    s->waiting = (uint16_t)(stage == RF_MISSION_CONFIG ? 0x23 : 0x22);
++    rf_wlfw_put(s->packet + 1, s->transaction, 2); rf_wlfw_put(s->packet + 3, s->waiting, 2);
++    if (stage == RF_MISSION_CONFIG) {
++        /* Native arrays have a single-byte count; reserved host struct fields
++         * are not on the wire. host_version and v2 shadow/MSI stay absent. */
++        for (unsigned which = 0; which < 3; ++which) {
++            unsigned count = which == 1 ? 21u : 12u, columns = which == 0 ? 5u : which == 1 ? 3u : 2u;
++            unsigned width = which == 2 ? 2u : 4u;
++            s->packet[used++] = (uint8_t)(0x11u + which);
++            rf_wlfw_put(s->packet + used, 1u + count * columns * width, 2); used += 2;
++            s->packet[used++] = (uint8_t)count;
++            for (unsigned i = 0; i < count; ++i) for (unsigned j = 0; j < columns; ++j) {
++                uint32_t value = which == 0 ? rf_mission_target[i][j] : which == 1 ?
++                    rf_mission_service[i][j] : rf_mission_shadow[i][j];
++                rf_wlfw_put(s->packet + used, value, width); used += width;
++            }
++        }
++        if (used != RF_MISSION_CFG_BYTES) return -1;
++    } else {
++        /* Mission0, hw_debug_valid1/hw_debug0, exactly as native ICNSS. */
++        s->packet[used++] = 1; rf_wlfw_put(s->packet + used, 4, 2); used += 6;
++        s->packet[used++] = 0x10; rf_wlfw_put(s->packet + used, 1, 2); used += 3;
++    }
++    rf_wlfw_put(s->packet + 5, used - 7u, 2); s->stage = stage; ++s->requests;
++    if (o->send(o->context, s->packet, used) || rf_mission_gate(s, o)) {
++        s->poisoned = 1; s->stage = RF_MISSION_FAILED; return -1;
++    }
++    return 0;
++}
++static inline int rf_mission_begin(struct rf_mission *s, const struct rf_mission_ops *o,
++    const struct rf_wlfw_cap *cap, const struct rf_snoc_snapshot *snapshot)
++{
++    if (rf_mission_gate(s, o) || s->attempted || s->stage != RF_MISSION_IDLE || !rf_bdf_identity(cap) ||
++        !snapshot || !snapshot->stable || snapshot->stage != 4 || snapshot->error ||
++        snapshot->fault || snapshot->malformed_routes || snapshot->wlan_matches[0] || snapshot->wlan_matches[1]) return -1;
++    /* This entry deliberately leaves WLAN unmatched in a faulting SMMU:
++     * firmware can enter mission, but no inherited host route is granted. */
++    if ((snapshot->control & 9u) || !(snapshot->control & 0x400u)) return -1;
++    s->attempted = 1;
++    return rf_mission_send(s, o, RF_MISSION_CONFIG);
++}
++static inline int rf_mission_receive(struct rf_mission *s, const struct rf_mission_ops *o,
++    const uint8_t *data, uint32_t bytes)
++{
++    if (rf_mission_gate(s, o) || !s->attempted || !data || bytes < 7 || bytes > 4096 ||
++        data[0] != 2 || rf_qmi_u16(data + 5) != bytes - 7u) return -1;
++    if (s->stage == RF_MISSION_FAILED || !s->waiting || rf_qmi_u16(data + 1) != s->transaction ||
++        rf_qmi_u16(data + 3) != s->waiting) { ++s->ignored; return 1; }
++    unsigned seen = 0; uint16_t result = 0, error = 0;
++    for (uint32_t at = 7; at < bytes;) {
++        if (bytes - at < 3) return -1;
++        unsigned kind = data[at], length = rf_qmi_u16(data + at + 1);
++        if (length > bytes - at - 3u) return -1;
++        if (kind == 2) {
++            if (seen || length != 4) return -1;
++            seen = 1; result = rf_qmi_u16(data + at + 3); error = rf_qmi_u16(data + at + 5);
++            if (result > 1 || (!result && error)) return -1;
++        } else if (kind < 16) return -1;
++        at += 3u + length;
++    }
++    if (!seen) return -1;
++    s->result = result; s->error = error; s->waiting = 0; ++s->responses;
++    if (result) { s->stage = RF_MISSION_FAILED; return 0; }
++    if (s->stage == RF_MISSION_CONFIG) return rf_mission_send(s, o, RF_MISSION_MODE);
++    if (s->stage == RF_MISSION_MODE) { s->stage = RF_MISSION_COMPLETE; return 0; }
++    return -1;
++}
++#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_mission.inc b/iokit/Kernel/arm/redfin_wifi_mission.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_mission.inc
+@@ -0,0 +1,72 @@
++/* SPDX-License-Identifier: MIT
++ * Native worker's acknowledged mission entry and bounded CE register reads.
++ * No SMMU/CE writes, interrupt registration, ring memory or RX posting.
++ */
++static int fw_start_mission_check(void *opaque)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (context != &fw_start || !context->mission_mode || fw_start_glink_check(context) ||
++        fw_start_snoc_check(context) || !context->snoc.stable) return EPERM;
++    const rf_snoc_ops ops = {context, fw_start_snoc_check, fw_start_snoc_read};
++    int error = rf_snoc_observe(&ops, &context->snoc_fresh);
++    if (error) return error;
++    const rf_snoc_snapshot *before = &context->snoc, *now = &context->snoc_fresh;
++    if (before->control != now->control || before->fault != now->fault ||
++        memcmp(before->id, now->id, sizeof(now->id)) ||
++        memcmp(before->syndrome, now->syndrome, sizeof(now->syndrome)) ||
++        memcmp(before->smr, now->smr, sizeof(now->smr)) ||
++        memcmp(before->s2cr, now->s2cr, sizeof(now->s2cr)) ||
++        memcmp(before->bank, now->bank, sizeof(now->bank))) return EAGAIN;
++    return !now->fault && !now->malformed_routes && !now->wlan_matches[0] && !now->wlan_matches[1] ? 0 : EPERM;
++}
++static int fw_start_mission_send(void *opaque, const uint8_t *data, uint32_t bytes)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (!data || bytes < 7 || bytes > RF_MISSION_CFG_BYTES || fw_start_mission_check(context)) return EPERM;
++    return fw_start_qrtr_queue(context, 1, 0x4004, context->wlfw_node, context->wlfw_port, data, bytes);
++}
++static int fw_start_ce_check(void *opaque)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (context != &fw_start || fw_start_glink_check(context) || fw_start_snoc_check(context) ||
++        !context->mission_mode || context->mission.poisoned || context->mission.stage != RF_MISSION_COMPLETE ||
++        context->mission.waiting || context->mission.responses != 2 || !context->mission_settle_ns ||
++        fw_start_ns(context) < context->mission_settle_ns) return EPERM;
++    const fw_start_map *entry = &context->ce_map;
++    if (!entry->memory && !entry->map && !entry->base) return 0;
++    return entry->memory && entry->map && entry->base && entry->map->getVirtualAddress() == entry->base &&
++        entry->map->getLength() == RF_CE_MAP_BYTES ? 0 : EPERM;
++}
++static int fw_start_ce_read(void *opaque, uint32_t at, uint32_t *out)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (!out || !rf_ce_read_allowed(at) || fw_start_ce_check(context) || !context->ce_map.base) return EPERM;
++    uintptr_t address = context->ce_map.base + at;
++    uint32_t value;
++    __asm__ volatile("ldr %w0, [%1]\n\tdmb oshld" : "=r"(value) : "r"(address) : "memory");
++    *out = value; return 0;
++}
++static int fw_start_ce_observe(fw_start_context *context)
++{
++    if (fw_start_ce_check(context) || context->ce_map.memory || context->ce_map.map || context->ce_map.base ||
++        fw_start_mission_check(context) || redfin_wifi_power_audit()) return EPERM;
++    fw_start_map *entry = &context->ce_map;
++    entry->memory = IOMemoryDescriptor::withPhysicalAddress(RF_CE_BASE, RF_CE_MAP_BYTES, kIODirectionIn);
++    entry->map = entry->memory ? entry->memory->map(kIOMapReadOnly | kIOMapInhibitCache) : NULL;
++    if (!entry->map || !entry->map->getVirtualAddress() || entry->map->getLength() != RF_CE_MAP_BYTES) return ENOMEM;
++    entry->base = (uintptr_t)entry->map->getVirtualAddress();
++    const rf_ce_ops ops = {context, fw_start_ce_check, fw_start_ce_read};
++    int error = rf_ce_observe(&ops, &context->ce);
++    const rf_ce_snapshot *s = &context->ce;
++    IOLog("REDFIN WIFI CE: observer=%d stage=%u stable=%u reads=%u changed=%#x WRAP=%#x RRI=%#x/%#x; no CE writes or DMA\n",
++        error, s->stage, s->stable, s->reads, s->changed_offset, s->wrapper[0], s->wrapper[1], s->wrapper[2]);
++    if (error) return error;
++    for (unsigned i = 0; i < RF_CE_COUNT; ++i) {
++        const uint32_t *v = s->ce[i];
++        IOLog("REDFIN WIFI CE: engine=%u SRC=%#x/%#x/%u DST=%#x/%#x/%u CTRL=%#x IE=%#x IS=%#x misc=%#x/%#x index=%u/%u/%u/%u WM=%#x/%#x\n",
++            i, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10],
++            v[11], v[12], v[13], v[14], v[15], v[16]);
++    }
++    if (fw_start_mission_check(context) || redfin_wifi_power_audit()) return EPERM;
++    return 0;
++}
+diff --git a/iokit/Kernel/arm/redfin_wifi_ce.h b/iokit/Kernel/arm/redfin_wifi_ce.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_ce.h
+@@ -0,0 +1,71 @@
++/* SPDX-License-Identifier: MIT
++ * Read-only WCN3990-class CE state. Linux v6.12 adc21867 ath10k/hw.c.
++ * Offsets are relative to WLAN+240000. Include after wifi_snoc.h.
++ */
++#ifndef REDFIN_WIFI_CE_H
++#define REDFIN_WIFI_CE_H
++#define RF_CE_BASE UINT64_C(0x18a40000)
++#define RF_CE_MAP_BYTES 0x10000u
++#define RF_CE_COUNT 12u
++#define RF_CE_OBSERVED_REGS 17u
++static const uint32_t rf_ce_observed_offsets[RF_CE_OBSERVED_REGS] = {
++    0, 4, 8, 0x0c, 0x10, 0x14, 0x18, 0x2c, 0x30, 0x34, 0x38,
++    0x3c, 0x40, 0x44, 0x48, 0x4c, 0x50};
++struct rf_ce_snapshot {
++    uint32_t stage, reads, error, changed_offset;
++    uint32_t wrapper[3], ce[RF_CE_COUNT][RF_CE_OBSERVED_REGS];
++    bool stable;
++};
++struct rf_ce_ops {
++    void *context;
++    int (*check)(void *);
++    int (*read)(void *, uint32_t, uint32_t *);
++};
++static inline bool rf_ce_read_allowed(uint32_t at)
++{
++    if (at & 3u) return false;
++    if (at >= 0xc000) return at == 0xc000 || at == 0xc004 || at == 0xc008;
++    for (unsigned i = 0; i < RF_CE_OBSERVED_REGS; ++i)
++        if ((at & 0xfffu) == rf_ce_observed_offsets[i]) return true;
++    return false;
++}
++static inline int rf_ce_sample(const struct rf_ce_ops *o, struct rf_ce_snapshot *s,
++    uint32_t at, uint32_t *saved, bool compare)
++{
++    uint32_t value = 0;
++    if (!rf_ce_read_allowed(at)) return EINVAL;
++    int error = o->check(o->context);
++    if (error) return error;
++    ++s->reads; error = o->read(o->context, at, &value);
++    if (error) return error;
++    if (value == UINT32_MAX) return EIO;
++    if (compare && value != *saved) { s->changed_offset = at; return EAGAIN; }
++    *saved = value; return 0;
++}
++static inline int rf_ce_observe(const struct rf_ce_ops *o, struct rf_ce_snapshot *s)
++{
++    int error = EINVAL;
++    if (!s) return EINVAL;
++#ifdef __cplusplus
++    *s = rf_ce_snapshot{};
++#else
++    *s = (struct rf_ce_snapshot){0};
++#endif
++    if (!o || !o->check || !o->read) goto done;
++    for (unsigned pass = 0; pass < 2; ++pass) {
++        s->stage = pass + 1u;
++        for (unsigned i = 0; i < 3; ++i) {
++            error = rf_ce_sample(o, s, 0xc000 + 4u*i, &s->wrapper[i], pass != 0);
++            if (error) goto done;
++        }
++        for (unsigned ce = 0; ce < RF_CE_COUNT; ++ce) for (unsigned r = 0; r < RF_CE_OBSERVED_REGS; ++r) {
++            error = rf_ce_sample(o, s, 0x1000u*ce + rf_ce_observed_offsets[r], &s->ce[ce][r], pass != 0);
++            if (error) goto done;
++        }
++    }
++    error = o->check(o->context);
++    if (!error) { s->stage = 3; s->stable = true; }
++done:
++    s->error = (uint32_t)error; return error;
++}
++#endif

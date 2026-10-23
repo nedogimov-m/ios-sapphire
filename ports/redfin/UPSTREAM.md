@@ -461,5 +461,24 @@ double-reads every SMR/S2CR and each CB's SCTLR/CBAR/CBA2R/FSR, and counts
 latent references even when the SMR is invalid. It never reserves a CB,
 changes routes, acknowledges faults, touches TCU/TBU/CE or authorizes DMA.
 
+The follow-on explicit mission profile uses native WLFW WLAN_CFG23 and
+WLAN_MODE22 with successful matching ACKs, transaction6/7 on the existing
+kernel port. The12 target-pipe,21 service-pipe (including native sentinel)
+and12 legacy shadow-register entries match Linux's WCN3990 tables and the
+inherited `xnu/patches/0122` layout. Reviewed native QMI descriptors confirm
+one-byte array counts, five serialized u32 fields per target entry, and
+u16 CE/offset pairs; host-only reserved fields are not on the wire.
+Mission0/hw_debug0 follow native ICNSS. Unknown/failed ACKs never grant CE
+access. Fresh complete SMMU snapshots retain WLAN unmatched and preserve
+the foreign routes/contexts before/after both requests.
+
+Reviewed ath10k `hw.c:190..337`/`ce.c` at the same pinned Linux commit and
+inherited `0123`'s mission-before-CE entry. Only after mission ACK and a
+100ms settling interval, serviced by the same GLINK worker, may the adapter
+double-read the12 CE banks at WLAN+240000 and the wrapper. This is still
+a read-only register observation, with no ring/RRI programming, buffers,
+host route, DMA or station registration. The preferred upstream's bus/
+station separation remains the software reference for the packet stage.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

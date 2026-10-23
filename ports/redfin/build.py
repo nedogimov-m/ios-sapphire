@@ -110,6 +110,7 @@ def main():
     p.add_argument('--wifi-wlan-hang-observe', action='store_true', help='with --wifi-wlan-power, read at most400 announced nonsecure MSA hang bytes on readiness timeout')
     p.add_argument('--wifi-wlan-bdf-download', action='store_true', help='with --wifi-wlan-power, send the reviewed Redfin BIN BDF and empty calibration report through a separate native DMON client')
     p.add_argument('--wifi-snoc-observe', action='store_true', help='after actual FW_READY in the BDF profile, observe WLAN APPS-SMMU routes/contexts without CE access or DMA')
+    p.add_argument('--wifi-snoc-mission', action='store_true', help='with --wifi-snoc-observe, acknowledge native WLAN_CFG/mission and observe CE registers; no host DMA route or rings')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -159,6 +160,8 @@ def main():
         p.error('--wifi-wlan-bdf-download requires --wifi-wlan-power')
     if a.wifi_snoc_observe and not a.wifi_wlan_bdf_download:
         p.error('--wifi-snoc-observe requires --wifi-wlan-bdf-download')
+    if a.wifi_snoc_mission and not a.wifi_snoc_observe:
+        p.error('--wifi-snoc-mission requires --wifi-snoc-observe')
     if a.wifi_glink_start:
         a.wifi_fw_start = True
     if a.wifi_fw_start and a.wifi_fw_source_probe:
@@ -445,7 +448,7 @@ def main():
         if a.wifi_snoc_observe:
             from wifi_platform import add_snoc_observer_contract
             try:
-                add_snoc_observer_contract(tree, nodes)
+                add_snoc_observer_contract(tree, nodes, mission=a.wifi_snoc_mission)
             except ValueError as error:
                 p.error(str(error))
         if a.scm_probe:
@@ -771,6 +774,8 @@ def main():
         manifest['wifi_wlan_bdf_download'] = True
     if a.wifi_snoc_observe:
         manifest['wifi_snoc_observe'] = True
+    if a.wifi_snoc_mission:
+        manifest['wifi_snoc_mission'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

@@ -955,3 +955,14 @@ but nonzero SCTLR words, so none meets the deliberately stricter all-zero
 blank diagnostic. Native allocation uses a software bitmap and M/reference
 evidence, as the earlier USB experiment established; this read-only result
 does not reserve any of those banks or authorize packet DMA.
+
+`--wifi-snoc-mission` additionally requires `--wifi-snoc-observe`. It sends
+the reviewed native WLAN_CFG and mission-mode requests, waits for each
+matching successful response, and services GLINK during a100ms settle.
+Full fresh SMMU snapshots around the exchange must preserve all inherited
+routes and contexts and leave c0/c1 unmatched. Only then does it map a
+read-only CE window and take two complete samples of the12 banks and
+wrapper. The same native adapter is exercised by host tests: missing mode
+ACK, incomplete readiness/ownership or an unexpired deadline cannot map
+or read CE registers. No SMMU/CE write, ring, DMA buffer or association is
+introduced by this profile.
