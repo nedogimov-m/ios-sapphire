@@ -801,3 +801,11 @@ The shim verifies the real fixed reservation before marking the handoff.
 No MSA CPU mapping, clearing, additional memory assignment, RF supply/
 clock command, WLAN mission request or packet DMA is introduced here.
 CAP success and observed FW_READY are reported independently.
+
+The first native setup run passes IND_REGISTER/MSA_INFO/MSA_READY/CAP on
+hardware. The MSA response describes64KiB secure plus1984KiB nonsecure
+inside the original2MiB reservation. CAP supplies chip0x4320/family0x4001,
+SoC0x400b0000 and firmware0x33197fff (valid mask0xd); board_info is absent,
+so its default0 must not be treated as an ID. Native absent-board fallback
+is0xff. FW_READY is still unobserved; RF supplies/clocks and packet DMA
+remain the next separate bring-up stages.

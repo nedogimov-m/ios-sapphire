@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native WLFW MSA and CAP hardware PASS — 2026-10-23
+
+Source `06b353e`, local native `build-20261023-181558.log` (no CI run).
+Authenticated, image/nonce-matched `wifi-host-rmtfs-wlfw-v1-20261023-181900`,
+boot ID `dd972d7c88f9e4d3`, repeats proven RMTFS/MPSS/TFTP/GLINK startup.
+Native IND_REGISTER succeeds (status0). MSA_INFO returns exactly two bounded
+regions:8ba00000+10000 secure1 and8ba10000+1f0000 secure0. MSA_READY indication
+and acknowledgement arrive; fixed native permissions are preserved without
+any MSA CPU mapping or new assignment. CAP transaction4 succeeds with
+valid mask0xd: chip0x4320, family0x4001, SoC0x400b0000, firmware0x33197fff.
+The firmware omits board_info; the printed default0 is not a valid board ID.
+Native ICNSS's absent-board fallback is0xff, pending any actual BDF selection.
+FW_READY has not been observed. Final result0/phase12, SMP2P stage4 (ready),
+without fatal. This is fresh native WLAN identity/MSA acceptance, not Wi-Fi
+association, packets or an iOS interface.
+
+Recovery authenticates the log, observes clean/unmodified HFSX with
+write_count462335, and verifies final hardware fastboot. Kernel
+`44135516fb164cf00805351d9340e10f6f65be9e09ea8a9ec4b44a635fe5d225`;
+image `2d8957c2ff89444d277ceff5fd018fa2031a99e079ec6d2f3da81bb0fc734780`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xdd972d7c88f9e4d3`.
+
+Next: native ICNSS RF-supply sequence after CAP, including the optional
+chain1 capability; observe actual CMD-DB VRM resources and inherited votes
+before adding any WLAN power command. Keep the host services pumping while
+waiting for FW_READY. Association/data, GPU/native Metal and Bluetooth are
+still unfinished. All EFS/firmware/log material remains private/ignored.
+
 ## REDFIN native legacy WLFW indication/MSA/CAP setup prepared — 2026-10-23
 
 Continues `3256b22`. Reviewed pinned Google ICNSS and generated WLFW/QMI
