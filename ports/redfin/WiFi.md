@@ -609,6 +609,17 @@ Observation: 93 focused source/native-power/build/return checks pass, with
 three optional private-artifact cases skipped. Local native build144832 and
 the full real Image/payload/live-FDT/return preflight pass. Fastboot's reported
 256 MiB download limit exceeds this 79,335,424-byte compressed boot image.
-The 117,103,408-byte decompressed Image still requires the separate temporary
-hardware boot recorded in NOTES.md. Hash/parse success establishes the source
-boundary only; firmware authentication and all radio/network work remain.
+The separate temporary hardware run on source f46c2e5 accepts this
+117,103,408-byte decompressed Image, maps the source and reports result0,
+stage2, 99,395,632 bytes, 35 PHDRs, 33 loads and 31 assets. The authenticated
+capture matches the image/boot nonce, records live PID1 and verified fastboot
+return, and observes unchanged clean HFSX. The physical descriptor logs its
+managed-page diagnostic/backtrace; execution continues without an observed
+panic. Hash/parse success establishes the source boundary only: no MPSS
+destination copy, PAS authentication or radio/network operation ran.
+
+The pinned native `subsys-pil-tz.c` calls PAS INIT/MEM_SETUP/AUTH without a
+PAS_SUPPORTED gate. The earlier zero query is an unresolved capability fact,
+not proof that native PIL cannot work. The next integration requires complete
+metadata/cache ownership, native bandwidth/proxy votes, PAS4 and fresh SMP2P
+ready/stop before GLINK/WLFW or an iOS interface can be enabled.

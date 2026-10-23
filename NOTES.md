@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN resident MPSS source hardware PASS — 2026-10-23
+
+Source f46c2e5; local native build `build-20261023-144832.log` (no new CI run).
+Fresh authenticated/image/nonce-matched capture
+`wifi-fw-source-v1-20261023-145215` reports result0/stage2/pinned1,
+99,395,632 source bytes, 35 PHDRs, 33 loads and 31 assets. The native hashes
+and parser accept 99,384,626 payload bytes and 191,553,563 planned BSS bytes.
+These are validated source/plan counts: no payload was copied to MPSS and
+no BSS was zeroed on the device. ABL accepted this larger compressed image
+and XNU reached the real source mapping, hashing and parsing code.
+
+Observation: the physical IOMemoryDescriptor emits a managed-page
+diagnostic/backtrace for the reserved kernel-RAM source. Execution continues
+through source result0 to md0/PID1 and 11 heartbeats; no panic is observed.
+This warning is retained in the private capture rather than hidden. The
+temporary collector authenticates/decrypts the capture, matches boot ID
+575a9e2c5c4caf1c and the exact image, verifies recovery with no disk mounts,
+and leaves verified fastboot. HFSX remains clean/unmounted, inconsistent=false,
+write_count462335. No partition flash or media write occurred.
+
+Kernel `04a1e8d7d3aa0536153fe078d8fedafb68c21f1dd5301c43760afb0417c653c7`;
+image `7ff5c88f4ab24347f9d7e924a6bd5f78d904d9e417f0f723454a01ed63b98d2a`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x575a9e2c5c4caf1c`.
+
+Unfinished: connect the proven resident source and retained power/AOP path
+to a complete native PIL lease (metadata storage/cache ownership, PAS4,
+proxy/bandwidth, fresh SMP2P ready/stop), then GLINK/QRTR/WLFW, association,
+frames and the iOS interface. The native Google `subsys-pil-tz.c` uses PAS
+INIT/MEM_SETUP/AUTH directly and does not gate on PAS_SUPPORTED; the earlier
+zero capability query alone is not proof that native PIL cannot work. No
+firmware authentication, radio startup or functional Wi-Fi is claimed.
+
 ## REDFIN native resident MPSS source probe built; hardware run next — 2026-10-23
 
 Resumed the unfinished Wi-Fi work from source parent d0ac432. The separate
