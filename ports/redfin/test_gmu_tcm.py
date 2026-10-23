@@ -36,7 +36,7 @@ struct host {
 };
 static struct host *h;
 static unsigned metrics[8];
-static uint32_t final_values[12];
+static uint32_t final_values[13];
 static uint32_t *slot(unsigned unit,uint32_t at) {
  if(unit==RF_GT_GCC && at<sizeof(h->gcc)) return &h->gcc[at/4];
  if(unit==RF_GT_GPUCC && at<sizeof(h->gpucc)) return &h->gpucc[at/4];
@@ -85,6 +85,7 @@ static int write_reg(void *ctx,unsigned unit,uint32_t at,uint32_t value) {
  if(unit==RF_GT_GCC) {
   if(at==0x52010)mask=1;
   else if(at==0x52000)mask=0x10000;
+  else if(at==0x71028)mask=3;
   else mask=1;
  }else if(unit==RF_GT_GPUCC) {
   if(at==0x1120)mask=3;
@@ -121,6 +122,7 @@ static int write_reg(void *ctx,unsigned unit,uint32_t at,uint32_t value) {
  }else {
   *p=value;
  }
+ if(h->scenario==33 && unit==RF_GT_GCC && at==0x71028)*p=old;
  if(unit==RF_GT_GMU && (at==0x7000 || at==0x7004))h->dtcm_writes++;
  return h->fail_write==h->writes?EIO:0; /* Error can follow a committed write. */
 }
@@ -157,7 +159,8 @@ int host_run(uint32_t chip,unsigned scenario,unsigned variant,
  case 2:h->gcc[0]&=~(1u<<variant);break;
  case 3:h->gcc[0xc/4]^=1u<<variant;break;
  case 4:h->gcc[0x40/4]^=1u<<variant;break;
- case 5:h->gcc[0x71028/4]=0;break;
+ case 5:h->gcc[0x71028/4]=0xabc00000|variant;h->gcc[0xc/4]=0x20000103;break;
+ case 33:h->gcc[0x71028/4]=0xabc00000;break;
  case 6:h->gpucc[0x1098/4]=1;break;
  case 7:h->gpucc[0x100c/4]=0x80000000;break;
  case 8:h->gpucc[0x1120/4]|=1u<<variant;break;
@@ -178,11 +181,11 @@ int host_run(uint32_t chip,unsigned scenario,unsigned variant,
  final_values[4]=h->gcc[0x52000/4];final_values[5]=h->gpucc[0x1120/4];
  final_values[6]=h->gpucc[0x1124/4];final_values[7]=h->gpucc[0x1098/4];
  final_values[8]=h->gcc[0];final_values[9]=h->gcc[4/4];
- final_values[10]=h->gcc[0xc/4];final_values[11]=h->gcc[0x40/4];
+ final_values[10]=h->gcc[0xc/4];final_values[11]=h->gcc[0x40/4];final_values[12]=h->gcc[0x71028/4];
  free(h);h=NULL;return result;
 }
 unsigned host_metric(unsigned i){return i<8?metrics[i]:999;}
-uint32_t host_final(unsigned i){return i<12?final_values[i]:0;}
+uint32_t host_final(unsigned i){return i<13?final_values[i]:0;}
 size_t host_report_size(void){return sizeof(struct rf_gt_report);}
 int host_allowed(unsigned unit,uint32_t at,int writing){return rf_gt_allowed(unit,at,writing!=0);}
 '''
@@ -216,7 +219,7 @@ class RedfinGMUTCMTests(unittest.TestCase):
         result = self.lib.host_run(chip, scenario, variant, fail_valid, fail_read,
                                     fail_write, ctypes.byref(report))
         metrics = tuple(self.lib.host_metric(i) for i in range(8))
-        final = tuple(self.lib.host_final(i) for i in range(12))
+        final = tuple(self.lib.host_final(i) for i in range(13))
         self.assertEqual(result, report.error)
         self.assertEqual(metrics[5:7], (0, 0))
         self.assertEqual((report.reads, report.writes), metrics[1:3])
@@ -237,7 +240,8 @@ class RedfinGMUTCMTests(unittest.TestCase):
         self.assertEqual(final[5] & 3, 0)
         self.assertEqual(final[6], (0x42100000 & ~0x10371F) | 0x602)
         self.assertEqual(final[7], 0xAFF1)
-        self.assertEqual(final[8:], (0xC0100001, 31, 0x20000107, 0x4000))
+        self.assertEqual(final[8:12], (0xC0100001, 31, 0x20000107, 0x4000))
+        self.assertEqual(final[12], 0xABC00003)
         self.assertEqual(metrics[4], 4)
         self.assertLessEqual(metrics[3], 2000)
 
@@ -249,6 +253,21 @@ class RedfinGMUTCMTests(unittest.TestCase):
             self.assertEqual(r.counter_delta, 19200)
             if variant == 2:
                 self.assertLess(r.counter_after, r.counter_before)
+
+    def test_native_cold_misc_setup_preserves_other_bits_and_pll_outputs(self):
+        for inherited in range(4):
+            result, r, _, final = self.run_leaf(5, inherited)
+            self.assertEqual(result, 0)
+            self.assertEqual(r.misc, 0xABC00000 | inherited)
+            self.assertEqual(final[12], 0xABC00003)
+            self.assertEqual(final[8:12], (0xC0100001, 31, 0x20000103, 0x4000))
+
+    def test_failed_misc_readback_never_enables_a_feed_or_touches_gmu(self):
+        result, r, metrics, final = self.run_leaf(33)
+        self.assertEqual(result, errno.EIO)
+        self.assertEqual(r.stage, 2)
+        self.assertEqual(metrics[4], 0)
+        self.assertEqual(final[3:5], (0x40000000, 0x8000))
 
     def test_counter_uses_elapsed_time_including_per_access_guard_cost(self):
         result, r, _, _ = self.run_leaf(29)
@@ -272,9 +291,9 @@ class RedfinGMUTCMTests(unittest.TestCase):
             self.assertEqual(metrics, (0,)*8)
 
     def test_source_identity_mismatch_is_read_only(self):
-        cases = [(1, 0), (5, 0), (9, 0)]
+        cases = [(1, 0), (9, 0)]
         cases += [(2, bit) for bit in (20, 30, 31)]
-        cases += [(3, bit) for bit in (0, 1, 2, 8, 9, 10, 11)]
+        cases += [(3, bit) for bit in (0, 1, 8, 9, 10, 11)]
         cases += [(4, bit) for bit in range(32)]
         cases += [(8, bit) for bit in (0, 4, 5, 6, 7)]
         for scenario, variant in cases:
@@ -387,7 +406,7 @@ class RedfinGMUTCMTests(unittest.TestCase):
             self.assertEqual(metrics[2], failed)
 
     def test_allowlist_excludes_firmware_start_gx_smmu_and_debug_mux_writes(self):
-        for unit, at in ((0, 0), (0, 4), (0, 0x40), (0, 0x71028), (0, 0x62000),
+        for unit, at in ((0, 0), (0, 4), (0, 0x40), (0, 0xc), (0, 0x62000),
                           (0, 0x4300C), (1, 0x100C), (1, 0x106C), (1, 0x1540), (1, 0x1568),
                           (2, 0), (2, 0x3000), (2, 0x14070), (2, 0x14618),
                           (2, 0x7008), (3, 0)):

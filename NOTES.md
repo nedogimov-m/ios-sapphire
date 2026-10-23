@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GMU enters real hardware; source-backed cold clocks — 2026-10-23
+
+Source13197c1 fixes the diagnostic IRQ key. Fresh authenticated v6 capture
+1fca65afc80113a7 passes InitIOKit, startup extensions, PID1, held-CX proof and
+enters GMU. Preflight reports result35/EAGAIN/stage1/15reads/0childwrites:
+GPLL0 MODEd810003d/L31/USER103/ALPHA4000, GPU_MISC0, GMU branch80004220.
+This is a successful localization, not GMU execution or TCM proof.
+
+The pinned gcc_lito_probe sets GPU_MISC lowbits3 before preparing feeds;
+its fixedGPLL0/even feed does not require the unused third output. Root now
+RMWs only GPU_MISC bits1:0, verifies readback and rechecks it during source
+proof; accepts main/even USER103 while preserving all PLL configuration.
+The enlarged exact ADT clock-policy binds offset/mask/value and USERmask.
+105focusedtestsPASS, including cold states/readback failure; all1119hosttests
+PASS in101.376s (`peripherals-host-tests-v44.txt`),14,278ASan/UBSan adapter
+scenariosPASS. Native ARM64 build122118PASS, real payload/ADT/FDT/returnPASS.
+
+Fresh authenticated v7 capture f056133cffd0b238 completes those GCC/bus votes
+and reaches the first GMU SYSRESET read at0x03d7e000, where the log stops.
+No CPU panic or PID1; automatic bootloader return/recovery succeeds. Current
+leaf tries that CSR before enabling GMU core clock. Native kgsl_gmu.c
+(gmu_enable_clks) and preferred HackiOS step5 enable core clock before CSR
+inspection. Next is to correct that ordering with fresh CX/source/IRQ gates,
+never write a reset-release/firmware/SMMU table, and keep watchdog return.
+All HFS header observations remain clean/unmodified atwrite_count462335.
+No flash/media/Android boot or per-device artifact was committed.
+
+Rechecked preferred sources: kernel8e611870 unchanged; userland HEAD is now
+a79ff0772a3454fd1ef127e181e5b3bce6c9ce18. Reviewed thermald/bootok/thermal_probe
+changes are recorded in UPSTREAM.md; no graphics backend/16.7ABI fix is present
+or installed. The old pinned worktree is retained for comparisons.
+
+`gmu-tcm-v6` local `build-20261023-121348.log`; kernel `ed2cc8d17a5d7f00c43721ae1c892747aeec4d05c5564c266f2649fd0f1497ac`; image `2db58fd554fd4989c4118630bc71b72cca9cc4871bc948d997c450345cc6cc1b`. Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x1fca65afc80113a7`.
+
+`gmu-tcm-v7` local `build-20261023-122118.log`; kernel `9c8dbfc3ddfa8116dbc142ca8a1f6f26cdc1d0f3d0ba80f58987b19b2a951293`; image `1b268be61c25372a0f04e5fe76273990bb54a4272cab89089c6f6cda08e3ad87`. Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xf056133cffd0b238`.
+
 ## REDFIN Wi-Fi power hardware PASS; GMU IOKit root cause fixed — 2026-10-23
 
 Source parentdab3c2c. Authenticated/image/nonce-matched SCM615a203339d75f5f

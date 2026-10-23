@@ -26,6 +26,20 @@ licenses.
 
 ## Compatibility boundary
 
+Rechecked 2026-10-23: kernel HEAD remains `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`.
+Userland now has HEAD `a79ff0772a3454fd1ef127e181e5b3bce6c9ce18`; its two
+functional additions are `fcc3214` (thermald/bootok) and `a79ff07`
+(standalone thermal probe). Reviewed changes cover thermal polling/sysctl,
+pressure notifications, the launchd job and boot guard; they do not add an
+A620 backend or update the private iOS16.5 graphics ABI. They depend on
+`kern.redwood.thermal` and the upstream custom root/var-store, so they are not
+installed into Redfin's Apple launchd/HFS root. The older paired source pin
+below remains the graphics-ABI reference. The existing `redwood_adreno.c`
+steps5/6 confirm clocks are enabled before GMU CSR inspection; step11 compares
+PAS_SUPPORTED for known images and warns that all-zero responses alone can
+be inconclusive. Redfin's raw4/13 query responses remain zero, not a successful
+firmware-authentication result.
+
 | | Upstream snapshot | Redfin |
 | --- | --- | --- |
 | Platform | POCO X5 Pro/redwood, SM7325, Adreno 642L, WCN6750 | Pixel 5, SM7250, Adreno 620v2, legacy ICNSS/MPSS WLAN path |

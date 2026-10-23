@@ -162,7 +162,7 @@ does not itself require an invented external DDR bandwidth floor.
 | Crystal and AHB branches | GPUCC `+0x109c`, `+0x1078`, enable bit 0; AHB uses native 10us delay completion |
 | Native bus clocks | GCC `+0x71154` DDRSS GPU AXI, `+0x7100c` GPU MEMNOC, `+0x71018` GPU SNOC DVM; enable bit 0 |
 | Native SMMU clock vote | GPUCC `+0x5000`, enable bit 0; does not configure a translation |
-| Native GCC handoff setup | GPU MISC `+0x71028` bits 1:0 = 3 disables the GPLL0 active inputs; verify rather than silently changing an unknown handoff |
+| Native GCC handoff setup | GPU MISC `+0x71028` bits 1:0 = 3 disables the GPLL0 active inputs, matching `gcc_lito_probe`; preserve every other bit and require readback before enabling feeds |
 
 The native GMU clock list also contains the AOP QDSS/APB clock. Full GMU
 boot adds CNOC and a DT-selected minimum DDR bandwidth vote. Its source
@@ -173,6 +173,17 @@ No GPU PLL1 or GX clock setup is needed to derive 200MHz from the inherited
 fixed GPLL0. Do not copy the SC7280 150MHz hub RCG/branches or change GPLL0
 L/ALPHA/postdivision. Source-register identity proves the programmed rate;
 direct measurement supplies a separate clock observation.
+
+The corrected metadata contract reaches real GMU preflight on hardware.
+Its authenticated capture reports GPLL0 MODE `0xd810003d`, L31,
+USER `0x103`, ALPHA `0x4000`, GPU MISC0, GMU branch `0x80004220`.
+The leaf originally stopped read-only because it assumed Linux had already
+set GPU MISC3 and required all three PLL output bits. The native cold path
+now performs the exact GPU-only MISC RMW before its feeds; source revalidation
+requires those bits afterward. It requires main/even output bits1:0 and /2,
+and preserves the unused third output. No PLL output/rate/postdivider write
+is permitted. The expanded `clock-policy` binds the MISC offset/mask/value
+and source USER mask/value so older contracts cannot authorize this path.
 
 The optional Lito debug measurement contract differs from Redwood:
 GCC mux/divider/CBCR `0x62000/0x62004/0x62008`, GPUCC selection **`0x129`**;

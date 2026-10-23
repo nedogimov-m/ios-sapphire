@@ -37,7 +37,7 @@ static const uint64_t gm_reg[] = {
 };
 static const uint64_t gm_dram_base = 0x180000000ULL, gm_dram_size = 0x80000000ULL;
 static const uint32_t gm_chip = 0x06020001;
-static const uint32_t gm_clock[] = {200000000, 31, 0x4000, 2, 6, 2};
+static const uint32_t gm_clock[] = {200000000, 31, 0x4000, 2, 6, 2, 0x71028, 3, 3, 0xf03, 0x103};
 static const uint32_t gm_tcm[] = {1, 0x10004000, 0x7000, 2, 1, 1000};
 static const uint32_t gm_parent[] = {0x30000, 64, 65535, 7, 416};
 static const uint32_t gm_irqs[] = {336, 337};

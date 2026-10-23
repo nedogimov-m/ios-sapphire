@@ -53,9 +53,9 @@ rf_gt_allowed(unsigned unit, uint32_t at, bool writing)
 {
     if (unit == RF_GT_GCC) {
         switch (at) {
-        case 0x52010: case 0x52000: case 0x71154: case 0x7100c: case 0x71018:
+        case 0x52010: case 0x52000: case 0x71154: case 0x7100c: case 0x71018: case 0x71028:
             return true;
-        case 0: case 4: case 0xc: case 0x40: case 0x71004: case 0x71028:
+        case 0: case 4: case 0xc: case 0x40: case 0x71004:
             return !writing;
         default: return false;
         }
@@ -156,26 +156,28 @@ rf_gt_update(const struct rf_gt_ops *ops, struct rf_gt_report *r,
 static inline bool
 rf_gt_pll_identity(uint32_t mode, uint32_t l, uint32_t user, uint32_t alpha)
 {
-    /* Locked/active FSM, all native outputs on, even postdivision /2. */
+    /* Locked/active FSM, main/even outputs on, even postdivision /2.
+     * Bit2 is the unused third output; do not require or modify it. */
     return (mode & 0xc0100000u) == 0xc0100000u && l == 31 &&
-        (user & 0xf07u) == 0x107u && alpha == 0x4000;
+        (user & 0xf03u) == 0x103u && alpha == 0x4000;
 }
 
 static inline int
 rf_gt_source_live(const struct rf_gt_ops *ops, struct rf_gt_report *r, bool running)
 {
-    uint32_t v[15];
-    static const struct { unsigned unit; uint32_t at; } registers[15] = {
+    uint32_t v[16];
+    static const struct { unsigned unit; uint32_t at; } registers[16] = {
         {RF_GT_GCC, 0x71004}, {RF_GT_GPUCC, 0x106c},
         {RF_GT_GCC, 0}, {RF_GT_GCC, 4}, {RF_GT_GCC, 0xc}, {RF_GT_GCC, 0x40},
         {RF_GT_GCC, 0x52010}, {RF_GT_GCC, 0x52000},
         {RF_GT_GPUCC, 0x1124}, {RF_GT_GPUCC, 0x1120},
         {RF_GT_GPUCC, 0x1098}, {RF_GT_GPUCC, 0x109c},
-        {RF_GT_GPUCC, 0x100c}, {RF_GT_GPUCC, 0x1064}, {RF_GT_GPUCC, 0x1540}
+        {RF_GT_GPUCC, 0x100c}, {RF_GT_GPUCC, 0x1064}, {RF_GT_GPUCC, 0x1540},
+        {RF_GT_GCC, 0x71028}
     };
     unsigned i;
     int error;
-    for (i = 0; i < 15; i++) {
+    for (i = 0; i < 16; i++) {
         error = rf_gt_rd(ops, r, registers[i].unit, registers[i].at, &v[i]);
         if (error)
             return error;
@@ -184,7 +186,7 @@ rf_gt_source_live(const struct rf_gt_ops *ops, struct rf_gt_report *r, bool runn
         !rf_gt_pll_identity(v[2], v[3], v[4], v[5]) ||
         !(v[6] & 1) || !(v[7] & 0x10000u) || (v[11] & 0x80000001u) != 1 ||
         (v[12] & 0x80000001u) != 1 ||
-        (v[13] & 0x80000001u) != 0x80000000u)
+        (v[13] & 0x80000001u) != 0x80000000u || (v[15] & 3u) != 3u)
         return EAGAIN;
     if (!running && (v[10] & 0x80000001u) != 0x80000000u)
         return EBUSY;
@@ -288,11 +290,14 @@ rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *outpu
     RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1120, &r.rcg_before));
     RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1124, &r.source_before));
     if (!rf_gt_pll_identity(r.pll_mode, r.pll_l, r.pll_user, r.pll_alpha) ||
-        (r.misc & 3u) != 3 || (r.rcg_before & 0xf1u)) {
+        (r.rcg_before & 0xf1u)) {
         error = EAGAIN; goto done;
     }
 
     r.stage = RF_GT_BUS_CLOCKS;
+    /* Native gcc_lito_probe disables the GPU GPLL0 active inputs before
+     * preparing its feeds. No shared PLL rate/output register is changed. */
+    RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GCC, 0x71028, 3, 3));
     RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GCC, 0x52010, 1, 1));
     RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GCC, 0x52000, 0x10000, 0x10000));
     RF_GT_TRY(rf_gt_delay(ops, 10)); /* Divided feed uses BRANCH_HALT_DELAY. */
