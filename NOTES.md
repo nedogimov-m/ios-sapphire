@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN firmware source linked; USB delivery protocol prepared — 2026-10-23
+
+Wi-Fi source357ca9f adds immutable resident firmware ingestion, native read-only
+mapping and staged copy/readback without UFS/PAS/startup. Root includes its
+three source/dependency overlays in both builders. Local full ARM64 build
+`build-20261023-052239.log` links successfully; kernel
+`58172b861adf0de271fe9ab4360a61530f5023a97406cb56b2c5ba50c7afcf70`.
+No new image or boot args were emitted; no device/media operation was issued.
+The actual private bundle passes the native CPP/guarded host-copy path:
+9420metadata,99,384,626payload and191,553,563BSS bytes;35PHDR/33loads/31assets.
+The private12-segment116,933,776-byte payload passes the real C loader, but
+ABL download/decompressed placement and native firmware activation remain
+unproved.133focusedWi-Fitests passed at source handoff. Full-suitev41 then
+found two fixture setup errors from tools/mkadt shadowing the board module;
+root fixed script-mode module resolution and added a real shadowing regression.
+All28firmware-ingestion/packer/native-adapter tests, including private cases,
+pass afterward. Final common regression is pending the USB TX correction.
+
+USB sourcec3a9a06 adds an independent nonce/cookie/sequence-bound delivery
+protocol and host codec;17focusedtests plus sanitizers pass. It requires an
+actual completed90-byte DWC3 frame and matching host ACK, with10s readiness,
+500ms marker deadline,16markers/badACK bounds and no lease extension. The
+core is deliberately not a startup hook/coordinator or a combined GPU profile.
+Transport still needs exact successful TRB completion/tagging and RX receipts;
+root is correcting the existing event handler's unchecked TX completion first.
+No claim of autonomous live GPU logs or GPU rendering is made. The passive
+device rescue waiter still reports waiting-fastboot; ADB authorization and
+the failedGMUboot's existing RAM/HFS remain unresolved. Next: final host/native
+checks; collect old RAM/HFS before another temporary XNU boot when accessible.
+
 ## REDFIN optional RO SMMU image and GMU breadcrumbs prepared — 2026-10-23
 
 Source cddcb54 binds opt-in redfinsmmu=1 to the exact GMU1 mode. The full

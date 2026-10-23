@@ -19,7 +19,13 @@ if __package__:
     from . import mkadt
     from .wifi_firmware import live_layout, read_regular, require
 else:
-    import mkadt
+    # mkpayload puts tools/ first on sys.path and has a different mkadt API.
+    # Resolve the board module by its path in script/discovery mode as well.
+    import importlib.util
+    _adt_spec = importlib.util.spec_from_file_location(
+        'redfin_wifi_blob_mkadt', Path(__file__).with_name('mkadt.py'))
+    mkadt = importlib.util.module_from_spec(_adt_spec)
+    _adt_spec.loader.exec_module(mkadt)
     from wifi_firmware import live_layout, read_regular, require
 
 PAGE = 16384

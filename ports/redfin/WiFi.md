@@ -544,13 +544,13 @@ fingerprinted, source hashes are rechecked between phases, and aliased
 control/readback buffers fail. Any uncertain operation quarantines the copy;
 the caller retains responsibility for its destination lease and safe teardown.
 
-Future kernel link dependencies are explicit: apply existing
-`wifi-firmware.patch`, then `wifi-fw-source.patch`; add
-`bsd/dev/redfin_wifi_fw_source.c` to BSD sources, and
-`iokit/Kernel/arm/RedfinWiFiFWSource.cpp` plus existing
-`iokit/Kernel/arm/RedfinWiFiFirmware.cpp` to IOKit C++ sources. The latter
-provides the kernel SHA256 adapter. No startup hook/source-list integration is
-installed by this milestone. The caller owns persistent `rf_wifi_fw_boot`,
+Both native builders apply `wifi-firmware.patch`, `wifi-fw-source.patch`,
+then `wifi-fw-build.patch`. The last patch includes
+`bsd/dev/redfin_wifi_fw_source.c` in BSD sources, and
+`iokit/Kernel/arm/RedfinWiFiFWSource.cpp` plus
+`iokit/Kernel/arm/RedfinWiFiFirmware.cpp` in IOKit C++ sources. The latter
+provides the kernel SHA256 adapter. This links the source mechanism without
+a startup hook or PAS operations. The caller owns persistent `rf_wifi_fw_boot`,
 the existing 6352-byte workspace and a separate 64 KiB readback buffer; keep
 them outside the kernel entry stack and do not embed that buffer in OSObject.
 

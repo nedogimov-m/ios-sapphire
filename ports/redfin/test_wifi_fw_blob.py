@@ -25,6 +25,25 @@ ARGS = ('cpus=1 rd=md0 modem=0 wifi=0 gpu=0 sweetusb=0 redfinspmi=1 redfinreturn
         'redfinbootid=0x0000000000000001')
 
 
+class WifiFirmwareImportTests(unittest.TestCase):
+    def test_payload_tools_cannot_shadow_the_board_adt(self):
+        script = '''
+import sys
+from pathlib import Path
+board = Path(sys.argv[1])
+sys.path[:0] = [str(board.parents[1] / 'tools'), str(board)]
+import mkadt
+assert Path(mkadt.__file__).parent.name == 'tools'
+import wifi_fw_blob
+assert Path(wifi_fw_blob.mkadt.__file__).resolve() == (board / 'mkadt.py').resolve()
+tree = wifi_fw_blob.mkadt.build(0x180000000, 0x80000000, seed=bytes(64))
+assert tree.prop('compatible')
+'''
+        result = subprocess.run([sys.executable, '-c', script, str(HERE)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 class WifiFirmwareBlobTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
