@@ -13,11 +13,16 @@ captures of the Apple logo and lock screen. The MobileGestalt Wi-Fi identity
 fix is validated on the device. The user confirms visible iOS and UI response
 to physical taps/swipes; a fresh log records 41 SEC contacts and HID dispatch.
 Bounded md0 USB tests pass ARP, ICMP and fresh UDP logging through native
-macOS CDC-ECM. USB with UFS/GUI, multitouch, the home screen, Wi-Fi and GPU
+macOS CDC-ECM. USB with UFS/GUI, multitouch, the home screen, Wi-Fi association/data and GPU
 acceleration remain unverified. The overlay disables inherited Xiaomi
 hardware drivers. A separate bounded eight-core GUI/touch profile is
 validated; rendering uses the CPU. The cutout-fit profile also passes
 authenticated automatic lock-screen captures and clean timed shutdown.
+
+The isolated native Wi-Fi profile now proves MPSS/PAS4 startup,
+GLINK/QRTR/RMTFS, MSA/CAP and DMON BDF/CAL_REPORT acknowledgements, followed
+by a real kernel FW_READY indication. CE packets, association, the iOS
+network interface and GUI Wi-Fi remain unfinished; see [Wi-Fi](WiFi.md).
 
 `--touch-probe --usb-probe --wifi-probe --gpu-probe` adds read-only peripheral
 observers. Common startup requires confirmed PMIC/IMEM bootloader return

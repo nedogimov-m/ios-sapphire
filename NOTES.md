@@ -1,5 +1,42 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native DMON BDF/CAL_REPORT and real WLAN FW_READY hardware PASS — 2026-10-24
+
+Source `b09070e`, native `build-20261024-024407.log`, authenticated
+bdf-v1 capture matched boot ID `679b44e45b4c0441`. The separate DMON
+registration succeeds with actual fw_status4 (MSA ready). Its fresh CAP
+matches kernel chip4320/family4001/SoC400b0000/firmware33197fff, board_info
+absent. Every one of13 BIN BDF chunks receives success0/error0, including
+the final CRC/end response:26328 bytes acknowledged. Empty CAL_REPORT
+also succeeds. Kernel client then receives actual QMI FW_READY indication21
+and records `FWready=1`. Worker final result0/phase12/SMP2P stage4;
+DMON complete6/26328bytes/13ACKs/cal1. The daemon's own ready indication
+was not needed or observed before exit; its printed ready0 is separate
+from the positively observed kernel indication.
+
+This crosses the former firmware-readiness blocker. It is not association,
+packet transfer, an iOS network interface or GUI Wi-Fi. The final physical
+samples now report configured=VALID480/1800/1304/3000/3000mV, MODE4,
+ENABLE80/STATUS86/READY1, all stable. Before/after-vote samples retained
+the previous higher aggregates. This is observed firmware/power behavior,
+not a reason to change the native vote planner. Raw WLAN SMP2P stays1/0.
+The timeout-only hang reader is not invoked on success.
+
+Recovery authenticates the log, verifies image/nonce, observes clean HFSX
+with unchanged write_count462335, primes public RAM metadata and leaves
+verified fastboot. No persistent EFS/storage change. Kernel
+`43c5e9330681f1b9bfafe395ea25d4c9c4b63e2c8b0ad0021de0cfc2775e01dd`;
+image `a2c715d4587d4cebc03cb3fd296d3ed3c4b5e4c82422a174402d177c07dfe833`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x679b44e45b4c0441`.
+
+Next: native SNOC data-plane resource/ABI review and bounded SMMU/CE
+ownership observation before granting any new DMA or programming rings.
+Prioritize the preferred upstream's Linux compatibility, station and
+Apple80211/ifnet layers, adapting ath10k/WCN3990-class hardware to Redfin's
+actual IDs/routes rather than importing WCN6750 hardware. Continue through
+CE/HTC/WMI/HTT, association/data and actual GUI integration. User priority
+remains GUI with working Wi-Fi first; GPU/Metal follows. Neither is complete.
+
 ## REDFIN source-backed native DMON BIN BDF exchange prepared — 2026-10-24
 
 Continues `a73c151`; immediate goal remains GUI with working Wi-Fi,

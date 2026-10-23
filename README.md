@@ -31,7 +31,11 @@ SMEM and Adreno 620 clocks. Guarded DWC3 DMA, high-speed USB enumeration,
 ARP, nonce-bearing ICMP and fresh UDP kernel logs are observed through
 macOS's native CDC-ECM driver with the opt-in AArch64 context profile.
 USB is validated in bounded md0 tests; integration with UFS/GUI remains
-unverified. Display performance, radio and GPU acceleration are still
+unverified. Native MPSS/PAS4, GLINK/QRTR/RMTFS and WLAN firmware readiness
+are now observed in a bounded md0 run: a separate DMON client transfers
+the captured Redfin BDF, gets all acknowledgements and completes CAL_REPORT;
+the kernel receives a real FW_READY indication. Wi-Fi association, packets
+and GUI network integration remain unfinished. Display performance and GPU acceleration are still
 in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

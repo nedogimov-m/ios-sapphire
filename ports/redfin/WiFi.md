@@ -1,7 +1,10 @@
 # Redfin Wi-Fi: evidence and the next two stages
 
-2026-10-22. No XNU Wi-Fi association or data transfer has been demonstrated on
-Pixel 5. A MAC address or an ICNSS probe is not that evidence.
+2026-10-24. Native MPSS/GLINK/QRTR/RMTFS and WLAN firmware readiness pass on
+Pixel 5. A separate DMON client uploads the captured Redfin BIN BDF with
+13 successful ACKs, sends CAL_REPORT and receives a real kernel FW_READY
+indication. CE packet transfer, association and GUI Wi-Fi remain unfinished.
+GUI with working Wi-Fi is the immediate goal; GPU/Metal follows.
 
 The saved live FDT (`research/redfin-root/device.dtb`) and recovery capture
 (`research/redfin-peripherals-v1/buses.txt:12`, `dmesg.txt:1185`) agree:
@@ -24,9 +27,9 @@ and [redbull config](https://android.googlesource.com/kernel/msm/+/500b3a2059c1e
 `CONFIG_ICNSS=m` plus `ICNSS_QMI=y` selects the legacy `icnss.c`, not ICNSS2/WCN6750.
 [BoardConfig](https://android.googlesource.com/device/google/redbull/+/3595d0b214eeeddf87e2c37477e3e74f831eca82/BoardConfig-common.mk#418)
 selects `qcwcn`/`qca_cld3`. The Bluetooth `wcn3990` compatible does not establish
-the exact WLAN RF chip/revision. That needs a WLFW capability response containing
-chip/family/board/SoC IDs and firmware version. The recovery capture has ICNSS
-probe success, but no firmware-ready/capability response.
+the exact WLAN RF chip/revision. Fresh kernel/daemon WLFW CAP now supplies
+chip4320/family4001/SoC400b0000/firmware33197fff. Board_info is absent;
+the native fallback isff, and printed default0 is not a board ID.
 
 The Linux power path enables five RPMh supplies (`vdd-cx-mx`, `vdd-1.8-xo`,
 `vdd-1.3-rfa`, `vdd-3.3-ch1`, `vdd-3.3-ch0`) before its optional
@@ -36,9 +39,11 @@ Modem PIL separately requires RPMh XO/CX/MSS votes, AOP notification and trusted
 [icnss.c power](https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/soc/qcom/icnss.c#574)
 and [QMI setup](https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/soc/qcom/icnss.c#1085).
 WLFW is QMI service `0x45`, version 1, instance 0. Setup registers indications,
-exchanges MSA regions, assigns permissions, signals MSA ready, reads capabilities,
-and waits for firmware ready. Stock firmware, board/calibration assets and their
-exact Redfin IDs are not yet inventoried; the vendor WLAN config is
+exchanges MSA regions, retains Redfin's native fixed permissions, signals
+MSA ready and reads capabilities. Its separate userspace-style DMON host
+then supplies board data and a calibration report before firmware readiness.
+Captured base firmware/board/config assets remain private and hash-bound;
+the current-effective Android/COW view is still unproved. The vendor config is
 `/vendor/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini`.
 
 ## Stage 1: inspect the transport without touching hardware registers
@@ -920,3 +925,11 @@ calibration IDs and no calibration-removal support. Only FW/MSA indications
 are subscribed; no persistent calibration cache is promised. FW_READY stays
 separate from completed BDF/calibration requests. This control-plane profile
 does not yet provide CE packets, association, an iOS interface or GUI Wi-Fi.
+
+Hardware bdf-v1 succeeds: DMON status4 and matching CAP, all13 BDF ACKs
+including the final end/CRC response, CAL_REPORT ACK and actual kernel
+FW_READY indication21. Final worker result0; no DMA rings or association
+are claimed. Final stable PMIC aggregates are480/1800/1304/3000/3000mV,
+MODE4, ENABLE80/STATUS86/READY1. Authenticated recovery confirms unchanged
+clean HFSX and verified fastboot. The next stage owns and validates the
+native SNOC/SMMU/CE data path before publishing an iOS interface.
