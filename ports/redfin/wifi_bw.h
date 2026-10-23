@@ -54,7 +54,8 @@ static inline int rf_wifi_bcm_lookup(const volatile uint8_t *db, unsigned index,
             value.vcd = db[at + 6u]; value.reserved = db[at + 7u];
         }
     }
-    if (matches != 1 || !value.unit || !value.width || value.vcd >= 16 || value.reserved) return -1;
+    if (matches != 1 || (index != 5 && (!value.unit || !value.width)) ||
+        value.vcd >= 16 || value.reserved) return -1;
     *out = value;
     return 0;
 }
@@ -70,8 +71,9 @@ static inline uint32_t rf_wifi_bcm_vote(const struct rf_wifi_bcm *bcm, unsigned 
      */
     static const uint8_t width[RF_WIFI_BW_COUNT] = {8, 16, 16, 16, 4, 4};
     static const uint8_t ports[RF_WIFI_BW_COUNT] = {1, 1, 1, 2, 2, 2};
-    if (!bcm || index >= RF_WIFI_BW_COUNT || !bcm->unit || !bcm->width) return 0;
+    if (!bcm || index >= RF_WIFI_BW_COUNT) return 0;
     if (index == 5) return 0x60000008u; /* Native APPS ACV bit; preserve other bits below. */
+    if (!bcm->unit || !bcm->width) return 0;
     uint64_t ib = index == 4 ? UINT64_C(8171520000) : UINT64_C(3936000000);
     uint64_t x = rf_wifi_bw_div(UINT64_C(393600000) * bcm->width,
         (uint64_t)width[index] * ports[index]);

@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN PAS4 worker enters hardware; ACV bitmask correction — 2026-10-23
+
+Source384c922 / native build152546, `wifi-fw-start-v1-20261023-152942`,
+bootide80a7d529f0ab70a: authenticated/image/nonce-matched capture runs the
+CPU0 worker with interrupts enabled, validates the complete resident source,
+then reaches native BCM parsing. Five numeric BCMs pass; ACV is rejected by
+the generic nonzero unit/width condition. Final result6/phase2, ARC0/BCM0,
+stores0. No PAS call, SMEM allocation or MPSS mapping/copy occurred. Static
+PID1/11heartbeats, verified fastboot return, HFSX clean/unmodified at
+write_count462335. Exact kernel/image/args are the preceding151816/152546
+milestone's v1 identities; the successful source was384c922.
+
+Native `bcm_update_acv_req` encodes APPS bit3 rather than an X/Y bandwidth
+quantity. ACV no longer requires bandwidth divisors, while its directory,
+address, exact8byte AUX, VCD/reserved and ownership bounds remain checked.
+The five numeric resources still require nonzero unit/width. A targeted
+regression covers zero ACV geometry and invalid VCD. All21actual BCM/PAS/
+native-power checks PASS; local native build `build-20261023-153325.log`
+PASS. Fresh full-image/live-FDT/return validation is retained privately.
+Next is the corrected temporaryv2run, not a repeated unsafe PAS attempt.
+
 ## REDFIN complete native PAS4 coordinator prepared — 2026-10-23
 
 Source parent ddd4d02. Added isolated `--wifi-fw-start`, exact

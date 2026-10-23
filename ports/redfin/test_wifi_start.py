@@ -124,6 +124,15 @@ class NativeWifiStartTests(unittest.TestCase):
         for old in (0x80000000, 0x10000000, 1):
             self.assertNotEqual(self.library.floor_vote(0, 0x60000001, old, C.byref(out)), 0)
 
+    def test_acv_is_a_bitmask_and_does_not_require_bandwidth_divisors(self):
+        struct.pack_into('<IH', self.db, 288 + 5 * 8, 0, 0)
+        self.load()
+        self.assertEqual(self.library.lookup(5), 0)
+        self.assertEqual(self.library.vote(5), 0x60000008)
+        struct.pack_into('<B', self.db, 288 + 5 * 8 + 6, 16)
+        self.load()
+        self.assertNotEqual(self.library.lookup(5), 0)
+
     def test_pas4_registers_for_every_native_command_and_both_conventions(self):
         for width in (32, 64):
             for command in (1, 2, 5, 6):

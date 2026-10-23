@@ -752,7 +752,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_bw.h b/iokit/Kernel/arm/redfin_wifi_bw
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_bw.h
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,105 @@
 +/* SPDX-License-Identifier: MIT
 + * Redfin PIL bandwidth: native Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8,
 + * msm_bus_{arb,fabric}_rpmh.c and the live Lito bus graph. No hardware writes.
@@ -809,7 +809,8 @@ new file mode 100644
 +            value.vcd = db[at + 6u]; value.reserved = db[at + 7u];
 +        }
 +    }
-+    if (matches != 1 || !value.unit || !value.width || value.vcd >= 16 || value.reserved) return -1;
++    if (matches != 1 || (index != 5 && (!value.unit || !value.width)) ||
++        value.vcd >= 16 || value.reserved) return -1;
 +    *out = value;
 +    return 0;
 +}
@@ -825,8 +826,9 @@ new file mode 100644
 +     */
 +    static const uint8_t width[RF_WIFI_BW_COUNT] = {8, 16, 16, 16, 4, 4};
 +    static const uint8_t ports[RF_WIFI_BW_COUNT] = {1, 1, 1, 2, 2, 2};
-+    if (!bcm || index >= RF_WIFI_BW_COUNT || !bcm->unit || !bcm->width) return 0;
++    if (!bcm || index >= RF_WIFI_BW_COUNT) return 0;
 +    if (index == 5) return 0x60000008u; /* Native APPS ACV bit; preserve other bits below. */
++    if (!bcm->unit || !bcm->width) return 0;
 +    uint64_t ib = index == 4 ? UINT64_C(8171520000) : UINT64_C(3936000000);
 +    uint64_t x = rf_wifi_bw_div(UINT64_C(393600000) * bcm->width,
 +        (uint64_t)width[index] * ports[index]);
