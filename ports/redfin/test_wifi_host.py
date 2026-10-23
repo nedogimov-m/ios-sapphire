@@ -42,6 +42,7 @@ void reset(void){memset(&host,0,sizeof(host));memset(&assets,0,sizeof(assets));m
 void owner(unsigned value){alive=value;}
 int receive(uint32_t to,uint32_t node,uint32_t from,const uint8_t *data,uint32_t bytes){
  if(to==0x4001)return rf_host_pd(&host,&ops,node,from,data,bytes);
+ if(to==0x4003)return rf_host_rmtfs_refuse(&host,&ops,node,from,data,bytes);
  if(to==0x4002)return rf_host_tftp_request(&host,&ops,node,from,data,bytes);
  return rf_host_tftp_packet(&host,&ops,node,from,to,data,bytes);
 }
@@ -183,6 +184,18 @@ class NativeWifiHostTests(unittest.TestCase):
             if count == 2:
                 self.assertIn(b'msm/modem/root_pd', output)
                 self.assertIn(b'msm/modem/wlan_pd', output)
+
+    def test_rmtfs_observer_cannot_grant_storage_handles_or_buffer_addresses(self):
+        for message, kind, value in ((1, 1, b'/boot/modem_fs1'), (4, 2, struct.pack('<I', 0x280000)),
+                                     (3, 1, struct.pack('<I', 1))):
+            body = bytes([kind]) + struct.pack('<H', len(value)) + value
+            request = struct.pack('<BHHH', 0, 9, message, len(body)) + body
+            self.assertEqual(self.receive(request, to=0x4003), 0)
+            output = self.output()
+            self.assertEqual(len(output), 14)
+            self.assertEqual(struct.unpack_from('<HH', output, 10), (1, 1))
+            self.assertEqual(self.library.metric(4), 0)
+            self.assertEqual(self.library.metric(8), 0)
 
     def test_captured_inventory_hashes_are_consumed_by_the_actual_native_asset_parser(self):
         directory = Path(self.temporary.name) / 'assets'

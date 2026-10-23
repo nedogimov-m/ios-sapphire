@@ -323,8 +323,12 @@ def add_glink_contract(tree, nodes, services=False):
                 nodes.get(incoming, {}).get('qcom,entry-name') != b'ipa\0' or not handle or
                 nodes.get(mapping, {}).get('qcom,smem-states') != handle + words(0)):
             raise ValueError('native IPA SMP2P query/reply binding changed')
+        rmtfs = nodes.get('/soc/qcom,rmtfs_sharedmem@0', {})
+        if (rmtfs.get('compatible') != b'qcom,sharedmem-uio\0' or rmtfs.get('reg') != words(0, 0x280000) or
+                rmtfs.get('reg-names') != b'rmtfs\0' or rmtfs.get('qcom,client-id') != words(1)):
+            raise ValueError('native RMTFS dynamic memory binding changed')
         tree.children[-1].props.append(('host-services', 0,
-            mkadt.u32(2, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1)))
+            mkadt.u32(3, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1, 14, 1, 0x4003)))
 
 
 def main():

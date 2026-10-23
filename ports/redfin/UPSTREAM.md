@@ -256,5 +256,17 @@ modemr.jsn root_pd metadata adds only its actual servreg/GPS services; absent
 PDR/dump services are preserved. The previous root metadata and the reviewed
 Sapphire IPA wire behavior are cross-checks, not replacement hardware IDs.
 
+RMTFS review, 2026-10-23: Google pin's
+`drivers/uio/msm_sharedmem/msm_sharedmem.c` and `secure_buffer.c`, plus
+[linux-msm/rmtfs b30a3eb38f9af283f18dbd3c7755653efc52c094](https://github.com/linux-msm/rmtfs/tree/b30a3eb38f9af283f18dbd3c7755653efc52c094)
+`qmi_rmtfs.{h,c}`, `rmtfs.c`, `sharedmem.c`. Redfin's UIO client1 allocates
+0x280000bytes dynamically, then shares HLOS/MSS permissions; its reg0 is not
+an MMIO/RAM address to reuse. Allocation replies are64bit, IOVEC physical
+fields32bit. The next observer returns explicit unavailability only: it
+cannot grant a handle, DMA buffer or storage access. No upstream partition
+table, EFS writer, ignored assignment failure or guessed pool is imported.
+The extra captured base-vendor JSONs contain no PDR-enable/dump-disable
+service; those absent responses remain grounded in the actual inventories.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

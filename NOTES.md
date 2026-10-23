@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN IPA absent; captured domains reconciled; RMTFS demand observer — 2026-10-23
+
+Source92b40b0/native170237, authenticated matched `wifi-host-v2-20261023-170430`,
+bootidfabaa0c834c9b743: MPSS/GLINK/QRTR repeat successfully,2PDM requests,
+0TFTP,0WLFW through45s. No inbound ipa entry/query appears (0/0/0), so no
+IPA reply is written. HFSX remains clean/unmodified at462335; final fastboot
+verified. Kernel d2752c08bc6e3c50c7e578af902128d3d37191faaaa81d280ceb3121fc04b28c;
+image4ce192041758ad63afdd1fdd5250d26a69153d2f0aae6083165d8deda88ea269.
+Exact v2 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xfabaa0c834c9b743`.
+
+Read-only recovery session captured exactly77,824additional base-vendor bytes
+for4JSON domain files; GPT/super/by-name/size checks match before/after,
+no mounts/disk writes/ramoops access, verified fastboot. ADSP root/sensor/audio
+instance74 and CDSP root76 describe servreg and audio only; no pdr_enabled or
+pddump_disabled service is present. Existing zero-domain replies are retained.
+All JSON/cache/source manifests stay ignored; effective COW view is still unproved.
+
+Reviewed native Google sharedmem-uio and secure_buffer plus linux-msm/rmtfs
+b30a3eb38f9af283f18dbd3c7755653efc52c094. Native Redfin RMTFS memory is dynamic
+(client1,size0x280000), requires a separately owned DMA buffer and HLOS/MSS
+sharing; reg0 is not a physical address to map. Alloc reply is64bit but IOVEC
+physical addresses are32bit. No guessed low pool, memory assignment or EFS
+backend is added. Current schema3 adds only a bounded RMTFS service observer:
+all requests receive explicit native failure, with no valid handle/buffer.
+This will establish actual demand before a real storage/DMA implementation.
+
+42actual host/SMP2P/GLINK checksPASS in1.806s. Native`build-20261023-171716.log`PASS; full
+Image/live-FDT/return preflightPASS; no CI run. Kernel`7acfeb07e8bd0e9d97e48bcfe5fbed620a7d71d17cdf38b23394fdb7bbcbdf60`;image`3fd3c7b597d4fc7737bb8bac8965007c394e99db751519aa7f2fded6a375eb45`.
+Exact v3 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x9800081ed3ee5de7`.
+Next: temporaryhost-v3run, inspect native RMTFS request names/size/ordering;
+continue with an owned low-memory/read-only source design if demanded.
+
 ## REDFIN native pd-mapper request/response hardware PASS; IPA query added — 2026-10-23
 
 Source1b7075c / native build164615. Authenticated/image/nonce-matched

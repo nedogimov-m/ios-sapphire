@@ -740,7 +740,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,706 @@
+@@ -0,0 +1,712 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -806,8 +806,8 @@ new file mode 100644
 +        fw_property(node, "source-contract", witness, sizeof(witness)) && !memcmp(witness, expected, sizeof(witness)) &&
 +        fw_property(node, "channel", name, sizeof(name)) && !memcmp(name, "IPCRTR", sizeof(name));
 +    if (valid && fw_start.host_mode) {
-+        const uint32_t required[13] = {2, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1};
-+        uint32_t actual[13] = {};
++        const uint32_t required[16] = {3, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1, 14, 1, 0x4003};
++        uint32_t actual[16] = {};
 +        valid = fw_property(node, "host-services", actual, sizeof(actual)) && !memcmp(actual, required, sizeof(actual));
 +    }
 +    return valid;
@@ -1200,6 +1200,8 @@ new file mode 100644
 +    if (context->host_mode && to != 0xfffffffeu) {
 +        int error = 0;
 +        if (type == 1 && to == 0x4001) error = rf_host_pd(&context->host, &context->host_ops, source, from, data + at, size);
++        else if (type == 1 && to == 0x4003) error = rf_host_rmtfs_refuse(&context->host, &context->host_ops,
++            source, from, data + at, size);
 +        else if (type == 1 && to == 0x4002) error = rf_host_tftp_request(&context->host, &context->host_ops,
 +            source, from, data + at, size);
 +        else if (type == 1 && to >= 0x4100 && to < 0x5100) error = rf_host_tftp_packet(&context->host,
@@ -1223,8 +1225,9 @@ new file mode 100644
 +        if (context->host_mode && !context->host_announced) {
 +            fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 0x40, 0x101, 1, 0x4001);
 +            fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 4096, 1, 1, 0x4002);
++            fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 14, 1, 1, 0x4003);
 +            context->host_announced = 1;
-+            IOLog("REDFIN WIFI HOST: announced native pd-mapper/TFTP; no storage/RMTFS service\n");
++            IOLog("REDFIN WIFI HOST: announced pd-mapper/TFTP and explicit-unavailable RMTFS observer; no storage access\n");
 +        }
 +    } else if (command == 4 && size >= 20) {
 +        uint32_t service = rf_gl_u32(data + at + 4), instance = rf_gl_u32(data + at + 8);
@@ -1288,6 +1291,9 @@ new file mode 100644
 +                context->host.pd_requests, context->host.requests, context->host.reads, context->host.writes,
 +                context->host.missing, context->pending_count, context->cap_sent, context->cap_received,
 +                context->smp2p.ipa_found, context->smp2p.ipa_state, context->smp2p.ipa_responses);
++            if (context->host_mode && context->host.rmtfs_requests)
++                IOLog("REDFIN WIFI HOST: RMTFS observed=%u last_message=%u (all requests refused)\n",
++                    context->host.rmtfs_requests, context->host.rmtfs_message);
 +        }
 +        if (context->wlfw_port) {
 +            if (!context->host_mode) return 0;
@@ -1927,7 +1933,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_host.h b/iokit/Kernel/arm/redfin_wifi_
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_host.h
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,322 @@
 +/* SPDX-License-Identifier: MIT
 + * Bounded QRTR host services for native MPSS: servreg locator and RAM TFTP.
 + * Wire references: native servreg-locator QMI and tqftpserv; the legacy
@@ -1959,7 +1965,7 @@ new file mode 100644
 +    uint8_t response[RF_HOST_BLOCK + 256];
 +};
 +struct rf_host {
-+    uint32_t poisoned, serial, requests, pd_requests, reads, writes, missing;
++    uint32_t poisoned, serial, requests, pd_requests, reads, writes, missing, rmtfs_requests, rmtfs_message;
 +    struct rf_host_ram ram[4];
 +    struct rf_host_tftp session[8];
 +    uint8_t qmi[512];
@@ -2210,6 +2216,43 @@ new file mode 100644
 +    }
 +    rf_host_le_put(out + 5, used - 7u, 2);
 +    if (o->send(o->context, 0x4001, node, from, out, used)) { h->poisoned = 1; return -1; }
++    return 0;
++}
++/* Observe real RMTFS demand without granting a file handle, buffer address,
++ * physical read/write or successful storage operation. Error values follow
++ * the native service: internal1, malformed2. No EFS backend is present. */
++static inline int rf_host_rmtfs_refuse(struct rf_host *h, const struct rf_host_ops *o, uint32_t node,
++    uint32_t from, const uint8_t *data, uint32_t bytes)
++{
++    if (rf_host_gate(h, o) || bytes < 7 || bytes > 4096 || data[0] || rf_host_le16(data + 5) != bytes - 7u)
++        return -1;
++    uint16_t message = rf_host_le16(data + 3), error = 1;
++    char name[128] = {0}; uint32_t requested = 0, seen = 0;
++    for (uint32_t at = 7; at < bytes;) {
++        if (bytes - at < 3u) { error = 2; break; }
++        uint32_t length = rf_host_le16(data + at + 1), kind = data[at];
++        if (length > bytes - at - 3u) { error = 2; break; }
++        const uint8_t *value = data + at + 3u;
++        if (message == 1 && kind == 1) {
++            if ((seen & 1u) || !length || length >= sizeof(name)) { error = 2; break; }
++            seen |= 1;
++            for (unsigned i = 0; i < length; ++i) {
++                if (value[i] < 32 || value[i] > 126) { error = 2; break; }
++                name[i] = (char)value[i];
++            }
++        } else if (message == 4 && kind == 2) {
++            if ((seen & 2u) || length != 4) { error = 2; break; }
++            seen |= 2;
++            for (unsigned i = 0; i < 4; ++i) requested |= (uint32_t)value[i] << (8u * i);
++        }
++        at += 3u + length;
++    }
++    if (message == 1 && !(seen & 1u)) error = 2;
++    ++h->rmtfs_requests; h->rmtfs_message = message;
++    o->event(o->context, 5u + message, name[0] ? name : "RMTFS unavailable", requested);
++    uint8_t response[14] = {2, 0, 0, 0, 0, 7, 0, 2, 4, 0, 1, 0, 0, 0};
++    memcpy(response + 1, data + 1, 4); rf_host_le_put(response + 12, error, 2);
++    if (o->send(o->context, 0x4003, node, from, response, sizeof(response))) { h->poisoned = 1; return -1; }
 +    return 0;
 +}
 +#endif

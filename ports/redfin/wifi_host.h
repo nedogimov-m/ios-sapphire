@@ -29,7 +29,7 @@ struct rf_host_tftp {
     uint8_t response[RF_HOST_BLOCK + 256];
 };
 struct rf_host {
-    uint32_t poisoned, serial, requests, pd_requests, reads, writes, missing;
+    uint32_t poisoned, serial, requests, pd_requests, reads, writes, missing, rmtfs_requests, rmtfs_message;
     struct rf_host_ram ram[4];
     struct rf_host_tftp session[8];
     uint8_t qmi[512];
@@ -280,6 +280,43 @@ static inline int rf_host_pd(struct rf_host *h, const struct rf_host_ops *o, uin
     }
     rf_host_le_put(out + 5, used - 7u, 2);
     if (o->send(o->context, 0x4001, node, from, out, used)) { h->poisoned = 1; return -1; }
+    return 0;
+}
+/* Observe real RMTFS demand without granting a file handle, buffer address,
+ * physical read/write or successful storage operation. Error values follow
+ * the native service: internal1, malformed2. No EFS backend is present. */
+static inline int rf_host_rmtfs_refuse(struct rf_host *h, const struct rf_host_ops *o, uint32_t node,
+    uint32_t from, const uint8_t *data, uint32_t bytes)
+{
+    if (rf_host_gate(h, o) || bytes < 7 || bytes > 4096 || data[0] || rf_host_le16(data + 5) != bytes - 7u)
+        return -1;
+    uint16_t message = rf_host_le16(data + 3), error = 1;
+    char name[128] = {0}; uint32_t requested = 0, seen = 0;
+    for (uint32_t at = 7; at < bytes;) {
+        if (bytes - at < 3u) { error = 2; break; }
+        uint32_t length = rf_host_le16(data + at + 1), kind = data[at];
+        if (length > bytes - at - 3u) { error = 2; break; }
+        const uint8_t *value = data + at + 3u;
+        if (message == 1 && kind == 1) {
+            if ((seen & 1u) || !length || length >= sizeof(name)) { error = 2; break; }
+            seen |= 1;
+            for (unsigned i = 0; i < length; ++i) {
+                if (value[i] < 32 || value[i] > 126) { error = 2; break; }
+                name[i] = (char)value[i];
+            }
+        } else if (message == 4 && kind == 2) {
+            if ((seen & 2u) || length != 4) { error = 2; break; }
+            seen |= 2;
+            for (unsigned i = 0; i < 4; ++i) requested |= (uint32_t)value[i] << (8u * i);
+        }
+        at += 3u + length;
+    }
+    if (message == 1 && !(seen & 1u)) error = 2;
+    ++h->rmtfs_requests; h->rmtfs_message = message;
+    o->event(o->context, 5u + message, name[0] ? name : "RMTFS unavailable", requested);
+    uint8_t response[14] = {2, 0, 0, 0, 0, 7, 0, 2, 4, 0, 1, 0, 0, 0};
+    memcpy(response + 1, data + 1, 4); rf_host_le_put(response + 12, error, 2);
+    if (o->send(o->context, 0x4003, node, from, response, sizeof(response))) { h->poisoned = 1; return -1; }
     return 0;
 }
 #endif

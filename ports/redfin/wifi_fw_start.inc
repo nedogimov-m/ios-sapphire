@@ -63,8 +63,8 @@ static bool fw_start_glink_contract(void)
         fw_property(node, "source-contract", witness, sizeof(witness)) && !memcmp(witness, expected, sizeof(witness)) &&
         fw_property(node, "channel", name, sizeof(name)) && !memcmp(name, "IPCRTR", sizeof(name));
     if (valid && fw_start.host_mode) {
-        const uint32_t required[13] = {2, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1};
-        uint32_t actual[13] = {};
+        const uint32_t required[16] = {3, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1, 14, 1, 0x4003};
+        uint32_t actual[16] = {};
         valid = fw_property(node, "host-services", actual, sizeof(actual)) && !memcmp(actual, required, sizeof(actual));
     }
     return valid;
@@ -457,6 +457,8 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
     if (context->host_mode && to != 0xfffffffeu) {
         int error = 0;
         if (type == 1 && to == 0x4001) error = rf_host_pd(&context->host, &context->host_ops, source, from, data + at, size);
+        else if (type == 1 && to == 0x4003) error = rf_host_rmtfs_refuse(&context->host, &context->host_ops,
+            source, from, data + at, size);
         else if (type == 1 && to == 0x4002) error = rf_host_tftp_request(&context->host, &context->host_ops,
             source, from, data + at, size);
         else if (type == 1 && to >= 0x4100 && to < 0x5100) error = rf_host_tftp_packet(&context->host,
@@ -480,8 +482,9 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
         if (context->host_mode && !context->host_announced) {
             fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 0x40, 0x101, 1, 0x4001);
             fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 4096, 1, 1, 0x4002);
+            fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 14, 1, 1, 0x4003);
             context->host_announced = 1;
-            IOLog("REDFIN WIFI HOST: announced native pd-mapper/TFTP; no storage/RMTFS service\n");
+            IOLog("REDFIN WIFI HOST: announced pd-mapper/TFTP and explicit-unavailable RMTFS observer; no storage access\n");
         }
     } else if (command == 4 && size >= 20) {
         uint32_t service = rf_gl_u32(data + at + 4), instance = rf_gl_u32(data + at + 8);
@@ -545,6 +548,9 @@ static int fw_start_transport_run(fw_start_context *context)
                 context->host.pd_requests, context->host.requests, context->host.reads, context->host.writes,
                 context->host.missing, context->pending_count, context->cap_sent, context->cap_received,
                 context->smp2p.ipa_found, context->smp2p.ipa_state, context->smp2p.ipa_responses);
+            if (context->host_mode && context->host.rmtfs_requests)
+                IOLog("REDFIN WIFI HOST: RMTFS observed=%u last_message=%u (all requests refused)\n",
+                    context->host.rmtfs_requests, context->host.rmtfs_message);
         }
         if (context->wlfw_port) {
             if (!context->host_mode) return 0;
