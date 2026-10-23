@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN post-readiness APPS SMMU hardware snapshot PASS — 2026-10-24
+
+Source `02dbe26`, local native build030244, authenticated snoc-v1 capture
+matches boot ID4d9ffc7a29b57317. DMON repeats13 successful BDF ACKs and
+CAL_REPORT; kernel receives real FW_READY. The observer completes836 reads,
+stable1/stage4/result0. Exact APPS IDs4c017e51/6000003e/5111, CR0290406,
+global fault/syndromes0. Neither WLANc0/c1 nor IPA521 has a matching route.
+Four inherited valid slots map to banks0/1/2; the additional latent bank0
+reference is retained. Bank3 is unreferenced but configured (SCTLR=e0,
+CBAR=100ff,CBA2R=1,FSR=400); it is not claimed. Banks4..61 are unreferenced
+with M0 but nonzero stable SCTLR words and CBAR/CBA2R/FSR0. There are no
+fully zero blank banks; this is not proof that native allocation is impossible.
+The previously reviewed USB/native allocator uses M, reference/metadata
+state and a software lease, not whole-SCTLR-zero as its allocation rule.
+
+All1249 full host tests PASS (3 optional private cases skipped). Recovery
+authenticates nonce/image, observes clean HFSX/write_count462335, primes
+public metadata and leaves verified fastboot. No persistent partition/EFS
+change. Kernel/image hashes and exact args are unchanged from the prepared
+entry below (`redfinbootid=0x4d9ffc7a29b57317`).
+
+Next: source-backed WLAN_CFG/mission ACK ordering while WLAN stays unmatched
+and host DMA remains ungranted; then an owned context/ring transport using
+fresh validated DMA32 memory. Firmware readiness is not packet transfer,
+association or GUI integration. GPU/Metal remains after working GUI Wi-Fi.
+
 ## REDFIN post-FW_READY native SNOC/SMMU observer prepared — 2026-10-24
 
 Continues `cb31940`; GUI with working Wi-Fi remains the immediate goal,
@@ -19,7 +45,7 @@ actual C/C++ cancellation at every one of837 checks/836 reads, every changed
 second-pass register, foreign/latent routes and FDT/IRQ/provider mutations.
 The actual captured FDT producer contract passes. Native local
 `build-20261024-030244.log` and complete Image/live-FDT/loader/return preflight
-PASS; no CI run. Full host suite is running; hardware remains pending.
+PASS; no CI run. Full1249 host tests subsequently PASS; hardware results above.
 Decompressed Image130086720 bytes stays below the explicit128MiB cap.
 
 Kernel `1aa1fe7bc5a617358ef8509110d5edd4e80f8ac25b51ec1bf576f5bc4e779c0d`;

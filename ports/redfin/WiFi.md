@@ -946,3 +946,12 @@ references from invalid SMRs. A blank, unreferenced context is evidence,
 not an ownership lease. No DMA RAM, route, table or ring is programmed.
 The native next-stage order is WLAN_CFG, acknowledged mission mode and
 owned CE initialization; FW_READY does not alone prove register reachability.
+
+The snoc-v1 device run completes all836 reads with two stable samples and
+the established APPS IDs. Global faults/syndromes are zero and WLANc0/c1
+and IPA521 are unmatched. Bank3 is already configured despite no SMR
+reference; it remains untouched. Banks4..61 have M0/zero CBAR/CBA2R/FSR
+but nonzero SCTLR words, so none meets the deliberately stricter all-zero
+blank diagnostic. Native allocation uses a software bitmap and M/reference
+evidence, as the earlier USB experiment established; this read-only result
+does not reserve any of those banks or authorize packet DMA.
