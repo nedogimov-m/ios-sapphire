@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN physical SID4 model differs from its DT label — 2026-10-24
+
+Source `7d65d82`, native `build-20261024-014122.log`, authenticated
+module-pmic-v1 capture, matched boot ID `b13af599832c0deb`. MPSS/RMTFS/TFTP
+and the native MSA/CAP handshake repeat successfully. The new observer
+reads SID0 REVID `0x1e51`, then SID4 REVID `0x2751`. The saved FDT names
+the latter `pm8150l@4`, but the physical subtype is27 rather than the
+PM8150L header's1f. The exact model guard returns ENOTSUP45 before any
+WLAN supply-candidate reads or new WLAN votes; worker phase12/SMP2P stage4.
+This run is not a30-second FW_READY wait or a physical WLAN power result.
+
+Recovery authenticates the log, verifies image/nonce, observes clean HFSX
+with unchanged write_count462335, re-primes the public RAM metadata and
+leaves verified hardware fastboot. Kernel
+`31e51b3275a4d639383e2c4d1e3776056637d3c236848e74fe39a33dcf08f579`;
+image `9027a9b8efd506f9ad09ad456b4fa5b79192fefed91b66255f8209ccb59c27ad`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xb13af599832c0deb`.
+
+Next: identify physical subtype27 from a pinned source, retain the legacy
+live DT path as a separate input, and update the exact observer model gate
+before repeating. Existing association/data, GPU/native Metal and Bluetooth
+work remains unfinished. No persistent partition changes in this run.
+
 ## REDFIN bounded native WLAN PMIC observer prepared — 2026-10-24
 
 Continues `4c047c2`. Native ICNSS's reviewed post-CAP order contains the
