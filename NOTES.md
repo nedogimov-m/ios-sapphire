@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN first combined GUI8/station run: touch EIO and delayed firmware startup — 2026-10-24
+
+Source `4e5cd5f`, local native `build-20261024-041155.log` (no CI run).
+Authenticated `wifi-gui8-station-v2` capture matches the prepared boot ID.
+Touch power/setup, SEC ID53:45:37:91:00, HID consumer, FUNCTIONS30=61 and
+SENSE_ON succeed. The event worker then stops EIO after48 batches, with
+zero contacts/overflows. GENI is idle, FIFOs empty, command_owned=0 and
+M_IRQ80 (already accepted M_RX_IRQ); this does not establish a GENI IRQ
+failure or a Wi-Fi cause. User reports touch unusable and notes it had
+not been tested recently. Investigate response validation and timing.
+
+Native WLAN power, SCM64, RMTFS sharing, PAS INIT/MEM_SETUP and SMP2P
+prepare succeed. Firmware copying is still in progress at the180s GUI
+shutdown. PAS AUTH and GLINK startup occur afterward. GLINK returns
+RF_GL_CHANGED3; no WLAN readiness, BDF, packet transport, association or
+DHCP occurs. Repeated full GUI/touch/handoff validation in hot callbacks
+is a performance hypothesis to inspect, not a measured root cause yet.
+The touch error precedes host WLAN DMA/SMMU/ring programming.
+
+Recovery authenticates the capture, observes clean HFSX/write_count470136,
+primes public metadata and leaves verified fastboot. No partition is
+flashed; all remote-visible allocations are retained until platform reset.
+Kernel `25b41d8db8e2b99a992e82d6fdd994ba92c42ef3fc3733130eff135226d40cfd`;
+image `13220fbcc422136703a839a1194d40705c81cc53a76614b78bd85cdf7e3515b3`.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x598fae4588b0b1b1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Next: fix the touch failure path and GUI startup/lifetime as one batch,
+then build and run the combined GUI/touch/station image. Actual GUI Wi-Fi
+association/data/DHCP remains the goal; GPU/Metal follows.
+
 ## REDFIN complete GUI8/WLAN packet/station implementation prepared — 2026-10-24
 
 Continues `a1f2abe`. User requests implementing the complete feature batch
