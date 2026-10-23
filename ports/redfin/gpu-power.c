@@ -129,3 +129,5 @@ int redfin_gpu_power_probe(void)
  return 0;
 }
 #endif
+
+#include "redfin_scm_query.c"

@@ -63,6 +63,16 @@ class BuildFlagTests(unittest.TestCase):
                 expected = '--wifi-native-probe' if option == '--wifi-native-probe' else '--gmu-tcm-probe'
                 self.refused([*base, option], expected + ' requires its separate RAM-only profile')
 
+    def test_scm_and_wifi_power_keep_separate_md0_cpu0_profiles(self):
+        for flag in ('--scm-probe', '--wifi-power-probe'):
+            self.refused([flag], flag + ' requires kernel, live DTB, CPU0 and --return-bootloader')
+            base = [flag, '--kernel', '/missing-kernel', '--dtb', '/missing-dtb', '--return-bootloader']
+            self.refused([*base, '--boot-mpidr', '0x100'],
+                         flag + ' requires kernel, live DTB, CPU0 and --return-bootloader')
+            for extra in ('--display', '--splash', '--touch-events', '--ufs-root',
+                          '--smp-probe', '--usb-probe', '--rpmh-probe', '--gpu-probe'):
+                self.refused([*base, extra], flag + ' requires its separate RAM-only profile')
+
     def test_cpu_capability_probe_requires_runtime_return_and_cpu0(self):
         self.refused(['--cpu-capability-probe'],
                      '--cpu-capability-probe requires --kernel, --dtb and --return-bootloader')

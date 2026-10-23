@@ -28,6 +28,13 @@ These options do not enable functional touch, Wi-Fi, USB networking or GPU
 acceleration. Hardware contracts and next steps: [CPU](CPU.md), [touch](TOUCH.md),
 [USB](USB.md), [Wi-Fi](WiFi.md), [GPU](GPU.md), [new upstream](UPSTREAM.md).
 
+New isolated GPU-CX/GMU/native-Wi-Fi/SCM diagnostic builds automatically
+prearm bootloader return in the CPU0 shim, before entering XNU, and retain
+the kernel return check. Their manifests and compiled config are checked
+by the host collector. [SCM.md](SCM.md) describes the query-only TrustZone
+audit. Existing images of these new modes without shim prearm must be
+rebuilt before another automatic cycle.
+
 ## Reproduce
 
 Capture from rooted Android; dumps remain ignored:
@@ -106,6 +113,13 @@ python3 ports/redfin/decode-screen.py logs/redfin/RUN/xnu-console.txt \
 
 The decoder verifies sequence numbers, fixed dimensions, Base64 and CRC32
 before writing PNG files. Missing or truncated records fail validation.
+
+For rescue after an unresolved boot, collect the existing RAM before
+starting another XNU image. `boot-cycle.py --collect-only --from-bootloader
+--recovery-image IMAGE --ramoops-key-dir KEYS --leave-bootloader
+--observe-rootfs` also reads the existing HFS header in verified recovery.
+It performs no filesystem repair or userdata write; check that observation
+before another writable GUI run.
 
 For writable-root tests, add `--shutdown-seconds 120` together with
 `--ufs-root --return-bootloader`. A kernel thread requests ordinary process

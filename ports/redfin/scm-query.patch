@@ -1,0 +1,274 @@
+diff --git a/bsd/dev/redfin_scm_query.c b/bsd/dev/redfin_scm_query.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_scm_query.c
+@@ -0,0 +1,125 @@
++/* SPDX-License-Identifier: MIT */
++/* Included once by the board's diagnostic translation unit. No init hook here. */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include "redfin_scm_query.h"
++
++extern int redfin_spmi_return_ready(void);
++int redfin_scm_query_probe(void);
++static bool sq_attempted;
++static struct { char args[608]; unsigned bytes; } sq_context;
++static const uint32_t sq_targets[]={0x02000201,0x02000202,0x02000205,0x02000206,0x02000207};
++static bool sq_word(const char *p,unsigned bytes,const char *word)
++{ return strlen(word)==bytes && !memcmp(p,word,bytes); }
++static bool sq_flags(const char *args,unsigned bytes)
++{
++ static const char *const words[]={"debug=0xc","serial=3","cpus=1","keepsyms=1","-noprogress","rd=md0",
++  "sweettouch=0","sweetkeys=0","sweetusb=0","sweetcpufreq=0","sweetbattery=0","modem=0","wifi=0","gpu=0",
++  "redfingpu=3","redfinscm=1","redfinspmi=1","redfinreturn=1"};
++ if(!args || !bytes || bytes>608 || args[bytes-1])return false;
++ uint32_t seen=0;bool nonce_seen=false,trace=false;
++ for(unsigned at=0;at<bytes-1;) {
++  if(args[at]==' '){at++;continue;}
++  unsigned first=at;while(at<bytes-1 && args[at]!=' ') {
++   if((unsigned char)args[at]<33 || (unsigned char)args[at]>126)return false;at++;
++  }
++  unsigned n=at-first;bool known=false;
++  for(unsigned i=0;i<sizeof(words)/sizeof(words[0]);i++)if(sq_word(args+first,n,words[i])) {
++   if(seen&(1u<<i))return false;seen|=1u<<i;known=true;break;
++  }
++  if(known)continue;
++  if(sq_word(args+first,n,"-enable_kprintf_spam")){if(trace)return false;trace=true;continue;}
++  if(n==31 && !memcmp(args+first,"redfinbootid=0x",15)) {
++   if(nonce_seen)return false;uint64_t value=0;
++   for(unsigned i=15;i<31;i++) {
++    unsigned digit=(unsigned)(args[first+i]-'0');
++    if(digit>9){if(args[first+i]<'a'||args[first+i]>'f')return false;digit=(unsigned)(args[first+i]-'a'+10);}
++    value=(value<<4)|digit;
++   }
++   if(!value)return false;nonce_seen=true;continue;
++  }
++  return false;
++ }
++ return nonce_seen && seen==((1u<<(sizeof(words)/sizeof(words[0])))-1);
++}
++static bool sq_property(const char *path,const char *key,const void *value,unsigned bytes)
++{
++ DTEntry node;const void *actual=NULL;unsigned length=0;
++ return SecureDTLookupEntry(NULL,path,&node)==kSuccess &&
++  SecureDTGetProperty(node,key,&actual,&length)==kSuccess && actual &&
++  bytes==length && !memcmp(actual,value,bytes);
++}
++static bool sq_contract(void)
++{
++ const uint32_t schema=1,pas[]={4,13};const uint64_t base=0x180000000ULL,bytes=0x80000000ULL;
++ return sq_property("/chosen","dram-base",&base,8) && sq_property("/chosen","dram-size",&bytes,8) &&
++  sq_property("/redfin-scm-query","query-only",&schema,4) &&
++  sq_property("/redfin-scm-query","pas-ids",pas,sizeof(pas)) &&
++  sq_property("/redfin-scm-query","functions",sq_targets,sizeof(sq_targets));
++}
++static bool sq_valid(void *context)
++{
++ const char *live=PE_boot_args();
++ return context==&sq_context && live && sq_context.bytes &&
++  !memcmp(live,sq_context.args,sq_context.bytes) &&
++  __builtin_arm_rsr64("CurrentEL")==4 && !(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) &&
++  redfin_spmi_return_ready()==1 && sq_contract();
++}
++static int sq_invoke(void *context,struct rf_sq_regs *r)
++{
++ if(!sq_valid(context) || !r)return ECANCELED;
++ register uint64_t x0 __asm__("x0")=r->x[0],x1 __asm__("x1")=r->x[1],x2 __asm__("x2")=r->x[2],
++  x3 __asm__("x3")=r->x[3],x4 __asm__("x4")=r->x[4],x5 __asm__("x5")=r->x[5],
++  x6 __asm__("x6")=r->x[6],x7 __asm__("x7")=0;
++ __asm__ volatile("smc #0" : "+r"(x0),"+r"(x1),"+r"(x2),"+r"(x3),"+r"(x4),"+r"(x5),"+r"(x6),"+r"(x7)
++  : : "x8","x9","x10","x11","x12","x13","x14","x15","x16","x17","cc","memory");
++ r->x[0]=x0;r->x[1]=x1;r->x[2]=x2;r->x[3]=x3;r->x[4]=x4;r->x[5]=x5;r->x[6]=x6;r->x[7]=x7;
++ return 0;
++}
++static void sq_delay(void *context,unsigned us){(void)context;delay(us);}
++static uint64_t sq_time(void *context)
++{ (void)context;uint64_t ns=0;absolutetime_to_nanoseconds(mach_absolute_time(),&ns);return ns; }
++static int sq_query(const struct rf_sq_ops *ops,unsigned width,unsigned kind,uint32_t arg,struct rf_sq_report *report)
++{
++ int result=rf_sq_run(ops,width,kind,arg,report);
++ printf("REDFIN SCM QUERY: kind=%u arg=%#x width=%u fn=%#llx result=%d status=%lld value=%#llx/%#llx/%#llx calls=%u resumes=%u busy=%u complete=%u\n",
++  kind,arg,width,report->function,result,report->status,report->value[0],report->value[1],report->value[2],
++  report->calls,report->resumes,report->busy_retries,report->completed);
++ return result;
++}
++int redfin_scm_query_probe(void)
++{
++ if(__atomic_exchange_n(&sq_attempted,true,__ATOMIC_ACQ_REL))return EBUSY;
++ const char *args=PE_boot_args();unsigned length=0;
++ if(!args)return EINVAL;
++ while(length<sizeof(sq_context.args) && args[length])length++;
++ if(length==sizeof(sq_context.args) || !sq_flags(args,length+1))return ENOTSUP;
++ memcpy(sq_context.args,args,length+1);sq_context.bytes=length+1;
++ if(!sq_valid(&sq_context))return ENXIO;
++ const struct rf_sq_ops ops={&sq_context,sq_valid,sq_invoke,sq_delay,sq_time};
++ struct rf_sq_report report;unsigned width=64;
++ int result=sq_query(&ops,width,RF_SQ_DETECT,0,&report);
++ if(result || !report.value[0]) {
++  width=32;result=sq_query(&ops,width,RF_SQ_DETECT,0,&report);
++ }
++ if(result || !report.value[0])return ENOTSUP;
++ bool pas_supported_query=false;
++ for(unsigned i=0;i<sizeof(sq_targets)/sizeof(sq_targets[0]);i++) {
++  result=sq_query(&ops,width,RF_SQ_AVAILABLE,sq_targets[i],&report);
++  if(!sq_valid(&sq_context))return ECANCELED;
++  if(sq_targets[i]==0x02000207)pas_supported_query=!result && report.value[0]!=0;
++ }
++ if(pas_supported_query)for(unsigned i=0;i<2;i++) {
++  result=sq_query(&ops,width,RF_SQ_PAS_SUPPORTED,i?13:4,&report);
++  if(!sq_valid(&sq_context))return ECANCELED;
++ }
++ printf("REDFIN SCM QUERY: finished query-only ABI/call/PAS capability audit; no init/auth/reset/shutdown/assignment\n");
++ return 0;
++}
++#endif /* ARM64_BOARD_CONFIG_SWEET */
+diff --git a/bsd/dev/redfin_scm_query.h b/bsd/dev/redfin_scm_query.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_scm_query.h
+@@ -0,0 +1,94 @@
++/* SPDX-License-Identifier: MIT */
++/* Read-only Qualcomm SCM queries. Native protocol reference: Google msm
++ * 500b3a2059c1eec0fec08ec56add06320ea901a8, drivers/soc/qcom/scm.c:
++ * is_scm_armv8(), __scm_call_armv8_64(), scm_is_call_available().
++ * No metadata pointer, PAS init/auth/reset/shutdown or memory assignment. */
++#ifndef REDFIN_SCM_QUERY_H
++#define REDFIN_SCM_QUERY_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <sys/errno.h>
++
++enum { RF_SQ_DETECT=1, RF_SQ_AVAILABLE, RF_SQ_PAS_SUPPORTED };
++struct rf_sq_regs { uint64_t x[8]; };
++struct rf_sq_ops {
++ void *context;
++ bool (*valid)(void *);
++ int (*invoke)(void *,struct rf_sq_regs *);
++ void (*delay_us)(void *,unsigned);
++ uint64_t (*time_ns)(void *);
++};
++struct rf_sq_report {
++ uint32_t convention,kind,argument,calls,resumes,busy_retries;
++ uint64_t function,value[3],elapsed_ns;
++ int64_t status;
++ bool completed;
++};
++static inline bool rf_sq_target(uint32_t function)
++{
++ return function==0x02000201 || function==0x02000202 ||
++  function==0x02000205 || function==0x02000206 || function==0x02000207;
++}
++static inline bool rf_sq_request(unsigned convention,unsigned kind,uint32_t argument,
++ struct rf_sq_regs *registers)
++{
++ if(!registers || (convention!=32 && convention!=64))return false;
++ const uint32_t width=convention==64?0x40000000u:0;
++ *registers=(struct rf_sq_regs){{0}};
++ if(kind==RF_SQ_DETECT && !argument) {
++  registers->x[0]=0x82000601u|width;
++  registers->x[2]=0x82000601u; /* Native legacy-SCM convention detection. */
++ } else if(kind==RF_SQ_AVAILABLE && rf_sq_target(argument)) {
++  registers->x[0]=0x02000601u|width;registers->x[2]=argument;
++ } else if(kind==RF_SQ_PAS_SUPPORTED && (argument==4 || argument==13)) {
++  registers->x[0]=0x02000207u|width;registers->x[2]=argument;
++ } else return false;
++ registers->x[1]=1;
++ return true;
++}
++static inline int rf_sq_run(const struct rf_sq_ops *ops,unsigned convention,
++ unsigned kind,uint32_t argument,struct rf_sq_report *report)
++{
++ struct rf_sq_regs request,live;
++ if(!ops || !report || !ops->valid || !ops->invoke || !ops->delay_us || !ops->time_ns ||
++    !rf_sq_request(convention,kind,argument,&request))return EINVAL;
++ *report=(struct rf_sq_report){0};
++ report->convention=convention;report->kind=kind;report->argument=argument;
++ report->function=request.x[0];
++ if(!ops->valid(ops->context))return ECANCELED;
++ uint64_t start=ops->time_ns(ops->context);
++ live=request;
++ for(;;) {
++  if(!ops->valid(ops->context))return ECANCELED;
++  uint64_t now=ops->time_ns(ops->context);
++  if(now<start || now-start>200000000ULL)return ETIMEDOUT;
++  report->elapsed_ns=now-start;
++  /* Only the exact initial query or its interrupted continuation can enter. */
++  if(live.x[0]!=request.x[0] && live.x[0]!=1)return EINVAL;
++  live.x[7]=0;
++  int error=ops->invoke(ops->context,&live);
++  report->calls++;
++  if(error)return error;
++  if(!ops->valid(ops->context))return ECANCELED;
++  now=ops->time_ns(ops->context);
++  if(now<start || now-start>200000000ULL)return ETIMEDOUT;
++  report->elapsed_ns=now-start;
++  report->status=convention==32?(int64_t)(int32_t)(uint32_t)live.x[0]:(int64_t)live.x[0];
++  for(unsigned i=0;i<3;i++)report->value[i]=convention==32?(uint32_t)live.x[i+1]:live.x[i+1];
++  if(report->status==1) {
++   if(++report->resumes>16)return ETIMEDOUT;
++   continue; /* Preserve returned x1..x6 including the native resume cookie. */
++  }
++  if(report->status==-12) {
++   if(report->busy_retries>=3)return EBUSY;
++   report->busy_retries++;
++   if(!ops->valid(ops->context))return ECANCELED;
++   ops->delay_us(ops->context,30000);
++   live=request;
++   continue;
++  }
++  report->completed=true;
++  return report->status?EIO:0;
++ }
++}
++#endif /* REDFIN_SCM_QUERY_H */
+diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
+--- a/bsd/dev/redfin_gpu_power.c
++++ b/bsd/dev/redfin_gpu_power.c
+@@ -129,3 +129,5 @@
+  return 0;
+ }
+ #endif
++
++#include "redfin_scm_query.c"
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -115,6 +115,7 @@
+ void redfin_usb_probe(void);
+ int redfin_gpu_probe(void);
+ int redfin_gpu_power_probe(void);
++int redfin_scm_query_probe(void);
+ void redfin_wifi_native_observe(void);
+ int redfin_rpmh_probe(void);
+ int redfin_touch_rail_observe(void);
+@@ -177,7 +178,8 @@
+  for (unsigned i = 0; i < 6; i++) {
+   (void)PE_parse_boot_argn(names[i], &modes[i], sizeof(modes[i]));
+   if (modes[i] > 1 && !((i == 0 && modes[i] == 2) ||
+-      (i == 1 && (modes[i] == 2 || modes[i] == 3)) || ((i == 2 || i == 3) && modes[i] == 2))) {
++      (i == 1 && (modes[i] == 2 || modes[i] == 3)) || (i == 2 && modes[i] == 2) ||
++      (i == 3 && (modes[i] == 2 || modes[i] == 3)))) {
+    IOLog("REDFIN PERIPHERALS: unsupported mode; observers skipped\n");
+    return;
+   }
+@@ -194,6 +196,14 @@
+  static uint32_t attempted;
+  if (__atomic_exchange_n(&attempted, 1, __ATOMIC_RELAXED)) return;
+  IOLog("REDFIN PERIPHERALS: bootloader return verified before observers\n");
++ if (modes[3] == 3) {
++  if (modes[0] || modes[1] || modes[2] || modes[4] || modes[5]) {
++   IOLog("REDFIN SCM QUERY: refused competing observers\n");
++   return;
++  }
++  IOLog("REDFIN SCM QUERY: experiment result=%d\n", redfin_scm_query_probe());
++  return;
++ }
+  if (modes[2] == 2) {
+   if (modes[0] || modes[1] || modes[3] || modes[4] || modes[5]) {
+    IOLog("REDFIN WIFI NATIVE: refused competing observers\n");

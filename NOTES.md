@@ -1,5 +1,61 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GMU attempt unresolved; autonomous device access unavailable — 2026-10-23
+
+Source `3bd5dc8`/GMU`ab1f463`; local ARM64 build
+`build-20261023-043115.log` succeeds. Kernel
+`1b55eb66f3683cb41cf3acf12f774b5603ecfa38421ee83f75edd9193817d026`, image `gmu-tcm-v1`
+`85dc0fb1edfdec36bdc587dfe63adc15a15a79c2fda28dda018cc74da0b1b953`. Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xf7be2de3bdd0e7b9`.
+Temporary fastboot boot was accepted. Collector waited360s and recorded
+no-log/no-fastboot: XNU outcome is unknown. No fresh XNU/GMU capture exists.
+USB subsequently reports Google Pixel5/ADB unauthorized; this does not
+establish the running OS. Host ADB restart did not authorize it, and the
+safe reboot-to-bootloader request was rejected by ADB authentication.
+No recovery image was sent after this failure. Current on-device HFS state
+is unobserved; no claim is made that GMU clocks/counter/TCM succeeded.
+Host backups, frozen kernels/images and prior authenticated logs are retained;
+no flash/media operation was issued by this md0 experiment. User is asleep;
+no physical screen/USB authorization or reset has been requested.
+Next when fastboot becomes available: temporary safe recovery, collect the
+existing encrypted RAM before any new XNU boot, then read/verify HFS header
+before another RW GUI run. Do not boot Android without restoring its backup.
+Offline work continues; future GMU adapter will log critical access breadcrumbs.
+A bounded private host waiter now watches only the already-known device's
+fastboot identity for2hours (`logs/redfin/rescue-wait/`). If available, it
+boots only the verified offline recovery, collects the pre-existing RAM and
+reads the HFS header using `--observe-rootfs`, then returns to fastboot.
+It sends no XNU image and does nothing to an unauthorized ADB environment.
+
+## REDFIN pre-kernel return and query/power images prepared — 2026-10-23
+
+New isolated UP GPU/GMU/native-Wi-Fi/SCM builds automatically compile the
+already-proved CPU0 shim prearm leaf before payload/ADT/kernel checks, while
+retaining redfinspmi=1/redfinreturn=1 and the kernel's return verifier. The
+host recovery cycle checks exact compiled gates/config hash, diagnostic
+selectors, frozen args, md0/no-writer policy and nonce; old modern-probe
+images without this prearm are no longer admitted. Five prearm policy tests
+and30buildertests PASS; original shim/UP/SMP/GUI guards remain separate.
+This is software hardening after the unresolved boot; no new device result
+for these combined profiles is claimed.
+
+New query-only SCM engine follows pinned native legacy scm.c ABI detection,
+standard call availability and PAS_SUPPORTED4/13. It preserves interrupted
+resume cookies, bounds retries/deadline and enforces its query-only allowlist;
+no firmware init/auth/reset/shutdown/assignment. Five actual-engine tests
+PASS; local full ARM64 build `build-20261023-045451.log` succeeds. Wi-Fi
+`80dc3cd` supplies cold SMP2P/lifecycle under trusted ops; `e74fa90` adds
+retained CX7/MSS6/XO3 and native AOP modem-on,106focusedWi-Fitests/private
+nativeARM64 compile PASS. Neither new power nor SMP2P has run on hardware.
+GPU `d2e5ef5` readonly64KiB global SMMU snapshot and `8d53e19` CPU-only4KiB
+page tables remain unwired:93focusedGPUtests, nativeprivate-Werror and403
+sanitized scenarios PASS. These do not prove SMMU ownership or firmware start.
+
+Prepared `scm-query-v1` kernel `46e3eeb6500d48f526a0c1cda3f6777fee9953ab7c3665e6709334efd0859c8f`; image `5c39900434a27cbdb835879851d5c5e58de67fbcc812a24829a93ae2b56c8db5`. Exact intended args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=3 redfinscm=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x8e18ecd81e118bf4`. Complete real payload/ADT/liveFDT and shim+kernel return policy PASS; not booted.
+
+Prepared `wifi-power-v1` kernel `46e3eeb6500d48f526a0c1cda3f6777fee9953ab7c3665e6709334efd0859c8f`; image `b391c1c7af749d3ece684f788b02759118530ff4eb8bfc22fe56c6ba77c8fa1c`. Exact intended args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwifipower=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x3428f9031ee4f9f5`. Complete real payload/ADT/liveFDT and shim+kernel return policy PASS; not booted.
+
+Unfinished: recover device access/old RAM, fresh GMU result and optional RO SMMU probe; native SCM capabilities, Wi-Fi power/SMP2P/PAS4/GLINK/WLFW, association/data; GPU firmware execution/commands/rendering and physical90Hz.
+
 ## REDFIN native Wi-Fi prerequisite hardware proof; GMU chain integrated — 2026-10-23
 
 Native AOP/platform source `be1f813`, read-only observer `f8647a4`, root

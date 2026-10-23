@@ -62,7 +62,60 @@ def xnu_return_proof(image):
         if len(boot_ids) != 1 or match is None or int(match[1], 16) == 0:
             raise ValueError("redfinbootid requires exactly one nonzero 16-digit lowercase hexadecimal token")
         proof["boot_id"] = match[1]
+    modern = any(manifest.get(name) is True for name in
+                 ('gpu_power_probe', 'wifi_native_probe', 'scm_probe'))
+    if (modern or any(token in tokens for token in ('redfingpu=2', 'redfingpu=3', 'redfinwifinative=1')) or
+            manifest.get('diagnostic_prearm', False) is not False):
+        diagnostic_return_profile(image, manifest, tokens)
+        proof['armed_by'] = 'shim'
+        proof['kernel_return_check'] = True
     return proof
+
+
+def diagnostic_return_profile(image, manifest, tokens):
+    """Bind new UP diagnostics to the proven pre-kernel shim return leaf."""
+    flags = ('gpu_power_probe', 'gmu_tcm_probe', 'wifi_native_probe',
+             'wifi_power_probe', 'scm_probe')
+    if any(type(manifest.get(name, False)) is not bool for name in flags):
+        raise ValueError('UP diagnostic selectors must be boolean')
+    primary = [name for name in ('gpu_power_probe', 'wifi_native_probe', 'scm_probe')
+               if manifest.get(name) is True]
+    if (len(primary) != 1 or manifest.get('diagnostic_prearm') is not True or
+            manifest.get('shim_early_return') is not True or
+            manifest.get('root_device') != 'md0' or
+            type(manifest.get('shutdown_seconds')) is not int or manifest['shutdown_seconds'] != 0 or
+            any(manifest.get(name) is not False for name in ('root_writable', 'cpu_copy_display',
+                'capture_screen', 'userspace_stacks', 'syscall_tracing', 'splash_reservation_assumption')) or
+            (manifest.get('gmu_tcm_probe') is True and primary != ['gpu_power_probe']) or
+            (manifest.get('wifi_power_probe') is True and primary != ['wifi_native_probe'])):
+        raise ValueError('UP prearm requires one isolated md0 diagnostic')
+    required = set(('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
+        'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 '
+        'modem=0 wifi=0 gpu=0 redfinspmi=1 redfinreturn=1').split())
+    if primary == ['gpu_power_probe']:
+        required.update(('redfingpu=2', 'redfingpupower=1', 'redfinrpmh=1'))
+        if manifest.get('gmu_tcm_probe') is True:
+            required.add('redfingmu=1')
+    elif primary == ['wifi_native_probe']:
+        required.update(('redfinwifi=2', 'redfinwifinative=1'))
+        if manifest.get('wifi_power_probe') is True:
+            required.add('redfinwifipower=1')
+    else:
+        required.update(('redfingpu=3', 'redfinscm=1'))
+    values = [token for token in tokens if not token.startswith('redfinbootid=')
+              and token != '-enable_kprintf_spam']
+    if (manifest['boot_args'] != ' '.join(tokens) or len(values) != len(required) or
+            set(values) != required or tokens.count('-enable_kprintf_spam') > 1 or
+            len([token for token in tokens if token.startswith('redfinbootid=')]) != 1):
+        raise ValueError('UP prearm boot args do not match their diagnostic manifest')
+    config = image.with_name('config.h').read_bytes()
+    if (len(config) > 4096 or b'\0' in config or
+            hashlib.sha256(config).hexdigest() != manifest['sha256'].get('config.h')):
+        raise ValueError('UP prearm config checksum mismatch')
+    for name, value in (('SHIM_EARLY_RETURN', 1), ('REDFIN_SMP_PROBE', 0), ('REDFIN_SMP_GUI', 0)):
+        expected = f'#define {name} {value}'.encode()
+        if re.findall(rb'^#define ' + name.encode() + rb'[^\n]*$', config, re.MULTILINE) != [expected]:
+            raise ValueError('UP prearm requires an exact compiled shim/UP profile')
 
 
 def smp_gui_return_profile(image, manifest, arguments, checksum):
@@ -410,7 +463,8 @@ class Cycle:
 
     def observe_rootfs(self):
         """Observe the selected HFS root; a header cannot certify filesystem health."""
-        if self.manifest.get("xnu_return", {}).get("root_device") != "ufsroot0":
+        if (self.manifest.get("xnu_return", {}).get("root_device") != "ufsroot0" and
+                not getattr(self.args, 'observe_rootfs', False)):
             return
         observation = self.manifest["rootfs"] = {"status": "unavailable"}
         if not self.recovery_verified:
@@ -672,6 +726,7 @@ def main(argv=None):
     parser.add_argument("--recovery-image", type=Path, help="temporary root-ADB image with a matching bootloader-return manifest.json")
     parser.add_argument("--from-bootloader", action="store_true", help="start in fastboot; skip initial Android access")
     parser.add_argument("--leave-bootloader", action="store_true", help="reboot to verified redfin fastboot after collecting")
+    parser.add_argument("--observe-rootfs", action="store_true", help="read existing HFS userdata header in verified recovery, including collect-only rescue")
     parser.add_argument("--ramoops-helper", type=Path)
     parser.add_argument("--ramoops-key-dir", type=Path, help="host-only priv.pem, public pub.pem (both 0600), and verified vendor ramoops executable; recovery only")
     parser.add_argument("--raw-ramoops", action="store_true", help="diagnostic only: may block Android's alt-bank switch")
@@ -686,6 +741,8 @@ def main(argv=None):
         parser.error("--recovery-image must be an existing RAM boot image")
     if args.collect_only and args.from_bootloader and not args.recovery_image:
         parser.error("--collect-only --from-bootloader requires --recovery-image")
+    if args.observe_rootfs and not args.recovery_image:
+        parser.error('--observe-rootfs requires the verified offline recovery')
     try:
         args.out.mkdir(parents=True, exist_ok=False)
     except OSError as error:
