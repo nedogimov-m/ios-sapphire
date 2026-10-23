@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native WLAN VRM observer and chain capability prepared — 2026-10-23
+
+Continues `68f4e57`. Reviewed native ICNSS consumer overrides and PMIC5 VRM
+provider init behavior. Actual live DT sets CX consumer0/0 (provider init
+352mV), chain supplies3000..3312mV, default XO1800mV/RFA1304mV, native LPM
+mode4 and no optional XO pin clock binding. New `--wifi-wlan-observe` binds
+all five unique supply references/provider constraints and reads their
+native CMD-DB VRM resources twice through the proven read-only mapping.
+It records matching inherited queued TCS metadata with enabled/idle state,
+without inferring current aggregate regulator outputs. There is no new RSC,
+PMIC, clock or WLAN write API. A bounded recovery `/dev/mem` read could not
+provide a complete CMD-DB snapshot; that session returned to verified
+fastboot without disk writes, and the XNU reader is used instead.
+
+CAP now preserves optional native TLV0x1b chain capability, allowing the
+later power stage to honor native chain1 exclusion for1x1. Existing RF IDs
+and optional board presence remain separate. After successful CAP the
+observer keeps GLINK/TFTP/RMTFS and indications pumping through45s while
+waiting for FW_READY. Old setup-only behavior stays selectable.
+
+All200 Wi-Fi checks PASS (3 optional private cases skipped), including5new
+actual VRM/chain/producer cases and compiled native observer regressions.
+Local native `build-20261023-183559.log` PASS; no CI run. Actual complete
+Image/live-FDT/shim-return preflight PASS; hardware observation is pending.
+Kernel `25a837b7f646dc942e7f11cda6cdd00902899a98254aa95cf5a1abe675c91d44`; image `6e56b5db8b8c6f01c661901f8a59cd4314ac10a8fdb24122c2c4f1661fa2ea6c`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x030a9c2f01f2ec6d`.
+
+Next: temporary observer run; pin actual resource addresses/metadata and
+chain capability, observe any late FW_READY/BDF requests, then implement
+the source-backed typed WLAN power sequence. Association/data, GPU/Metal
+and Bluetooth remain unfinished.
+
 ## REDFIN native WLFW MSA and CAP hardware PASS — 2026-10-23
 
 Source `06b353e`, local native `build-20261023-181558.log` (no CI run).

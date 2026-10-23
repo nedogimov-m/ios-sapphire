@@ -301,5 +301,19 @@ kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`, `redwood_wlfw.c`:
 its WCN6750 indication/HOST_CAP/CAP order is useful protocol context, but
 does not replace Redfin's legacy MSA exchange or native client/instance IDs.
 
+ICNSS supply review after CAP succeeds, 2026-10-23: the same pinned
+`icnss_get_vreg_info`, `icnss_vreg_on`, `icnss_get_clk_info` and
+`rpmh-regulator.c` establish the consumer/provider split. Actual Redfin
+overrides `vdd-cx-mx-config` to0/0 (provider init voltage352mV) and both
+3.3V-chain requests to3000..3312mV. XO/RFA use native1800/1304mV defaults.
+All five providers are PMIC5 LDO VRM resources with native LPM selector4;
+the optional XO pin clock has no live DT binding. CAP TLV0x1b is the optional
+signed32-bit chain capability; native ICNSS skips chain1 for value1.
+The observer binds these exact DT inputs and reads the five named VRM
+records twice through the already-owned read-only CMD-DB mapping. Queued
+inherited TCS entries retain their enabled/idle metadata; they are not a
+measurement of current aggregate regulator outputs. No WLAN VRM/PMIC/clock
+write is added in this observation stage.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

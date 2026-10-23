@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <string.h>
 struct rf_wlfw_cap {
-    uint32_t valid, chip, family, board, soc, firmware;
+    uint32_t valid, chip, family, board, soc, firmware, chain;
     uint16_t result, error;
 };
 static inline uint16_t rf_qmi_u16(const uint8_t *p) { return (uint16_t)p[0] | (uint16_t)p[1] << 8; }
@@ -43,6 +43,10 @@ static inline int rf_wlfw_cap_parse(struct rf_wlfw_cap *out, const uint8_t *data
             bit = 16;
             if (length < 4 || length > 128) return -1;
             parsed.firmware = rf_qmi_u32(value); parsed.valid |= 8;
+        } else if (type == 0x1b) {
+            bit = 32;
+            if (length != 4) return -1;
+            parsed.chain = rf_qmi_u32(value); parsed.valid |= 16;
         }
         if (bit && (seen & bit)) return -1;
         seen |= bit; at += 3u + length;

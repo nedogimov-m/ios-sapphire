@@ -21,7 +21,7 @@ diff --git a/iokit/Kernel/arm/RedfinWiFiProbe.cpp b/iokit/Kernel/arm/RedfinWiFiP
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinWiFiProbe.cpp
-@@ -0,0 +1,745 @@
+@@ -0,0 +1,774 @@
 +/* SPDX-License-Identifier: MIT
 + * Redfin native Wi-Fi prerequisites and separately gated retained power/AOP
 + * experiment. The default path maps read-only. redfinwifipower=1 additionally
@@ -41,6 +41,7 @@ new file mode 100644
 +#include "../../../bsd/dev/redfin_rpmh.h"
 +#include "../../bsddev/redfin_wifi_smem.h"
 +#include "redfin_wifi_bw.h"
++#include "redfin_wifi_wlan.h"
 +
 +extern "C" int redfin_spmi_return_ready(void);
 +extern "C" void redfin_wifi_fw_source_probe(void);
@@ -657,6 +658,34 @@ new file mode 100644
 +        wf_power_rsc_guard(&wf_power) ? 0 : EPERM;
 +}
 +
++extern "C" int redfin_wifi_wlan_resources_observe(void)
++{
++    DTEntry node;
++    const uint32_t expected[10] = {1, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000};
++    uint32_t actual[10] = {}, observe = 0; uint8_t names[sizeof(rf_wlan_supply_names)] = {};
++    if (redfin_wifi_power_audit() || SecureDTLookupEntry(NULL, "/redfin-wifi-wlan", &node) != kSuccess ||
++        !wf_property(node, "source-contract", actual, sizeof(actual)) || memcmp(actual, expected, sizeof(actual)) ||
++        !wf_property(node, "resource-names", names, sizeof(names)) || memcmp(names, rf_wlan_supply_names, sizeof(names)) ||
++        !wf_property(node, "observe-only", &observe, sizeof(observe)) || observe != 1) return EPERM;
++    rf_wlan_resources resources = {};
++    if (rf_wlan_resources_read((const volatile uint8_t *)wf_power.base[WFP_DB], &resources) ||
++        redfin_wifi_power_audit()) return EIO;
++    for (unsigned i = 0; i < RF_WLAN_SUPPLIES; ++i) {
++        const rf_cmddb_resource *r = &resources.supply[i];
++        IOLog("REDFIN WIFI WLAN: VRM %.8s address=%#x type=%u aux=%#x/%u priorities=%#x/%#x; observed only\n",
++            rf_wlan_supply_names[i], r->address, r->type, r->aux_version, r->aux_bytes, r->priority[0], r->priority[1]);
++        for (unsigned slot = 0; slot < 8; ++slot) for (unsigned command = 0; command < wf_power.commands && command < 16; ++command) {
++            const wf_slot *inherited = &wf_power.inherited[slot];
++            uint32_t address = inherited->command[command][1];
++            if (address >= r->address && address <= r->address + 12u)
++                IOLog("REDFIN WIFI WLAN: inherited TCS=%u command=%u enabled=%u idle=%u address=%#x value=%#x\n",
++                    slot, command, (inherited->enabled >> command) & 1u, inherited->idle,
++                    address, inherited->command[command][2]);
++        }
++    }
++    return redfin_wifi_power_audit();
++}
++
 +static void wf_power_probe(void)
 +{
 +    wf_power_context *context = &wf_power;
@@ -874,6 +903,52 @@ new file mode 100644
 +        if (y < old_y) y = old_y;
 +    }
 +    *out = 0x60000000u | (x << 14) | y;
++    return 0;
++}
++#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_wlan.h b/iokit/Kernel/arm/redfin_wifi_wlan.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_wlan.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: MIT
++ * Read-only discovery of legacy ICNSS's five native CMD-DB VRM resources.
++ * Include after redfin_rpmh.h. No RSC, PMIC, clock or WLAN write API here.
++ */
++#ifndef REDFIN_WIFI_WLAN_H
++#define REDFIN_WIFI_WLAN_H
++#define RF_WLAN_SUPPLIES 5u
++static const uint8_t rf_wlan_supply_names[RF_WLAN_SUPPLIES][8] = {
++    "ldoa1", "ldoa14", "ldoc2", "ldoc11", "ldoc10"};
++struct rf_wlan_resources { struct rf_cmddb_resource supply[RF_WLAN_SUPPLIES]; };
++static inline int rf_wlan_resources_read(const volatile uint8_t *db, struct rf_wlan_resources *out)
++{
++    if (!db || !out) return -1;
++#ifdef __cplusplus
++    struct rf_wlan_resources first = {}, second = {};
++#else
++    struct rf_wlan_resources first = {0}, second = {0};
++#endif
++    for (unsigned pass = 0; pass < 2; ++pass) {
++        struct rf_wlan_resources *selected = pass ? &second : &first;
++        for (unsigned i = 0; i < RF_WLAN_SUPPLIES; ++i) {
++            struct rf_cmddb_resource *r = &selected->supply[i];
++            if (rf_cmddb_lookup(db, RF_CMDDB_BYTES, rf_wlan_supply_names[i], RF_CMDDB_VRM, r) != RF_CMDDB_OK ||
++                r->type != RF_CMDDB_VRM || !r->address || (r->address & 3u) || r->address > UINT32_MAX - 12u)
++                return -1;
++            for (unsigned j = 0; j < i; ++j) {
++                uint32_t prior = selected->supply[j].address;
++                if (r->address < prior + 16u && prior < r->address + 16u) return -1;
++            }
++        }
++    }
++    for (unsigned i = 0; i < RF_WLAN_SUPPLIES; ++i) {
++        const struct rf_cmddb_resource *a = &first.supply[i], *b = &second.supply[i];
++        if (a->address != b->address || a->type != b->type || a->aux_version != b->aux_version ||
++            a->aux_bytes != b->aux_bytes || a->priority[0] != b->priority[0] || a->priority[1] != b->priority[1])
++            return -1;
++    }
++    *out = first;
 +    return 0;
 +}
 +#endif

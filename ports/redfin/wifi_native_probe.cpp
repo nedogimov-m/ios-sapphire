@@ -17,6 +17,7 @@
 #include "../../../bsd/dev/redfin_rpmh.h"
 #include "../../bsddev/redfin_wifi_smem.h"
 #include "redfin_wifi_bw.h"
+#include "redfin_wifi_wlan.h"
 
 extern "C" int redfin_spmi_return_ready(void);
 extern "C" void redfin_wifi_fw_source_probe(void);
@@ -631,6 +632,34 @@ extern "C" int redfin_wifi_power_audit(void)
 {
     return !redfin_wifi_power_held() && wf_power_tables(&wf_power, false) &&
         wf_power_rsc_guard(&wf_power) ? 0 : EPERM;
+}
+
+extern "C" int redfin_wifi_wlan_resources_observe(void)
+{
+    DTEntry node;
+    const uint32_t expected[10] = {1, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000};
+    uint32_t actual[10] = {}, observe = 0; uint8_t names[sizeof(rf_wlan_supply_names)] = {};
+    if (redfin_wifi_power_audit() || SecureDTLookupEntry(NULL, "/redfin-wifi-wlan", &node) != kSuccess ||
+        !wf_property(node, "source-contract", actual, sizeof(actual)) || memcmp(actual, expected, sizeof(actual)) ||
+        !wf_property(node, "resource-names", names, sizeof(names)) || memcmp(names, rf_wlan_supply_names, sizeof(names)) ||
+        !wf_property(node, "observe-only", &observe, sizeof(observe)) || observe != 1) return EPERM;
+    rf_wlan_resources resources = {};
+    if (rf_wlan_resources_read((const volatile uint8_t *)wf_power.base[WFP_DB], &resources) ||
+        redfin_wifi_power_audit()) return EIO;
+    for (unsigned i = 0; i < RF_WLAN_SUPPLIES; ++i) {
+        const rf_cmddb_resource *r = &resources.supply[i];
+        IOLog("REDFIN WIFI WLAN: VRM %.8s address=%#x type=%u aux=%#x/%u priorities=%#x/%#x; observed only\n",
+            rf_wlan_supply_names[i], r->address, r->type, r->aux_version, r->aux_bytes, r->priority[0], r->priority[1]);
+        for (unsigned slot = 0; slot < 8; ++slot) for (unsigned command = 0; command < wf_power.commands && command < 16; ++command) {
+            const wf_slot *inherited = &wf_power.inherited[slot];
+            uint32_t address = inherited->command[command][1];
+            if (address >= r->address && address <= r->address + 12u)
+                IOLog("REDFIN WIFI WLAN: inherited TCS=%u command=%u enabled=%u idle=%u address=%#x value=%#x\n",
+                    slot, command, (inherited->enabled >> command) & 1u, inherited->idle,
+                    address, inherited->command[command][2]);
+        }
+    }
+    return redfin_wifi_power_audit();
 }
 
 static void wf_power_probe(void)

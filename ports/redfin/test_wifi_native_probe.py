@@ -26,6 +26,7 @@ HARNESS = r'''
 #include "wifi_smem.h"
 #include "redfin_rpmh.h"
 #include "wifi_bw.h"
+#include "wifi_wlan.h"
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
 typedef uintptr_t DTEntry;

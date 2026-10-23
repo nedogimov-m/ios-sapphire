@@ -368,6 +368,48 @@ def add_wlfw_contract(tree, nodes):
         ('shim-verified', mkadt.u32(0))]))
 
 
+def add_wlan_observer_contract(tree, nodes):
+    """Bind the native ICNSS consumers/providers before reading VRM metadata."""
+    names = ('ldoa1', 'ldoa14', 'ldoc2', 'ldoc11', 'ldoc10')
+    supply_keys = ('vdd-cx-mx', 'vdd-1.8-xo', 'vdd-1.3-rfa', 'vdd-3.3-ch1', 'vdd-3.3-ch0')
+    children = ('regulator-pm8150-l1', 'regulator-pm8150-l14', 'regulator-pm8150a-l2',
+                'regulator-pm8150a-l11', 'regulator-pm8150a-l10')
+    bounds = ((352000, 952000, 352000), (1616000, 1984000, 1616000), (1144000, 1328000, 1144000),
+              (3000000, 3312000, 3000000), (3000000, 3312000, 3000000))
+    words = lambda *values: struct.pack('>' + 'I' * len(values), *values)
+    icnss = nodes.get('/soc/qcom,icnss@18800000', {})
+    if (not any(child.name == 'redfin-wifi-wlfw' for child in tree.children) or
+            any(key in icnss for key in ('clocks', 'clock-names'))):
+        raise ValueError('native WLAN observer requires fixed legacy setup and absent optional XO pin clock')
+    for index, name in enumerate(names):
+        path = '/soc/rsc@18200000/rpmh-regulator-' + name
+        provider, consumer = nodes.get(path, {}), nodes.get(path + '/' + children[index], {})
+        reference = consumer.get('phandle', consumer.get('linux,phandle'))
+        if (provider.get('compatible') != b'qcom,rpmh-vrm-regulator\0' or
+                provider.get('status', b'okay\0') not in (b'okay\0', b'ok\0') or
+                consumer.get('status', b'okay\0') not in (b'okay\0', b'ok\0') or
+                provider.get('qcom,resource-name') != name.encode() + b'\0' or
+                provider.get('qcom,regulator-type') != b'pmic5-ldo\0' or not reference or
+                icnss.get(supply_keys[index] + '-supply') != reference or
+                consumer.get('qcom,set') != words(3) or consumer.get('qcom,init-mode') != words(2) or
+                any(consumer.get(key) != words(value) for key, value in zip(
+                    ('regulator-min-microvolt', 'regulator-max-microvolt', 'qcom,init-voltage'), bounds[index]))):
+            raise ValueError('native WLAN VRM supply/provider binding changed: ' + name)
+        matches = [path for path, props in nodes.items() if props.get('phandle', props.get('linux,phandle')) == reference]
+        if matches != [path + '/' + children[index]]:
+            raise ValueError('native WLAN supply reference is ambiguous')
+        config = icnss.get('qcom,' + supply_keys[index] + '-config')
+        expected = words(0, 0) if index == 0 else words(3000000, 3312000) if index >= 3 else None
+        if config != expected:
+            raise ValueError('native WLAN consumer voltage/load/delay config changed')
+    if any(child.name == 'redfin-wifi-wlan' for child in tree.children):
+        raise ValueError('duplicate native WLAN observer contract')
+    tree.children.append(mkadt.node('redfin-wifi-wlan', [
+        ('source-contract', mkadt.u32(1, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000)),
+        ('resource-names', b''.join(name.encode().ljust(8, b'\0') for name in names)),
+        ('observe-only', mkadt.u32(1))]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dtb', required=True, type=Path)

@@ -809,3 +809,12 @@ SoC0x400b0000 and firmware0x33197fff (valid mask0xd); board_info is absent,
 so its default0 must not be treated as an ID. Native absent-board fallback
 is0xff. FW_READY is still unobserved; RF supplies/clocks and packet DMA
 remain the next separate bring-up stages.
+
+`--wifi-wlan-observe` extends the proved legacy setup with a read-only
+CMD-DB VRM observer and continues pumping host services through the bounded
+45-second window while awaiting FW_READY. It binds the live five supply
+references, PMIC5 provider constraints/init mode, actual ICNSS overrides and
+absent optional XO pin clock. Native TLV0x1b chain capability is retained
+separately from RF identity. The observer reports `ldoa1`, `ldoa14`, `ldoc2`,
+`ldoc11`, `ldoc10` addresses/metadata and any matching inherited TCS entries;
+it adds no RSC, PMIC, clock or WLAN write operation.
