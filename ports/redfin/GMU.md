@@ -235,10 +235,10 @@ separate boundary.
 
 [`gmu-probe.c`](gmu-probe.c), [`gmu-probe.h`](gmu-probe.h) and the additive
 [`gmu-probe.patch`](gmu-probe.patch) supply the synchronous kernel adapter.
-The patch adds only `bsd/dev/redfin_gmu_probe.c`, `redfin_gmu_probe.h` and a
-byte-identical `redfin_gmu_tcm.h`. A separate integration change must compile
-the C source and connect it to the existing CX owner; this patch changes no
-startup, loader, root or legacy GPU path.
+The patch adds only `bsd/dev/redfin_gmu_probe.c`, `redfin_gmu_probe.h`, and
+byte-identical `redfin_gmu_tcm.h` / `redfin_gpu_smmu.h`. A separate integration
+change must compile the C source and connect it to the existing CX owner;
+this patch changes no startup, loader, root or legacy GPU path.
 
 The parent first calls read-only
 `redfin_gmu_probe_contract(frozen_args, args_bytes)` before its first ARC or
@@ -264,9 +264,10 @@ The exact args are the existing isolated UP/md0 CX profile plus exactly one
 `redfinspmi=1`, `redfinreturn=1`, `cpus=1`, `rd=md0` and all eight legacy
 touch/key/USB/CPU-frequency/battery/modem/Wi-Fi/GPU zero flags remain required.
 The base debug/serial/keepsyms/progress words are exact; a unique nonzero
-16-digit lowercase hex `redfinbootid` is mandatory. Only a single optional
-`-enable_kprintf_spam` is admitted. Duplicate, unrecognized, GUI, UFS,
-alternate CPU-count and numeric-truncation variants fail before mapping.
+16-digit lowercase hex `redfinbootid` is mandatory. A single optional
+`-enable_kprintf_spam` and the separately bound read-only `redfinsmmu=1`
+extension in [GPU-SMMU.md](GPU-SMMU.md) are admitted. Duplicate, unrecognized,
+GUI, UFS, alternate CPU-count and numeric-truncation variants fail before mapping.
 
 [`gmu_probe.py:add_contract()`](gmu_probe.py) runs after the matching
 `gpu_power.add_contract()`. It validates native GCC/GPUCC identities and
@@ -291,16 +292,17 @@ and those IRQ checks; it does not access a GMU CSR just by mapping the range.
 Its helper's narrow per-register allowlist additionally excludes GX/SMMU
 controller/PDC/RSC/debug-mux writes and CM3 reset release.
 
-Run `python3 -m unittest ports/redfin/test_gmu_probe.py`. The 19 adapter/FDT
+Run `python3 -m unittest ports/redfin/test_gmu_probe.py`. The 42 adapter/FDT
 tests compile the actual C adapter and invoke the real leaf, including all
-1,280 ADT property bits, exact native-controller binding, missing-zero GICD
-regression, every parent-lifetime failure point, late args/ADT/IRQ changes,
+1,280 GMU and 1,280 additional SMMU ADT bits, exact native-controller binding,
+missing-zero GICD regression, every parent-lifetime failure point, late args/ADT/IRQ changes,
 and complete reset-held TCM restoration with measured guard overhead.
 The local captured native FDT also passes the generator; no device operation
 or downloaded artifact is part of these tests. A private adapter copy also
 passes the real DEVELOPMENT_ARM64_SWEET BSD compiler flags and kernel
-headers. ASan/UBSan pass all adapter parent-lifetime edges/1,280 property
-mutations and all leaf guard/read/write edges. A full linked kernel and
+headers. The extended adapter's private ASan/UBSan run passes 13,558 cases,
+including all parent-lifetime edges and 2,560 property mutations; the leaf's
+guard/read/write edges were checked separately. A full linked kernel and
 physical GMU observation remain the caller's next validation.
 
 ## Remaining full-boot and secure-GPU contracts

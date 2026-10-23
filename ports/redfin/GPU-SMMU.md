@@ -2,9 +2,9 @@
 
 [`include/redfin_gpu_smmu.h`](include/redfin_gpu_smmu.h) implements a bounded
 read-only global-register snapshot. It has no write callback, reads no
-context-bank page and grants no DMA/context ownership. Its new code is not
-connected to the current TCM kernel startup. The held-CX/clock/reset proofs
-in [GMU.md](GMU.md) must precede a separately selected hardware experiment.
+context-bank page and grants no DMA/context ownership. The optional adapter
+mode below requires this call's fresh held-CX and successful reset-held TCM
+proof from [GMU.md](GMU.md). Its hardware result remains unobserved.
 [`include/redfin_gmu_pagetables.h`](include/redfin_gmu_pagetables.h) separately
 constructs CPU-only 4KiB tables from owned allocations. It installs no table
 or route and is also unwired.
@@ -35,18 +35,18 @@ TLB invalidation/sync, fault acknowledgements and table-memory dereferences.
 Native `arm-smmu.c:78` explicitly documents hypervisor interception of global
 register accesses, including a deployed bug involving stores sourced from
 WZR/XZR. The preferred upstream therefore uses explicit scalar `ldr wN` and
-`str wN` instruction forms. A future read-only adapter should use an explicit
-scalar `ldr` plus the normal Device read-completion barrier. This snapshot
-does not issue a store of any kind to the hardware. HYP-mediated globals and
+`str wN` instruction forms. The adapter uses an explicit scalar `ldr wN`
+plus `dmb oshld`, confirmed in a native ARM64 object. This snapshot does not
+issue a store of any kind to the hardware. HYP-mediated globals and
 physical context-bank pages are separate access boundaries.
 
 The native SMMU clock list is GPU MEMNOC, GPU SNOC DVM, GPUCC AHB and the
 GPUCC HLOS1 SMMU clock vote. The existing TCM stage enables those branches,
-but a new snapshot must revalidate its held power/clock and CM3/GX-reset
-lifetime before each register read. Native global/context interrupt SPIs
-673 and 678–685 correspond to GIC INTIDs 705 and 710–717. A future exact-mode
-adapter must prove those interrupts unowned/masked, not pending and inactive;
-it must not mask or acknowledge an inherited owner as part of observation.
+and the adapter revalidates its held power/clock and CM3/GX-reset lifetime
+before each register read. Native global/context interrupt SPIs 673 and
+678–685 correspond to GIC INTIDs 705 and 710–717. The selected adapter requires
+all of them disabled, not pending and inactive. It never masks or acknowledges
+an inherited interrupt owner as part of observation.
 
 ## Snapshot interface and interpretation
 
@@ -90,6 +90,79 @@ ownership, a safe route/IRQ lease or permission to modify a HYP-owned bank.
 All of those are still required before a translation context can be enabled.
 The native `qcom,skip-init` path preserves bootloader handoff; do not reset
 the global SMMU or replace another stream's route to acquire a context.
+
+## Exact optional kernel mode
+
+The existing synchronous `redfin_gmu_probe_contract()` / `redfin_gmu_probe()`
+API is unchanged. The exact isolated GMU1 profile from [GMU.md](GMU.md) admits
+one optional `redfinsmmu=1`; no other value or duplicate is accepted.
+`redfin_gmu_args_select(args, bytes_including_NUL, &smmu_requested)` reports
+the selection only on a fully valid profile. Invalid args leave the selection
+output unchanged. No flag means the original TCM hardware-write sequence and
+no SMMU mapping, access or SMMU IRQ check, even if an unused ADT node exists.
+
+The parent calls `redfin_gmu_probe_contract()` before its first ARC/GDSC
+write. In the selected mode this validates both exact ADT leaves, so a missing,
+malformed or incompatible SMMU policy cannot first be discovered after parent
+power writes. The common builder supplies the new leaf through
+`gmu_probe.add_contract(tree, native_nodes, smmu=True)` after the existing
+matching CX contract. The default call still emits only the old GMU leaf.
+Both additions are atomic: a failed native input leaves the tree unchanged.
+
+Native validation checks the full modern SMMU/TCU resource tuple, native
+64KiB legacy wrapper and protection metadata, skip-init/three-level flags,
+both descriptions' four clock phandles/IDs/names, CX supply and GIC parent,
+all nine native IRQ triples, and the GMU children's verified SMMU phandle,
+stream IDs 4/5, mask `0x400` and disabled generic DMA. GCC MEMNOC/SNOC-DVM
+are IDs 35/36 at `0x7100c/0x71018`. GMU AXI's ID 13 at `0x71154` is a
+separate DDRSS clock. A mismatched 128KiB upstream aperture is rejected.
+
+The little-endian `/redfin-gpu-smmu` contract is:
+
+| Property | Exact values |
+| --- | --- |
+| `reg` (64-bit pair) | `[0x03da0000,0x10000]` |
+| `chip-id` | `0x06020001` |
+| `stream-map` | `[4,0x400,5,0x400]` |
+| `format-policy` | `[0x1000,0x8000,128,8,39,36]`: register page, global half, stream/context bounds, minimum prospective-map VA/PA bits |
+| `clock-policy` | Four `[unit,offset,mask,expected]` rows below; unit 0 GCC, 1 GPUCC |
+| `interrupts` | `[705,710,711,712,713,714,715,716,717]` |
+
+| Clock | Policy row |
+| --- | --- |
+| MEMNOC | `[0,0x7100c,0x80000001,1]` |
+| SNOC DVM | `[0,0x71018,0x80000001,1]` |
+| GPUCC AHB | `[1,0x1078,1,1]`; native HALT_DELAY does not promise a HALT status bit |
+| HLOS1 SMMU vote | `[1,0x5000,0x80000001,1]` |
+
+GICD `+0x158/+0x258/+0x358` mask `0x3fc2` must stay clear. These checks
+join the existing GMU IRQ and parent/CPU0/EL1/return/argument/ADT lifetime.
+The adapter binds all 14 GMU/SMMU/chosen properties and rechecks their bytes.
+
+SMMU entry requires this call's `RF_GT_DONE`, zero error, held reset, verified
+200MHz source, live counter and fully restored clean DTCM. The first GMU
+summary is printed before attempting the new stage. Before mapping globals
+and before each snapshot read, the adapter checks the current parent lease,
+native PLL/source/votes, collapsed GX, all four SMMU clocks and GPU_MISC,
+CM3 reset 1 and idle INIT/HFI state. Only `0x03da0000+0x8000` is CPU-mapped;
+every context-bank page remains unmapped. The read callback accepts only the
+global allowlist and issues one explicit scalar `LDR` with its read barrier.
+The snapshot's interface still has no write callback.
+
+First-access breadcrumbs precede critical GPLL0/feed/clock and GMU CSR/TCM
+accesses. Each register/direction logs once; restoration has one bounded
+marker. SMMU breadcrumbs mark IDs, globals, routing, GR1 metadata and the
+second pass. Logging is followed by fresh lease validation before MMIO.
+Polling iterations do not emit a log stream, and counter-window timing is
+not extended by a first-access log. After capture, bounded CPU-only dumps
+print raw IDs, routes and CBAR/CBA2R; route/GR1 dumps require a complete first
+pass. Partial ID readiness is explicit, and derived route analysis appears
+only for a stable snapshot. Unreferenced contexts are explicitly not owned.
+
+Failure never releases the held ARC floor, clears faults/IRQs, changes a
+route, reads a CB page, installs a table or starts firmware. The public call
+returns the new snapshot result when selected, and the original TCM result
+otherwise. Its one-shot entry remains consumed after success or refusal.
 
 ## Memory-map plan after ownership proof
 
@@ -179,8 +252,21 @@ snapshot header. The 13 tests cover complete double snapshots, every
 read/lease failure and every second-pass register change, the native-size
 boundary, latent references, stream aliases/ambiguity, malformed fields,
 fault preservation and an allowlist excluding all context/TCU/TBU/TLB access.
-These results are host observations. No GPU-SMMU hardware read or new kernel
-startup is enabled by this milestone.
+These results are host observations; they do not establish GPU-SMMU hardware
+access or context ownership.
+
+`python3 -m unittest ports/redfin/test_gmu_probe.py` now passes 42 adapter/FDT
+tests. They cover native contracts and atomicity, all 2,560 GMU/SMMU ADT bits,
+all 9,963 selected-parent lifetime edges, every one of 114 SMMU read lifetime
+revocations and all 57 second-pass register changes. Fresh source/reset/bus/
+GX/args/binding failures, inherited and late IRQs, first-access logging
+revocations, geometry refusal, first-pass log completeness and original-mode
+hardware-write parity are exercised. The locally captured native FDT also
+passes the selected generator. A private standalone ASan+UBSan run passes
+13,558 scenarios; a private native object built with actual XNU
+`DEVELOPMENT_ARM64_SWEET` BSD compiler flags and `-Werror` confirms scalar
+`LDR` followed by `dmb oshld`. No prepared build tree or device is changed
+by these checks.
 
 `python3 -m unittest ports/redfin/test_gmu_pagetables.py` adds 19 host tests.
 An independent three-level descriptor walker checks every emitted entry,
@@ -195,9 +281,10 @@ cases. The private header copy also passes the actual XNU
 `DEVELOPMENT_ARM64_SWEET` BSD compiler flags with `-Werror`.
 These are CPU-memory results; no table is installed or firmware started.
 
-Next: after physical reset-held TCM success, bind a separate exact read-only
-GPU-SMMU mode to that same successful lifetime and collect native IDs/routes.
-Only then decide whether any candidate bank/SME can receive an independent
+Next: collect a fresh authenticated temporary-boot result for reset-held TCM
+and the separately selected read-only snapshot. Hardware TCM/SMMU success is
+not claimed by this source milestone. Only then decide whether any candidate
+bank/SME can receive an independent
 software/hypervisor ownership grant and validated 4KiB page tables.
 
 [hackios]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
