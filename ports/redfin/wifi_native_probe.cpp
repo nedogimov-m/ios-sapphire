@@ -608,10 +608,26 @@ extern "C" int redfin_wifi_power_start(void)
 extern "C" int redfin_wifi_power_held(void)
 {
     wf_power_context *context = &wf_power;
+    /* The retained worker sealed its one RSC writer after completion. Children
+     * recheck the exact owner/profile/maps and our ACTIVE slot, without walking
+     * the complete immutable CMD-DB directory for every copy/readback chunk.
+     * Full inherited-table/CMD-DB audits run at phase boundaries and checkpoints.
+     */
     return context->firmware && context->held == 7 &&
         context->bandwidth_held == (1u << RF_WIFI_BW_COUNT) - 1u &&
         context->phase == WFP_AOP_ON && context->aop.load_state == 1 &&
-        !wf_power_check(context) && wf_power_tables(context, false) && wf_power_rsc_guard(context) ? 0 : EPERM;
+        !wf_power_check(context) && wf_power_word(context, WFP_RSC, 0) == context->id &&
+        wf_power_word(context, WFP_RSC, 0xcu) == context->config &&
+        wf_power_word(context, WFP_RSC, 0xd04u) == 0 &&
+        wf_power_word(context, WFP_RSC, 0xd14u) == 0 &&
+        wf_power_word(context, WFP_RSC, 0xd1cu) == 0 &&
+        wf_power_word(context, WFP_RSC, 0xd10u) == 0 ? 0 : EPERM;
+}
+
+extern "C" int redfin_wifi_power_audit(void)
+{
+    return !redfin_wifi_power_held() && wf_power_tables(&wf_power, false) &&
+        wf_power_rsc_guard(&wf_power) ? 0 : EPERM;
 }
 
 static void wf_power_probe(void)

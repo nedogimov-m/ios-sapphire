@@ -673,3 +673,13 @@ allocation remain disabled until this session's INIT and MEM_SETUP succeed.
 TrustZone's acceptance of that high metadata pointer is a separate hardware
 question, not inferred from SCM convention detection. Exact v2 observations
 and the v3 image/arguments are recorded in NOTES.md.
+
+V3 hardware accepts the separate high metadata pointer: PAS4 INIT returns
+status0/value0 after two native interrupted continuations, MEM_SETUP returns
+0/0, and the guarded SMP2P allocator publishes its outbound item successfully.
+The captured run reaches768copy chunks without AUTH or remote ready. V4
+removes repeated whole-table walks from nested child checks: exact owner,
+CPU/thread/profile/mappings and the idle owned ACTIVE slot remain checked
+for every child operation; full CMD-DB/inherited-state audits run before PAS
+and every256chunks. Votes remain retained, with the sole RSC writer sealed.
+The next hardware run must prove complete copy/readback and AUTH separately.

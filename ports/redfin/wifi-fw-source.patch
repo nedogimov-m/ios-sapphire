@@ -739,7 +739,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,405 @@
+@@ -0,0 +1,412 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -753,6 +753,7 @@ new file mode 100644
 +
 +extern "C" int redfin_wifi_power_start(void);
 +extern "C" int redfin_wifi_power_held(void);
++extern "C" int redfin_wifi_power_audit(void);
 +/* Built-in XNU worker exit; declaration is private to Mach compilation in
 + * this pinned kernel's kern/thread.h. This is not an external kext KPI. */
 +extern "C" void thread_terminate_self(void);
@@ -862,7 +863,7 @@ new file mode 100644
 +}
 +static int fw_start_pas(fw_start_context *context, unsigned command)
 +{
-+    if (fw_start_check(context) || !context->power ||
++    if (fw_start_check(context) || !context->power || redfin_wifi_power_audit() ||
 +        (command == 6 && context->phase != FW_START_RESET) ||
 +        (command == 1 && (context->phase != FW_START_INIT || context->initialized ||
 +            fw_probe.boot.source.stage != RF_WIFI_FW_METADATA)) ||
@@ -988,7 +989,10 @@ new file mode 100644
 +    if (!data || !destination) return EPERM;
 +    memcpy(destination, data, bytes);
 +    __asm__ volatile("dsb osh" ::: "memory");
-+    if (!(++context->copies % 256u)) IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
++    if (!(++context->copies % 256u)) {
++        if (redfin_wifi_power_audit()) return EPERM;
++        IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
++    }
 +    return fw_start_check(context);
 +}
 +static int fw_start_zero(void *opaque, uint64_t physical, uint32_t bytes)
@@ -998,7 +1002,10 @@ new file mode 100644
 +    if (!destination || context->phase != FW_START_COPY) return EPERM;
 +    memset(destination, 0, bytes);
 +    __asm__ volatile("dsb osh" ::: "memory");
-+    if (!(++context->copies % 256u)) IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
++    if (!(++context->copies % 256u)) {
++        if (redfin_wifi_power_audit()) return EPERM;
++        IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
++    }
 +    return fw_start_check(context);
 +}
 +static int fw_start_readback(void *opaque, uint64_t physical, uint8_t *data, uint32_t bytes)

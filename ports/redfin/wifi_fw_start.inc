@@ -11,6 +11,7 @@
 
 extern "C" int redfin_wifi_power_start(void);
 extern "C" int redfin_wifi_power_held(void);
+extern "C" int redfin_wifi_power_audit(void);
 /* Built-in XNU worker exit; declaration is private to Mach compilation in
  * this pinned kernel's kern/thread.h. This is not an external kext KPI. */
 extern "C" void thread_terminate_self(void);
@@ -120,7 +121,7 @@ static int fw_start_invoke(void *opaque, rf_sq_regs *registers)
 }
 static int fw_start_pas(fw_start_context *context, unsigned command)
 {
-    if (fw_start_check(context) || !context->power ||
+    if (fw_start_check(context) || !context->power || redfin_wifi_power_audit() ||
         (command == 6 && context->phase != FW_START_RESET) ||
         (command == 1 && (context->phase != FW_START_INIT || context->initialized ||
             fw_probe.boot.source.stage != RF_WIFI_FW_METADATA)) ||
@@ -246,7 +247,10 @@ static int fw_start_copy(void *opaque, uint64_t physical, const uint8_t *data, u
     if (!data || !destination) return EPERM;
     memcpy(destination, data, bytes);
     __asm__ volatile("dsb osh" ::: "memory");
-    if (!(++context->copies % 256u)) IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
+    if (!(++context->copies % 256u)) {
+        if (redfin_wifi_power_audit()) return EPERM;
+        IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
+    }
     return fw_start_check(context);
 }
 static int fw_start_zero(void *opaque, uint64_t physical, uint32_t bytes)
@@ -256,7 +260,10 @@ static int fw_start_zero(void *opaque, uint64_t physical, uint32_t bytes)
     if (!destination || context->phase != FW_START_COPY) return EPERM;
     memset(destination, 0, bytes);
     __asm__ volatile("dsb osh" ::: "memory");
-    if (!(++context->copies % 256u)) IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
+    if (!(++context->copies % 256u)) {
+        if (redfin_wifi_power_audit()) return EPERM;
+        IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
+    }
     return fw_start_check(context);
 }
 static int fw_start_readback(void *opaque, uint64_t physical, uint8_t *data, uint32_t bytes)

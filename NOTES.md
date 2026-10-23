@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN PAS4 INIT/MEM_SETUP and SMP2P hardware PASS; copy pacing — 2026-10-23
+
+Sourcecc94617 / native build154143. Fresh authenticated/image/nonce-matched
+`wifi-fw-start-v3-20261023-154345`, bootid6ee1419bf91d039a, repeats all9
+ARC/BCM votes and acknowledged AOP state. Its separate high metadata page
+is accepted by SMC64 PAS4 INIT: status0/value0 after3calls/2resumes. Exact
+PAS4 MEM_SETUP returns0/0 in1call. SMP2P prepares successfully,stage2,
+92stores/1kick under the native allocator lock. MPSS copies reach at least
+768completed copy/zero chunks before the last captured progress line.
+Static PID1 records11heartbeats; recovery authenticates the matching capture,
+observes clean/unmodified HFSX/write_count462335 and verifies final fastboot.
+No AUTH/remote ready, completed entire image copy or Wi-Fi is claimed.
+
+V3 kernel f5cf5c6d9f21881c12d70b048eef83ad41f2f4c26201ed99d9f8f0d50bd0a283;
+image e7b96a9073e46fa394c5f653b4e1ce93c50f98be0e5a68f2b84f6513ded4739d.
+Exact v3 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=2 redfinspmi=1 redfinreturn=1 redfinbootid=0x6ee1419bf91d039a`.
+
+Source review identifies avoidable whole-CMD-DB/inherited-RSC walks inside
+EVERY nested child lease check. Current v4 checks the exact sealed owner,
+CPU/thread/profile/maps and idle owned ACTIVE slot for each child operation.
+Complete resource/inherited-state audits remain before PAS and every256copy
+chunks. The one RSC writer is sealed in AOP_ON, all alternate drivers/IRQs
+remain disabled, and retained votes cannot be released/retried. This reduces
+work per chunk while preserving live ownership gates. Slow guard processing
+is the current explanation for the earlier bounded run, not a measured profile.
+
+33focusednative power/PAS/dispatch checks PASS in1.503s. Local native build
+`build-20261023-154749.log` PASS; complete actual Image/live-FDT/return preflight PASS.
+Kernel `6e12470409beaabb7e81c96789bedb2e5ca6364ae81303c6a6aeec480c09bcf2`; image `b20269c9c01504cfecea27f5070d1ef5369f9f229a8446d91df304b8d23b77a6`.
+Exact v4 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=2 redfinspmi=1 redfinreturn=1 redfinbootid=0x921aa40b67cb0805`.
+Next: the corrected temporaryv4run through full copy/AUTH/fresh ready.
+
 ## REDFIN native bandwidth hardware PASS; cold PAS sequence corrected — 2026-10-23
 
 Source b810426 / local native build153325. Authenticated/image/nonce-matched
