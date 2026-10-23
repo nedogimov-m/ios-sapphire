@@ -1,0 +1,21 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -1047,8 +1047,15 @@
+ 	int livelog = ud.guard.redfin ? 0 : 1;
+ 	PE_parse_boot_argn(ud.guard.redfin?"redfinusblog":"sweetusblog", &livelog, sizeof(livelog));
+     if (ud.guard.redfin && ud.guard.enum_only) livelog=0;
+-	if (livelog && ud.ifp != NULL && kernel_thread_start(ud_log_thread, NULL, &thread) == KERN_SUCCESS) {
+-		thread_deallocate(thread);
++	if (livelog && ud.ifp != NULL) {
++		if (kernel_thread_start(ud_log_thread, NULL, &thread) == KERN_SUCCESS) {
++			thread_deallocate(thread);
++		} else if (ud.guard.redfin) {
++			/* The event worker may already own active DMA. Propagate failure
++			 * to the existing owned quiesce path; retain the slab and route. */
++			rf_usb_gadget_fail(&ud.guard, EIO);
++			return;
++		}
+ 	}
+ }
+ 
