@@ -3167,10 +3167,12 @@ diff --git a/bsd/dev/redfin_wifi_pmic.inc b/bsd/dev/redfin_wifi_pmic.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_wifi_pmic.inc
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,153 @@
 +/* SPDX-License-Identifier: MIT
 + * Included at the end of redfin_spmi.c, after the existing rail observer.
-+ * Google msm500b3a2: spmi-pmic-arb.c v5, qpnp-revid.h PM8150/PM8150L.
++ * Google msm500b3a2: spmi-pmic-arb.c v5, qpnp-revid.h PM8150.
++ * Physical SID4 REVID2751 is authenticated on this Redfin; the live DT's
++ * pm8150l label does not establish its model name. Pin the observed identity.
 + * Qualcomm firmware20bb8ae: common LDO4000/stride100, pm_ldo_driver_init's
 + * type4/subtype>=30 unified layout and pm_pwr_alg VSET_VALID42/43.
 + * SID1 LDO ordering is already observed on Redfin. SID5 pages remain named
@@ -3286,7 +3288,7 @@ new file mode 100644
 +  error = redfin_wp_read(&redfin_wp.targets[i], 4, 2, &model);
 +  printf("REDFIN WIFI PMIC: phase=%u SID%u REVID=%#x result=%d\n", phase, i * 4u, model, error);
 +  if (error) goto out;
-+  if (model != (i ? 0x1f51 : 0x1e51)) { error = ENOTSUP; goto out; }
++  if (model != (i ? 0x2751 : 0x1e51)) { error = ENOTSUP; goto out; }
 + }
 + for (unsigned i = 2; i < 7; ++i) {
 +  const struct redfin_rail_target *t = &redfin_wp.targets[i];
@@ -3309,7 +3311,7 @@ new file mode 100644
 +  uint16_t model = 0;
 +  error = redfin_wp_read(&redfin_wp.targets[i], 4, 2, &model);
 +  if (error) goto out;
-+  if (model != (i ? 0x1f51 : 0x1e51)) { error = EAGAIN; goto out; }
++  if (model != (i ? 0x2751 : 0x1e51)) { error = EAGAIN; goto out; }
 + }
 + ++redfin_wp.next_phase;
 +out:

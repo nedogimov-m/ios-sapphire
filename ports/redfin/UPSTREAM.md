@@ -359,5 +359,15 @@ write. The new optional observer reuses the existing SPMI mappings and
 checks the live native MPSS child before every read command/poll. It adds
 no PMIC/GPIO/clock write, RSC vote, memory assignment or readiness policy.
 
+The first authenticated physical run reads SID4 `0x2751`, so its `pm8150l`
+live-DT label does not establish the PM8150L identity `0x1f51`. Rechecked
+the Google pin's `qpnp-revid.c` and Linux v6.12 commit
+`adc218676eef25575469234709c2d87185ca223a`
+`include/soc/qcom/qcom-spmi-pmic.h`; neither names subtype27. The revised
+raw observer pins the authenticated `0x2751` identity without assigning an
+unverified model name. The per-peripheral type/subtype check still controls
+the generic unified read layout; neither model matching nor a DT label
+grants power policy or new PMIC write authority.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

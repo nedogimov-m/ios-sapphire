@@ -93,7 +93,7 @@ static uint32_t redfin_spmi_rd(vm_offset_t base,unsigned offset){
   if(offset==channel+0x18 && status_seen){
    pending=false;
    if(ppid==1)return 0x1e51;
-   if(ppid==0x401)return issue==13 ? 0x2051 : 0x1f51;
+   if(ppid==0x401)return issue==13 ? 0x1f51 : 0x2751;
    if(last_reg==4)return issue==14 && ppid==0x541 ? 0x2004 : 0x6b04;
    if(last_reg==0x40){configured_reads++;return issue==15 && ppid==0x541 && !(configured_reads&1) ? 1305 : 1304;}
    if(last_reg==0x42)return phase ? 1304 : 0;

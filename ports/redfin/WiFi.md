@@ -859,7 +859,9 @@ PM8150/PM8150L SIDs. It uses the existing EE0 SPMI observer mappings for
 three bounded snapshots: before the native WLAN votes, after their ACKs,
 and at FW_READY or the transport deadline. Two samples record each fixed
 candidate's header, configured/VALID mV, mode/enable and raw status. Both
-physical PMIC model reads must match. SID5 page attribution remains a
+physical PMIC identity reads must match SID0 `0x1e51` and SID4 `0x2751`.
+The latter's legacy `pm8150l` DT label does not establish its model name.
+SID5 page attribution remains a
 candidate, and a configured or VALID field by itself is not a power proof.
 Unknown layouts stay header-only. Every command is EXT_READL; no PMIC write
 channel is used. Owner/mapping loss, a changed sample, error or timeout

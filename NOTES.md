@@ -1,5 +1,30 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN PMIC observer pins authenticated SID4 identity — 2026-10-24
+
+Continues `3fd0dc4`. Rechecked Google's pinned `qpnp-revid.c` and Linux
+v6.12 `adc218676eef25575469234709c2d87185ca223a`'s PMIC header: neither
+names subtype27. The raw observer now requires the actual authenticated
+SID4 REVID `0x2751`, separately from the saved `pm8150l@4/5` DT labels.
+No model name, voltage policy, readiness or new writer is inferred from
+that label or identity. The source-backed per-peripheral unified-layout
+check and all error/owner/mapping/phase guards remain required.
+
+All 8 compiled observer/producer tests PASS, including rejection of the
+unobserved PM8150L identity1f. Native `build-20261024-015003.log` PASS;
+no CI run. Actual Image/live-FDT/loader/shim-return preflight PASS.
+The additional model guard still precedes every candidate read and WLAN
+vote. Hardware v2 result is pending; the previous clean HFS observation
+and verified fastboot allow this temporary md0 continuation.
+
+Kernel `31df57d6b1f8f846687fb5d8aff68e7467cdbba2246d91d657cc8373909bcd53`;
+image `d420dd965ce28772563f02fafb2a895ad7afb78b202df3389b49a6fe60f58d14`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xf76eec02e8e820bf`.
+
+Next: temporary module-pmic-v2 run; collect before/after/final raw tuples
+and FW_READY evidence. Association/data, GPU/native Metal and Bluetooth
+remain unfinished; persistent storage and EFS stay unchanged.
+
 ## REDFIN physical SID4 model differs from its DT label — 2026-10-24
 
 Source `7d65d82`, native `build-20261024-014122.log`, authenticated

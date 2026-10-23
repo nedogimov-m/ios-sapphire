@@ -413,6 +413,7 @@ def add_wlan_observer_contract(tree, nodes, power=False, pmic=False):
                 spmi.get('qcom,ee') != words(0) or
                 spmi.get('#address-cells') != words(2) or spmi.get('#size-cells') != words(0)):
             raise ValueError('native WLAN PMIC observer requires the captured EE0 SPMI bus')
+        # Preserve the captured legacy node labels; physical SID4 REVID is2751.
         for name, sid in (('pm8150', 0), ('pm8150', 1), ('pm8150l', 4), ('pm8150l', 5)):
             props = nodes.get(f'{spmi_path}/qcom,{name}@{sid}', {})
             if (props.get('compatible') != b'qcom,spmi-pmic\0' or props.get('reg') != words(sid, 0) or
