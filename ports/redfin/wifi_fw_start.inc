@@ -65,7 +65,7 @@ struct fw_start_context {
     void *rmtfs_shadow;
     rf_rmtfs rmtfs;
     rf_rm_ops rmtfs_ops;
-    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed, wlan_pmic_mode;
+    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed, wlan_pmic_mode, wlan_hang_mode;
     rf_wlfw_setup wlfw_setup;
     rf_wlfw_ops wlfw_ops;
     unsigned dynamic_sent, dynamic_received;
@@ -205,6 +205,10 @@ static bool fw_start_wlan_contract(void)
         valid = fw_start.wlan_power_mode && fw_property(node, "pmic-observe", &enabled, sizeof(enabled)) && enabled == 1 &&
             fw_property(node, "pmic-candidates", candidates, sizeof(candidates)) &&
             !memcmp(candidates, expected_candidates, sizeof(candidates));
+    }
+    if (valid && fw_start.wlan_hang_mode) {
+        uint32_t enabled = 0;
+        valid = fw_start.wlan_power_mode && fw_property(node, "msa-hang-observe", &enabled, sizeof(enabled)) && enabled == 1;
     }
     return valid;
 }
@@ -585,6 +589,57 @@ static int fw_start_wlan_pmic_policy(void *opaque)
     return context == &fw_start && context->wlan_pmic_mode && !fw_start_wlan_power_policy(context) &&
         !redfin_wifi_power_audit() ? 0 : EPERM;
 }
+static int fw_start_wlan_hang_observe(fw_start_context *context)
+{
+    if (!context->wlan_hang_mode || fw_start_wlan_power_policy(context)) return EPERM;
+    rf_wlfw_hang_window window = {};
+    int eligible = rf_wlfw_hang_plan(&context->wlfw_setup, &window);
+    IOLog("REDFIN WIFI HANG: metadata valid=%#x offset=%#x bytes=%u nonsecure_window=%d\n",
+        context->wlfw_setup.hang_valid, context->wlfw_setup.hang_offset, context->wlfw_setup.hang_bytes, eligible);
+    if (eligible != 1) return 0; /* No absent, oversized, secure or unaccepted read. */
+    IOMemoryDescriptor *memory = IOMemoryDescriptor::withPhysicalAddress(window.physical, window.mapped, kIODirectionIn);
+    IOMemoryMap *mapping = memory ? memory->map(kIOMapReadOnly | kIOMapWriteCombineCache) : NULL;
+    if (!mapping || !mapping->getVirtualAddress() || mapping->getLength() != window.mapped) {
+        OSSafeReleaseNULL(mapping); OSSafeReleaseNULL(memory); return ENOMEM;
+    }
+    /* The serialized PIL copy is complete. Reuse its existing private scratch;
+     * GLINK/RMTFS are not pumped concurrently by this sole CPU0 worker. */
+    static_assert(REDFIN_MPSS_COPY_CHUNK >= 800, "bounded native hang scratch");
+    uint8_t *first = context->readback, *second = context->readback + 400;
+    const volatile uint8_t *source = (const volatile uint8_t *)(mapping->getVirtualAddress() + window.offset);
+    int error = 0;
+    for (unsigned pass = 0; pass < 2 && !error; ++pass) {
+        uint8_t *destination = pass ? second : first;
+        for (unsigned i = 0; i < window.bytes; ++i) {
+            if (!(i & 63u) && fw_start_wlan_power_policy(context)) { error = EPERM; break; }
+            destination[i] = source[i];
+        }
+        __asm__ volatile("dmb oshld" ::: "memory");
+    }
+    rf_wlfw_hang_window fresh = {};
+    if (!error && (fw_start_wlan_power_policy(context) ||
+        rf_wlfw_hang_plan(&context->wlfw_setup, &fresh) != 1 || fresh.physical != window.physical ||
+        fresh.mapped != window.mapped || fresh.offset != window.offset || fresh.bytes != window.bytes ||
+        mapping->getLength() != window.mapped)) error = EPERM;
+    if (!error) {
+        bool stable = !memcmp(first, second, window.bytes);
+        IOLog("REDFIN WIFI HANG: physical=%#llx bytes=%u stable=%u; bounded read-only RAM, no readiness decision\n",
+            (unsigned long long)(window.physical + window.offset), window.bytes, stable);
+        if (stable) for (unsigned i = 0; i < window.bytes; i += 16) {
+            static const char hex[] = "0123456789abcdef";
+            char encoded[33]; unsigned count = window.bytes - i < 16 ? window.bytes - i : 16;
+            for (unsigned j = 0; j < count; ++j) {
+                encoded[2u * j] = hex[first[i + j] >> 4]; encoded[2u * j + 1u] = hex[first[i + j] & 15u];
+            }
+            encoded[2u * count] = 0;
+            IOLog("REDFIN WIFI HANG: +%#x %s\n", i, encoded);
+        }
+    }
+    /* This local read-only alias grants no remote ownership or DMA mapping.
+     * Its release does not release the retained MSA, MPSS or power resources. */
+    OSSafeReleaseNULL(mapping); OSSafeReleaseNULL(memory);
+    return error;
+}
 static void fw_start_host_event(void *opaque, unsigned kind, const char *name, uint32_t bytes)
 {
     (void)opaque;
@@ -654,6 +709,9 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
                         IOLog("REDFIN WIFI WLFW: MSA region=%u base=%#llx bytes=%#x secure=%u; native fixed permissions retained\n",
                             i, (unsigned long long)context->wlfw_setup.region[i].base,
                             context->wlfw_setup.region[i].bytes, context->wlfw_setup.region[i].secure);
+                if (!error && data[at] == 4 && rf_qmi_u16(data + at + 3) == 0x2b)
+                    IOLog("REDFIN WIFI WLFW: MSA hang metadata valid=%#x offset=%#x bytes=%u; no CPU map in handshake\n",
+                        context->wlfw_setup.hang_valid, context->wlfw_setup.hang_offset, context->wlfw_setup.hang_bytes);
                 if (error == 1) error = 0;
                 if (!error && size >= 7 && rf_qmi_u16(data + at + 3) == 0x2c)
                     IOLog("REDFIN WIFI WLFW: pin results valid=%#x power=%#x phy=%#x RF=%#x\n",
@@ -824,6 +882,10 @@ static int fw_start_transport_run(fw_start_context *context)
     }
     if (context->wlan_pmic_mode && context->wlan_observed) {
         error = redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy);
+        if (error) return error;
+    }
+    if (context->wlan_hang_mode && context->wlan_observed) {
+        error = fw_start_wlan_hang_observe(context);
         if (error) return error;
     }
     return ETIMEDOUT;
@@ -1002,6 +1064,11 @@ static void fw_start_worker(void *, wait_result_t)
     bool pmic_present = wlan_present && SecureDTGetProperty(wlan_node, "pmic-observe", &pmic_property, &pmic_bytes) == kSuccess;
     uint32_t pmic_enabled = 0;
     fw_start.wlan_pmic_mode = pmic_present && fw_property(wlan_node, "pmic-observe", &pmic_enabled, sizeof(pmic_enabled)) && pmic_enabled == 1;
+    const void *hang_property = NULL;
+    unsigned hang_bytes = 0;
+    bool hang_present = wlan_present && SecureDTGetProperty(wlan_node, "msa-hang-observe", &hang_property, &hang_bytes) == kSuccess;
+    uint32_t hang_enabled = 0;
+    fw_start.wlan_hang_mode = hang_present && fw_property(wlan_node, "msa-hang-observe", &hang_enabled, sizeof(hang_enabled)) && hang_enabled == 1;
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
         !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
@@ -1010,7 +1077,7 @@ static void fw_start_worker(void *, wait_result_t)
         (rmtfs_present && (mode != 4 || !fw_start_rmtfs_contract(&fw_start, true))) ||
         (wlfw_present && (!fw_start.wlfw_mode || !fw_start_wlfw_contract())) ||
         (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract())) ||
-        (pmic_present && !fw_start.wlan_pmic_mode)) {
+        (pmic_present && !fw_start.wlan_pmic_mode) || (hang_present && !fw_start.wlan_hang_mode)) {
         IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
         thread_terminate_self();
         __builtin_unreachable();

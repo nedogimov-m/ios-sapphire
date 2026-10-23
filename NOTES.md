@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN bounded native MSA hang-data observer prepared — 2026-10-24
+
+Continues `20fe609`. User reaffirms the immediate goal: GUI with working
+Wi-Fi, then GPU/Metal. FW_READY alone is not completion; association/data
+and the actual iOS GUI/network integration must still be proved.
+
+The captured base-vendor root listing has no `mbn` directory; its source
+remains a raw base view with unproved Virtual A/B overlay state. The MCFG
+misses are not established blockers and no substitute files are fabricated.
+Reviewed native `msa_ready_ind_cb`'s optional hang offset/length and400-byte
+limit. The protocol now retains exact optional presence/values and logs
+them. New explicit `--wifi-wlan-hang-observe` with the power profile reads
+only at timeout, after accepted MSA/CAP. A pure planner requires the entire
+one/two16KiB pages to fit within one accepted nonsecure MSA region. Missing,
+secure, overlapping, oversized, partial-page or unaccepted windows never map.
+The sole CPU0 worker takes two bounded read-only Normal-NC samples, printing
+bytes only when stable; only the local alias is released. No new assignment,
+MSA clearing, DMA grant, power write or readiness decision is introduced.
+
+All 233 Wi-Fi tests and full1230-test host suite PASS (3 optional private
+cases skipped). Actual C/C++ tests cover optional metadata, mapping flags/
+bounds, page crossings, every owner-cancellation position, failures and
+unstable data. Native `build-20261024-021219.log` PASS; no CI run. Complete
+actual Image/live-FDT/loader/shim-return preflight PASS; hardware pending.
+Decompressed Image130,068,576 bytes stays below the explicit128MiB cap.
+
+Kernel `132af60dd26bced72f986d7e039ef897d4d06c147742a218becf61aa7f2a6c24`;
+image `24d820c38c0801e5826d8e71d90af3a3b6fef6887e8bc645afd2276eb43d8d21`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x4a401ca6db20f93f`.
+
+Next: temporary module-pmic-state-hang-v4 run; inspect the real metadata
+and any eligible stable firmware diagnostic, then continue toward WLAN
+readiness, CE/HTC/WMI/HTT, association/data and GUI integration. GPU/Metal
+follows working GUI Wi-Fi. No persistent partition change is authorized here.
+
 ## REDFIN native WLAN SMP2P entry observed without error bits — 2026-10-24
 
 Source `d97f81c`, native `build-20261024-015657.log`, authenticated

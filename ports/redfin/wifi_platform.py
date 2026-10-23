@@ -368,7 +368,7 @@ def add_wlfw_contract(tree, nodes):
         ('shim-verified', mkadt.u32(0))]))
 
 
-def add_wlan_observer_contract(tree, nodes, power=False, pmic=False):
+def add_wlan_observer_contract(tree, nodes, power=False, pmic=False, hang=False):
     """Bind the native ICNSS consumers/providers before reading VRM metadata."""
     names = ('ldoa1', 'ldoa14', 'ldoc2', 'ldoc11', 'ldoc10')
     supply_keys = ('vdd-cx-mx', 'vdd-1.8-xo', 'vdd-1.3-rfa', 'vdd-3.3-ch1', 'vdd-3.3-ch0')
@@ -404,8 +404,8 @@ def add_wlan_observer_contract(tree, nodes, power=False, pmic=False):
             raise ValueError('native WLAN consumer voltage/load/delay config changed')
     if any(child.name == 'redfin-wifi-wlan' for child in tree.children):
         raise ValueError('duplicate native WLAN observer contract')
-    if type(power) is not bool or type(pmic) is not bool or (pmic and not power):
-        raise ValueError('native WLAN power/PMIC selectors must be boolean; PMIC observation requires power')
+    if any(type(value) is not bool for value in (power, pmic, hang)) or ((pmic or hang) and not power):
+        raise ValueError('native WLAN selectors must be boolean; PMIC/hang observation requires power')
     if pmic:
         spmi_path = '/soc/qcom,spmi@c440000'
         spmi = nodes.get(spmi_path, {})
@@ -425,7 +425,8 @@ def add_wlan_observer_contract(tree, nodes, power=False, pmic=False):
         ('observe-only', mkadt.u32(0 if power else 1))] + ([
         ('resource-addresses', mkadt.u32(0x40800, 0x42100, 0x41d00, 0x41a00, 0x41900))] if power else []) + ([
         ('pmic-observe', mkadt.u32(1)),
-        ('pmic-candidates', mkadt.u32(0x001, 0x401, 0x140, 0x14d, 0x541, 0x54a, 0x549))] if pmic else [])))
+        ('pmic-candidates', mkadt.u32(0x001, 0x401, 0x140, 0x14d, 0x541, 0x54a, 0x549))] if pmic else []) + ([
+        ('msa-hang-observe', mkadt.u32(1))] if hang else [])))
 
 
 def main():

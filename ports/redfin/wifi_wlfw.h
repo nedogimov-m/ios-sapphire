@@ -16,6 +16,7 @@ struct rf_wlfw_setup {
     uint32_t stage, attempted, poisoned, registered, regions, msa_accepted, ready_indications, pin_indications;
     uint32_t fw_ready, msa_ready_ind, responses, ignored, already_registered, notify_rejuvenate, rejuvenate;
     uint32_t pin_valid, pin_value[3];
+    uint32_t hang_valid, hang_offset, hang_bytes;
     uint16_t transaction, waiting, result, error;
     uint64_t fw_status;
     struct rf_wlfw_region region[2];
@@ -158,6 +159,7 @@ static inline int rf_wlfw_receive(struct rf_wlfw_setup *s, const struct rf_wlfw_
         if (message == 0x2b) {
             if (offset > RF_WLFW_MSA_BYTES || length > RF_WLFW_MSA_BYTES - offset) return -1;
             s->msa_ready_ind = 1;
+            s->hang_valid = seen; s->hang_offset = offset; s->hang_bytes = length;
         } else { ++s->pin_indications; s->pin_valid = seen; memcpy(s->pin_value, pins, sizeof(pins)); }
         return 0;
     }
@@ -180,6 +182,39 @@ static inline int rf_wlfw_receive(struct rf_wlfw_setup *s, const struct rf_wlfw_
         return rf_wlfw_send(s, o, RF_WLFW_CAP);
     }
     return -1;
+}
+
+/* Pure plan for the optional native hang-data observer. A whole 16KiB
+ * mapping must fit inside one accepted nonsecure MSA region. No mapping,
+ * permission assignment or read is performed by this function.
+ * Return1 eligible,0 absent/disabled metadata,-1 invalid/unaccepted window. */
+struct rf_wlfw_hang_window { uint64_t physical; uint32_t mapped, offset, bytes; };
+static inline int rf_wlfw_hang_plan(const struct rf_wlfw_setup *s, struct rf_wlfw_hang_window *out)
+{
+    if (!out) return -1;
+    memset(out, 0, sizeof(*out));
+    if (!s || s->poisoned || s->stage != RF_WLFW_COMPLETE || !s->msa_accepted || !s->msa_ready_ind ||
+        s->result || s->error || s->regions > 2) return -1;
+    if (s->hang_valid != 3 || !s->hang_bytes) return 0;
+    if (s->hang_bytes > 400 || s->hang_offset >= RF_WLFW_MSA_BYTES ||
+        s->hang_bytes > RF_WLFW_MSA_BYTES - s->hang_offset) return -1;
+    uint64_t address = RF_WLFW_MSA_BASE + s->hang_offset;
+    uint64_t page = address & ~UINT64_C(16383);
+    uint32_t offset = (uint32_t)(address - page);
+    uint32_t mapped = (offset + s->hang_bytes + 16383u) & ~16383u;
+    unsigned matches = 0;
+    for (unsigned i = 0; i < s->regions; ++i) {
+        const struct rf_wlfw_region *r = &s->region[i];
+        if (r->secure > 1 || r->base < RF_WLFW_MSA_BASE || r->base >= RF_WLFW_MSA_BASE + RF_WLFW_MSA_BYTES ||
+            r->bytes > RF_WLFW_MSA_BASE + RF_WLFW_MSA_BYTES - r->base) return -1;
+        for (unsigned j = 0; j < i; ++j) if (r->bytes && s->region[j].bytes &&
+            r->base < s->region[j].base + s->region[j].bytes && s->region[j].base < r->base + r->bytes) return -1;
+        if (!r->secure && page >= r->base && page < r->base + r->bytes && mapped <= r->base + r->bytes - page)
+            ++matches;
+    }
+    if (matches != 1 || mapped > 32768u) return -1;
+    out->physical = page; out->mapped = mapped; out->offset = offset; out->bytes = s->hang_bytes;
+    return 1;
 }
 
 struct rf_wlfw_dynamic {

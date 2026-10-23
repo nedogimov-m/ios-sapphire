@@ -886,3 +886,14 @@ through the final readiness timeout. Neither native WLAN error bit is
 observed; the same physical PMIC tuples and successful QMI/power exchanges
 repeat. The remaining MCFG TFTP misses and optional MSA hang-data metadata
 are independent diagnostic leads; none is yet an established root cause.
+
+`--wifi-wlan-hang-observe` adds a separate timeout-only diagnostic to
+`--wifi-wlan-power`. MSA_READY's optional hang offset/length are retained
+with their presence bits. A read is eligible only after successful native
+MSA/CAP, for1..400 bytes announced by firmware, with the complete one/two
+16KiB pages inside one accepted nonsecure MSA region. Secure/unaccepted
+windows and absent/oversized metadata are logged without mapping. The
+native worker takes two bounded read-only Normal-NC samples and prints
+bytes only when they agree. The local alias is then released; the original
+MSA, MPSS and power resources stay retained until reset. Other profiles
+continue to omit this MSA CPU mapping.

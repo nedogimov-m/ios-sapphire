@@ -248,6 +248,16 @@ class WiFiPmicProducerTests(unittest.TestCase):
             with self.subTest(issue=issue), self.assertRaises(ValueError):
                 P.add_wlan_observer_contract(root, source, power=issue != 'power', pmic=True)
 
+    def test_hang_reader_requires_explicit_power_profile_and_separate_handoff(self):
+        source = source_nodes(); root = mkadt.build(0x180000000, 0x80000000)
+        P.add_wlfw_contract(root, source)
+        with self.assertRaises(ValueError):
+            P.add_wlan_observer_contract(root, source, hang=True)
+        P.add_wlan_observer_contract(root, source, power=True, hang=True)
+        node = next(node for node in root.children if node.name == 'redfin-wifi-wlan')
+        self.assertEqual(node.prop('msa-hang-observe'), b'\1\0\0\0')
+        self.assertIsNone(node.prop('pmic-observe'))
+
 
 if __name__ == '__main__':
     unittest.main()

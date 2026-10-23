@@ -79,7 +79,7 @@ uint64_t metric(unsigned which){
  state.msa_ready_ind,state.ready_indications,state.pin_indications,state.result,state.error,state.poisoned,
  state.responses,state.ignored,state.already_registered,state.cap.chip,state.cap.family,state.cap.board,
  state.cap.soc,state.cap.firmware,state.cap.valid,state.rejuvenate,state.pin_valid,
- state.pin_value[0],state.pin_value[1],state.pin_value[2]};
+ state.pin_value[0],state.pin_value[1],state.pin_value[2],state.hang_valid,state.hang_offset,state.hang_bytes};
  return which<sizeof(values)/sizeof(values[0]) ? values[which] : 0;
 }
 void fail(unsigned mode){if(mode==1)alive=0;if(mode==2)fail_send=1;}
@@ -203,6 +203,16 @@ class WlfwTests(unittest.TestCase):
         self.receive(response(0x21, 0, tlv(0x10, b'\1'), indication=True), code=-1)
         self.receive(response(0x2b, 0, tlv(0x10, bytes(4)) * 2, indication=True), code=-1)
         self.assertEqual(self.lib.metric(6), 0); self.assertEqual(self.lib.metric(5), 0)
+
+    def test_native_hang_metadata_keeps_optional_presence_offset_and_length_without_mapping(self):
+        self.registered()
+        for extra, expected in ((b'', (0, 0, 0)),
+                                (tlv(0x10, struct.pack('<I', 0x10100)), (1, 0x10100, 0)),
+                                (tlv(0x11, struct.pack('<H', 96)), (2, 0, 96)),
+                                (tlv(0x10, struct.pack('<I', 0x10100)) + tlv(0x11, struct.pack('<H', 96)), (3, 0x10100, 96))):
+            self.receive(response(0x2b, 0, extra, indication=True))
+            self.assertEqual(tuple(self.lib.metric(i) for i in (26, 27, 28)), expected)
+            self.assertEqual((self.lib.metric(1), self.lib.metric(5)), (2, 0))
 
     def test_native_power_profile_registers_rejuvenation_and_quarantines_that_epoch(self):
         self.assertEqual(self.lib.begin_features(1), 0)

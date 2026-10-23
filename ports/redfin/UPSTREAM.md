@@ -378,5 +378,18 @@ retains its raw presence/index/value for diagnostics. No additional SMEM or
 MMIO read, interrupt registration, acknowledgement, recovery or readiness
 decision is added. A zero value remains distinct from an absent entry.
 
+MSA diagnostic review, 2026-10-24: the same native `icnss_qmi.c`
+`msa_ready_ind_cb` preserves optional hang-data offset/length, caps it at
+400 bytes and maps that firmware-announced window. `icnss.c` copies it on
+an early crash. Redfin now retains the optional fields and has a separate
+opt-in timeout observer. Its pure planner requires successful MSA/CAP and
+an accepted nonsecure region covering every whole16KiB mapped page, while
+the fixed reservation remains shim verified. It rejects secure, missing,
+overlapping, oversized, partial-page or unaccepted windows. The native
+adapter maps only that bounded read-only Normal-NC alias, takes two samples,
+and releases only its local alias. It introduces no MSA clearing, permission
+assignment, DMA grant, power write or readiness decision. Default setup and
+PMIC profiles do not perform this MSA CPU read.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772
