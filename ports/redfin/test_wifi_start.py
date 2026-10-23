@@ -152,6 +152,13 @@ class NativeWifiStartTests(unittest.TestCase):
             self.assertNotEqual(self.library.pas(0, width, command, address, size), 0)
             self.assertEqual(self.library.metric(0), 0)
 
+    def test_owned_high_metadata_requires_smc64_and_exact_page_geometry(self):
+        self.assertEqual(self.library.pas(0, 64, 1, 0x182600000, 0), 0)
+        self.assertEqual(self.library.metric(11), 0x182600000)
+        for width, address in ((32, 0x182600000), (64, 0x182600001), (64, 0x200000000)):
+            self.assertNotEqual(self.library.pas(0, width, 1, address, 0), 0)
+            self.assertEqual(self.library.metric(0), 0)
+
     def test_pas_resumes_preserve_native_cookie_and_busy_retries_restore_request(self):
         for mode, resumes, busy in ((3, 0, 1), (4, 1, 0)):
             self.assertEqual(self.library.pas(mode, 64, 6, 0, 0), 0)

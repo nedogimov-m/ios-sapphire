@@ -86,6 +86,10 @@ int rf_wifi_fw_source_open(struct rf_wifi_fw_source *, const struct rf_wifi_fw_b
  * The 64KiB readback buffer is caller-owned private storage. No SMC is invoked. */
 int rf_wifi_fw_copy_metadata(struct rf_wifi_fw_source *, const struct rf_wifi_fw_source_ops *,
     const struct rf_wifi_fw_copy_ops *, uint8_t *readback, size_t readback_bytes);
+/* Separate source-backed PAS metadata scratch; the destination lease must
+ * authorize its exact reserved extent. This grants no MPSS segment authority. */
+int rf_wifi_fw_copy_metadata_to(struct rf_wifi_fw_source *, const struct rf_wifi_fw_source_ops *,
+    const struct rf_wifi_fw_copy_ops *, uint64_t physical, uint8_t *readback, size_t readback_bytes);
 int rf_wifi_fw_copy_segments(struct rf_wifi_fw_source *, const struct rf_wifi_fw_source_ops *,
     const struct rf_wifi_fw_copy_ops *, uint8_t *readback, size_t readback_bytes);
 void rf_wifi_fw_source_close(struct rf_wifi_fw_source *, const struct rf_wifi_fw_source_ops *);

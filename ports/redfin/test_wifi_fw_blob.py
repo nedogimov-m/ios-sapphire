@@ -143,6 +143,27 @@ class WifiFirmwareBlobTests(unittest.TestCase):
             P.pack(self.payload, self.firmware, self.digest, self.report,
                    0x8000000, probe_exclusions=EXCLUDED)
 
+    def test_native_start_reserves_a_distinct_zeroed_metadata_page_before_the_source(self):
+        payload = bytearray(self.payload)
+        command = ARGS + ' redfinwifi=2 redfinwifinative=1 redfinwififw=2'
+        payload[72:680] = command.encode().ljust(608, b'\0')
+        result, report = P.pack(payload, self.firmware, self.digest, self.report,
+                                0x8000000, probe_exclusions=EXCLUDED, start=True)
+        self.assertIsNone(self.accepted(result))
+        self.assertEqual(report['metadata_physical'] + P.PAGE, report['source_physical'])
+        count = struct.unpack_from('<I', result, 12)[0]
+        metadata = struct.unpack_from('<4Q', result, 680 + 32 * (count - 2))
+        self.assertEqual((metadata[1], metadata[3]), (P.PAGE, P.PAGE))
+        self.assertEqual(result[metadata[2]:metadata[2] + metadata[3]], bytes(P.PAGE))
+        offset, length = struct.unpack_from('<2Q', result, 32)
+        root, _end = P.mkadt.adt.parse(result[offset:offset + length])
+        node = next(child for child in root.children if child.name == 'redfin-wifi-fw')
+        chosen = next(child for child in root.children if child.name == 'chosen')
+        memory = next(child for child in chosen.children if child.name == 'memory-map')
+        expected = P.mkadt.u64(report['metadata_physical'], P.PAGE)
+        self.assertEqual(node.prop('metadata-reg'), expected)
+        self.assertEqual(memory.prop('RedfinWiFiMetadata'), expected)
+
     def test_native_report_hash_explicit_cap_and_original_profile_are_required(self):
         for digest, report, cap in [('0' * 64, self.report, 0x8000000),
                                     (self.digest, {}, 0x8000000), (self.digest, self.report, 1),

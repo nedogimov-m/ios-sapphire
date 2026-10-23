@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native bandwidth hardware PASS; cold PAS sequence corrected — 2026-10-23
+
+Source b810426 / local native build153325. Authenticated/image/nonce-matched
+`wifi-fw-start-v2-20261023-153441`, bootidfcb861da392f7d98, accepts all six
+native BCMs. ACV is unit1/width0/VCD11. All9ARC/BCM commands complete with
+IRQ1/CMD0x10101; AOP acknowledges modem-on, final power0/phase4,ARC7,BCM3f,
+142stores/quarantine0. SCM convention detection returns64. The capture then
+ends on transition to the extra cold PAS_SHUTDOWN; no PAS return, SMP2P write,
+MPSS copy or ready is observed. PID1 reaches its banner but no heartbeat is
+captured. The watchdog returns successfully, authenticated recovery observes
+HFSX clean/unmounted/write_count462335, and verifies final fastboot.
+
+V2 kernel e9baa89afcb678a37216e12be57cee08a39834b1e87d9a8bfc814ce915d4df90;
+image b6354ffbcac681dc5b5671cb0aeb4a502e8a7bfa814d8ffbc65cdfc516238bcf.
+Exact v2 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=2 redfinspmi=1 redfinreturn=1 redfinbootid=0xfcb861da392f7d98`.
+
+The pinned native cold PIL starts INIT/MEM_SETUP, without preliminary
+SHUTDOWN. V3 removes that extra call. A separate zeroed16KiB segment before
+the resident firmware provides an exactly bound PAS metadata scratch page.
+The source copy/readback API accepts that explicit caller-owned destination;
+SMC64 is required for its high RAM address. Metadata memory never grants MPSS
+segment authority: only successful same-session INIT and exact MEM_SETUP
+permit SMP2P preparation/MPSS mapping and copies, before AUTH. Every SMC now
+logs entry and return, localizing a secure-world stop. No guessed low RAM pool,
+extra media allocation, unconditional cold reset or relaxed remote write is
+introduced. Whether TrustZone accepts high metadata remains unproven.
+
+55focusedtests PASS in2.837s (3optional private cases skipped), including
+isolated zero metadata segment, SMC64/address bounds and unchanged original
+source/copy cases. Local native build `build-20261023-154143.log` PASS; actual full
+Image/live-FDT/compiled-return preflight PASS. No new CI run.
+Kernel `f5cf5c6d9f21881c12d70b048eef83ad41f2f4c26201ed99d9f8f0d50bd0a283`; image `e7b96a9073e46fa394c5f653b4e1ce93c50f98be0e5a68f2b84f6513ded4739d`.
+Exact v3 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=2 redfinspmi=1 redfinreturn=1 redfinbootid=0x6ee1419bf91d039a`.
+Next: the fresh temporaryv3run, then continue from its actual PAS result.
+
 ## REDFIN PAS4 worker enters hardware; ACV bitmask correction — 2026-10-23
 
 Source384c922 / native build152546, `wifi-fw-start-v1-20261023-152942`,

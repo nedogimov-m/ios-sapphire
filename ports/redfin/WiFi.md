@@ -661,3 +661,15 @@ retry bounds, separate PAS/transport errors and ownership loss. The final
 The complete real Image/live-FDT/return preflight passes. This documents a
 prepared hardware run; MPSS authentication/readiness and all Wi-Fi packets
 still need their separate device observations in NOTES.md.
+
+The v2 hardware run proves all nine ARC/BCM transactions and acknowledged AOP
+state. Its log stops on the transition to the extra cold PAS shutdown, with
+no returned PAS result. The current v3 sequence follows native cold PIL's
+INIT/MEM_SETUP order instead. A distinct zeroed16KiB boot segment immediately
+before the firmware is bound by `metadata-reg` and memory-map
+`RedfinWiFiMetadata`. The native caller owns this scratch mapping and requires
+SMC64 for its high physical address. MPSS mapping/segment writes and SMP2P
+allocation remain disabled until this session's INIT and MEM_SETUP succeed.
+TrustZone's acceptance of that high metadata pointer is a separate hardware
+question, not inferred from SCM convention detection. Exact v2 observations
+and the v3 image/arguments are recorded in NOTES.md.

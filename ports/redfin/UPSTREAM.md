@@ -216,5 +216,15 @@ PAS4/SMP2P boot sequence; Redwood's PAS6/RF backend is not substituted.
 Software/native-build results and pending device execution are recorded
 separately in NOTES.md. Upstream's WLAN/ifnet remains a later consumer.
 
+The subsequent hardware run proves all native bandwidth/AOP prerequisites
+but stops on transition to an extra initial PAS shutdown. Re-reviewing the
+same Google's native cold PIL confirms INIT/MEM_SETUP is first. Redfin's
+corrected caller therefore stages metadata in an explicitly reserved high-RAM
+scratch page and requires SMC64; it grants MPSS write authority only after
+successful same-session INIT/MEM_SETUP. This adapts metadata storage to
+Redfin's high-only XNU RAM and removes the unneeded cold shutdown. The scratch
+pointer's acceptance by TrustZone is still a device question; native code and
+the preferred HackiOS PAS6 result cannot establish it for MPSS4.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

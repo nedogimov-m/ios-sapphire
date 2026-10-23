@@ -11,7 +11,9 @@ static inline int rf_wifi_pas_run(const struct rf_sq_ops *ops, unsigned conventi
     if (!ops || !report || !ops->valid || !ops->invoke || !ops->time_ns || !ops->delay_us ||
         (convention != 32 && convention != 64) ||
         (command != 1 && command != 2 && command != 5 && command != 6) ||
-        (command == 1 && (address != UINT64_C(0x8c000000) || bytes)) ||
+        (command == 1 && ((address != UINT64_C(0x8c000000) &&
+            (address < UINT64_C(0x180000000) || address > UINT64_C(0x200000000) - 16384u || address % 16384u)) ||
+            bytes || (convention == 32 && address > UINT32_MAX))) ||
         (command == 2 && (address != UINT64_C(0x8c000000) || bytes != UINT64_C(0x11800000))) ||
         ((command == 5 || command == 6) && (address || bytes))) return EINVAL;
     request.x[0] = UINT64_C(0x02000200) | command | (convention == 64 ? UINT64_C(0x40000000) : 0);

@@ -187,20 +187,29 @@ static int copy_sync(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source
     return error;
 }
 
-int rf_wifi_fw_copy_metadata(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
-    const struct rf_wifi_fw_copy_ops *c, uint8_t *readback, size_t bytes)
+int rf_wifi_fw_copy_metadata_to(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
+    const struct rf_wifi_fw_copy_ops *c, uint64_t physical, uint8_t *readback, size_t bytes)
 {
+    if (!s || !redfin_mpss_valid_range(physical, RF_WIFI_FW_PAGE) || (physical & (RF_WIFI_FW_PAGE - 1u)))
+        return RF_WIFI_FW_ARGUMENT;
     int error = copy_valid(s, o, c, readback, bytes);
     if (error) return error == RF_WIFI_FW_ARGUMENT || error == RF_WIFI_FW_STATE ? error : fail(s, error);
     if (s->stage != RF_WIFI_FW_VERIFIED) return RF_WIFI_FW_STATE;
     error = blob_hash(s, o);
-    if (!error) error = copy_chunk(s, o, c, RF_WIFI_FW_METADATA, s->workspace->plan.physical_base,
+    if (!error) error = copy_chunk(s, o, c, RF_WIFI_FW_METADATA, physical,
         s->workspace->image.asset[0].data, s->workspace->image.asset[0].bytes, readback);
-    if (!error) error = copy_sync(s, o, c, RF_WIFI_FW_METADATA, s->workspace->plan.physical_base,
+    if (!error) error = copy_sync(s, o, c, RF_WIFI_FW_METADATA, physical,
         s->workspace->image.asset[0].bytes);
     if (error) return fail(s, error);
     s->metadata_written = s->workspace->image.asset[0].bytes; s->stage = RF_WIFI_FW_METADATA;
     return RF_WIFI_FW_OK;
+}
+
+int rf_wifi_fw_copy_metadata(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,
+    const struct rf_wifi_fw_copy_ops *c, uint8_t *readback, size_t bytes)
+{
+    if (!s || !s->workspace) return RF_WIFI_FW_ARGUMENT;
+    return rf_wifi_fw_copy_metadata_to(s, o, c, s->workspace->plan.physical_base, readback, bytes);
 }
 
 int rf_wifi_fw_copy_segments(struct rf_wifi_fw_source *s, const struct rf_wifi_fw_source_ops *o,

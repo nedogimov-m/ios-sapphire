@@ -147,12 +147,20 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
         probe = [('probe-contract', mkadt.u32(1, 4, 64, 0)),
                  ('probe-exclusions', mkadt.u64(*(value for pair in probe_exclusions for value in pair)))]
     reserved = aligned(len(firmware), PAGE)
-    physical = info['physical'] + info['end'] - info['virt']
-    new_end = info['end'] + reserved
+    require(not start or len(info['segments']) <= 62, 'native metadata needs a second free segment')
+    metadata = info['physical'] + info['end'] - info['virt'] if start else 0
+    source_end = info['end'] + (PAGE if start else 0)
+    physical = info['physical'] + source_end - info['virt']
+    new_end = source_end + reserved
+    if start:
+        require(info['memory_map'].prop('RedfinWiFiMetadata') is None, 'duplicate native metadata extent')
+        info['memory_map'].props.append(('RedfinWiFiMetadata', 0, mkadt.u64(metadata, PAGE)))
     info['memory_map'].props.append(('RedfinWiFiFirmware', 0, mkadt.u64(physical, reserved)))
     info['root'].children.append(mkadt.node('redfin-wifi-fw', [
         ('reg', mkadt.u64(physical, reserved)), ('bundle-bytes', mkadt.u64(len(firmware))),
         ('bundle-sha256', bytes.fromhex(digest)), ('source-contract', mkadt.u32(*CONTRACT))] + probe))
+    if start:
+        info['root'].children[-1].props.append(('metadata-reg', 0, mkadt.u64(metadata, PAGE)))
     tree = mkadt.adt.serialize(info['root'])
     tree_physical = physical + reserved
     arguments = aligned(tree_physical + len(tree), 16)
@@ -160,7 +168,9 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
     require(top <= info['physical'] + info['memory'], 'firmware/ADT/arguments exceed kernel RAM')
     pieces = [(address, size, memoryview(payload)[offset:offset + length])
               for address, size, offset, length in info['segments']]
-    pieces.append((info['end'], reserved, memoryview(firmware)))
+    if start:
+        pieces.append((info['end'], PAGE, memoryview(bytes(PAGE))))
+    pieces.append((source_end, reserved, memoryview(firmware)))
     projected = aligned(HEADER + 32 * len(pieces), 16) + sum(aligned(len(data), 16) for _address, _size, data in pieces) + aligned(len(tree), 16)
     require(projected <= max_payload_bytes, 'complete payload exceeds explicit host cap')
     output = bytearray(aligned(HEADER + 32 * len(pieces), 16))
@@ -179,6 +189,7 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
         struct.pack_into('<4Q', output, HEADER + 32 * index, *segment)
     return bytes(output), {'schema': 1, 'bundle_bytes': len(firmware), 'bundle_sha256': digest,
                            'source_physical': physical, 'source_reserved': reserved,
+                           'metadata_physical': metadata, 'metadata_reserved': PAGE if start else 0,
                            'adt_physical': tree_physical, 'boot_args_physical': arguments, 'top': top,
                            'segments': len(table), 'payload_bytes': len(output),
                            'explicit_payload_cap': max_payload_bytes, 'rootfs_dependency': False,
