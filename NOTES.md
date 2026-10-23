@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native WLAN SMP2P entry observed without error bits — 2026-10-24
+
+Source `d97f81c`, native `build-20261024-015657.log`, authenticated
+module-pmic-state-v3 capture matched boot ID `9b894c3f51001506`. The stable
+peer first reports WLAN absent, then present/raw0 after native MSA/CAP.
+Every subsequent periodic sample and the final worker result retain
+`wlan=1/0`; native force-error-fatal/early-crash bits0/1 are not observed.
+This does not prove firmware health outside those sampled notifications.
+All three physical PMIC snapshots repeat their earlier enabled/stable
+tuples, and the native15 supply ACKs/dynamic mask1 pass again. No FW_READY
+or pin result arrives; finalETIMEDOUT60/phase12/SMP2P stage4.
+
+The two later TFTP misses remain
+`/readonly/vendor/mbn/mcfg_hw/mbn_hw.dig` and
+`/readonly/vendor/mbn/mcfg_sw/mbn_sw.dig`. Their role in the readiness wait
+is unproved. Recovery authenticates the log, verifies image/nonce, observes
+clean HFSX/write_count462335, primes the next public RAM metadata and
+leaves verified hardware fastboot. Persistent EFS/storage is unchanged.
+
+Kernel `60d1d33dc182d4dc07dfceaed549f6aa8be3ef908cb75fbde4a8056bfcb69f8c`;
+image `83fb3aa31b02c00ba8a7d463772d6f05def195b8fc0d5290621ee8b4d52a9307`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x9b894c3f51001506`.
+
+Next: inspect the observed missing MCFG paths in the already verified
+read-only base-vendor source; retain actual optional MSA hang-data metadata
+before considering any bounded nonsecure read. No guessed GPIO/clock or
+firmware setting is introduced. Association/data, GPU/native Metal and
+Bluetooth remain unfinished.
+
 ## REDFIN native WLAN SMP2P raw-state diagnostics prepared — 2026-10-24
 
 Continues `3ae5f04`. Rechecked native ICNSS notifications and the actual

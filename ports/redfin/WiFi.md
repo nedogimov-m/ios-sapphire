@@ -880,3 +880,9 @@ Host progress and the final worker result now include inbound native SMP2P
 ICNSS interrupt binding, bit0 is force-error-fatal and bit1 early-crash.
 The diagnostic records raw values without replying, registering interrupts
 or claiming a recovery. Presence1/value0 differs from a missing entry.
+
+The hardware state-v3 run observes this entry appear and remain present/raw0
+through the final readiness timeout. Neither native WLAN error bit is
+observed; the same physical PMIC tuples and successful QMI/power exchanges
+repeat. The remaining MCFG TFTP misses and optional MSA hang-data metadata
+are independent diagnostic leads; none is yet an established root cause.
