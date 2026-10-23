@@ -433,6 +433,56 @@ def add_wlan_observer_contract(tree, nodes, power=False, pmic=False, hang=False,
         ('bdf-sha256', bytes.fromhex('7b0add4f469df39c0b26167513da8931419e917a4d9058252c05e0f5cffe7b90'))] if bdf else [])))
 
 
+def add_snoc_observer_contract(tree, nodes):
+    """Bind actual WLAN/SMMU routes before an opt-in read-only snapshot.
+
+    Native ICNSS maps the host's CE buffers through c0/mask1. Its separate
+    smmu_iova_ipa aperture is not the WLAN stream and is not spare CE RAM.
+    """
+    words = lambda *values: struct.pack('>' + 'I' * len(values), *values)
+    wlan_path = '/soc/qcom,icnss@18800000'
+    smmu_path = '/soc/apps-smmu@15000000'
+    wlan, smmu = nodes.get(wlan_path, {}), nodes.get(smmu_path, {})
+    reference = smmu.get('phandle', smmu.get('linux,phandle'))
+    irq = (132, 81, 415, 416, 417, 86, 94, 96, 82, 119, 120, 87)
+    prior = [child for child in tree.children if child.name == 'redfin-wifi-wlan']
+    if (len(prior) != 1 or prior[0].prop('bdf-download') != mkadt.u32(1) or
+            prior[0].prop('observe-only') != mkadt.u32(0)):
+        raise ValueError('native SNOC observer requires the powered BDF profile')
+    if (wlan.get('compatible') != b'qcom,icnss\0' or
+            wlan.get('reg') != words(0x18800000, 0x800000, 0xb0000000, 0x10000) or
+            wlan.get('reg-names') != b'membase\0smmu_iova_ipa\0' or
+            wlan.get('qcom,iommu-dma-addr-pool') != words(0xa0000000, 0x10000000) or
+            wlan.get('qcom,iommu-dma') != b'fastmap\0' or
+            wlan.get('qcom,iommu-faults') != b'stall-disable\0HUPCF\0non-fatal\0' or
+            wlan.get('interrupts') != words(*(value for spi in irq for value in (0, spi, 4))) or
+            not reference or len(reference) != 4 or reference in (words(0), words(0xffffffff)) or
+            wlan.get('iommus') != reference + words(0xc0, 1) or
+            smmu.get('compatible') != b'qcom,qsmmu-v500\0' or
+            smmu.get('reg') != words(0x15000000, 0x100000, 0x15182000, 0x20) or
+            smmu.get('reg-names') != b'base\0tcu-base\0' or smmu.get('#iommu-cells') != words(2) or
+            smmu.get('qcom,skip-init') != b'' or smmu.get('qcom,use-3-lvl-tables') != b'' or
+            any(key in smmu for key in ('clocks', 'clock-names', 'qcom,static-cb')) or
+            any(props.get('status', b'okay\0') not in (b'okay\0', b'ok\0') for props in (wlan, smmu))):
+        raise ValueError('native WLAN/SNOC SMMU binding changed')
+    # This also catches inconsistent aliases and provider phandle collisions.
+    matches = []
+    for path, props in nodes.items():
+        if ('phandle' in props and 'linux,phandle' in props and props['phandle'] != props['linux,phandle']):
+            raise ValueError('native SNOC phandle aliases disagree')
+        if props.get('phandle', props.get('linux,phandle')) == reference:
+            matches.append(path)
+    if matches != [smmu_path] or any(child.name == 'redfin-wifi-snoc' for child in tree.children):
+        raise ValueError('native SNOC SMMU reference/contract is ambiguous')
+    tree.children.append(mkadt.node('redfin-wifi-snoc', [
+        ('reg', mkadt.u64(0x15000000, 0x100000)),
+        ('wlan-reg', mkadt.u64(0x18800000, 0x800000)),
+        ('wlan-iova', mkadt.u64(0xa0000000, 0x10000000)),
+        ('source-contract', mkadt.u32(1, 0xc0, 1, 81, 62, 0x4000, 0x80000, 0x1000)),
+        ('ce-intids', mkadt.u32(*(spi + 32 for spi in irq))),
+        ('observe-only', mkadt.u32(1))]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dtb', required=True, type=Path)

@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN post-FW_READY native SNOC/SMMU observer prepared — 2026-10-24
+
+Continues `cb31940`; GUI with working Wi-Fi remains the immediate goal,
+GPU/Metal follows. Native/mainline SNOC and preferred upstream bus/station
+reviews are recorded in UPSTREAM.md. The actual live ICNSS uses SIDc0/mask1
+on APPS SMMU, host IOVA a0000000+10000000 and12 CE IRQs; IPA521 and its
+named aperture are separate. New explicit `--wifi-snoc-observe` requires
+the powered BDF profile. After successful CAL_REPORT and actual readiness,
+the same CPU0 worker double-reads all81 SMR/S2CR pairs and62 contexts'
+SCTLR/CBAR/CBA2R/FSR. Exact previously observed APPS IDs/layout precede CB
+reads. It stops on changed registers, inaccessible values or owner loss.
+Latent invalid-SMR references remain counted; no observation grants a CB,
+route, DMA RAM or ring. WLAN/CE/TCU/TBU MMIO remains untouched.
+
+All252 focused Wi-Fi tests PASS (3 optional private cases skipped), including
+actual C/C++ cancellation at every one of837 checks/836 reads, every changed
+second-pass register, foreign/latent routes and FDT/IRQ/provider mutations.
+The actual captured FDT producer contract passes. Native local
+`build-20261024-030244.log` and complete Image/live-FDT/loader/return preflight
+PASS; no CI run. Full host suite is running; hardware remains pending.
+Decompressed Image130086720 bytes stays below the explicit128MiB cap.
+
+Kernel `1aa1fe7bc5a617358ef8509110d5edd4e80f8ac25b51ec1bf576f5bc4e779c0d`;
+image `bbe7a54dfa439443aa4fec4e3f0b34f8cb57b74434207f70c61e6d3303c6e2b9`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x4d9ffc7a29b57317`.
+
+Next: temporary snoc-v1 run and authenticated route/context evidence,
+then source-backed mission configuration and owned CE transport. Existing
+md0/UP fences remain intact. Association/data and GUI integration are still
+unfinished; persistent partitions, EFS and backups remain unchanged.
+
 ## REDFIN native DMON BDF/CAL_REPORT and real WLAN FW_READY hardware PASS — 2026-10-24
 
 Source `b09070e`, native `build-20261024-024407.log`, authenticated

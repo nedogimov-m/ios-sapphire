@@ -933,3 +933,16 @@ are claimed. Final stable PMIC aggregates are480/1800/1304/3000/3000mV,
 MODE4, ENABLE80/STATUS86/READY1. Authenticated recovery confirms unchanged
 clean HFSX and verified fastboot. The next stage owns and validates the
 native SNOC/SMMU/CE data path before publishing an iOS interface.
+
+`--wifi-snoc-observe` requires the powered BDF profile and runs only after
+actual firmware readiness. The producer binds the captured WLAN register
+range, SIDc0/mask1, host IOVA aperture, all12 CE IRQs and exact APPS SMMU
+provider. The bounded worker maps only read-only SMMU global/context pages;
+the WLAN/CE/TCU/TBU windows remain untouched. Two complete snapshots cover
+all81 SMR/S2CR pairs and62 context banks' SCTLR/CBAR/CBA2R/FSR. Any changed
+value, unsupported layout or owner loss stops the observer. The report
+separates c0/c1 WLAN matches from IPA521 and includes latent context
+references from invalid SMRs. A blank, unreferenced context is evidence,
+not an ownership lease. No DMA RAM, route, table or ring is programmed.
+The native next-stage order is WLAN_CFG, acknowledged mission mode and
+owned CE initialization; FW_READY does not alone prove register reachability.

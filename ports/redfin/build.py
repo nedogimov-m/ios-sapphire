@@ -109,6 +109,7 @@ def main():
     p.add_argument('--wifi-wlan-pmic-observe', action='store_true', help='with --wifi-wlan-power, read fixed PMIC supply candidates before/after votes and at the observation deadline')
     p.add_argument('--wifi-wlan-hang-observe', action='store_true', help='with --wifi-wlan-power, read at most400 announced nonsecure MSA hang bytes on readiness timeout')
     p.add_argument('--wifi-wlan-bdf-download', action='store_true', help='with --wifi-wlan-power, send the reviewed Redfin BIN BDF and empty calibration report through a separate native DMON client')
+    p.add_argument('--wifi-snoc-observe', action='store_true', help='after actual FW_READY in the BDF profile, observe WLAN APPS-SMMU routes/contexts without CE access or DMA')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -156,6 +157,8 @@ def main():
         p.error('--wifi-wlan-hang-observe requires --wifi-wlan-power')
     if a.wifi_wlan_bdf_download and not a.wifi_wlan_power:
         p.error('--wifi-wlan-bdf-download requires --wifi-wlan-power')
+    if a.wifi_snoc_observe and not a.wifi_wlan_bdf_download:
+        p.error('--wifi-snoc-observe requires --wifi-wlan-bdf-download')
     if a.wifi_glink_start:
         a.wifi_fw_start = True
     if a.wifi_fw_start and a.wifi_fw_source_probe:
@@ -437,6 +440,12 @@ def main():
             try:
                 add_wlan_observer_contract(tree, nodes, power=a.wifi_wlan_power, pmic=a.wifi_wlan_pmic_observe,
                                            hang=a.wifi_wlan_hang_observe, bdf=a.wifi_wlan_bdf_download)
+            except ValueError as error:
+                p.error(str(error))
+        if a.wifi_snoc_observe:
+            from wifi_platform import add_snoc_observer_contract
+            try:
+                add_snoc_observer_contract(tree, nodes)
             except ValueError as error:
                 p.error(str(error))
         if a.scm_probe:
@@ -760,6 +769,8 @@ def main():
         manifest['wifi_wlan_hang_observe'] = True
     if a.wifi_wlan_bdf_download:
         manifest['wifi_wlan_bdf_download'] = True
+    if a.wifi_snoc_observe:
+        manifest['wifi_snoc_observe'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

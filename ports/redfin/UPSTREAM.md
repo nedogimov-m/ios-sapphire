@@ -434,5 +434,32 @@ subset) and promises no calibration download/update or persistent cache.
 Every ACK must succeed, including final CRC; no CRC-error exemption, retry,
 mission mode, new memory assignment, DMA or partition writer is added.
 
+## Native SNOC data-plane entry review — 2026-10-24
+
+Reviewed Linux v6.12 `adc218676eef25575469234709c2d87185ca223a`
+`ath10k/snoc.c:932..1105`, `qmi.c:380..505`, and native Google msm
+`500b3a2059c1eec0fec08ec56add06320ea901a8`
+`icnss.c:2372..2394`/`icnss_qmi.c:1358..1437`. The source order is
+power, WLAN_CFG, acknowledged WLAN_MODE mission, optional read-index
+memory, CE initialization, then interrupt/RX servicing. Firmware readiness
+alone is not permission to access WLAN registers or use inherited rings.
+
+Re-reviewed the preferred kernel snapshot
+`8e61187098f2c26c5daee8f9f72b6416aa64b9ab`
+`wifi/lx/src/lx_bus.c` and `lx_80211.c`: retain its separation between
+bus servicing, station/WPA2 and Ethernet/iOS layers, adapting the ath10k
+SNOC backend instead of its WCN6750 ath11k windows, MSI or ring ABI.
+The station layer remains a later consumer of a proven packet path.
+
+The captured native ICNSS binding is WLAN `18800000+800000`, APPS SMMU
+SIDc0/mask1, host IOVA `a0000000+10000000`, and12 CE SPIs. Its named
+IPA IOVA aperture `b0000000+10000` is separate; neither it nor the retained
+RMTFS allocation grants CE RAM. APPS SMMU has no optional clock/static-CB
+binding in this capture and is independently readable in the bounded USB
+profile. The new post-readiness observer pins that established layout,
+double-reads every SMR/S2CR and each CB's SCTLR/CBAR/CBA2R/FSR, and counts
+latent references even when the SMR is invalid. It never reserves a CB,
+changes routes, acknowledges faults, touches TCU/TBU/CE or authorizes DMA.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

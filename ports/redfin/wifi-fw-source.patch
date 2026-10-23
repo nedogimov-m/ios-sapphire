@@ -740,7 +740,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,1192 @@
+@@ -0,0 +1,1225 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -759,6 +759,7 @@ new file mode 100644
 +#include "redfin_wifi_hyp.h"
 +#include "redfin_wifi_wlfw.h"
 +#include "redfin_wifi_bdf.h"
++#include "redfin_wifi_snoc.h"
 +
 +extern "C" int redfin_wifi_power_start(void);
 +extern "C" int redfin_wifi_power_held(void);
@@ -816,6 +817,9 @@ new file mode 100644
 +    rf_wlfw_dynamic dynamic;
 +    rf_bdf_session bdf;
 +    rf_bdf_ops bdf_ops;
++    bool snoc_mode, snoc_attempted;
++    fw_start_map snoc_maps[2];
++    rf_snoc_snapshot snoc;
 +};
 +static fw_start_context fw_start;
 +static const uint8_t fw_start_bdf_digest[32] = {
@@ -970,6 +974,26 @@ new file mode 100644
 +    return valid;
 +}
 +
++static bool fw_start_snoc_contract(void)
++{
++    DTEntry node;
++    uint32_t actual[8] = {}, irqs[12] = {}, observe = 0;
++    uint64_t smmu[2] = {}, wlan[2] = {}, iova[2] = {};
++    const uint32_t expected[8] = {1, 0xc0, 1, 81, 62, 0x4000, 0x80000, 0x1000};
++    const uint32_t expected_irqs[12] = {164, 113, 447, 448, 449, 118, 126, 128, 114, 151, 152, 119};
++    const uint64_t expected_smmu[2] = {RF_SNOC_SMMU_BASE, RF_SNOC_SMMU_BYTES};
++    const uint64_t expected_wlan[2] = {0x18800000, 0x800000};
++    const uint64_t expected_iova[2] = {0xa0000000, 0x10000000};
++    return fw_start.snoc_mode && fw_start.wlan_bdf_mode && fw_start.wlan_power_mode &&
++        SecureDTLookupEntry(NULL, "/redfin-wifi-snoc", &node) == kSuccess &&
++        fw_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
++        fw_property(node, "ce-intids", irqs, sizeof(irqs)) && !memcmp(irqs, expected_irqs, sizeof(irqs)) &&
++        fw_property(node, "reg", smmu, sizeof(smmu)) && !memcmp(smmu, expected_smmu, sizeof(smmu)) &&
++        fw_property(node, "wlan-reg", wlan, sizeof(wlan)) && !memcmp(wlan, expected_wlan, sizeof(wlan)) &&
++        fw_property(node, "wlan-iova", iova, sizeof(iova)) && !memcmp(iova, expected_iova, sizeof(iova)) &&
++        fw_property(node, "observe-only", &observe, sizeof(observe)) && observe == 1;
++}
++
 +static int fw_start_check(void *opaque)
 +{
 +    fw_start_context *context = (fw_start_context *)opaque;
@@ -980,7 +1004,8 @@ new file mode 100644
 +        (!context->host_mode || fw_start_assets_contract(context, false)) &&
 +        (!context->rmtfs_mode || (!context->rmtfs.poisoned && fw_start_rmtfs_contract(context, false))) &&
 +        (!context->wlfw_mode || (!context->wlfw_setup.poisoned && fw_start_wlfw_contract())) &&
-+        (!context->wlan_observe_mode || fw_start_wlan_contract());
++        (!context->wlan_observe_mode || fw_start_wlan_contract()) &&
++        (!context->snoc_mode || fw_start_snoc_contract());
 +    if (valid) for (unsigned i = 0; i < FW_START_MAPS; ++i) {
 +        const fw_start_map *entry = &context->mapping[i];
 +        if (!entry->map && !entry->memory && !entry->base) continue;
@@ -995,6 +1020,7 @@ new file mode 100644
 +    return valid ? 0 : ECANCELED;
 +}
 +static bool fw_start_valid(void *opaque) { return !fw_start_check(opaque); }
++#include "redfin_wifi_snoc.inc"
 +static int fw_start_source_policy(void *opaque, uint64_t nonce)
 +{ return nonce == fw_probe.nonce ? fw_start_check(opaque) : ECANCELED; }
 +
@@ -1679,8 +1705,12 @@ new file mode 100644
 +                    }
 +                    bool bdf_done = !context->wlan_bdf_mode || context->bdf.stage == RF_BDF_COMPLETE ||
 +                        (!context->bdf.attempted && context->wlfw_setup.fw_ready);
-+                    if (bdf_done && (context->wlfw_setup.fw_ready || context->bdf.fw_ready)) return context->wlan_pmic_mode ?
-+                        redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
++                    if (bdf_done && (context->wlfw_setup.fw_ready || context->bdf.fw_ready)) {
++                        error = context->wlan_pmic_mode ?
++                            redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
++                        if (!error && context->snoc_mode) error = fw_start_snoc_observe(context);
++                        return error;
++                    }
 +                }
 +            } else if (!context->cap_sent) {
 +                const uint8_t request[7] = {0, 1, 0, 0x24, 0, 0, 0};
@@ -1888,6 +1918,9 @@ new file mode 100644
 +    bool bdf_present = wlan_present && SecureDTGetProperty(wlan_node, "bdf-download", &bdf_property, &bdf_bytes) == kSuccess;
 +    uint32_t bdf_enabled = 0;
 +    fw_start.wlan_bdf_mode = bdf_present && fw_property(wlan_node, "bdf-download", &bdf_enabled, sizeof(bdf_enabled)) && bdf_enabled == 1;
++    DTEntry snoc_node;
++    bool snoc_present = SecureDTLookupEntry(NULL, "/redfin-wifi-snoc", &snoc_node) == kSuccess;
++    fw_start.snoc_mode = snoc_present && fw_start.wlan_bdf_mode;
 +    if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
 +    if (!args || bytes == sizeof(fw_probe.args) ||
 +        !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
@@ -1897,7 +1930,7 @@ new file mode 100644
 +        (wlfw_present && (!fw_start.wlfw_mode || !fw_start_wlfw_contract())) ||
 +        (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract())) ||
 +        (pmic_present && !fw_start.wlan_pmic_mode) || (hang_present && !fw_start.wlan_hang_mode) ||
-+        (bdf_present && !fw_start.wlan_bdf_mode)) {
++        (bdf_present && !fw_start.wlan_bdf_mode) || (snoc_present && !fw_start_snoc_contract())) {
 +        IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
 +        thread_terminate_self();
 +        __builtin_unreachable();
@@ -3683,3 +3716,230 @@ new file mode 100644
 +    return -1;
 +}
 +#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_snoc.h b/iokit/Kernel/arm/redfin_wifi_snoc.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_snoc.h
+@@ -0,0 +1,144 @@
++/* SPDX-License-Identifier: MIT
++ * Redfin APPS SMMU evidence for the WCN3990-class SNOC transport.
++ * Native msm 500b3a2059c1eec0fec08ec56add06320ea901a8 arm-smmu{,-regs.h}.
++ * Read-only, fixed-layout snapshots. Neither an invalid SMR nor a blank CB
++ * grants ownership; no route, context, TLB, fault or CE write API exists here.
++ */
++#ifndef REDFIN_WIFI_SNOC_H
++#define REDFIN_WIFI_SNOC_H
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <sys/errno.h>
++
++#define RF_SNOC_SMMU_BASE UINT64_C(0x15000000)
++#define RF_SNOC_SMMU_BYTES 0x100000u
++#define RF_SNOC_GLOBAL_BYTES 0x4000u
++#define RF_SNOC_CONTEXT_OFFSET 0x80000u
++#define RF_SNOC_CONTEXT_BYTES 0x40000u
++#define RF_SNOC_STREAMS 81u
++#define RF_SNOC_CONTEXTS 62u
++#define RF_SNOC_WLAN_SID 0xc0u
++
++struct rf_snoc_ops {
++    void *context;
++    int (*check)(void *);
++    /* block0 = GR0/GR1, block1 = CB pages; offsets are block relative. */
++    int (*read)(void *, unsigned, uint32_t, uint32_t *);
++};
++struct rf_snoc_bank { uint32_t sctlr, cbar, cba2r, fault; };
++struct rf_snoc_snapshot {
++    uint32_t stage, error, reads, changed_block, changed_offset;
++    uint32_t id[3], control, fault, syndrome[3];
++    uint32_t smr[RF_SNOC_STREAMS], s2cr[RF_SNOC_STREAMS];
++    struct rf_snoc_bank bank[RF_SNOC_CONTEXTS];
++    uint32_t references[RF_SNOC_CONTEXTS], active_references[RF_SNOC_CONTEXTS];
++    uint32_t wlan_matches[2], wlan_slot[2], ipa_matches, malformed_routes;
++    uint32_t blank_unreferenced;
++    bool stable;
++};
++
++static inline bool rf_snoc_read_allowed(unsigned block, uint32_t at)
++{
++    if (at & 3u) return false;
++    if (block == 1) return at < RF_SNOC_CONTEXTS * 0x1000u &&
++        ((at & 0xfffu) == 0 || (at & 0xfffu) == 0x58u);
++    if (block) return false;
++    if (at == 0 || at == 0x20 || at == 0x24 || at == 0x28 || at == 0x48 ||
++        at == 0x50 || at == 0x54 || at == 0x58) return true;
++    return (at >= 0x800 && at - 0x800 < RF_SNOC_STREAMS * 4u) ||
++        (at >= 0xc00 && at - 0xc00 < RF_SNOC_STREAMS * 4u) ||
++        (at >= 0x1000 && at - 0x1000 < RF_SNOC_CONTEXTS * 4u) ||
++        (at >= 0x1800 && at - 0x1800 < RF_SNOC_CONTEXTS * 4u);
++}
++static inline bool rf_snoc_stream_matches(uint32_t smr, uint32_t sid)
++{
++    return (smr & 0x80000000u) && !((sid ^ smr) & ~((smr >> 16) & 0x7fffu) & 0x7fffu);
++}
++static inline int rf_snoc_sample(const struct rf_snoc_ops *ops, struct rf_snoc_snapshot *s,
++    unsigned block, uint32_t at, uint32_t *saved, bool compare)
++{
++    uint32_t value = 0;
++    if (!saved || !rf_snoc_read_allowed(block, at)) return EINVAL;
++    int error = ops->check(ops->context);
++    if (error) return error;
++    ++s->reads;
++    error = ops->read(ops->context, block, at, &value);
++    if (error) return error;
++    if (value == UINT32_MAX) return EIO;
++    if (compare && *saved != value) {
++        s->changed_block = block; s->changed_offset = at;
++        return EAGAIN;
++    }
++    *saved = value;
++    return 0;
++}
++
++static inline int rf_snoc_observe(const struct rf_snoc_ops *ops, struct rf_snoc_snapshot *s)
++{
++    int error = EINVAL;
++    if (!s) return EINVAL;
++#ifdef __cplusplus
++    *s = rf_snoc_snapshot{};
++#else
++    *s = (struct rf_snoc_snapshot){0};
++#endif
++    s->wlan_slot[0] = s->wlan_slot[1] = UINT32_MAX;
++    if (!ops || !ops->check || !ops->read) goto done;
++#define RF_SNOC_SAMPLE(block, at, field, compare) do { \
++    error = rf_snoc_sample(ops, s, block, at, &(field), compare); if (error) goto done; \
++} while (0)
++    for (unsigned pass = 0; pass < 2; ++pass) {
++        bool compare = pass != 0;
++        s->stage = pass ? 3 : 1;
++        for (unsigned i = 0; i < 3; ++i) RF_SNOC_SAMPLE(0, 0x20 + 4u*i, s->id[i], compare);
++        /* Exact IDs were observed by the isolated native USB context probe.
++         * Refuse different layouts before ever reaching context pages. */
++        if (s->id[0] != 0x4c017e51u || s->id[1] != 0x6000003eu || s->id[2] != 0x5111u)
++        { error = ENOTSUP; goto done; }
++        RF_SNOC_SAMPLE(0, 0, s->control, compare);
++        if ((s->control & 9u) || !(s->control & 0x400u)) { error = ENOTSUP; goto done; }
++        RF_SNOC_SAMPLE(0, 0x48, s->fault, compare);
++        for (unsigned i = 0; i < 3; ++i) RF_SNOC_SAMPLE(0, 0x50 + 4u*i, s->syndrome[i], compare);
++        if (!pass) s->stage = 2;
++        for (unsigned i = 0; i < RF_SNOC_STREAMS; ++i) {
++            RF_SNOC_SAMPLE(0, 0x800 + 4u*i, s->smr[i], compare);
++            RF_SNOC_SAMPLE(0, 0xc00 + 4u*i, s->s2cr[i], compare);
++        }
++        for (unsigned i = 0; i < RF_SNOC_CONTEXTS; ++i) {
++            RF_SNOC_SAMPLE(0, 0x1000 + 4u*i, s->bank[i].cbar, compare);
++            RF_SNOC_SAMPLE(0, 0x1800 + 4u*i, s->bank[i].cba2r, compare);
++            RF_SNOC_SAMPLE(1, 0x1000u*i, s->bank[i].sctlr, compare);
++            RF_SNOC_SAMPLE(1, 0x1000u*i + 0x58, s->bank[i].fault, compare);
++        }
++    }
++    for (unsigned i = 0; i < RF_SNOC_STREAMS; ++i) {
++        uint32_t type = (s->s2cr[i] >> 16) & 3u, bank = s->s2cr[i] & 255u;
++        if (type == 3 || (s->smr[i] & 0x8000u) || (!type && bank >= RF_SNOC_CONTEXTS))
++            ++s->malformed_routes;
++        /* Retain references even from invalid SMRs: never call a latent CB free. */
++        if (!type && bank < RF_SNOC_CONTEXTS) {
++            ++s->references[bank];
++            if (s->smr[i] & 0x80000000u) ++s->active_references[bank];
++        }
++        for (unsigned which = 0; which < 2; ++which) if (rf_snoc_stream_matches(s->smr[i], RF_SNOC_WLAN_SID + which)) {
++            ++s->wlan_matches[which]; s->wlan_slot[which] = i;
++        }
++        if (rf_snoc_stream_matches(s->smr[i], 0x521)) ++s->ipa_matches;
++    }
++    for (unsigned which = 0; which < 2; ++which)
++        if (s->wlan_matches[which] != 1) s->wlan_slot[which] = UINT32_MAX;
++    for (unsigned i = 0; i < RF_SNOC_CONTEXTS; ++i) {
++        const struct rf_snoc_bank *b = &s->bank[i];
++        if (!s->malformed_routes && !s->references[i] && !b->sctlr && !b->cbar && !b->cba2r && !b->fault)
++            ++s->blank_unreferenced;
++    }
++    error = ops->check(ops->context);
++    if (error) goto done;
++    s->stage = 4; s->stable = true;
++done:
++#undef RF_SNOC_SAMPLE
++    s->error = (uint32_t)error;
++    return error;
++}
++#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_snoc.inc b/iokit/Kernel/arm/redfin_wifi_snoc.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_snoc.inc
+@@ -0,0 +1,73 @@
++/* SPDX-License-Identifier: MIT
++ * Sole native WLAN worker, after real readiness. APPS SMMU is independently
++ * observable in the bounded USB profile; no WLAN/CE/TCU/TBU register is read.
++ * This adapter retains read-only local mappings until the platform reset.
++ */
++static int fw_start_snoc_check(void *opaque)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (context != &fw_start || fw_start_check(context) || !context->snoc_mode ||
++        !context->authenticated || context->reset || context->locked ||
++        !context->wlan_observed || !context->dynamic_received ||
++        context->wlfw_setup.stage != RF_WLFW_COMPLETE ||
++        !(context->wlfw_setup.fw_ready || context->bdf.fw_ready) ||
++        (context->bdf.attempted && (context->bdf.stage != RF_BDF_COMPLETE || !context->bdf.cal_reported)))
++        return EPERM;
++    for (unsigned i = 0; i < 2; ++i) {
++        const fw_start_map *entry = &context->snoc_maps[i];
++        if (!entry->memory && !entry->map && !entry->base) continue;
++        if (!entry->memory || !entry->map || !entry->base ||
++            entry->map->getVirtualAddress() != entry->base ||
++            entry->map->getLength() != (i ? RF_SNOC_CONTEXT_BYTES : RF_SNOC_GLOBAL_BYTES)) return EPERM;
++    }
++    return 0;
++}
++static int fw_start_snoc_read(void *opaque, unsigned block, uint32_t at, uint32_t *out)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (!out || !rf_snoc_read_allowed(block, at) || fw_start_snoc_check(context) ||
++        !context->snoc_maps[block].base) return EPERM;
++    uintptr_t address = context->snoc_maps[block].base + at;
++    uint32_t value;
++    __asm__ volatile("ldr %w0, [%1]\n\tdmb oshld" : "=r"(value) : "r"(address) : "memory");
++    *out = value;
++    return 0;
++}
++static int fw_start_snoc_observe(fw_start_context *context)
++{
++    if (fw_start_snoc_check(context) || context->snoc_attempted || redfin_wifi_power_audit()) return EPERM;
++    context->snoc_attempted = true;
++    for (unsigned i = 0; i < 2; ++i) {
++        if (fw_start_snoc_check(context)) return EPERM;
++        fw_start_map *entry = &context->snoc_maps[i];
++        uint64_t physical = RF_SNOC_SMMU_BASE + (i ? RF_SNOC_CONTEXT_OFFSET : 0);
++        uint64_t bytes = i ? RF_SNOC_CONTEXT_BYTES : RF_SNOC_GLOBAL_BYTES;
++        entry->memory = IOMemoryDescriptor::withPhysicalAddress(physical, bytes, kIODirectionIn);
++        entry->map = entry->memory ? entry->memory->map(kIOMapReadOnly | kIOMapInhibitCache) : NULL;
++        if (!entry->map || !entry->map->getVirtualAddress() || entry->map->getLength() != bytes) return ENOMEM;
++        entry->base = (uintptr_t)entry->map->getVirtualAddress();
++    }
++    const rf_snoc_ops ops = {context, fw_start_snoc_check, fw_start_snoc_read};
++    int error = rf_snoc_observe(&ops, &context->snoc);
++    const rf_snoc_snapshot *s = &context->snoc;
++    IOLog("REDFIN WIFI SNOC: observer=%d stage=%u reads=%u changed=%u/%#x stable=%u; no CE access or ownership grant\n",
++        error, s->stage, s->reads, s->changed_block, s->changed_offset, s->stable);
++    if (error) return error;
++    if (fw_start_snoc_check(context) || redfin_wifi_power_audit()) return EPERM;
++    IOLog("REDFIN WIFI SNOC: SMMU ID=%#x/%#x/%#x CR0=%#x GFSR=%#x syndrome=%#x/%#x/%#x WLAN=%u/%u slots=%u/%u IPA521=%u malformed=%u blank-unreferenced=%u ownership=0\n",
++        s->id[0], s->id[1], s->id[2], s->control, s->fault, s->syndrome[0], s->syndrome[1], s->syndrome[2],
++        s->wlan_matches[0], s->wlan_matches[1], s->wlan_slot[0], s->wlan_slot[1], s->ipa_matches,
++        s->malformed_routes, s->blank_unreferenced);
++    for (unsigned i = 0; i < RF_SNOC_STREAMS; ++i) {
++        if (!(s->smr[i] & 0x80000000u)) continue;
++        IOLog("REDFIN WIFI SNOC: slot=%u SMR=%#x S2CR=%#x type=%u bank=%u wlan=%u/%u\n", i,
++            s->smr[i], s->s2cr[i], (s->s2cr[i] >> 16) & 3u, s->s2cr[i] & 255u,
++            rf_snoc_stream_matches(s->smr[i], 0xc0), rf_snoc_stream_matches(s->smr[i], 0xc1));
++    }
++    for (unsigned i = 0; i < RF_SNOC_CONTEXTS; ++i) {
++        const rf_snoc_bank *b = &s->bank[i];
++        IOLog("REDFIN WIFI SNOC: bank=%u refs=%u/%u SCTLR=%#x CBAR=%#x CBA2R=%#x FSR=%#x ownership=0\n",
++            i, s->references[i], s->active_references[i], b->sctlr, b->cbar, b->cba2r, b->fault);
++    }
++    return 0;
++}

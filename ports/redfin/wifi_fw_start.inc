@@ -16,6 +16,7 @@
 #include "redfin_wifi_hyp.h"
 #include "redfin_wifi_wlfw.h"
 #include "redfin_wifi_bdf.h"
+#include "redfin_wifi_snoc.h"
 
 extern "C" int redfin_wifi_power_start(void);
 extern "C" int redfin_wifi_power_held(void);
@@ -73,6 +74,9 @@ struct fw_start_context {
     rf_wlfw_dynamic dynamic;
     rf_bdf_session bdf;
     rf_bdf_ops bdf_ops;
+    bool snoc_mode, snoc_attempted;
+    fw_start_map snoc_maps[2];
+    rf_snoc_snapshot snoc;
 };
 static fw_start_context fw_start;
 static const uint8_t fw_start_bdf_digest[32] = {
@@ -227,6 +231,26 @@ static bool fw_start_wlan_contract(void)
     return valid;
 }
 
+static bool fw_start_snoc_contract(void)
+{
+    DTEntry node;
+    uint32_t actual[8] = {}, irqs[12] = {}, observe = 0;
+    uint64_t smmu[2] = {}, wlan[2] = {}, iova[2] = {};
+    const uint32_t expected[8] = {1, 0xc0, 1, 81, 62, 0x4000, 0x80000, 0x1000};
+    const uint32_t expected_irqs[12] = {164, 113, 447, 448, 449, 118, 126, 128, 114, 151, 152, 119};
+    const uint64_t expected_smmu[2] = {RF_SNOC_SMMU_BASE, RF_SNOC_SMMU_BYTES};
+    const uint64_t expected_wlan[2] = {0x18800000, 0x800000};
+    const uint64_t expected_iova[2] = {0xa0000000, 0x10000000};
+    return fw_start.snoc_mode && fw_start.wlan_bdf_mode && fw_start.wlan_power_mode &&
+        SecureDTLookupEntry(NULL, "/redfin-wifi-snoc", &node) == kSuccess &&
+        fw_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
+        fw_property(node, "ce-intids", irqs, sizeof(irqs)) && !memcmp(irqs, expected_irqs, sizeof(irqs)) &&
+        fw_property(node, "reg", smmu, sizeof(smmu)) && !memcmp(smmu, expected_smmu, sizeof(smmu)) &&
+        fw_property(node, "wlan-reg", wlan, sizeof(wlan)) && !memcmp(wlan, expected_wlan, sizeof(wlan)) &&
+        fw_property(node, "wlan-iova", iova, sizeof(iova)) && !memcmp(iova, expected_iova, sizeof(iova)) &&
+        fw_property(node, "observe-only", &observe, sizeof(observe)) && observe == 1;
+}
+
 static int fw_start_check(void *opaque)
 {
     fw_start_context *context = (fw_start_context *)opaque;
@@ -237,7 +261,8 @@ static int fw_start_check(void *opaque)
         (!context->host_mode || fw_start_assets_contract(context, false)) &&
         (!context->rmtfs_mode || (!context->rmtfs.poisoned && fw_start_rmtfs_contract(context, false))) &&
         (!context->wlfw_mode || (!context->wlfw_setup.poisoned && fw_start_wlfw_contract())) &&
-        (!context->wlan_observe_mode || fw_start_wlan_contract());
+        (!context->wlan_observe_mode || fw_start_wlan_contract()) &&
+        (!context->snoc_mode || fw_start_snoc_contract());
     if (valid) for (unsigned i = 0; i < FW_START_MAPS; ++i) {
         const fw_start_map *entry = &context->mapping[i];
         if (!entry->map && !entry->memory && !entry->base) continue;
@@ -252,6 +277,7 @@ static int fw_start_check(void *opaque)
     return valid ? 0 : ECANCELED;
 }
 static bool fw_start_valid(void *opaque) { return !fw_start_check(opaque); }
+#include "redfin_wifi_snoc.inc"
 static int fw_start_source_policy(void *opaque, uint64_t nonce)
 { return nonce == fw_probe.nonce ? fw_start_check(opaque) : ECANCELED; }
 
@@ -936,8 +962,12 @@ static int fw_start_transport_run(fw_start_context *context)
                     }
                     bool bdf_done = !context->wlan_bdf_mode || context->bdf.stage == RF_BDF_COMPLETE ||
                         (!context->bdf.attempted && context->wlfw_setup.fw_ready);
-                    if (bdf_done && (context->wlfw_setup.fw_ready || context->bdf.fw_ready)) return context->wlan_pmic_mode ?
-                        redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
+                    if (bdf_done && (context->wlfw_setup.fw_ready || context->bdf.fw_ready)) {
+                        error = context->wlan_pmic_mode ?
+                            redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
+                        if (!error && context->snoc_mode) error = fw_start_snoc_observe(context);
+                        return error;
+                    }
                 }
             } else if (!context->cap_sent) {
                 const uint8_t request[7] = {0, 1, 0, 0x24, 0, 0, 0};
@@ -1145,6 +1175,9 @@ static void fw_start_worker(void *, wait_result_t)
     bool bdf_present = wlan_present && SecureDTGetProperty(wlan_node, "bdf-download", &bdf_property, &bdf_bytes) == kSuccess;
     uint32_t bdf_enabled = 0;
     fw_start.wlan_bdf_mode = bdf_present && fw_property(wlan_node, "bdf-download", &bdf_enabled, sizeof(bdf_enabled)) && bdf_enabled == 1;
+    DTEntry snoc_node;
+    bool snoc_present = SecureDTLookupEntry(NULL, "/redfin-wifi-snoc", &snoc_node) == kSuccess;
+    fw_start.snoc_mode = snoc_present && fw_start.wlan_bdf_mode;
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
         !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
@@ -1154,7 +1187,7 @@ static void fw_start_worker(void *, wait_result_t)
         (wlfw_present && (!fw_start.wlfw_mode || !fw_start_wlfw_contract())) ||
         (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract())) ||
         (pmic_present && !fw_start.wlan_pmic_mode) || (hang_present && !fw_start.wlan_hang_mode) ||
-        (bdf_present && !fw_start.wlan_bdf_mode)) {
+        (bdf_present && !fw_start.wlan_bdf_mode) || (snoc_present && !fw_start_snoc_contract())) {
         IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
         thread_terminate_self();
         __builtin_unreachable();
