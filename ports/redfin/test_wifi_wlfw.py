@@ -60,6 +60,8 @@ HARNESS = r'''
 static struct rf_wlfw_setup state;
 static uint8_t sent[8][48];
 static uint32_t lengths[8],sends,alive,fail_send;
+static struct rf_wlfw_dynamic dynamic;
+static uint8_t dynamic_packet[18];
 static int check(void *p){return p==&state && alive ? 0 : -1;}
 static int send(void *p,const uint8_t *data,uint32_t bytes){
  if(check(p)||fail_send||sends>=8||bytes>48)return -1;
@@ -68,6 +70,7 @@ static int send(void *p,const uint8_t *data,uint32_t bytes){
 static const struct rf_wlfw_ops ops={&state,check,send};
 void reset(void){memset(&state,0,sizeof(state));memset(sent,0,sizeof(sent));sends=fail_send=0;alive=1;}
 int begin(void){return rf_wlfw_begin(&state,&ops);}
+int begin_features(unsigned value){return rf_wlfw_begin_features(&state,&ops,value);}
 int receive(const uint8_t *data,uint32_t bytes){return rf_wlfw_receive(&state,&ops,data,bytes);}
 uint8_t *packet(unsigned index){return index<8 ? sent[index] : NULL;}
 uint32_t packet_bytes(unsigned index){return index<8 ? lengths[index] : 0;}
@@ -75,11 +78,17 @@ uint64_t metric(unsigned which){
  uint64_t values[]={state.stage,sends,state.registered,state.regions,state.msa_accepted,state.fw_ready,
  state.msa_ready_ind,state.ready_indications,state.pin_indications,state.result,state.error,state.poisoned,
  state.responses,state.ignored,state.already_registered,state.cap.chip,state.cap.family,state.cap.board,
- state.cap.soc,state.cap.firmware,state.cap.valid};
+ state.cap.soc,state.cap.firmware,state.cap.valid,state.rejuvenate,state.pin_valid,
+ state.pin_value[0],state.pin_value[1],state.pin_value[2]};
  return which<sizeof(values)/sizeof(values[0]) ? values[which] : 0;
 }
 void fail(unsigned mode){if(mode==1)alive=0;if(mode==2)fail_send=1;}
 int direct(unsigned stage){return rf_wlfw_send(&state,&ops,stage);}
+uint8_t *dynamic_request(void){rf_wlfw_dynamic_request(dynamic_packet);return dynamic_packet;}
+int dynamic_response(const uint8_t *data,uint32_t bytes){memset(&dynamic,0,sizeof(dynamic));return rf_wlfw_dynamic_parse(&dynamic,data,bytes);}
+uint64_t dynamic_value(unsigned which){
+ uint64_t values[]={dynamic.valid,dynamic.previous,dynamic.current,dynamic.result,dynamic.error};return which<5 ? values[which] : 0;
+}
 '''
 
 
@@ -98,6 +107,9 @@ class WlfwTests(unittest.TestCase):
             raise RuntimeError(result.stderr)
         cls.lib = C.CDLL(str(library)); cls.lib.receive.argtypes = [C.c_void_p, C.c_uint32]
         cls.lib.metric.restype = C.c_uint64; cls.lib.packet.restype = C.c_void_p
+        cls.lib.dynamic_request.restype = C.c_void_p
+        cls.lib.dynamic_response.argtypes = [C.c_void_p, C.c_uint32]
+        cls.lib.dynamic_value.restype = C.c_uint64
 
     def setUp(self):
         self.lib.reset()
@@ -191,6 +203,34 @@ class WlfwTests(unittest.TestCase):
         self.receive(response(0x21, 0, tlv(0x10, b'\1'), indication=True), code=-1)
         self.receive(response(0x2b, 0, tlv(0x10, bytes(4)) * 2, indication=True), code=-1)
         self.assertEqual(self.lib.metric(6), 0); self.assertEqual(self.lib.metric(5), 0)
+
+    def test_native_power_profile_registers_rejuvenation_and_quarantines_that_epoch(self):
+        self.assertEqual(self.lib.begin_features(1), 0)
+        self.assertEqual(self.packet(0)[-7:], tlv(0x19, struct.pack('<I', 1)))
+        self.assertEqual(len(self.packet(0)), 33)
+        self.receive(response(0x39, 0, tlv(0x10, b'\1'), indication=True), code=-1)
+        self.assertEqual([self.lib.metric(i) for i in (0, 1, 11, 21)], [6, 1, 1, 1])
+        self.assertNotEqual(self.lib.begin(), 0)
+        self.setUp(); self.assertNotEqual(self.lib.begin_features(2), 0); self.assertEqual(self.lib.metric(1), 0)
+
+    def test_pin_results_preserve_native_values_and_presence(self):
+        self.registered()
+        self.receive(response(0x2c, 0, tlv(0x10, struct.pack('<I', 7)) + tlv(0x11, struct.pack('<I', 5)) +
+                              tlv(0x12, struct.pack('<I', 11)), indication=True))
+        self.assertEqual([self.lib.metric(i) for i in (22, 23, 24, 25)], [7, 7, 5, 11])
+
+    def test_dynamic_feature_request_and_reply_match_native_u64_mask_contract(self):
+        packet = C.string_at(self.lib.dynamic_request(), 18)
+        self.assertEqual(packet, struct.pack('<BHHH', 0, 5, 0x3b, 11) + tlv(0x10, struct.pack('<Q', 1)))
+        data = response(0x3b, 5, tlv(0x10, bytes(8)) + tlv(0x11, struct.pack('<Q', 1)))
+        self.assertEqual(self.lib.dynamic_response(data, len(data)), 0)
+        self.assertEqual([self.lib.dynamic_value(i) for i in range(5)], [3, 0, 1, 0, 0])
+        data = response(0x3b, 5, result=1, error=0x5e)
+        self.assertEqual(self.lib.dynamic_response(data, len(data)), 0)
+        self.assertEqual([self.lib.dynamic_value(i) for i in (3, 4)], [1, 0x5e])
+        for data in (response(0x3b, 4), response(0x3a, 5), response(0x3b, 5, tlv(0x10, b'\1')),
+                     response(0x3b, 5, tlv(0x11, bytes(8)) * 2)):
+            self.assertNotEqual(self.lib.dynamic_response(data, len(data)), 0)
 
     def test_live_contract_refuses_hyp_change_foreign_region_and_duplicate_reference(self):
         tree = mkadt.build(0x180000000, 0x80000000)

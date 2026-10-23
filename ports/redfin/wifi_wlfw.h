@@ -14,7 +14,8 @@ enum { RF_WLFW_IDLE, RF_WLFW_REGISTER, RF_WLFW_MSA_INFO, RF_WLFW_MSA_READY,
 struct rf_wlfw_region { uint64_t base; uint32_t bytes, secure; };
 struct rf_wlfw_setup {
     uint32_t stage, attempted, poisoned, registered, regions, msa_accepted, ready_indications, pin_indications;
-    uint32_t fw_ready, msa_ready_ind, responses, ignored, already_registered;
+    uint32_t fw_ready, msa_ready_ind, responses, ignored, already_registered, notify_rejuvenate, rejuvenate;
+    uint32_t pin_valid, pin_value[3];
     uint16_t transaction, waiting, result, error;
     uint64_t fw_status;
     struct rf_wlfw_region region[2];
@@ -54,6 +55,10 @@ static inline int rf_wlfw_send(struct rf_wlfw_setup *s, const struct rf_wlfw_ops
         }
         data[used++] = 0x15; data[used++] = 4; data[used++] = 0;
         rf_wlfw_put(data + used, UINT32_C(0x4b4e454c), 4); used += 4;
+        if (s->notify_rejuvenate) {
+            data[used++] = 0x19; data[used++] = 4; data[used++] = 0;
+            rf_wlfw_put(data + used, 1, 4); used += 4;
+        }
     } else if (stage == RF_WLFW_MSA_INFO) {
         data[used++] = 1; data[used++] = 8; data[used++] = 0;
         rf_wlfw_put(data + used, RF_WLFW_MSA_BASE, 8); used += 8;
@@ -67,12 +72,14 @@ static inline int rf_wlfw_send(struct rf_wlfw_setup *s, const struct rf_wlfw_ops
     }
     return 0;
 }
-static inline int rf_wlfw_begin(struct rf_wlfw_setup *s, const struct rf_wlfw_ops *o)
+static inline int rf_wlfw_begin_features(struct rf_wlfw_setup *s, const struct rf_wlfw_ops *o, unsigned rejuvenate)
 {
-    if (rf_wlfw_gate(s, o) || s->attempted || s->stage != RF_WLFW_IDLE) return -1;
-    s->attempted = 1;
+    if (rejuvenate > 1 || rf_wlfw_gate(s, o) || s->attempted || s->stage != RF_WLFW_IDLE) return -1;
+    s->attempted = 1; s->notify_rejuvenate = rejuvenate;
     return rf_wlfw_send(s, o, RF_WLFW_REGISTER);
 }
+static inline int rf_wlfw_begin(struct rf_wlfw_setup *s, const struct rf_wlfw_ops *o)
+{ return rf_wlfw_begin_features(s, o, 0); }
 /* 0 accepted, 1 unrelated/late response, -1 malformed or platform failure.
  * A valid QMI error is recorded as FAILED without pretending it was success. */
 static inline int rf_wlfw_receive(struct rf_wlfw_setup *s, const struct rf_wlfw_ops *o,
@@ -82,6 +89,17 @@ static inline int rf_wlfw_receive(struct rf_wlfw_setup *s, const struct rf_wlfw_
         rf_qmi_u16(data + 5) != bytes - 7u) return -1;
     uint16_t transaction = rf_qmi_u16(data + 1), message = rf_qmi_u16(data + 3);
     if (data[0] != 2 && data[0] != 4) return -1;
+    if (data[0] == 4 && message == 0x39) {
+        /* Native rejuvenation means this WLAN epoch can no longer be used.
+         * This diagnostic retains resources and relies on full platform reset;
+         * it never acknowledges a recovery that it has not performed. */
+        if (bytes > 151) return -1;
+        for (uint32_t at = 7; at < bytes;) {
+            if (bytes - at < 3 || rf_qmi_u16(data + at + 1) > bytes - at - 3u) return -1;
+            at += 3u + rf_qmi_u16(data + at + 1);
+        }
+        s->rejuvenate = 1; s->poisoned = 1; s->stage = RF_WLFW_FAILED; return -1;
+    }
     if (data[0] == 2 && (s->stage == RF_WLFW_COMPLETE || s->stage == RF_WLFW_FAILED ||
         transaction != s->transaction || message != s->waiting)) { ++s->ignored; return 1; }
     if (data[0] == 4 && message != 0x21 && message != 0x2b && message != 0x2c) { ++s->ignored; return 1; }
@@ -92,7 +110,7 @@ static inline int rf_wlfw_receive(struct rf_wlfw_setup *s, const struct rf_wlfw_
         s->stage = cap.result ? RF_WLFW_FAILED : RF_WLFW_COMPLETE;
         return 0;
     }
-    uint32_t seen = 0, count = 0, offset = 0, length = 0;
+    uint32_t seen = 0, count = 0, offset = 0, length = 0, pins[3] = {0};
     uint16_t result = 0, error = 0;
     uint64_t status = 0;
     struct rf_wlfw_region regions[2] = {{0, 0, 0}, {0, 0, 0}};
@@ -131,6 +149,7 @@ static inline int rf_wlfw_receive(struct rf_wlfw_setup *s, const struct rf_wlfw_
             bit = 2; if (size != 2) return -1; length = rf_qmi_u16(value);
         } else if (data[0] == 4 && message == 0x2c && kind >= 0x10 && kind <= 0x12) {
             bit = 1u << (kind - 0x10u); if (size != 4) return -1;
+            pins[kind - 0x10u] = rf_qmi_u32(value);
         } else if (kind < 16) return -1;
         if (bit && (seen & bit)) return -1;
         seen |= bit; at += 3u + size;
@@ -139,7 +158,7 @@ static inline int rf_wlfw_receive(struct rf_wlfw_setup *s, const struct rf_wlfw_
         if (message == 0x2b) {
             if (offset > RF_WLFW_MSA_BYTES || length > RF_WLFW_MSA_BYTES - offset) return -1;
             s->msa_ready_ind = 1;
-        } else ++s->pin_indications;
+        } else { ++s->pin_indications; s->pin_valid = seen; memcpy(s->pin_value, pins, sizeof(pins)); }
         return 0;
     }
     if (!(seen & 1u) || (!result && s->stage == RF_WLFW_MSA_INFO && !(seen & 2u))) return -1;
@@ -161,5 +180,43 @@ static inline int rf_wlfw_receive(struct rf_wlfw_setup *s, const struct rf_wlfw_
         return rf_wlfw_send(s, o, RF_WLFW_CAP);
     }
     return -1;
+}
+
+struct rf_wlfw_dynamic {
+    uint64_t previous, current;
+    uint32_t valid;
+    uint16_t result, error;
+};
+static inline void rf_wlfw_dynamic_request(uint8_t out[18])
+{
+    memset(out, 0, 18); rf_wlfw_put(out + 1, 5, 2); rf_wlfw_put(out + 3, 0x3b, 2);
+    rf_wlfw_put(out + 5, 11, 2); out[7] = 0x10; out[8] = 8;
+    rf_wlfw_put(out + 10, 1, 8); /* Native ICNSS default: FW_REJUVENATE. */
+}
+static inline int rf_wlfw_dynamic_parse(struct rf_wlfw_dynamic *out, const uint8_t *data, uint32_t bytes)
+{
+    if (!out || !data || bytes < 14 || bytes > 256 || data[0] != 2 || rf_qmi_u16(data + 1) != 5 ||
+        rf_qmi_u16(data + 3) != 0x3b || rf_qmi_u16(data + 5) != bytes - 7u) return -1;
+    struct rf_wlfw_dynamic parsed;
+    memset(&parsed, 0, sizeof(parsed)); uint32_t seen = 0;
+    for (uint32_t at = 7; at < bytes;) {
+        if (bytes - at < 3) return -1;
+        uint32_t length = rf_qmi_u16(data + at + 1), kind = data[at], bit = 0;
+        const uint8_t *value = data + at + 3u;
+        if (length > bytes - at - 3u) return -1;
+        if (kind == 2) {
+            bit = 1; if (length != 4) return -1;
+            parsed.result = rf_qmi_u16(value); parsed.error = rf_qmi_u16(value + 2);
+            if (parsed.result > 1 || (!parsed.result && parsed.error)) return -1;
+        } else if (kind == 0x10 || kind == 0x11) {
+            bit = kind == 0x10 ? 2u : 4u; if (length != 8) return -1;
+            parsed.valid |= kind == 0x10 ? 1u : 2u;
+            if (kind == 0x10) parsed.previous = rf_wlfw_u64(value); else parsed.current = rf_wlfw_u64(value);
+        } else if (kind < 16) return -1;
+        if (seen & bit) return -1;
+        seen |= bit; at += 3u + length;
+    }
+    if (!(seen & 1u)) return -1;
+    *out = parsed; return 0;
 }
 #endif

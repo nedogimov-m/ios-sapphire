@@ -1,5 +1,30 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native post-power dynamic feature exchange prepared — 2026-10-23
+
+Continues `4c48693`. The power-only profile now matches native default
+rejuvenation notification (IND_REGISTER TLV0x19/u32=1) and queues the native
+post-power DYNAMIC_FEATURE_MASK0x3b, transaction5, TLV0x10/u64 mask1.
+Previous/current response masks and QMI errors are recorded separately
+from CAP identity; a valid feature rejection does not fabricate a CAP
+failure or readiness. Source: pinned ICNSS defaults and generated codec.
+An actual rejuvenation0x39 quarantines the epoch for full platform reset;
+no recovery acknowledgement or subsystem reset is claimed. Power/PHY/RF
+pin-result values are retained with explicit presence. Setup-only and
+read-only profiles retain their earlier notification behavior.
+
+All212 Wi-Fi checks PASS (3 optional private cases skipped), including
+actual native feature bytes, masks/errors, pin values and rejuvenation
+quarantine. Native `build-20261023-191352.log` PASS; no CI run. Complete
+actual Image/live-FDT/shim-return preflight PASS; hardware result pending.
+Kernel `73e7c5de5c4f1d93ac991470881b4a654180c2d8124dad28989ae37974779a3b`; image `8b30fda981c21df5a121118d0cec192273a08baaefc9cd24e03330c2d8cd6bf4`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x713ae40cbd52b861`.
+
+Next: temporary power-v2 run, inspect native mask acknowledgement and
+FW_READY. Also investigate the observed missing modem shared object from
+the already captured modem_b inventory rather than assume it is optional.
+All persistent EFS/boot/recovery/modem remain untouched.
+
 ## REDFIN all15 native WLAN VRM requests hardware PASS; FW_READY wait remains — 2026-10-23
 
 Source `26c87c9`, local native `build-20261023-185754.log`. Authenticated,

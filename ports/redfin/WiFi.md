@@ -836,3 +836,11 @@ clock is present in this DT profile. Host services continue while waiting
 for FW_READY, with a30-second transport deadline for a captured final result.
 TCS acceptance records a resource request; it does not measure a regulator
 output or demonstrate association/data transfer.
+
+Hardware accepts all15 requests (bitmap0x7fff, native RSC ACKs) and reseals
+the parent with no quarantine; FW_READY is still absent through the30s
+window. The power-only continuation adds native rejuvenation notification
+and post-power dynamic mask1 (QMI0x3b), with checked previous/current masks.
+It records power/PHY/RF pin results and quarantines an actual rejuvenation
+indication until full reset. CAP identity and dynamic-feature results remain
+separate observations; host services keep running while awaiting readiness.

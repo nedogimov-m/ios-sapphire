@@ -67,6 +67,8 @@ struct fw_start_context {
     bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed;
     rf_wlfw_setup wlfw_setup;
     rf_wlfw_ops wlfw_ops;
+    unsigned dynamic_sent, dynamic_received;
+    rf_wlfw_dynamic dynamic;
 };
 static fw_start_context fw_start;
 
@@ -613,10 +615,21 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
         else if (type == 1 && to >= 0x4100 && to < 0x5100) error = rf_host_tftp_packet(&context->host,
             &context->host_ops, source, from, to, data + at, size);
         else if (type == 1 && to == 0x4004 && source == context->wlfw_node && from == context->wlfw_port) {
-            if (context->wlfw_mode && context->wlfw_setup.attempted) {
+            if (context->wlan_power_mode && context->dynamic_sent && size >= 7 && rf_qmi_u16(data + at + 3) == 0x3b) {
+                error = rf_wlfw_dynamic_parse(&context->dynamic, data + at, size);
+                if (error) { context->poisoned = true; return; }
+                context->dynamic_received = 1;
+                IOLog("REDFIN WIFI WLFW: dynamic mask result=%u error=%u valid=%#x previous=%#llx current=%#llx\n",
+                    context->dynamic.result, context->dynamic.error, context->dynamic.valid,
+                    (unsigned long long)context->dynamic.previous, (unsigned long long)context->dynamic.current);
+            } else if (context->wlfw_mode && context->wlfw_setup.attempted) {
                 unsigned previous = context->wlfw_setup.stage;
                 error = rf_wlfw_receive(&context->wlfw_setup, &context->wlfw_ops, data + at, size);
-                if (error < 0) { context->poisoned = true; return; }
+                if (error < 0) {
+                    IOLog("REDFIN WIFI WLFW: rejected message=%#x rejuvenate=%u; retained until platform reset\n",
+                        size >= 7 ? (unsigned)rf_qmi_u16(data + at + 3) : 0, context->wlfw_setup.rejuvenate);
+                    context->poisoned = true; return;
+                }
                 if (!error) IOLog("REDFIN WIFI WLFW: received=%#x stage=%u->%u transaction=%u result=%u error=%u status=%#llx regions=%u MSA=%u FWready=%u\n",
                     (unsigned)rf_qmi_u16(data + at + 3), previous, context->wlfw_setup.stage,
                     context->wlfw_setup.transaction, context->wlfw_setup.result, context->wlfw_setup.error,
@@ -628,12 +641,16 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
                             i, (unsigned long long)context->wlfw_setup.region[i].base,
                             context->wlfw_setup.region[i].bytes, context->wlfw_setup.region[i].secure);
                 if (error == 1) error = 0;
+                if (!error && size >= 7 && rf_qmi_u16(data + at + 3) == 0x2c)
+                    IOLog("REDFIN WIFI WLFW: pin results valid=%#x power=%#x phy=%#x RF=%#x\n",
+                        context->wlfw_setup.pin_valid, context->wlfw_setup.pin_value[0],
+                        context->wlfw_setup.pin_value[1], context->wlfw_setup.pin_value[2]);
                 if (context->wlfw_setup.stage == RF_WLFW_COMPLETE) {
                     context->cap = context->wlfw_setup.cap; context->cap_received = 1;
                 }
             } else if (!context->wlfw_mode && context->cap_sent &&
                 !rf_wlfw_cap_parse(&context->cap, data + at, size, 1)) context->cap_received = 1;
-            if (context->cap_received)
+            if (context->cap_received && size >= 7 && rf_qmi_u16(data + at + 3) == 0x24)
                 IOLog("REDFIN WIFI WLFW: CAP result=%u error=%u valid=%#x chip=%#x family=%#x board=%#x SoC=%#x firmware=%#x chain=%u chain_present=%u\n",
                     context->cap.result, context->cap.error, context->cap.valid, context->cap.chip, context->cap.family,
                     context->cap.board, context->cap.soc, context->cap.firmware, context->cap.chain,
@@ -737,7 +754,7 @@ static int fw_start_transport_run(fw_start_context *context)
             if (!context->host_mode) return 0;
             if (context->wlfw_mode) {
                 if (!context->wlfw_setup.attempted) {
-                    error = rf_wlfw_begin(&context->wlfw_setup, &context->wlfw_ops);
+                    error = rf_wlfw_begin_features(&context->wlfw_setup, &context->wlfw_ops, context->wlan_power_mode ? 1u : 0u);
                     if (error) return error;
                     IOLog("REDFIN WIFI WLFW: native legacy indication/MSA/CAP handshake begins; fixed permissions, no MSA CPU map\n");
                 }
@@ -760,6 +777,14 @@ static int fw_start_transport_run(fw_start_context *context)
                         }
                         if (error) return error;
                         context->wlan_observed = true;
+                    }
+                    if (context->wlan_power_mode && !context->dynamic_sent) {
+                        uint8_t request[18]; rf_wlfw_dynamic_request(request);
+                        error = fw_start_qrtr_queue(context, 1, 0x4004, context->wlfw_node, context->wlfw_port,
+                            request, sizeof(request));
+                        if (error) return error;
+                        context->dynamic_sent = 1;
+                        IOLog("REDFIN WIFI WLFW: queued native post-power dynamic feature mask1 transaction5\n");
                     }
                     if (context->wlfw_setup.fw_ready) return 0;
                 }

@@ -326,5 +326,15 @@ chains; reported1x1 omits chain1. Only the already-owned DRV2 ACTIVE slot is
 used, with the base ARC/BCM/AOP ledger retained and the same live MPSS child
 checking every write/poll. Uncertain requests remain held until reset.
 
+After the first power run accepted all15 requests without FW_READY,
+reviewed the same native `wlfw_dynamic_feature_mask_send_sync_msg` and
+generated codec. Native defaults register rejuvenation TLV0x19/u32=1 and,
+after power, send message0x3b/TLV0x10/u64 mask1. Response previous/current
+masks are independent optional u64 fields. The power-only profile now
+performs that exchange; valid QMI errors remain recorded without changing
+the separately successful CAP identity. Native rejuvenation indication0x39
+quarantines this bounded epoch until platform reset instead of claiming an
+unperformed recovery. Pin-result indications preserve their actual fields.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772
