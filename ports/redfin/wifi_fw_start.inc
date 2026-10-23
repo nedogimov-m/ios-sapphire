@@ -753,10 +753,11 @@ static int fw_start_transport_run(fw_start_context *context)
                 context->glink.open, context->glink.rx, context->glink.heard, context->glink.sent,
                 context->glink.packets, context->qrtr_services, context->wlfw_port);
             next_report = now + 1000000000u;
-            if (context->host_mode) IOLog("REDFIN WIFI HOST: pd=%u TFTP=%u reads=%u writes=%u missing=%u pending=%u cap=%u/%u IPA=%u/%#x/%u\n",
+            if (context->host_mode) IOLog("REDFIN WIFI HOST: pd=%u TFTP=%u reads=%u writes=%u missing=%u pending=%u cap=%u/%u IPA=%u/%#x/%u WLAN=%u/%#x\n",
                 context->host.pd_requests, context->host.requests, context->host.reads, context->host.writes,
                 context->host.missing, context->pending_count, context->cap_sent, context->cap_received,
-                context->smp2p.ipa_found, context->smp2p.ipa_state, context->smp2p.ipa_responses);
+                context->smp2p.ipa_found, context->smp2p.ipa_state, context->smp2p.ipa_responses,
+                context->smp2p.wlan_found, context->smp2p.wlan_state);
             if (context->host_mode && context->host.rmtfs_requests)
                 IOLog("REDFIN WIFI HOST: RMTFS observed=%u last_message=%u (all requests refused)\n",
                     context->host.rmtfs_requests, context->host.rmtfs_message);
@@ -1018,11 +1019,12 @@ static void fw_start_worker(void *, wait_result_t)
     fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
     IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());
     int error = fw_start_run(&fw_start);
-    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu retained=1\n",
+    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x retained=1\n",
         error, fw_start.phase, fw_start.reset, fw_start.initialized, fw_start.setup,
         fw_start.authenticated, fw_start.smp2p.stage, fw_start.copies,
         (unsigned long long)fw_probe.boot.source.copied_bytes,
-        (unsigned long long)fw_probe.boot.source.zeroed_bytes);
+        (unsigned long long)fw_probe.boot.source.zeroed_bytes,
+        fw_start.smp2p.wlan_found, fw_start.smp2p.wlan_state);
     /* This bounded diagnostic never frees remote-visible state or retries.
      * The shim/PMIC watchdog resets the complete platform back to fastboot. */
     if (error) fw_start.poisoned = true;

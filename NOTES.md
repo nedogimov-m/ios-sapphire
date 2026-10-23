@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native WLAN SMP2P raw-state diagnostics prepared — 2026-10-24
+
+Continues `3ae5f04`. Rechecked native ICNSS notifications and the actual
+live `qcom,smp2p-wlan-1-in`/consumer binding: entry `wlan`, bit0 force-error-
+fatal, bit1 early-crash. The peer parser already reads/validates both full
+stable inbound snapshots. It now retains raw WLAN presence/index/value
+alongside master/IPA and logs them in periodic host progress and the final
+worker result. An absent entry and present value0 remain separate. There
+is no added SMEM/MMIO read, write, IRQ registration, reply, reset/recovery
+or WLAN readiness decision.
+
+All 226 Wi-Fi tests PASS (3 optional private cases skipped). The new actual
+C regression covers absence, same-peer append, raw0/1/2/3/ffffffff, unchanged
+store/kick counts and immutable-name rejection. Internal C/Python session
+sizes agree. Native `build-20261024-015657.log` PASS; no CI run. Complete
+actual Image/live-FDT/loader/shim-return preflight PASS. Hardware pending.
+
+Kernel `60d1d33dc182d4dc07dfceaed549f6aa8be3ef908cb75fbde4a8056bfcb69f8c`;
+image `83fb3aa31b02c00ba8a7d463772d6f05def195b8fc0d5290621ee8b4d52a9307`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x9b894c3f51001506`.
+
+Next: temporary module-pmic-state-v3 run; distinguish an observed native
+WLAN error notification from an unreported readiness wait. Repeat the
+physical snapshots and authenticated recovery. Association/data, GPU/native
+Metal and Bluetooth remain unfinished; no persistent partition changes.
+
 ## REDFIN three physical WLAN PMIC snapshots PASS; FW_READY absent — 2026-10-24
 
 Source `7aa286c`, native `build-20261024-015003.log`, authenticated

@@ -291,7 +291,7 @@ static int peer(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
     if (s->peer_seen && (features != s->peer_features || restart != s->peer_restart || valid < s->peer_valid))
         return RF_WIFI_SMP2P_RESTART;
     uint8_t names[16][16];
-    uint32_t slave = 0, found = 0, ipa = 0, ipa_found = 0;
+    uint32_t slave = 0, found = 0, ipa = 0, ipa_found = 0, wlan = 0, wlan_found = 0;
     for (unsigned i = 0; i < valid; ++i) {
         int terminated = 0;
         for (unsigned j = 0; j < 16; ++j) {
@@ -315,6 +315,10 @@ static int peer(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
         different = 0;
         for (unsigned j = 0; j < 16; ++j) different |= names[i][j] ^ ipa_name[j];
         if (!different) { ipa = i; ipa_found = 1; }
+        static const uint8_t wlan_name[16] = "wlan";
+        different = 0;
+        for (unsigned j = 0; j < 16; ++j) different |= names[i][j] ^ wlan_name[j];
+        if (!different) { wlan = i; wlan_found = 1; }
     }
     uint32_t state_value = found ? first[9u + 5u * slave] : 0;
     if (state_value & SMP_FATAL) return RF_WIFI_SMP2P_FATAL;
@@ -336,6 +340,8 @@ static int peer(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
     s->handover |= (state_value & SMP_HANDOVER) != 0;
     s->ipa_found = ipa_found; s->ipa_index = ipa;
     s->ipa_state = ipa_found ? first[9u + 5u * ipa] : 0;
+    s->wlan_found = wlan_found; s->wlan_index = wlan;
+    s->wlan_state = wlan_found ? first[9u + 5u * wlan] : 0;
     *state = state_value;
     error = gate(s, o);
     return error ? error : negotiated ? RF_WIFI_SMP2P_UNSTABLE : RF_WIFI_SMP2P_OK;

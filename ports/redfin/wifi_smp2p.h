@@ -71,6 +71,9 @@ struct rf_wifi_smp2p_session {
     uint8_t names[16][16];
     uint32_t stores, kicks;
     uint32_t ipa_index, ipa_found, ipa_state, ipa_responses;
+    /* Raw native WLAN notification entry; presence is separate from value0.
+     * Recording it sends no reply and does not establish WLAN FW_READY. */
+    uint32_t wlan_index, wlan_found, wlan_state;
 };
 
 #ifdef __cplusplus

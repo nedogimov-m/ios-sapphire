@@ -369,5 +369,14 @@ unverified model name. The per-peripheral type/subtype check still controls
 the generic unified read layout; neither model matching nor a DT label
 grants power policy or new PMIC write authority.
 
+After all PMIC snapshots succeed without FW_READY, rechecked native ICNSS
+`register_fw_error_notifications`/`register_early_crash_notifications` at
+the same Google pin. The actual FDT maps inbound SMP2P entry `wlan` bit0
+to force-error-fatal and bit1 to early-crash. The bounded peer parser already
+reads/validates both complete stable snapshots, including this entry; it now
+retains its raw presence/index/value for diagnostics. No additional SMEM or
+MMIO read, interrupt registration, acknowledgement, recovery or readiness
+decision is added. A zero value remains distinct from an absent entry.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

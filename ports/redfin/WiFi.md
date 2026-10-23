@@ -874,3 +874,9 @@ Hardware module-pmic-v2 completes all three snapshots. Candidate PPIDs
 votes, after their ACKs and at the final timeout. These stable raw points
 are already powered; SID5 supply attribution and RF-clock readiness remain
 separate questions. Native power/mask ACKs still do not produce FW_READY.
+
+Host progress and the final worker result now include inbound native SMP2P
+`wlan` presence/value from the existing stable peer snapshots. In the live
+ICNSS interrupt binding, bit0 is force-error-fatal and bit1 early-crash.
+The diagnostic records raw values without replying, registering interrupts
+or claiming a recovery. Presence1/value0 differs from a missing entry.

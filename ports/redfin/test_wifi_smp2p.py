@@ -29,6 +29,7 @@ class Session(C.Structure):
                  'slave_index', 'slave_found', 'last_state', 'handover')]
     _fields_ += [('names', (C.c_uint8 * 16) * 16), ('stores', C.c_uint32), ('kicks', C.c_uint32)]
     _fields_ += [(name, C.c_uint32) for name in ('ipa_index', 'ipa_found', 'ipa_state', 'ipa_responses')]
+    _fields_ += [(name, C.c_uint32) for name in ('wlan_index', 'wlan_found', 'wlan_state')]
 
 
 class Ops(C.Structure):
@@ -231,6 +232,23 @@ class Smp2pTests(unittest.TestCase):
         self.assertEqual(model.session.stores, before)
         not_started = self.prepared()
         self.assertNotEqual(self.call(not_started, 'ipa_respond'), 0)
+
+    def test_native_wlan_state_is_raw_validated_metadata_without_any_new_reply(self):
+        model = self.ready()
+        self.assertEqual((model.session.wlan_found, model.session.wlan_state), (0, 0))
+        before = (model.session.stores, model.session.kicks)
+        # Remote appends its native WLAN entry to this same fresh peer. Zero
+        # is a valid state, distinct from the previous absence of the entry.
+        model.put(model.inbound + 12, 16 | 2 << 16)
+        model.memory[model.inbound + 40:model.inbound + 56] = b'wlan'.ljust(16, b'\0')
+        for state in (0, 1, 2, 3, 0xffffffff):
+            model.put(model.inbound + 56, state)
+            self.assertEqual(self.call(model, 'alive'), 0)
+            self.assertEqual((model.session.wlan_found, model.session.wlan_index, model.session.wlan_state), (1, 1, state))
+            self.assertEqual((model.session.stores, model.session.kicks), before)
+        model.memory[model.inbound + 40:model.inbound + 56] = b'changed'.ljust(16, b'\0')
+        self.assertNotEqual(self.call(model, 'alive'), 0)
+        self.assertEqual((model.session.stores, model.session.kicks), before)
 
     def test_prepare_appends_only_exact_outbound_and_publishes_version_last(self):
         model = Model()
