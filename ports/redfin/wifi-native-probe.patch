@@ -21,7 +21,7 @@ diff --git a/iokit/Kernel/arm/RedfinWiFiProbe.cpp b/iokit/Kernel/arm/RedfinWiFiP
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinWiFiProbe.cpp
-@@ -0,0 +1,628 @@
+@@ -0,0 +1,635 @@
 +/* SPDX-License-Identifier: MIT
 + * Redfin native Wi-Fi prerequisites and separately gated retained power/AOP
 + * experiment. The default path maps read-only. redfinwifipower=1 additionally
@@ -42,6 +42,7 @@ new file mode 100644
 +#include "../../bsddev/redfin_wifi_smem.h"
 +
 +extern "C" int redfin_spmi_return_ready(void);
++extern "C" void redfin_wifi_fw_source_probe(void);
 +
 +struct wf_map {
 +    IOMemoryDescriptor *memory;
@@ -570,6 +571,12 @@ new file mode 100644
 +    uint64_t ranges[6] = {};
 +    if (!wf_platform(ranges)) {
 +        IOLog("REDFIN WIFI NATIVE: refused md0/UP/identity/return/live-FDT contract\n");
++        return;
++    }
++    int source = 0;
++    if (PE_parse_boot_argn("redfinwififw", &source, sizeof(source)) && source) {
++        if (source == 1) redfin_wifi_fw_source_probe();
++        else IOLog("REDFIN WIFI FW: refused unsupported source mode\n");
 +        return;
 +    }
 +    int power = 0;

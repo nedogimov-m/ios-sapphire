@@ -40,6 +40,9 @@ alignas(16) static uint8_t aop[0x1000],smem[REDFIN_SMEM_BYTES],db[RF_CMDDB_BYTES
 static uint64_t ranges[6],ram_base,ram_bytes,boot_id;
 static uint32_t witness[12],marker;
 static int enabled,cpus,spmi,returned,ready,modem,wifi,gpu,usb,gui,smp,wifi_mode;
+static int source_mode;
+static unsigned source_calls;
+extern "C" void redfin_wifi_fw_source_probe(void){++source_calls;}
 static int bad_board,bad_node,bad_length,fail_descriptor,fail_mapping,short_mapping,null_mapping;
 static unsigned descriptors,mappings,created_memory,created_maps,released_memory,released_maps,unsafe;
 static unsigned proof_calls,lose_proof;
@@ -57,6 +60,7 @@ static int PE_parse_boot_argn(const char *key,void *out,int size) {
     if(!strcmp(key,"rd")){if(size!=16)return 0;memcpy(out,root,16);return 1;}
     if(!strcmp(key,"redfinbootid")){if(size!=8)return 0;memcpy(out,&boot_id,8);return 1;}
     if(!strcmp(key,"redfinwifinative"))value=enabled;
+    else if(!strcmp(key,"redfinwififw"))value=source_mode;
     else if(!strcmp(key,"redfinwifi"))value=wifi_mode;
     else if(!strcmp(key,"cpus"))value=cpus;
     else if(!strcmp(key,"redfinspmi"))value=spmi;
@@ -146,7 +150,7 @@ extern "C" void reset(void) {
     memcpy(ranges,r,sizeof(r));memcpy(witness,w,sizeof(w));marker=1;
     ram_base=0x180000000;ram_bytes=0x80000000;boot_id=1234;
     enabled=cpus=spmi=returned=ready=1;modem=wifi=gpu=usb=gui=smp=0;
-    wifi_mode=2;
+    wifi_mode=2;source_mode=0;source_calls=0;
     bad_board=bad_node=bad_length=fail_descriptor=fail_mapping=short_mapping=null_mapping=0;
     descriptors=mappings=created_memory=created_maps=released_memory=released_maps=unsafe=0;
     proof_calls=lose_proof=0;memset(root,0,sizeof(root));memcpy(root,"md0",3);
@@ -165,6 +169,7 @@ extern "C" void set_option(unsigned which,uint64_t value) {
     case 21:boot_id=value;break;case 22:lose_proof=(unsigned)value;break;
     case 23:memcpy(root,"ufsroot0",9);break;case 24:memset(root,'x',sizeof(root));break;
     case 25:wifi_mode=(int)value;break;
+    case 26:source_mode=(int)value;break;
     }
 }
 extern "C" void mutate_range(unsigned index,uint64_t value){if(index<6)ranges[index]=value;}
@@ -172,8 +177,8 @@ extern "C" void mutate_witness(unsigned index,uint32_t value){if(index<12)witnes
 extern "C" const char *get_output(void){return output;}
 extern "C" uint8_t *get_region(unsigned which){return which==0 ? aop : which==1 ? smem : db;}
 extern "C" unsigned metric(unsigned which) {
-    const unsigned values[]={descriptors,mappings,created_memory,created_maps,released_memory,released_maps,unsafe,proof_calls};
-    return which<8 ? values[which] : 0;
+    const unsigned values[]={descriptors,mappings,created_memory,created_maps,released_memory,released_maps,unsafe,proof_calls,source_calls};
+    return which<9 ? values[which] : 0;
 }
 extern "C" int select_turbo(const uint16_t *levels,unsigned count) {
     if(count>16)return -2;rf_cmddb_resource resource={};resource.level_count=count;
@@ -245,6 +250,17 @@ class NativeWifiProbeTests(unittest.TestCase):
         self.assertIn('TURBO_selector=3', output)
         self.assertIn('no PAS/power/SMEM writes or notifications', output)
         self.assertEqual((self.library.metric(0), self.library.metric(1)), (3, 3))
+
+    def test_firmware_source_dispatch_never_maps_the_transport(self):
+        self.library.set_option(26, 1)
+        self.run_probe()
+        self.assertEqual(self.library.metric(8), 1)
+        self.assertEqual((self.library.metric(0), self.library.metric(1)), (0, 0))
+        self.library.reset()
+        self.library.set_option(26, 2)
+        self.assertIn('refused unsupported source mode', self.run_probe())
+        self.assertEqual(self.library.metric(8), 0)
+        self.assertEqual((self.library.metric(0), self.library.metric(1)), (0, 0))
 
     def test_md0_up_identity_and_return_failures_map_nothing(self):
         cases = [(0, 0), (0, 2), (1, 8), (2, 0), (3, 0), (4, 0), (5, 1), (6, 1),

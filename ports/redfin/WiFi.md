@@ -586,3 +586,29 @@ ABL download/decompressed-Image placement limits. No larger Image was built or
 booted; source pinning, MPSS copy/readback and power remain untested on device.
 SCM/PAS start, complete proxy/bandwidth, native SMP2P/GLINK/WLFW, association
 and data remain unfinished. Firmware/payload/check reports remain private.
+
+## Isolated resident-source hardware profile — 2026-10-23
+
+`build.py --wifi-fw-source-probe --wifi-fw-bundle PRIVATE_BUNDLE
+--wifi-fw-sha256 RECORDED_SHA256` adds the verified bundle to the temporary
+CPU0/md0 image. It requires the normal kernel/live-DTB/memory arguments and
+`--return-bootloader`. It cannot combine with the power probe or UFS/GUI,
+USB, SMP or other hardware probes. The exact runtime selector is
+`redfinwifi=2 redfinwifinative=1 redfinwififw=1`.
+
+The source ADT additionally carries `probe-contract = u32(1,4,64,0)` and
+`probe-exclusions`, native u64(base,length) pairs from the live layout.
+The one-shot entry freezes the exact arguments, nonzero boot nonce, owner
+thread and exclusion list; every source lease check revalidates them with
+physical CPU0/EL1 and cached bootloader-return proof. It opens the existing
+source adapter, hashes/parses the bundle and closes it. All source mappings
+are read-only. It maps no MPSS destination and does not start the modem,
+write shared memory, call PAS or access storage.
+
+Observation: 93 focused source/native-power/build/return checks pass, with
+three optional private-artifact cases skipped. Local native build144832 and
+the full real Image/payload/live-FDT/return preflight pass. Fastboot's reported
+256 MiB download limit exceeds this 79,335,424-byte compressed boot image.
+The 117,103,408-byte decompressed Image still requires the separate temporary
+hardware boot recorded in NOTES.md. Hash/parse success establishes the source
+boundary only; firmware authentication and all radio/network work remain.

@@ -187,5 +187,15 @@ segments/31 assets and a 0x8c000000+0x11800000 reserved span. Its endpoint
 This adapts native ICNSS/MPSS dependencies; upstream Redwood WPSS/PAS6 and
 ath11k are different hardware. See [WiFi.md](WiFi.md) and [GMU.md](GMU.md).
 
+Reviewed again, 2026-10-23: kernel
+`8e61187098f2c26c5daee8f9f72b6416aa64b9ab`, `redwood_image.c` and
+`redwood_wifi.c` step6. Their resident plain-firmware mechanism informs the
+separate Redfin MPSS source probe. Redfin keeps its bounded flat segment,
+native PAS4 layout, original PHDR indices, complete live exclusions and
+read-only source lease; it does not import Redwood's APFS dependency,
+WPSS/PAS6 destinations or WCN6750 radio backend. Local build144832 and host
+preflight establish the new source-only profile; hardware results belong
+in NOTES.md, independently of upstream's stage descriptions.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

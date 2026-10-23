@@ -73,6 +73,20 @@ class BuildFlagTests(unittest.TestCase):
                           '--smp-probe', '--usb-probe', '--rpmh-probe', '--gpu-probe'):
                 self.refused([*base, extra], flag + ' requires its separate RAM-only profile')
 
+    def test_firmware_source_needs_private_identity_and_cannot_start_power(self):
+        self.refused(['--wifi-fw-source-probe'],
+                     '--wifi-fw-source-probe requires its private bundle/SHA256 and separate source-only profile')
+        for flags in (['--wifi-fw-bundle', '/private-bundle'], ['--wifi-fw-sha256', '0' * 64]):
+            self.refused(flags, '--wifi-fw-bundle/--wifi-fw-sha256 require --wifi-fw-source-probe')
+        selected = ['--wifi-fw-source-probe', '--wifi-fw-bundle', '/private-bundle',
+                    '--wifi-fw-sha256', '0' * 64]
+        self.refused(selected, '--wifi-fw-source-probe requires kernel, live DTB, CPU0 and --return-bootloader')
+        base = [*selected, '--kernel', '/missing-kernel', '--dtb', '/missing-dtb', '--return-bootloader']
+        self.refused([*base, '--wifi-power-probe'],
+                     '--wifi-fw-source-probe requires its private bundle/SHA256 and separate source-only profile')
+        for extra in ('--ufs-root', '--smp-probe', '--usb-probe'):
+            self.refused([*base, extra], '--wifi-fw-source-probe requires its separate RAM-only profile')
+
     def test_cpu_capability_probe_requires_runtime_return_and_cpu0(self):
         self.refused(['--cpu-capability-probe'],
                      '--cpu-capability-probe requires --kernel, --dtb and --return-bootloader')

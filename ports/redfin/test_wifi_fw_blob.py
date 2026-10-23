@@ -122,6 +122,27 @@ class WifiFirmwareBlobTests(unittest.TestCase):
         self.assertEqual(node.prop('source-contract'), P.mkadt.u32(*P.CONTRACT))
         self.assertEqual(report['adt_physical'], 0x180000000 + end - before['virt'])
 
+    def test_source_probe_carries_validated_exclusions_and_requires_the_native_selector(self):
+        payload = bytearray(self.payload)
+        command = ARGS + ' redfinwifi=2 redfinwifinative=1 redfinwififw=1'
+        payload[72:680] = command.encode().ljust(608, b'\0')
+        result, report = P.pack(payload, self.firmware, self.digest, self.report,
+                                0x8000000, probe_exclusions=EXCLUDED)
+        self.assertIsNone(self.accepted(result))
+        self.assertTrue(report['source_probe'])
+        offset, length = struct.unpack_from('<2Q', result, 32)
+        root, _end = P.mkadt.adt.parse(result[offset:offset + length])
+        node = next(child for child in root.children if child.name == 'redfin-wifi-fw')
+        self.assertEqual(node.prop('probe-contract'), P.mkadt.u32(1, 4, 64, 0))
+        self.assertEqual(node.prop('probe-exclusions'), P.mkadt.u64(*(value for pair in EXCLUDED for value in pair)))
+        for excluded in ([], EXCLUDED[:1], [*EXCLUDED, (0x8c000000, 4)], [*EXCLUDED, (0, 1 << 64)]):
+            with self.subTest(excluded=excluded), self.assertRaises(ValueError):
+                P.pack(payload, self.firmware, self.digest, self.report,
+                       0x8000000, probe_exclusions=excluded)
+        with self.assertRaises(ValueError):
+            P.pack(self.payload, self.firmware, self.digest, self.report,
+                   0x8000000, probe_exclusions=EXCLUDED)
+
     def test_native_report_hash_explicit_cap_and_original_profile_are_required(self):
         for digest, report, cap in [('0' * 64, self.report, 0x8000000),
                                     (self.digest, {}, 0x8000000), (self.digest, self.report, 1),

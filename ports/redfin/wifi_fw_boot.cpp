@@ -183,4 +183,138 @@ extern "C" void redfin_wifi_fw_boot_close(rf_wifi_fw_boot *boot)
     rf_wifi_fw_source_close(&boot->source, &boot->source_ops);
     boot->active = 0;
 }
+
+struct fw_probe_context {
+    rf_wifi_fw_boot boot;
+    redfin_mpss_workspace workspace;
+    redfin_mpss_range excluded[REDFIN_MPSS_MAX_EXCLUSIONS];
+    char args[608];
+    uint64_t nonce;
+    thread_t owner;
+    unsigned bytes, exclusions;
+    bool active, poisoned;
+};
+static fw_probe_context fw_probe;
+static uint32_t fw_probe_attempted;
+
+static bool fw_probe_args(const char *args, unsigned bytes, uint64_t *nonce_out)
+{
+    static const char *const required[] = {
+        "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
+        "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
+        "modem=0", "wifi=0", "gpu=0", "redfinwifi=2", "redfinwifinative=1",
+        "redfinwififw=1", "redfinspmi=1", "redfinreturn=1"};
+    uint32_t seen = 0;
+    uint64_t nonce = 0;
+    bool nonce_seen = false, trace_seen = false;
+    if (!args || !bytes || bytes > sizeof(fw_probe.args) || args[bytes - 1]) return false;
+    for (unsigned at = 0; at < bytes - 1;) {
+        if (args[at] == ' ') { ++at; continue; }
+        unsigned first = at;
+        while (at < bytes - 1 && args[at] != ' ') {
+            if ((unsigned char)args[at] < 33 || (unsigned char)args[at] > 126) return false;
+            ++at;
+        }
+        unsigned length = at - first;
+        bool known = false;
+        for (unsigned i = 0; i < sizeof(required) / sizeof(required[0]); ++i) {
+            if (strlen(required[i]) != length || memcmp(args + first, required[i], length)) continue;
+            if (seen & (1u << i)) return false;
+            seen |= 1u << i; known = true; break;
+        }
+        if (known) continue;
+        if (length == sizeof("-enable_kprintf_spam") - 1 &&
+            !memcmp(args + first, "-enable_kprintf_spam", length)) {
+            if (trace_seen) return false;
+            trace_seen = true; continue;
+        }
+        if (length != 31 || memcmp(args + first, "redfinbootid=0x", 15) || nonce_seen) return false;
+        for (unsigned i = 15; i < 31; ++i) {
+            unsigned digit = (unsigned)(args[first + i] - '0');
+            if (digit > 9) {
+                if (args[first + i] < 'a' || args[first + i] > 'f') return false;
+                digit = (unsigned)(args[first + i] - 'a' + 10);
+            }
+            nonce = (nonce << 4) | digit;
+        }
+        if (!nonce) return false;
+        nonce_seen = true;
+    }
+    if (!nonce_seen || seen != ((1u << (sizeof(required) / sizeof(required[0]))) - 1u)) return false;
+    if (nonce_out) *nonce_out = nonce;
+    return true;
+}
+
+static bool fw_probe_properties(fw_probe_context *context, bool capture)
+{
+    DTEntry node;
+    uint32_t contract[4] = {}, expected[4] = {1, 4, REDFIN_MPSS_MAX_EXCLUSIONS, 0};
+    const void *raw = NULL;
+    unsigned bytes = 0;
+    if (SecureDTLookupEntry(NULL, "/redfin-wifi-fw", &node) != kSuccess ||
+        !fw_property(node, "probe-contract", contract, sizeof(contract)) ||
+        memcmp(contract, expected, sizeof(expected)) ||
+        SecureDTGetProperty(node, "probe-exclusions", &raw, &bytes) != kSuccess ||
+        !raw || bytes % sizeof(redfin_mpss_range) ||
+        bytes < 2 * sizeof(redfin_mpss_range) || bytes > sizeof(context->excluded)) return false;
+    if (!capture)
+        return bytes == context->exclusions * sizeof(redfin_mpss_range) &&
+            !memcmp(raw, context->excluded, bytes);
+    memcpy(context->excluded, raw, bytes);
+    context->exclusions = bytes / sizeof(redfin_mpss_range);
+    bool kernel = false, display = false;
+    const redfin_mpss_range mpss = {REDFIN_MPSS_BASE, REDFIN_MPSS_BYTES};
+    for (unsigned i = 0; i < context->exclusions; ++i) {
+        const redfin_mpss_range *range = &context->excluded[i];
+        if (!redfin_mpss_valid_range(range->base, range->bytes) ||
+            redfin_mpss_intersects(range->base, range->bytes, mpss.base, mpss.bytes)) return false;
+        kernel |= range->base == UINT64_C(0x180000000) && range->bytes == UINT64_C(0x80000000);
+        display |= range->base == UINT64_C(0xa0000000) && range->bytes == UINT64_C(0x2300000);
+    }
+    return kernel && display;
+}
+
+static int fw_probe_check(void *opaque, uint64_t boot_id)
+{
+    fw_probe_context *context = (fw_probe_context *)opaque;
+    const char *live = PE_boot_args();
+    bool valid = context == &fw_probe && context->active && !context->poisoned &&
+        live && context->bytes && boot_id == context->nonce &&
+        current_thread() == context->owner && redfin_spmi_return_ready() == 1 &&
+        __builtin_arm_rsr64("CurrentEL") == 4 &&
+        !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
+        !memcmp(live, context->args, context->bytes) && fw_probe_properties(context, false);
+    if (context == &fw_probe && !valid) context->poisoned = true;
+    return valid ? 0 : ECANCELED;
+}
+
+extern "C" void redfin_wifi_fw_source_probe(void)
+{
+    if (__atomic_exchange_n(&fw_probe_attempted, 1, __ATOMIC_RELAXED)) return;
+    fw_probe_context *context = &fw_probe;
+    const char *args = PE_boot_args();
+    unsigned bytes = 0;
+    if (args) while (bytes < sizeof(context->args) && args[bytes]) ++bytes;
+    if (!args || bytes == sizeof(context->args) ||
+        !fw_probe_args(args, bytes + 1, &context->nonce) ||
+        !fw_probe_properties(context, true)) {
+        IOLog("REDFIN WIFI FW: refused exact source-probe args/exclusions before mapping\n");
+        return;
+    }
+    memcpy(context->args, args, bytes + 1); context->bytes = bytes + 1;
+    context->owner = current_thread(); context->active = true;
+    const rf_wifi_fw_boot_policy policy = {
+        context, fw_probe_check, context->excluded, context->exclusions};
+    IOLog("REDFIN WIFI FW: native resident source preflight begins; no destination/PAS/start\n");
+    int error = redfin_wifi_fw_boot_open(&context->boot, &context->workspace, &policy);
+    if (!error) error = fw_probe_check(context, context->nonce);
+    const struct redfin_mpss_plan *plan = &context->workspace.plan;
+    IOLog("REDFIN WIFI FW: result=%d stage=%u pinned=%u bytes=%llu PHDR=%u loads=%u assets=%u payload=%llu BSS=%llu; source-only\n",
+        error, context->boot.source.stage, context->boot.source.pinned,
+        (unsigned long long)context->boot.native_blob.bytes, plan->phdrs, plan->segments,
+        context->workspace.image.assets, (unsigned long long)plan->file_bytes,
+        (unsigned long long)plan->zero_bytes);
+    redfin_wifi_fw_boot_close(&context->boot);
+    context->active = false;
+}
 #endif

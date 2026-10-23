@@ -18,6 +18,7 @@
 #include "../../bsddev/redfin_wifi_smem.h"
 
 extern "C" int redfin_spmi_return_ready(void);
+extern "C" void redfin_wifi_fw_source_probe(void);
 
 struct wf_map {
     IOMemoryDescriptor *memory;
@@ -546,6 +547,12 @@ extern "C" void redfin_wifi_native_observe(void)
     uint64_t ranges[6] = {};
     if (!wf_platform(ranges)) {
         IOLog("REDFIN WIFI NATIVE: refused md0/UP/identity/return/live-FDT contract\n");
+        return;
+    }
+    int source = 0;
+    if (PE_parse_boot_argn("redfinwififw", &source, sizeof(source)) && source) {
+        if (source == 1) redfin_wifi_fw_source_probe();
+        else IOLog("REDFIN WIFI FW: refused unsupported source mode\n");
         return;
     }
     int power = 0;

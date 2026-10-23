@@ -113,7 +113,7 @@ def verify_bundle(verifier, path, digest, excluded):
     return report
 
 
-def pack(payload, firmware, digest, native_report, max_payload_bytes):
+def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_exclusions=None):
     require(type(max_payload_bytes) is int and 0 < max_payload_bytes <= MAX_PAYLOAD, 'explicit payload cap outside implementation bound')
     require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'expected bundle SHA256 must be lowercase hex')
     require(64 <= len(firmware) <= MAX_BUNDLE and hashlib.sha256(firmware).hexdigest() == digest,
@@ -124,13 +124,33 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes):
             native_report.get('hardware_started') is False and native_report.get('signature_authenticated') is False,
             'missing native planner/source verification')
     info = payload_info(payload)
+    probe = []
+    if probe_exclusions is not None:
+        require(type(probe_exclusions) in (list, tuple) and 2 <= len(probe_exclusions) <= 64,
+                'source probe requires the complete bounded live exclusion set')
+        for item in probe_exclusions:
+            require(type(item) in (list, tuple) and len(item) == 2 and
+                    all(type(value) is int for value in item), 'invalid source-probe exclusion')
+            base, size = item
+            require(base >= 0 and size > 0 and base + size < 1 << 64 and
+                    not (base < 0x9D800000 and 0x8C000000 < base + size),
+                    'source-probe exclusion is invalid or overlaps MPSS')
+        require((0x180000000, 0x80000000) in map(tuple, probe_exclusions) and
+                (0xA0000000, 0x2300000) in map(tuple, probe_exclusions),
+                'source probe lacks native kernel/display exclusions')
+        command = payload[72:HEADER].split(b'\0', 1)[0].decode('ascii').split()
+        require(command.count('redfinwififw=1') == 1 and
+                'redfinwifi=2' in command and 'redfinwifinative=1' in command,
+                'source-probe payload has no exact native selector')
+        probe = [('probe-contract', mkadt.u32(1, 4, 64, 0)),
+                 ('probe-exclusions', mkadt.u64(*(value for pair in probe_exclusions for value in pair)))]
     reserved = aligned(len(firmware), PAGE)
     physical = info['physical'] + info['end'] - info['virt']
     new_end = info['end'] + reserved
     info['memory_map'].props.append(('RedfinWiFiFirmware', 0, mkadt.u64(physical, reserved)))
     info['root'].children.append(mkadt.node('redfin-wifi-fw', [
         ('reg', mkadt.u64(physical, reserved)), ('bundle-bytes', mkadt.u64(len(firmware))),
-        ('bundle-sha256', bytes.fromhex(digest)), ('source-contract', mkadt.u32(*CONTRACT))]))
+        ('bundle-sha256', bytes.fromhex(digest)), ('source-contract', mkadt.u32(*CONTRACT))] + probe))
     tree = mkadt.adt.serialize(info['root'])
     tree_physical = physical + reserved
     arguments = aligned(tree_physical + len(tree), 16)
@@ -160,6 +180,7 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes):
                            'adt_physical': tree_physical, 'boot_args_physical': arguments, 'top': top,
                            'segments': len(table), 'payload_bytes': len(output),
                            'explicit_payload_cap': max_payload_bytes, 'rootfs_dependency': False,
+                           'source_probe': probe_exclusions is not None,
                            'abl_limits_proven': False, 'hardware_started': False,
                            'signature_authenticated': False}
 
@@ -185,6 +206,7 @@ def main():
     parser.add_argument('--dtb', required=True, type=Path)
     parser.add_argument('--max-payload-bytes', required=True, type=lambda text: int(text, 0))
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--source-probe', action='store_true', help='bind the live exclusions for the separate read-only native probe')
     args = parser.parse_args()
     try:
         payload = read_regular(args.payload, MAX_PAYLOAD)
@@ -192,7 +214,8 @@ def main():
         excluded = live_layout(read_regular(args.dtb, 16 * 1024 * 1024), info['physical'], info['memory'])
         verified = verify_bundle(args.verifier, args.bundle, args.bundle_sha256, excluded)
         result, report = pack(payload, read_regular(args.bundle, MAX_BUNDLE), args.bundle_sha256,
-                              verified, args.max_payload_bytes)
+                              verified, args.max_payload_bytes,
+                              probe_exclusions=excluded if args.source_probe else None)
         publish(args.output, result)
         report['payload_sha256'] = hashlib.sha256(result).hexdigest()
         print(json.dumps(report, indent=2))

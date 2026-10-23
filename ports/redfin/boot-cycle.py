@@ -63,8 +63,8 @@ def xnu_return_proof(image):
             raise ValueError("redfinbootid requires exactly one nonzero 16-digit lowercase hexadecimal token")
         proof["boot_id"] = match[1]
     modern = any(manifest.get(name) is True for name in
-                 ('gpu_power_probe', 'wifi_native_probe', 'scm_probe'))
-    if (modern or any(token in tokens for token in ('redfingpu=2', 'redfingpu=3', 'redfinwifinative=1')) or
+                 ('gpu_power_probe', 'wifi_native_probe', 'wifi_fw_source_probe', 'scm_probe'))
+    if (modern or any(token in tokens for token in ('redfingpu=2', 'redfingpu=3', 'redfinwifinative=1', 'redfinwififw=1')) or
             manifest.get('diagnostic_prearm', False) is not False):
         diagnostic_return_profile(image, manifest, tokens)
         proof['armed_by'] = 'shim'
@@ -75,7 +75,7 @@ def xnu_return_proof(image):
 def diagnostic_return_profile(image, manifest, tokens):
     """Bind new UP diagnostics to the proven pre-kernel shim return leaf."""
     flags = ('gpu_power_probe', 'gmu_tcm_probe', 'gpu_smmu_probe', 'gpu_smmu_context_probe', 'wifi_native_probe',
-             'wifi_power_probe', 'scm_probe')
+             'wifi_power_probe', 'wifi_fw_source_probe', 'scm_probe')
     if any(type(manifest.get(name, False)) is not bool for name in flags):
         raise ValueError('UP diagnostic selectors must be boolean')
     primary = [name for name in ('gpu_power_probe', 'wifi_native_probe', 'scm_probe')
@@ -89,7 +89,8 @@ def diagnostic_return_profile(image, manifest, tokens):
             (manifest.get('gmu_tcm_probe') is True and primary != ['gpu_power_probe']) or
             (manifest.get('gpu_smmu_probe') is True and manifest.get('gmu_tcm_probe') is not True) or
             (manifest.get('gpu_smmu_context_probe') is True and manifest.get('gpu_smmu_probe') is not True) or
-            (manifest.get('wifi_power_probe') is True and primary != ['wifi_native_probe'])):
+            (manifest.get('wifi_power_probe') is True and primary != ['wifi_native_probe']) or
+            (manifest.get('wifi_fw_source_probe') is True and primary != ['wifi_native_probe'])):
         raise ValueError('UP prearm requires one isolated md0 diagnostic')
     required = set(('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
         'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 '
@@ -104,6 +105,10 @@ def diagnostic_return_profile(image, manifest, tokens):
         required.update(('redfinwifi=2', 'redfinwifinative=1'))
         if manifest.get('wifi_power_probe') is True:
             required.add('redfinwifipower=1')
+        if manifest.get('wifi_fw_source_probe') is True:
+            if manifest.get('wifi_power_probe') is True:
+                raise ValueError('resident source probe must stay separate from power startup')
+            required.add('redfinwififw=1')
     else:
         required.update(('redfingpu=3', 'redfinscm=1'))
     values = [token for token in tokens if not token.startswith('redfinbootid=')

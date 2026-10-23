@@ -35,6 +35,8 @@ HARNESS = r'''
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include "wifi_fw_boot.h"
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
@@ -59,6 +61,19 @@ int fixture_hash(const uint8_t *,size_t,uint8_t[32]);
 }
 static boot_args args;
 static struct {void *bootArgs;} PE_state;
+static char probe_output[2048];
+static size_t probe_output_used;
+static unsigned return_calls,lose_return;
+static uint32_t probe_contract[4];
+static redfin_mpss_range probe_exclusions[3];
+static unsigned probe_exclusion_bytes;
+static const char *PE_boot_args(void){return args.CommandLine;}
+static void IOLog(const char *format,...) {
+ va_list values;va_start(values,format);
+ int count=vsnprintf(probe_output+probe_output_used,sizeof(probe_output)-probe_output_used,format,values);
+ va_end(values);
+ if(count>0 && (size_t)count<sizeof(probe_output)-probe_output_used)probe_output_used+=(size_t)count;
+}
 static unsigned ready,owner,register_issue,bad_board,bad_node,bad_length,policy_live,policy_calls,lose_policy;
 static unsigned descriptor_failure,map_failure,null_mapping,short_mapping,descriptors,mappings,released_descriptors,released_maps,unsafe;
 static unsigned mode_cpus,mode_spmi,mode_return,mode_modem,mode_wifi,mode_gpu,mode_usb;
@@ -71,7 +86,7 @@ static uint64_t register_value(const char *key){return !strcmp(key,"CurrentEL") 
 static vm_offset_t ml_static_vtop(vm_offset_t address) {
  return address>=args.virtBase && address-args.virtBase<args.memSize ? args.physBase+address-args.virtBase : 0;
 }
-extern "C" int redfin_spmi_return_ready(void){return ready==1;}
+extern "C" int redfin_spmi_return_ready(void){++return_calls;return ready==1 && (!lose_return || return_calls<lose_return);}
 extern "C" int redfin_mpss_kernel_sha256(void *,const uint8_t *data,size_t bytes,uint8_t out[32]){return fixture_hash(data,bytes,out);}
 static int PE_parse_boot_argn(const char *key,void *output,int bytes) {
  if(!strcmp(key,"redfinbootid")){if(bytes!=8)return 0;memcpy(output,&nonce,8);return 1;}
@@ -113,6 +128,8 @@ static int SecureDTGetProperty(DTEntry entry,const char *key,const void **out,un
   if(!strcmp(key,"bundle-bytes")){*out=&bundle_bytes;*bytes=8-(bad_length==2 ? 1 : 0);return 0;}
   if(!strcmp(key,"bundle-sha256")){*out=digest;*bytes=32-(bad_length==3 ? 1 : 0);return 0;}
   if(!strcmp(key,"source-contract")){*out=source_contract;*bytes=16-(bad_length==4 ? 1 : 0);return 0;}
+  if(!strcmp(key,"probe-contract")){*out=probe_contract;*bytes=sizeof(probe_contract);return 0;}
+  if(!strcmp(key,"probe-exclusions")){*out=probe_exclusions;*bytes=probe_exclusion_bytes;return 0;}
  }
  return 1;
 }
@@ -146,6 +163,10 @@ static int policy_check(void *context,uint64_t id) {
 }
 extern "C" void native_reset(void) {
  memset(&boot,0,sizeof(boot));memset(&args,0,sizeof(args));
+ memset(&fw_probe,0,sizeof(fw_probe));fw_probe_attempted=0;
+ memset(probe_output,0,sizeof(probe_output));probe_output_used=return_calls=lose_return=0;
+ const uint32_t probe_expected[4]={1,4,64,0};memcpy(probe_contract,probe_expected,sizeof(probe_expected));
+ memcpy(probe_exclusions,exclusions,sizeof(exclusions));probe_exclusion_bytes=sizeof(probe_exclusions);
  const rf_wifi_fw_blob *b=fixture_blob();const rf_wifi_fw_layout *l=fixture_layout();
  args.Revision=args.Version=2;args.virtBase=0xfffffe0006000000ULL;
  args.physBase=l->ram.base;args.memSize=args.memSizeActual=l->ram.bytes;args.topOfKernelData=l->top;
@@ -161,6 +182,8 @@ extern "C" void native_reset(void) {
  mode_modem=mode_wifi=mode_gpu=mode_usb=0;
 }
 extern "C" int native_open(void){const rf_wifi_fw_boot_policy policy={&boot,policy_check,exclusions,3};return redfin_wifi_fw_boot_open(&boot,fixture_workspace(),&policy);}
+extern "C" void native_source_probe(void){redfin_wifi_fw_source_probe();}
+extern "C" const char *native_probe_output(void){return probe_output;}
 extern "C" int native_bad_workspace(void){const rf_wifi_fw_boot_policy policy={&boot,policy_check,exclusions,3};return redfin_wifi_fw_boot_open(&boot,(redfin_mpss_workspace *)&boot,&policy);}
 extern "C" int native_metadata(void){fixture_phase(RF_WIFI_FW_METADATA);return rf_wifi_fw_copy_metadata(&boot.source,&boot.source_ops,fixture_copy_ops(),fixture_readback(),65536);}
 extern "C" int native_segments(void){fixture_phase(RF_WIFI_FW_SEGMENTS);return rf_wifi_fw_copy_segments(&boot.source,&boot.source_ops,fixture_copy_ops(),fixture_readback(),65536);}
@@ -185,6 +208,8 @@ extern "C" void native_option(unsigned which,uint64_t value) {
  case 22:mode_cpus=(unsigned)value;break;case 23:mode_modem=(unsigned)value;break;case 24:mode_wifi=(unsigned)value;break;
  case 25:mode_gpu=(unsigned)value;break;case 26:mode_usb=(unsigned)value;break;case 27:mode_return=(unsigned)value;break;
  case 28:mode_spmi=(unsigned)value;break;case 29:args.deviceTreeLength=(uint32_t)value;break;case 30:vm_kernel_top=(vm_offset_t)value;break;
+ case 31:probe_contract[0]=(uint32_t)value;break;case 32:probe_exclusion_bytes=(unsigned)value;break;
+ case 33:probe_exclusions[2].base=value;break;case 34:probe_exclusions[0].base=value;break;case 35:lose_return=(unsigned)value;break;
  }
 }
 extern "C" uint64_t native_metric(unsigned which) {
@@ -227,6 +252,7 @@ class NativeWifiFirmwareBootTests(unittest.TestCase):
         cls.library.native_command.argtypes = [C.c_void_p]
         cls.library.native_property.argtypes = [C.c_uint, C.c_void_p, C.c_uint]
         cls.library.native_metric.restype = C.c_uint64
+        cls.library.native_probe_output.restype = C.c_char_p
         cls.library.metric.restype = C.c_uint64
         cls.addClassCleanup(cls.library.destroy)
         cls.addClassCleanup(cls.library.native_close)
@@ -259,6 +285,57 @@ class NativeWifiFirmwareBootTests(unittest.TestCase):
         return {'schema': 1, 'bundle_bytes': len(data), 'bundle_sha256': digest,
                 'assets': self.library.metric(13), 'memory_bytes': self.library.metric(14),
                 'signature_authenticated': False, 'hardware_started': False}
+
+    def source_command(self, change=None):
+        command = ('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
+                   'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 '
+                   'modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=1 '
+                   'redfinspmi=1 redfinreturn=1 redfinbootid=0x0000000000000001')
+        self.library.native_command((change(command) if change else command).encode().ljust(608, b'\0'))
+
+    def test_source_probe_hashes_and_parses_once_with_only_released_read_only_source(self):
+        self.source_command()
+        self.library.native_source_probe()
+        output = self.library.native_probe_output().decode()
+        self.assertIn('result=0 stage=2 pinned=1', output)
+        self.assertIn('PHDR=5 loads=3 assets=3', output)
+        self.assertEqual(self.library.native_metric(0), 1)
+        self.assert_closed()
+        self.library.native_source_probe()
+        self.assertEqual(self.library.native_metric(0), 1)
+
+    def test_source_profile_refuses_missing_duplicate_foreign_and_active_tokens_before_mapping(self):
+        changes = [lambda command: command.replace('cpus=1 ', ''),
+                   lambda command: command + ' cpus=1',
+                   lambda command: command + ' redfinwifipower=1',
+                   lambda command: command.replace('wifi=0 ', 'wifi=1 '),
+                   lambda command: command.replace('rd=md0', 'rd=ufsroot0'),
+                   lambda command: command.replace('0000000000000001', '0000000000000000')]
+        for change in changes:
+            self.setUp()
+            self.source_command(change)
+            self.library.native_source_probe()
+            self.assertIn('refused exact source-probe', self.library.native_probe_output().decode())
+            self.assertEqual(self.library.native_metric(0), 0)
+
+    def test_source_exclusions_and_return_proof_gate_every_source_mapping(self):
+        for which, value in ((31, 2), (32, 47), (33, 0x8c000000), (34, 0x180004000), (0, 0)):
+            with self.subTest(which=which):
+                self.setUp()
+                self.source_command()
+                self.library.native_option(which, value)
+                self.library.native_source_probe()
+                self.assertNotIn('result=0 ', self.library.native_probe_output().decode())
+                self.assertEqual(self.library.native_metric(0), 0)
+                self.assert_closed()
+        for call in (3, 12):
+            with self.subTest(return_loss=call):
+                self.setUp()
+                self.source_command()
+                self.library.native_option(35, call)
+                self.library.native_source_probe()
+                self.assertNotIn('result=0 ', self.library.native_probe_output().decode())
+                self.assert_closed()
 
     def adopt_payload(self, payload, report):
         offset, length = struct.unpack_from('<2Q', payload, 32)

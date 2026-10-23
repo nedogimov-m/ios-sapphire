@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native resident MPSS source probe built; hardware run next — 2026-10-23
+
+Resumed the unfinished Wi-Fi work from source parent d0ac432. The separate
+`--wifi-fw-source-probe` requires the recorded private bundle/SHA256, native
+CPU0/md0 profile and shim plus kernel bootloader return. It adds the native
+live exclusion list to the firmware ADT, maps only the resident source
+read-only, checks its whole-bundle/per-asset hashes and parses the existing
+MPSS plan, then releases the source. No destination mapping, PAS, modem
+startup, AOP/power, SMEM write or media access is added. Canonical source,
+kernel overlays and the verified prepared native tree are synchronized.
+Fixed the unfinished C++ plan-name collision and bound the source selector
+to the host return policy, including rejection of mixed source/power modes.
+
+Observation: 93 focused firmware/native-power/build/return checks pass
+(3 private-artifact cases skipped; `source-probe-host-tests.txt`). Native
+local build `build-20261023-144832.log` succeeds; no new Codemagic/Actions ID.
+The preceding sandboxed build compiled/linked but failed at the dSYM shell's
+`/dev/fd` access; the completed build reran with that access allowed.
+Actual full Image/payload/live-FDT C-loader and shim-return preflight pass.
+The boot image is 79,335,424 bytes; fastboot reports max-download-size
+0x10000000. Decompressed Image is 117,103,408 bytes. These host checks do
+not yet establish ABL placement or source access on the phone.
+
+Kernel `04a1e8d7d3aa0536153fe078d8fedafb68c21f1dd5301c43760afb0417c653c7`;
+image `7ff5c88f4ab24347f9d7e924a6bd5f78d904d9e417f0f723454a01ed63b98d2a`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x575a9e2c5c4caf1c`.
+
+Next: one temporary `wifi-fw-source-v1` boot with authenticated/image/nonce
+matched collection and read-only HFS-header observation. Native PAS4 and
+fresh SMP2P/GLINK/WLFW, association/data and the iOS interface remain
+unfinished. The earlier negative PAS_SUPPORTED4 result is still unresolved.
+All firmware, images, device identifiers and logs remain ignored/private.
+
 ## REDFIN CB0/1 read-only hardware PASS; user switches priority to Wi-Fi — 2026-10-23
 
 Source parentdee6f34. New explicit `--gpu-smmu-context-probe`/

@@ -94,6 +94,9 @@ def main():
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
     p.add_argument('--wifi-native-probe', action='store_true', help='isolated md0/UP read-only AOP/SMEM/CMD-DB prerequisite snapshot')
     p.add_argument('--wifi-power-probe', action='store_true', help='isolated md0/UP retained CX/MSS/XO votes and AOP modem-on transaction')
+    p.add_argument('--wifi-fw-source-probe', action='store_true', help='isolated md0 native resident MPSS source pin/hash/parse; no radio start')
+    p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
+    p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
         help='gracefully stop iOS after 5..300 seconds; requires --ufs-root and --return-bootloader')
     p.add_argument('--spmi-probe', action='store_true', help='read PM8150 subtype and reboot-reason spare through the SPMI observer')
@@ -118,6 +121,12 @@ def main():
         a.gpu_power_probe = True
     if a.wifi_power_probe:
         a.wifi_native_probe = True
+    if a.wifi_fw_source_probe:
+        a.wifi_native_probe = True
+        if not (a.wifi_fw_bundle and a.wifi_fw_sha256) or a.wifi_power_probe:
+            p.error('--wifi-fw-source-probe requires its private bundle/SHA256 and separate source-only profile')
+    elif a.wifi_fw_bundle or a.wifi_fw_sha256:
+        p.error('--wifi-fw-bundle/--wifi-fw-sha256 require --wifi-fw-source-probe')
     if a.scm_probe:
         if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
             p.error('--scm-probe requires kernel, live DTB, CPU0 and --return-bootloader')
@@ -127,13 +136,13 @@ def main():
                 any(value for name, value in vars(a).items() if name.endswith('_probe') and name != 'scm_probe')):
             p.error('--scm-probe requires its separate RAM-only profile')
     if a.wifi_native_probe:
-        label = '--wifi-power-probe' if a.wifi_power_probe else '--wifi-native-probe'
+        label = '--wifi-fw-source-probe' if a.wifi_fw_source_probe else '--wifi-power-probe' if a.wifi_power_probe else '--wifi-native-probe'
         if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
             p.error(f'{label} requires kernel, live DTB, CPU0 and --return-bootloader')
         competing = ('display', 'splash', 'touch_events', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
                      'capture_screen', 'userspace_stacks', 'trace_syscalls', 'smp_gui', 'shim_early_return')
         if (any(getattr(a, name) for name in competing) or
-                any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('wifi_native_probe', 'wifi_power_probe'))):
+                any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('wifi_native_probe', 'wifi_power_probe', 'wifi_fw_source_probe'))):
             p.error(f'{label} requires its separate RAM-only profile')
     if a.gpu_power_probe:
         label = '--gpu-smmu-context-probe' if a.gpu_smmu_context_probe else '--gpu-smmu-probe' if a.gpu_smmu_probe else '--gmu-tcm-probe' if a.gmu_tcm_probe else '--gpu-power-probe'
@@ -494,6 +503,8 @@ def main():
             command_line += ' redfinscm=1'
         if a.wifi_native_probe:
             command_line += ' redfinwifinative=1'
+        if a.wifi_fw_source_probe:
+            command_line += ' redfinwififw=1'
         if a.wifi_power_probe:
             command_line += ' redfinwifipower=1'
         if a.touch_id_probe or a.touch_events:
@@ -534,6 +545,30 @@ def main():
             out / 'payload.bin', '--ramdisk', out / 'init', '--cmdline',
             command_line])
         payload = (out / 'payload.bin').read_bytes()
+        if a.wifi_fw_source_probe:
+            import wifi_fw_blob
+            from wifi_firmware import live_layout, read_regular
+            try:
+                excluded = live_layout(a.dtb.read_bytes(), a.memory_base, a.memory_size)
+                verifier = out / 'wifi-fw-source-check'
+                compiler = shutil.which('cc')
+                if not compiler:
+                    p.error('--wifi-fw-source-probe requires a host C compiler')
+                command = [compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+                    HERE / 'wifi-fw-source-check.c', HERE / 'wifi_fw_source.c', '-o', verifier]
+                if sys.platform != 'darwin':
+                    command.append('-lcrypto')
+                run(command)
+                verified = wifi_fw_blob.verify_bundle(verifier, a.wifi_fw_bundle, a.wifi_fw_sha256, excluded)
+                firmware = read_regular(a.wifi_fw_bundle, wifi_fw_blob.MAX_BUNDLE)
+                payload, firmware_report = wifi_fw_blob.pack(payload, firmware, a.wifi_fw_sha256,
+                    verified, 0x8000000, probe_exclusions=excluded)
+                (out / 'payload.bin').write_bytes(payload)
+                at, size = struct.unpack_from('<QQ', payload, 32)
+                (out / 'redfin.adt').write_bytes(payload[at:at + size])
+                (out / 'wifi-fw-source.json').write_text(json.dumps(firmware_report, indent=2) + '\n')
+            except (ValueError, OSError, subprocess.SubprocessError) as error:
+                p.error(str(error))
     (out / 'config.h').write_text(f'#define DIAG_SPLASH {int(a.splash)}\n'
         f'#define DIAG_STRIDE {a.stride}\n#define DIAG_SECONDS {a.seconds}\n'
         f'#define WATCHDOG_SECONDS {a.watchdog_seconds}\n'
@@ -623,6 +658,8 @@ def main():
         manifest['scm_probe'] = True
     if a.wifi_native_probe:
         manifest['wifi_native_probe'] = True
+    if a.wifi_fw_source_probe:
+        manifest['wifi_fw_source_probe'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:
