@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GLINK allocation hardware PASS; negotiation diagnostics — 2026-10-23
+
+Source515ea72 / local native build160808. Fresh authenticated/image/nonce
+matched `wifi-glink-v1-20261023-161010`, bootidcf059ff8564cf77d, repeats
+complete native MPSS start: AUTH0/0 after53calls/52resumes and fresh ready0x6.
+GLINK init succeeds; descriptor atSMEM+0xfb198 was already newly created by
+this remote, TX allocates atSMEM+0x100380 with5metadata stores. No APPS
+counter reset is performed. The first pump returns protocol7 before the
+first progress snapshot; no version/channel/QRTR/WLFW success is observed.
+The v1capture does not contain the rejected frame fields, so its exact
+trigger is not yet established. PID1 lives; authenticated recovery verifies
+clean/unmodified HFSX/write_count462335 and final fastboot.
+
+V1 kernel12b4b1ce0b411d1b5b83900ee8d5af9977ff7495ee0ffdd347e11958f8de7211;
+image08f50d54d4767706cfb0f50267a6f524e36dc364b3cfeb641342bcfaae9645af.
+Exact v1 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xcf059ff8564cf77d`.
+
+Reviewed the preferred kernel's native GLINK version handling: unsupported
+bits in the peer's VERSION offer must be intersected, not reject the offer.
+V2 corrects this independently of the still-unknown v1frame and logs the
+last command/parameters, available bytes and queue offsets on parser failure.
+A regression negotiates peer features0x83 to our supported1. All23GLINK/
+PAS/return checksPASS in1.092s. Native build`build-20261023-161347.log`PASS and full actual
+Image/live-FDT/return preflightPASS; no CI run. Kernel`60cdd7a2831aa7904e597d1a90f1ac8e27bfec48e311a7a7bc7b1e1fe223ca4d`;image`67b731af5e75cbbec0adf3008f7c19006bffd65cf2efdca8291427e05068346f`.
+Exact v2 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x2541e7da5fa6655c`.
+Next: the new temporaryv2run; use its observed frame or discovery result.
+
 ## REDFIN native GLINK/IPCRTR/QRTR path prepared after real MPSS ready — 2026-10-23
 
 Sourceparent3d069ed. Added separate `--wifi-glink-start` / redfinwififw3,

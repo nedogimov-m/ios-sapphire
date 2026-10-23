@@ -34,6 +34,7 @@ struct rf_glink {
     uint32_t attempted, poisoned, partition, bytes, descriptor, tx, rx, rx_bytes;
     uint32_t head, tail, features, version, asked, acknowledged, channel, open, offered;
     uint32_t fill, remaining, heard, sent, packets, stores;
+    uint32_t last_command, last_p1, last_p2, last_waiting;
     struct rf_glink_intent intent[32];
     uint8_t packet[65536];
 };
@@ -201,6 +202,7 @@ static inline int rf_gl_pump(struct rf_glink *s, const struct rf_glink_ops *o)
         uint8_t header[16] = RF_GL_ZERO;
         rf_gl_peek(s, o, 0, header, 8);
         uint32_t first = rf_gl_u32(header), command = first & 0xffffu, p1 = first >> 16, p2 = rf_gl_u32(header + 4);
+        s->last_command = command; s->last_p1 = p1; s->last_p2 = p2; s->last_waiting = waiting;
         uint32_t bytes = 8, chunk = 0, left = 0;
         if (command == 2) { if (!p2 || p2 > 32) return RF_GL_PROTOCOL; bytes += p2; }
         else if (command == 5) { if (!p2 || p2 > 32) return RF_GL_PROTOCOL; bytes += p2 * 8u; }
@@ -218,7 +220,7 @@ static inline int rf_gl_pump(struct rf_glink *s, const struct rf_glink_ops *o)
         unsigned response_bytes = 0, response_command = 0xffffu, response_p1 = 0, response_p2 = 0;
         bool packet = false;
         if (command == 0 || command == 1) {
-            if (p1 != 1 || (p2 & ~1u)) return RF_GL_PROTOCOL;
+            if (p1 != 1 || (command == 1 && (p2 & ~s->features))) return RF_GL_PROTOCOL;
             s->features &= p2;
             if (command == 0) { response_command = 1; response_p1 = 1; response_p2 = s->features; }
             else s->version = 1;

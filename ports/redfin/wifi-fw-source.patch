@@ -739,7 +739,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,547 @@
+@@ -0,0 +1,552 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -1137,7 +1137,12 @@ new file mode 100644
 +        if (alive && alive != RF_WIFI_SMP2P_UNSTABLE) return alive;
 +        if (!alive) {
 +            error = rf_gl_pump(&context->glink, &context->glink_ops);
-+            if (error && error != RF_GL_AGAIN) return error;
++            if (error && error != RF_GL_AGAIN) {
++                IOLog("REDFIN WIFI GLINK: parser=%d last=%u/%u/%#x waiting=%u head=%u tail=%u RXbytes=%u\n",
++                    error, context->glink.last_command, context->glink.last_p1, context->glink.last_p2,
++                    context->glink.last_waiting, context->glink.head, context->glink.tail, context->glink.rx_bytes);
++                return error;
++            }
 +            while (context->pending_count) {
 +                error = rf_gl_send_packet(&context->glink, &context->glink_ops,
 +                    context->pending[context->pending_tail], 52, context->transport, sizeof(context->transport));
@@ -1365,7 +1370,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_glink.h b/iokit/Kernel/arm/redfin_wifi
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_glink.h
-@@ -0,0 +1,296 @@
+@@ -0,0 +1,298 @@
 +/* SPDX-License-Identifier: MIT
 + * Bounded native APPS/MPSS GLINK transport. Google msm
 + * 500b3a2059c1eec0fec08ec56add06320ea901a8 qcom_glink_{smem,native}.c;
@@ -1402,6 +1407,7 @@ new file mode 100644
 +    uint32_t attempted, poisoned, partition, bytes, descriptor, tx, rx, rx_bytes;
 +    uint32_t head, tail, features, version, asked, acknowledged, channel, open, offered;
 +    uint32_t fill, remaining, heard, sent, packets, stores;
++    uint32_t last_command, last_p1, last_p2, last_waiting;
 +    struct rf_glink_intent intent[32];
 +    uint8_t packet[65536];
 +};
@@ -1569,6 +1575,7 @@ new file mode 100644
 +        uint8_t header[16] = RF_GL_ZERO;
 +        rf_gl_peek(s, o, 0, header, 8);
 +        uint32_t first = rf_gl_u32(header), command = first & 0xffffu, p1 = first >> 16, p2 = rf_gl_u32(header + 4);
++        s->last_command = command; s->last_p1 = p1; s->last_p2 = p2; s->last_waiting = waiting;
 +        uint32_t bytes = 8, chunk = 0, left = 0;
 +        if (command == 2) { if (!p2 || p2 > 32) return RF_GL_PROTOCOL; bytes += p2; }
 +        else if (command == 5) { if (!p2 || p2 > 32) return RF_GL_PROTOCOL; bytes += p2 * 8u; }
@@ -1586,7 +1593,7 @@ new file mode 100644
 +        unsigned response_bytes = 0, response_command = 0xffffu, response_p1 = 0, response_p2 = 0;
 +        bool packet = false;
 +        if (command == 0 || command == 1) {
-+            if (p1 != 1 || (p2 & ~1u)) return RF_GL_PROTOCOL;
++            if (p1 != 1 || (command == 1 && (p2 & ~s->features))) return RF_GL_PROTOCOL;
 +            s->features &= p2;
 +            if (command == 0) { response_command = 1; response_p1 = 1; response_p2 = s->features; }
 +            else s->version = 1;

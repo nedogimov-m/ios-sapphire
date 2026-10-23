@@ -112,6 +112,14 @@ class NativeGlinkTests(unittest.TestCase):
         free = struct.unpack_from('<I', self.memory, PART + 12)[0]
         self.assertLessEqual(free, PART_SIZE)
 
+    def test_version_negotiates_the_intersection_with_new_peer_capabilities(self):
+        self.assertEqual(self.library.initialize(), 0)
+        self.assertEqual(self.library.say(), 0)
+        self.remote(self.frame(0, 1, 0x83) + self.frame(1, 1, 1) +
+                    self.frame(2, 7, 7, b'IPCRTR\0') + self.frame(4, 1))
+        self.assertEqual(self.library.pump(), 0)
+        self.assertEqual(self.library.metric(6), 1)
+
     def test_version_ipcrtr_intents_rx_and_tx_use_real_ring_frames(self):
         self.handshake()
         payload = b'QRTR test payload'

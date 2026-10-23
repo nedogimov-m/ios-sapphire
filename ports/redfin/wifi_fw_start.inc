@@ -395,7 +395,12 @@ static int fw_start_transport_run(fw_start_context *context)
         if (alive && alive != RF_WIFI_SMP2P_UNSTABLE) return alive;
         if (!alive) {
             error = rf_gl_pump(&context->glink, &context->glink_ops);
-            if (error && error != RF_GL_AGAIN) return error;
+            if (error && error != RF_GL_AGAIN) {
+                IOLog("REDFIN WIFI GLINK: parser=%d last=%u/%u/%#x waiting=%u head=%u tail=%u RXbytes=%u\n",
+                    error, context->glink.last_command, context->glink.last_p1, context->glink.last_p2,
+                    context->glink.last_waiting, context->glink.head, context->glink.tail, context->glink.rx_bytes);
+                return error;
+            }
             while (context->pending_count) {
                 error = rf_gl_send_packet(&context->glink, &context->glink_ops,
                     context->pending[context->pending_tail], 52, context->transport, sizeof(context->transport));
