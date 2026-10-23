@@ -268,5 +268,21 @@ table, EFS writer, ignored assignment failure or guessed pool is imported.
 The extra captured base-vendor JSONs contain no PDR-enable/dump-disable
 service; those absent responses remain grounded in the actual inventories.
 
+RMTFS implementation review after hardware OPEN demand, 2026-10-23: the same
+Google `msm_sharedmem.c` chooses HLOS3/MSS_MSA15, permissions6, for Redfin's
+client1 without `qcom,vm-nav-path`. Its `secure_buffer.c`, `secure_buffer.h`
+and `scm.c` establish two 24-byte destination records, seven arguments and
+the ARM64 extended-argument buffer for MP0x0c/ASSIGN0x16. No NAV permission
+or inherited Sapphire pool is used. The linux-msm/rmtfs pin above supplies
+the OPEN/CLOSE/ALLOC/IOVEC/GET_DEV_ERROR wire contracts and read-only shadow
+semantics. Their partition contents and storage writer are not imported.
+Four native Redfin partitions are captured twice through verified offline
+recovery; only private, hash-bound snapshots and volatile shadows enter the
+temporary image. A top-down free-DRAM allocation is checked against the
+actual live FDT, Image, DTB and XNU RAM by the shim before zeroing/claiming
+the guarded low buffer. Assignment failures remain failures; buffers and
+mappings remain retained until the platform resets. Hardware results are
+recorded separately in NOTES.md.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

@@ -99,6 +99,7 @@ def main():
     p.add_argument('--wifi-glink-start', action='store_true', help='native MPSS startup followed by GLINK/IPCRTR and QRTR service discovery')
     p.add_argument('--wifi-host-services', action='store_true', help='native GLINK with captured WLAN assets, pd-mapper and RAM-only TFTP')
     p.add_argument('--wifi-assets-inventory', type=Path, help='private captured base-vendor host-inventory.json for --wifi-host-services')
+    p.add_argument('--wifi-rmtfs-inventory', type=Path, help='verified private read-only EFS inventory; enables volatile RMTFS with --wifi-host-services')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -131,6 +132,8 @@ def main():
             p.error('--wifi-host-services requires --wifi-assets-inventory')
     elif a.wifi_assets_inventory:
         p.error('--wifi-assets-inventory requires --wifi-host-services')
+    if a.wifi_rmtfs_inventory and not a.wifi_host_services:
+        p.error('--wifi-rmtfs-inventory requires --wifi-host-services')
     if a.wifi_glink_start:
         a.wifi_fw_start = True
     if a.wifi_fw_start and a.wifi_fw_source_probe:
@@ -591,13 +594,18 @@ def main():
                 verified = wifi_fw_blob.verify_bundle(verifier, a.wifi_fw_bundle, a.wifi_fw_sha256, excluded)
                 firmware = read_regular(a.wifi_fw_bundle, wifi_fw_blob.MAX_BUNDLE)
                 auxiliary = None
+                rmtfs = None
                 if a.wifi_host_services:
                     import wifi_assets
                     auxiliary = wifi_assets.pack(a.wifi_assets_inventory)
                     (out / 'wifi-host-assets.json').write_text(json.dumps(auxiliary[1], indent=2) + '\n')
+                if a.wifi_rmtfs_inventory:
+                    import wifi_rmtfs
+                    rmtfs = wifi_rmtfs.pack(a.wifi_rmtfs_inventory, a.dtb.read_bytes(), a.memory_base, a.memory_size)
+                    (out / 'wifi-rmtfs.json').write_text(json.dumps(rmtfs[1], indent=2) + '\n')
                 payload, firmware_report = wifi_fw_blob.pack(payload, firmware, a.wifi_fw_sha256,
                     verified, 0x8000000, probe_exclusions=excluded, start=a.wifi_fw_start, transport=a.wifi_glink_start,
-                    auxiliary=auxiliary)
+                    auxiliary=auxiliary, rmtfs=rmtfs)
                 (out / 'payload.bin').write_bytes(payload)
                 at, size = struct.unpack_from('<QQ', payload, 32)
                 (out / 'redfin.adt').write_bytes(payload[at:at + size])
@@ -701,6 +709,8 @@ def main():
         manifest['wifi_glink_start'] = True
     if a.wifi_host_services:
         manifest['wifi_host_services'] = True
+    if a.wifi_rmtfs_inventory:
+        manifest['wifi_rmtfs'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

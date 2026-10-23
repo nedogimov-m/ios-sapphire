@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native RMTFS RAM backend and checked low-buffer handoff — 2026-10-23
+
+Continues source `1e41f51`. A new read-only recovery session independently
+reads each of modemst1/modemst2/fsg twice (2,621,440 bytes each) and fsc twice
+(131,072 bytes). All pairs match; LUN sizes, saved primary/backup GPT hashes,
+GPT labels and by-name identities match before/after. No mounts, disk writes
+or ramoops access; verified final fastboot. Snapshots/manifests remain private.
+
+The opt-in `--wifi-rmtfs-inventory` binds complete/per-file hashes in a
+resident read-only segment, then creates volatile kernel RAM shadows.
+OPEN/CLOSE/ALLOC/IOVEC/GET_DEV_ERROR use the reviewed native wire ABI. Caller,
+endpoint, allocation and complete vector bounds precede every transfer;
+there is no kernel block-device/EFS writer. A top-down allocation from live
+free DRAM supplies 0x280000 shared bytes plus two 16KiB guards. The shim
+checks actual Image/DTB/XNU/all fixed reservations before clearing/claiming
+it; the worker requires its ownership marker. HLOS3/MSS15 RW assignment
+uses native seven-argument/64-bit SCM layout. Failures never publish a valid
+buffer; uncertain memory/votes/mappings remain retained until full reset.
+
+183 Wi-Fi tests PASS (3 optional private cases skipped), including all12
+new actual RMTFS/SCM/producer/loader tests; loader/return regressions PASS.
+Two read-only EFS/GPT capture tests PASS. Local native build
+`build-20261023-173812.log` PASS; no CI run. Full actual Image/live-FDT and
+shim-return preflight PASS. Hardware execution of this backend is unverified.
+Kernel `1e0329a239eb15fd8a990bc6776d5934ac2905f27522cf3648accf53f6d2e097`; image `b7ecf446f5ae69173b2560183913d22aa4743607c4e16f94e700ff22d265c738`. Image 89,997,312 bytes, decompressed 129,085,840, below128MiB.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x03ef31dcd063d8d5`.
+
+Next: temporary RMTFS-v1 boot; authenticate the matching capture and inspect
+HLOS/MSS sharing, real OPEN/ALLOC/IOVEC ordering, fatal state and WLFW.
+Persistent EFS remains untouched. Wi-Fi data, GPU/Metal and Bluetooth remain
+unfinished.
+
 ## REDFIN RMTFS OPEN observed before MPSS fatal — 2026-10-23
 
 Source `6ec6c89`, local native build `build-20261023-171716.log` (no CI run).

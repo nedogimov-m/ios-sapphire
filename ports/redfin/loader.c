@@ -24,7 +24,7 @@ struct boot_args {
     char command[608];
     uint64_t flags, actual_memory;
 };
-struct plan { uint64_t adt, args, top, entry; };
+struct plan { uint64_t adt, args, top, entry, rmtfs_pool, rmtfs_owned; };
 _Static_assert(offsetof(struct payload, segments) == 680, "payload ABI");
 _Static_assert(sizeof(struct boot_args) == 736, "boot args ABI");
 
@@ -98,6 +98,131 @@ static int adt_valid_up(const volatile unsigned char *b, uint64_t size,
         if (kind == 2) { if (seen != 3) return 0; chosen++; }
         depth++; pending[depth] = children; kinds[depth] = kind;
     }
+}
+
+/* The optional RMTFS pool is allocated from live free DRAM, outside XNU.
+ * Validate the actual ABL source/DTB as well as all inherited reservations.
+ * Merely naming a range in an ADT does not grant ownership of its memory. */
+static int rmtfs_plan(const struct payload *p, const struct hardware *hw,
+    uint64_t image, uint64_t image_bytes, uint64_t dtb, uint64_t dtb_bytes, struct plan *q)
+{
+    const volatile unsigned char *b = (const volatile unsigned char *)p + p->adt_offset;
+    uint32_t pending[32], kinds[32];
+    uint64_t pool[2] = {0}, shared[2] = {0}, snapshot[2] = {0}, scratch[2] = {0}, maps[6] = {0}, bytes = 0;
+    uint64_t off = 0, owned = 0;
+    unsigned depth = 0, nodes = 0, map_seen = 0;
+    q->rmtfs_pool = q->rmtfs_owned = 0;
+    pending[0] = 1; kinds[0] = 0;
+    for (;;) {
+        while (!pending[depth]) { if (!depth) goto parsed; --depth; }
+        --pending[depth];
+        if (depth == 31 || off > p->adt_size || p->adt_size - off < 8) return 0;
+        uint32_t props = word(b + off, 0), children = word(b + off + 4, 0), kind = 0, seen = 0;
+        off += 8;
+        if (!props || props > 1024 || children > 1024) return 0;
+        for (uint32_t i = 0; i < props; ++i) {
+            if (p->adt_size - off < 36) return 0;
+            const volatile unsigned char *key = b + off;
+            uint32_t length = word(key + 32, 0);
+            off += 36;
+            uint64_t padded = ((uint64_t)length + 3) & ~3ULL;
+            if ((length & 0x80000000u) || padded > p->adt_size - off) return 0;
+            const volatile unsigned char *value = b + off;
+            if (!i) {
+                if (!same(key, 32, "name")) return 0;
+                if (depth == 1 && same(value, length, "redfin-rmtfs")) {
+                    if (++nodes != 1 || props != 9 || children) return 0;
+                    kind = 1;
+                } else if (depth == 1 && same(value, length, "chosen")) kind = 2;
+                else if (depth == 2 && kinds[depth] == 2 && same(value, length, "memory-map")) kind = 3;
+            } else if (kind == 1) {
+                unsigned bit = 0;
+                uint64_t *region = NULL;
+                if (same(key, 32, "pool-reg")) { bit = 1; region = pool; }
+                else if (same(key, 32, "shared-reg")) { bit = 2; region = shared; }
+                else if (same(key, 32, "snapshot-reg")) { bit = 4; region = snapshot; }
+                else if (same(key, 32, "scratch-reg")) { bit = 8; region = scratch; }
+                else if (same(key, 32, "source-contract")) {
+                    const uint32_t expected[10] = {1, 14, 1, 0x4003, 512, 4, 0x280000, 3, 15, 6};
+                    bit = 16;
+                    if (length != sizeof(expected)) return 0;
+                    for (unsigned j = 0; j < 10; ++j) if (word(value + 4u * j, 0) != expected[j]) return 0;
+                } else if (same(key, 32, "bundle-bytes")) {
+                    bit = 32; if (length != 8) return 0; bytes = quad(value);
+                } else if (same(key, 32, "bundle-sha256")) {
+                    unsigned nonzero = 0; bit = 64;
+                    if (length != 32) return 0;
+                    for (unsigned j = 0; j < 32; ++j) nonzero |= value[j];
+                    if (!nonzero) return 0;
+                } else if (same(key, 32, "shim-owned")) {
+                    bit = 128; if (length != 4 || word(value, 0)) return 0; owned = off;
+                } else return 0;
+                if (seen & bit) return 0;
+                seen |= bit;
+                if (region) { if (length != 16) return 0; region[0] = quad(value); region[1] = quad(value + 8); }
+            } else if (kind == 3) {
+                unsigned index = 0, bit = 0;
+                if (same(key, 32, "RedfinRMTFSPool")) { index = 0; bit = 1; }
+                else if (same(key, 32, "RedfinRMTFSSnapshot")) { index = 2; bit = 2; }
+                else if (same(key, 32, "RedfinRMTFSScratch")) { index = 4; bit = 4; }
+                if (bit) {
+                    if ((map_seen & bit) || length != 16) return 0;
+                    map_seen |= bit; maps[index] = quad(value); maps[index + 1] = quad(value + 8);
+                }
+            }
+            off += padded;
+        }
+        if (kind == 1 && seen != 255) return 0;
+        ++depth; pending[depth] = children; kinds[depth] = kind;
+    }
+parsed:
+    if (off != p->adt_size) return 0;
+    if (!nodes && !map_seen) return 1;
+    if (nodes != 1 || map_seen != 7 || !owned || pool[0] != maps[0] || pool[1] != maps[1] ||
+        snapshot[0] != maps[2] || snapshot[1] != maps[3] || scratch[0] != maps[4] || scratch[1] != maps[5] ||
+        pool[0] < 0x80000000ULL || pool[0] > 0x100000000ULL - 0x288000 || pool[1] != 0x288000 ||
+        (pool[0] & (PAGE - 1)) || shared[0] != pool[0] + PAGE || shared[1] != 0x280000 ||
+        bytes < 576 || bytes > 12u * 1024u * 1024u || snapshot[1] != ((bytes + PAGE - 1) & ~(PAGE - 1)) ||
+        !span(snapshot[0], snapshot[1]) || snapshot[0] < p->phys || (snapshot[0] & (PAGE - 1)) ||
+        scratch[0] != snapshot[0] + snapshot[1] || scratch[1] != PAGE ||
+        overlap(pool[0], pool[1], p->phys, p->memory) || overlap(pool[0], pool[1], image, image_bytes) ||
+        overlap(pool[0], pool[1], dtb, dtb_bytes)) return 0;
+    const char *const required[] = {"cpus=1", "rd=md0", "redfinwififw=4", "redfinwifinative=1",
+        "redfinwifi=2", "redfinspmi=1", "redfinreturn=1", "modem=0", "wifi=0", "gpu=0", "sweetusb=0"};
+    unsigned command_seen = 0;
+    for (unsigned at = 0; at < sizeof(p->command) && p->command[at];) {
+        if (p->command[at] == ' ') { ++at; continue; }
+        unsigned first = at;
+        while (at < sizeof(p->command) && p->command[at] && p->command[at] != ' ') ++at;
+        for (unsigned i = 0; i < 11; ++i) {
+            unsigned j = 0;
+            while (j < at - first && required[i][j] && p->command[first + j] == required[i][j]) ++j;
+            if (j == at - first && !required[i][j]) {
+                if (command_seen & (1u << i)) return 0;
+                command_seen |= 1u << i;
+            }
+        }
+    }
+    if (command_seen != 2047) return 0;
+    unsigned bank = 0, source = 0, arguments = 0;
+    for (unsigned i = 0; i < hw->banks; ++i) if (pool[0] >= hw->memory[i].base &&
+        pool[0] + pool[1] <= hw->memory[i].base + hw->memory[i].size) bank = 1;
+    if (!bank) return 0;
+    for (unsigned i = 0; i < hw->reservations; ++i)
+        if (overlap(pool[0], pool[1], hw->reserved[i].base, hw->reserved[i].size)) return 0;
+    for (unsigned i = 0; i < p->count; ++i) {
+        const struct segment *s = &p->segments[i];
+        uint64_t physical = p->phys + s->va - p->virt;
+        if (physical == snapshot[0] && s->size == snapshot[1] && s->bytes == bytes) ++source;
+        if (physical == scratch[0] && s->size == PAGE && s->bytes == PAGE) {
+            const volatile unsigned char *data = (const volatile unsigned char *)p + s->offset;
+            for (unsigned j = 0; j < PAGE; ++j) if (data[j]) return 0;
+            ++arguments;
+        }
+    }
+    if (source != 1 || arguments != 1) return 0;
+    q->rmtfs_pool = pool[0]; q->rmtfs_owned = owned;
+    return 1;
 }
 
 
@@ -478,6 +603,7 @@ static const char *validate(const void *data, uint64_t size, uint64_t image,
     int gui = REDFIN_GUI_BUILD_READY && redfin_gui_profile(p->command, sizeof(p->command), NULL);
     if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, 1) : adt_valid_smp(tree, p->adt_size)) :
         adt_valid_up(tree, p->adt_size, mpidr, p->phys, p->memory))) return "ADT CPU or RAM mismatch";
+    if (!rmtfs_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "RMTFS RAM ownership";
     return NULL;
 }
 
@@ -501,6 +627,11 @@ const char *redfin_boot(uint64_t dtb, const struct hardware *hw)
     const char *error = validate(p, XNU_PAYLOAD_SIZE, start, source + XNU_PAYLOAD_SIZE, dtb, hw, MRS(mpidr_el1) & 0xffffff, &q);
     if (error) return error;
     __asm__ volatile("msr daifset, #15" ::: "memory");
+    if (q.rmtfs_pool) {
+        volatile uint64_t *pool = (void *)(uintptr_t)q.rmtfs_pool;
+        for (uint64_t i = 0; i < 0x288000 / 8; ++i)
+            pool[i] = i < PAGE / 8 || i >= (PAGE + 0x280000) / 8 ? 0xa7a7a7a7a7a7a7a7ULL : 0;
+    }
     for (unsigned i = 0; i < p->count; i++) {
         const struct segment *s = &p->segments[i];
         volatile unsigned char *dst = (void *)(uintptr_t)(p->phys + (s->va - p->virt));
@@ -516,6 +647,7 @@ const char *redfin_boot(uint64_t dtb, const struct hardware *hw)
     const volatile unsigned char *adt = (const void *)(uintptr_t)(source + p->adt_offset);
     for (uint64_t i = 0; i < p->adt_size; i += 4)
         *(volatile uint32_t *)(tree + i) = *(const volatile uint32_t *)(adt + i);
+    if (q.rmtfs_pool) *(volatile uint32_t *)(tree + q.rmtfs_owned) = 1;
     volatile struct boot_args *args = (void *)(uintptr_t)q.args;
     for (unsigned i = 0; i < sizeof(*args); i += 8)
         *(volatile uint64_t *)((volatile unsigned char *)args + i) = 0;

@@ -114,7 +114,7 @@ def verify_bundle(verifier, path, digest, excluded):
 
 
 def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_exclusions=None, start=False, transport=False,
-         auxiliary=None):
+         auxiliary=None, rmtfs=None):
     require(type(max_payload_bytes) is int and 0 < max_payload_bytes <= MAX_PAYLOAD, 'explicit payload cap outside implementation bound')
     require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'expected bundle SHA256 must be lowercase hex')
     require(64 <= len(firmware) <= MAX_BUNDLE and hashlib.sha256(firmware).hexdigest() == digest,
@@ -149,8 +149,38 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
         probe = [('probe-contract', mkadt.u32(1, 4, 64, 0)),
                  ('probe-exclusions', mkadt.u64(*(value for pair in probe_exclusions for value in pair)))]
     reserved = aligned(len(firmware), PAGE)
-    extra = (1 if start else 0) + (1 if auxiliary is not None else 0)
+    extra = (1 if start else 0) + (1 if auxiliary is not None else 0) + (2 if rmtfs is not None else 0)
     require(len(info['segments']) + 1 + extra <= 64, 'native firmware/metadata/assets exceed segment slots')
+    prefix_bytes = 0
+    if rmtfs is not None:
+        require(start and transport and auxiliary is not None and type(rmtfs) is tuple and len(rmtfs) == 2,
+                'RMTFS requires native host services and a verified private RAM snapshot')
+        rmtfs_data, rmtfs_report = rmtfs
+        require(type(rmtfs_data) is bytes and 576 <= len(rmtfs_data) <= 12 * 1024 * 1024 and
+                rmtfs_report.get('schema') == 1 and rmtfs_report.get('bytes') == len(rmtfs_data) and
+                rmtfs_report.get('persistent_writes') is False and
+                hashlib.sha256(rmtfs_data).hexdigest() == rmtfs_report.get('sha256'), 'invalid private RMTFS snapshot')
+        pool, shared = rmtfs_report['pool'], rmtfs_report['shared']
+        require(len(pool) == len(shared) == 2 and all(type(n) is int for n in (*pool, *shared)) and
+                pool[0] >= 0x80000000 and not pool[0] % PAGE and pool[1] == 0x288000 and
+                pool[0] + pool[1] <= 1 << 32 and tuple(shared) == (pool[0] + PAGE, 0x280000),
+                'invalid RMTFS guarded low allocation')
+        rmtfs_reserved = aligned(len(rmtfs_data), PAGE)
+        snapshot = info['physical'] + info['end'] - info['virt']
+        scratch = snapshot + rmtfs_reserved
+        prefix_bytes = rmtfs_reserved + PAGE
+        require(not any(child.name == 'redfin-rmtfs' for child in info['root'].children) and
+                all(info['memory_map'].prop(name) is None for name in
+                    ('RedfinRMTFSSnapshot', 'RedfinRMTFSScratch', 'RedfinRMTFSPool')), 'duplicate RMTFS handoff')
+        for name, region in (('RedfinRMTFSSnapshot', (snapshot, rmtfs_reserved)),
+                             ('RedfinRMTFSScratch', (scratch, PAGE)), ('RedfinRMTFSPool', pool)):
+            info['memory_map'].props.append((name, 0, mkadt.u64(*region)))
+        info['root'].children.append(mkadt.node('redfin-rmtfs', [
+            ('source-contract', mkadt.u32(1, 14, 1, 0x4003, 512, 4, 0x280000, 3, 15, 6)),
+            ('snapshot-reg', mkadt.u64(snapshot, rmtfs_reserved)), ('scratch-reg', mkadt.u64(scratch, PAGE)),
+            ('pool-reg', mkadt.u64(*pool)), ('shared-reg', mkadt.u64(*shared)),
+            ('bundle-bytes', mkadt.u64(len(rmtfs_data))), ('bundle-sha256', bytes.fromhex(rmtfs_report['sha256'])),
+            ('shim-owned', mkadt.u32(0))]))
     auxiliary_bytes = 0
     if auxiliary is not None:
         require(start and transport and type(auxiliary) is tuple and len(auxiliary) == 2,
@@ -160,15 +190,15 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
                 auxiliary_report.get('schema') == 1 and auxiliary_report.get('bytes') == len(auxiliary_data) and
                 hashlib.sha256(auxiliary_data).hexdigest() == auxiliary_report.get('sha256'), 'invalid immutable host asset source')
         auxiliary_bytes = aligned(len(auxiliary_data), PAGE)
-        auxiliary_physical = info['physical'] + info['end'] - info['virt']
+        auxiliary_physical = info['physical'] + info['end'] - info['virt'] + prefix_bytes
         require(not any(child.name == 'redfin-wifi-assets' for child in info['root'].children) and
                 info['memory_map'].prop('RedfinWiFiAssets') is None, 'duplicate native WLAN assets')
         info['memory_map'].props.append(('RedfinWiFiAssets', 0, mkadt.u64(auxiliary_physical, auxiliary_bytes)))
         info['root'].children.append(mkadt.node('redfin-wifi-assets', [
             ('reg', mkadt.u64(auxiliary_physical, auxiliary_bytes)), ('bundle-bytes', mkadt.u64(len(auxiliary_data))),
             ('bundle-sha256', bytes.fromhex(auxiliary_report['sha256'])), ('source-contract', mkadt.u32(1, 16, 128, PAGE))]))
-    metadata = info['physical'] + info['end'] - info['virt'] + auxiliary_bytes if start else 0
-    source_end = info['end'] + auxiliary_bytes + (PAGE if start else 0)
+    metadata = info['physical'] + info['end'] - info['virt'] + prefix_bytes + auxiliary_bytes if start else 0
+    source_end = info['end'] + prefix_bytes + auxiliary_bytes + (PAGE if start else 0)
     physical = info['physical'] + source_end - info['virt']
     new_end = source_end + reserved
     if start:
@@ -188,9 +218,12 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
     pieces = [(address, size, memoryview(payload)[offset:offset + length])
               for address, size, offset, length in info['segments']]
     if start:
+        if rmtfs is not None:
+            pieces.append((info['end'], rmtfs_reserved, memoryview(rmtfs_data)))
+            pieces.append((info['end'] + rmtfs_reserved, PAGE, memoryview(bytes(PAGE))))
         if auxiliary is not None:
-            pieces.append((info['end'], auxiliary_bytes, memoryview(auxiliary_data)))
-        pieces.append((info['end'] + auxiliary_bytes, PAGE, memoryview(bytes(PAGE))))
+            pieces.append((info['end'] + prefix_bytes, auxiliary_bytes, memoryview(auxiliary_data)))
+        pieces.append((info['end'] + prefix_bytes + auxiliary_bytes, PAGE, memoryview(bytes(PAGE))))
     pieces.append((source_end, reserved, memoryview(firmware)))
     projected = aligned(HEADER + 32 * len(pieces), 16) + sum(aligned(len(data), 16) for _address, _size, data in pieces) + aligned(len(tree), 16)
     require(projected <= max_payload_bytes, 'complete payload exceeds explicit host cap')

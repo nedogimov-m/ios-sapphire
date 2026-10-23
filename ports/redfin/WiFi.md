@@ -745,3 +745,41 @@ a bounded32-entry queue. A fresh WLFW announcement queues CAP0x24 with a
 new transaction, accepting identity only from its exact node/port/transaction
 and valid response/result/TLVs. The first hardware run must independently
 prove host-service requests, domain loading and any WLFW capability reply.
+
+## Native RMTFS snapshots and volatile shadows — 2026-10-23
+
+The host-v3 capture observes an OPEN for `/boot/modem_fs1`, its explicit
+unavailable response, then SMP2P fatal. This establishes real RMTFS demand;
+the exact cause of the fatal remains to be checked by providing the service.
+
+`capture-rmtfs.py` reads `modemst1`, `modemst2`, `fsg` and `fsc` through the
+verified temporary offline recovery. It checks saved LUN GPT hashes, GPT
+labels, by-name links and block sizes, then requires two independent copies
+of every partition to agree. It returns to verified fastboot. All snapshots
+and their manifests contain private device data and stay ignored by git.
+
+```sh
+python3 ports/redfin/capture-rmtfs.py \
+  --recovery-image research/redfin-recovery-adb-safe/recovery-adb-only.img \
+  --gpt-sha256-file backup/redfin/ufs-gpt-before.sha256 \
+  --out research/redfin-wifi-native/rmtfs-snapshot-v1
+```
+
+Adding `--wifi-rmtfs-inventory PRIVATE/inventory.json` to the existing
+`--wifi-host-services` build selects the opt-in native RMTFS backend without
+changing the frozen CPU0/md0/return boot arguments. A separate read-only
+resident snapshot segment and zeroed SCM argument page precede the WLAN
+assets. Whole-image and per-partition hashes are checked before copying to
+private kernel RAM shadows. There is no kernel block-device or EFS write API.
+
+The producer selects 0x280000 bytes plus two 16KiB guard pages from free
+low DRAM in the captured live FDT. Before writing any destination the shim
+independently excludes actual Image/DTB/XNU/fixed reservations, verifies the
+snapshot and zeroed scratch segments, then clears the pool and marks its
+handoff owned. The native worker requires that marker, retains all mappings,
+and uses the reviewed HLOS3/MSS15 RW assignment. No address is published
+unless assignment succeeds. OPEN/ALLOC/IOVEC requests validate paths,
+callers, endpoint ownership and every vector before transfer. Writes and
+forced synchronization affect RAM shadows only and are lost on reset.
+This still requires an independent hardware request/readiness result; it
+does not demonstrate WLAN association, packets or an iOS network interface.
