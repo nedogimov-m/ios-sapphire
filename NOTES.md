@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GLINK/IPCRTR/QRTR hardware PASS; WLAN host services prepared — 2026-10-23
+
+Sourcea44543d / native build162015. Fresh authenticated/image/nonce matched
+`wifi-glink-v3-20261023-162125`, bootidcbde71f75e7f16ad, repeats native
+MPSS AUTH/fresh ready. GLINK negotiates version1 and opens IPCRTR both ways,
+remote channel2/ACK1. DescriptorSMEM+0xfb198,APPS TX+0x100380,remoteRX+0xfb1c8.
+QRTR HELLO from node0 receives our reply. Remote announces service0x42/v1/
+instance180,node0/port2 and0x2b/v2/instance18,node0/port1. Final42frames heard,
+11sent,3QRTR packets,2services. WLFW0x45 is absent through10s and the caller
+returnsETIMEDOUT60. This establishes real bidirectional native transport,
+not WLAN activation. PID1 lives, HFSX stays clean/unmodified atwrite_count
+462335 and authenticated recovery verifies final fastboot.
+V3 kernela7960d7abb3835b17de3e56ac4618b9975855a4d9b412a09f67c6ab04b7c26e9;
+image2415f90195e800c0fe79f10c80af21d9d0ab79c70ec79d1ba1f7f0f823a3d707.
+Exact v3 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xcbde71f75e7f16ad`.
+
+Current `--wifi-host-services`/redfinwififw4 adds native pd-mapper0x40/0x101
+and TFTP4096/v1 after the proven transport. The private captured base-vendor
+inventory hashes bind5WLAN files (3,880,432byte bundle) in a separate read-only
+RAM segment; whole/per-asset native hashes, paths, bounds and zero padding
+are checked. This remains raw vendor_b base, not a proved effective snapshot
+or pristine stock source. No firmware compatibility claim is inferred.
+Metadata/main-source boundaries remain independently bound.
+
+TFTP reads only the immutable assets/main firmware. `/readwrite/` has4bounded
+64KiB RAM files,8sessions,4096byte blocks, duplicate ACK/data handling and
+native seek/rsize/stat options; no storage, EFS, RMTFS or DMA API is present.
+Native pd-mapper returns the captured WLAN domain/instance180. Queued QRTR
+responses and optional bulk APPS-FIFO copy/readback avoid per-word policy
+walks; publication/parent/counter ownership stays guarded. A fresh WLFW
+announcement triggers bounded CAP0x24 transaction1, with exact source/port/
+transaction/TLV/result checks before reporting silicon identity. No WLAN
+power/MSA assignment, association or iOS interface is introduced here.
+
+77focused host-service/GLINK/firmware-blob/profile/return checksPASS in11.299s
+(1optional private case skipped). Actual TFTP multiblock/retry/RAM writes,
+foreign callers, malformed paths/TLVs, captured asset hashes and partial bulk
+publication failure are covered. Native builds164028/final`build-20261023-164615.log`PASS;
+real full Image/live-FDT/return preflightPASS. Boot image82,051,072bytes,
+decompressed121,071,840bytes, below the explicit128MiB host cap. No CI run.
+Kernel`f0a06f424f03eb0745ea88916523b93eb26874eed687c9d12c6ea97ac9d9389e`;image`e4a268a14408e2299d2c7cf8948e79c0b3ffe8e89e18ca45bfab865047e69925`.
+Exact host-v1 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x467b59b2c2074dba`.
+Next: fresh temporaryhost-v1run; inspect actual PDM/TFTP requests and WLFW CAP.
+The active larger goal still requires Wi-Fi data/ifnet, GPU/native Metal,
+then Bluetooth; none of those end-to-end outcomes is claimed yet.
+
 ## REDFIN GLINK reaches intent exchange; native channel/handle semantics — 2026-10-23
 
 Source1ef1e7d / native build161347. Authenticated/image/nonce-matched

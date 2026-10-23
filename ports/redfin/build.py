@@ -97,6 +97,8 @@ def main():
     p.add_argument('--wifi-fw-source-probe', action='store_true', help='isolated md0 native resident MPSS source pin/hash/parse; no radio start')
     p.add_argument('--wifi-fw-start', action='store_true', help='isolated native PAS4 MPSS boot with retained power/bandwidth and fresh SMP2P ready')
     p.add_argument('--wifi-glink-start', action='store_true', help='native MPSS startup followed by GLINK/IPCRTR and QRTR service discovery')
+    p.add_argument('--wifi-host-services', action='store_true', help='native GLINK with captured WLAN assets, pd-mapper and RAM-only TFTP')
+    p.add_argument('--wifi-assets-inventory', type=Path, help='private captured base-vendor host-inventory.json for --wifi-host-services')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -123,6 +125,12 @@ def main():
         a.gpu_power_probe = True
     if a.wifi_power_probe:
         a.wifi_native_probe = True
+    if a.wifi_host_services:
+        a.wifi_glink_start = True
+        if not a.wifi_assets_inventory:
+            p.error('--wifi-host-services requires --wifi-assets-inventory')
+    elif a.wifi_assets_inventory:
+        p.error('--wifi-assets-inventory requires --wifi-host-services')
     if a.wifi_glink_start:
         a.wifi_fw_start = True
     if a.wifi_fw_start and a.wifi_fw_source_probe:
@@ -390,7 +398,7 @@ def main():
         if a.wifi_glink_start:
             from wifi_platform import add_glink_contract
             try:
-                add_glink_contract(tree, nodes)
+                add_glink_contract(tree, nodes, services=a.wifi_host_services)
             except ValueError as error:
                 p.error(str(error))
         if a.scm_probe:
@@ -525,7 +533,7 @@ def main():
         if a.wifi_fw_source_probe:
             command_line += ' redfinwififw=1'
         if a.wifi_fw_start:
-            command_line += ' redfinwififw=3' if a.wifi_glink_start else ' redfinwififw=2'
+            command_line += ' redfinwififw=4' if a.wifi_host_services else ' redfinwififw=3' if a.wifi_glink_start else ' redfinwififw=2'
         if a.wifi_power_probe:
             command_line += ' redfinwifipower=1'
         if a.touch_id_probe or a.touch_events:
@@ -582,8 +590,14 @@ def main():
                 run(command)
                 verified = wifi_fw_blob.verify_bundle(verifier, a.wifi_fw_bundle, a.wifi_fw_sha256, excluded)
                 firmware = read_regular(a.wifi_fw_bundle, wifi_fw_blob.MAX_BUNDLE)
+                auxiliary = None
+                if a.wifi_host_services:
+                    import wifi_assets
+                    auxiliary = wifi_assets.pack(a.wifi_assets_inventory)
+                    (out / 'wifi-host-assets.json').write_text(json.dumps(auxiliary[1], indent=2) + '\n')
                 payload, firmware_report = wifi_fw_blob.pack(payload, firmware, a.wifi_fw_sha256,
-                    verified, 0x8000000, probe_exclusions=excluded, start=a.wifi_fw_start, transport=a.wifi_glink_start)
+                    verified, 0x8000000, probe_exclusions=excluded, start=a.wifi_fw_start, transport=a.wifi_glink_start,
+                    auxiliary=auxiliary)
                 (out / 'payload.bin').write_bytes(payload)
                 at, size = struct.unpack_from('<QQ', payload, 32)
                 (out / 'redfin.adt').write_bytes(payload[at:at + size])
@@ -685,6 +699,8 @@ def main():
         manifest['wifi_fw_start'] = True
     if a.wifi_glink_start:
         manifest['wifi_glink_start'] = True
+    if a.wifi_host_services:
+        manifest['wifi_host_services'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

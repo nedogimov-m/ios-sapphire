@@ -412,7 +412,7 @@ diff --git a/iokit/Kernel/arm/RedfinWiFiFWSource.cpp b/iokit/Kernel/arm/RedfinWi
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinWiFiFWSource.cpp
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,323 @@
 +/* SPDX-License-Identifier: MIT
 + * The preferred HackiOS kernel 8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 + * redwood_image.c/redwood_wifi.c use firmware in a resident boot image. Redfin
@@ -614,12 +614,13 @@ new file mode 100644
 +
 +static bool fw_probe_args(const char *args, unsigned bytes, uint64_t *nonce_out, unsigned mode = 1)
 +{
-+    if (mode < 1 || mode > 3) return false;
++    if (mode < 1 || mode > 4) return false;
 +    const char *const required[] = {
 +        "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
 +        "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
 +        "modem=0", "wifi=0", "gpu=0", "redfinwifi=2", "redfinwifinative=1",
-+        mode == 1 ? "redfinwififw=1" : mode == 2 ? "redfinwififw=2" : "redfinwififw=3", "redfinspmi=1", "redfinreturn=1"};
++        mode == 1 ? "redfinwififw=1" : mode == 2 ? "redfinwififw=2" : mode == 3 ? "redfinwififw=3" : "redfinwififw=4",
++        "redfinspmi=1", "redfinreturn=1"};
 +    uint32_t seen = 0;
 +    uint64_t nonce = 0;
 +    bool nonce_seen = false, trace_seen = false;
@@ -739,7 +740,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,553 @@
+@@ -0,0 +1,701 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -751,6 +752,9 @@ new file mode 100644
 +#include "../../../bsd/dev/redfin_wifi_smp2p.h"
 +#include "redfin_wifi_pas.h"
 +#include "redfin_wifi_glink.h"
++#include "redfin_wifi_assets.h"
++#include "redfin_wifi_host.h"
++#include "redfin_wifi_qmi.h"
 +
 +extern "C" int redfin_wifi_power_start(void);
 +extern "C" int redfin_wifi_power_held(void);
@@ -762,7 +766,8 @@ new file mode 100644
 +enum { FW_START_SOURCE = 1, FW_START_POWER, FW_START_ABI, FW_START_RESET,
 +    FW_START_SMP2P, FW_START_METADATA, FW_START_INIT, FW_START_SETUP,
 +    FW_START_COPY, FW_START_AUTH, FW_START_READY, FW_START_GLINK };
-+enum { FW_START_SMEM, FW_START_TCSR, FW_START_IPCC, FW_START_MPSS, FW_START_METADATA_MAP, FW_START_MAPS };
++enum { FW_START_SMEM, FW_START_TCSR, FW_START_IPCC, FW_START_MPSS, FW_START_METADATA_MAP,
++    FW_START_ASSETS_MAP, FW_START_MAPS };
 +static const uint64_t fw_start_ranges[8] = {
 +    UINT64_C(0x80900000), 0x200000, 0x1f40000, 0x20000,
 +    0x408000, 0x1000, 0x8c000000, 0x11800000};
@@ -780,8 +785,16 @@ new file mode 100644
 +    rf_glink_ops glink_ops;
 +    uint8_t transport[8256], qrtr[8256];
 +    uint32_t qrtr_peer, qrtr_seen, qrtr_hello, qrtr_hello_sent, qrtr_services, wlfw_node, wlfw_port;
-+    uint8_t pending[32][64];
++    uint8_t pending[32][RF_HOST_BLOCK + 64];
++    uint32_t pending_bytes[32];
 +    unsigned pending_head, pending_tail, pending_count, transport_mode;
++    unsigned host_mode, host_announced, cap_sent, cap_received;
++    uint64_t assets_reg[2], assets_bytes;
++    uint8_t assets_sha256[32];
++    rf_wlan_assets assets;
++    rf_host host;
++    rf_host_ops host_ops;
++    rf_wlfw_cap cap;
 +};
 +static fw_start_context fw_start;
 +
@@ -789,9 +802,37 @@ new file mode 100644
 +{
 +    const uint32_t expected[10] = {1, 4, 1, 478, 479, 480, 16384, 0x20000, 3, 1};
 +    uint32_t witness[10] = {}; char name[7] = {}; DTEntry node;
-+    return SecureDTLookupEntry(NULL, "/redfin-wifi-glink", &node) == kSuccess &&
++    bool valid = SecureDTLookupEntry(NULL, "/redfin-wifi-glink", &node) == kSuccess &&
 +        fw_property(node, "source-contract", witness, sizeof(witness)) && !memcmp(witness, expected, sizeof(witness)) &&
 +        fw_property(node, "channel", name, sizeof(name)) && !memcmp(name, "IPCRTR", sizeof(name));
++    if (valid && fw_start.host_mode) {
++        const uint32_t required[11] = {1, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096};
++        uint32_t actual[11] = {};
++        valid = fw_property(node, "host-services", actual, sizeof(actual)) && !memcmp(actual, required, sizeof(actual));
++    }
++    return valid;
++}
++
++static bool fw_start_assets_contract(fw_start_context *context, bool capture)
++{
++    DTEntry node, memory;
++    const uint32_t required[4] = {1, 16, 128, 16384};
++    uint32_t witness[4] = {}; uint64_t reg[2] = {}, mapped[2] = {}, bytes = 0; uint8_t digest[32] = {};
++    if (SecureDTLookupEntry(NULL, "/redfin-wifi-assets", &node) != kSuccess ||
++        !fw_property(node, "source-contract", witness, sizeof(witness)) || memcmp(witness, required, sizeof(witness)) ||
++        !fw_property(node, "reg", reg, sizeof(reg)) || !fw_property(node, "bundle-bytes", &bytes, sizeof(bytes)) ||
++        !fw_property(node, "bundle-sha256", digest, sizeof(digest)) ||
++        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory) != kSuccess ||
++        !fw_property(memory, "RedfinWiFiAssets", mapped, sizeof(mapped)) || memcmp(reg, mapped, sizeof(reg)) ||
++        bytes < 64 || bytes > 16u * 1024u * 1024u || reg[1] != ((bytes + 16383u) & ~UINT64_C(16383)) ||
++        reg[0] < UINT64_C(0x180000000) || reg[0] > UINT64_C(0x200000000) - reg[1] || (reg[0] & 16383u) ||
++        reg[0] + reg[1] != context->metadata[0]) return false;
++    if (capture) {
++        memcpy(context->assets_reg, reg, sizeof(reg)); memcpy(context->assets_sha256, digest, sizeof(digest));
++        context->assets_bytes = bytes;
++    }
++    return !memcmp(reg, context->assets_reg, sizeof(reg)) && !memcmp(digest, context->assets_sha256, sizeof(digest)) &&
++        bytes == context->assets_bytes;
 +}
 +
 +static bool fw_start_metadata_contract(fw_start_context *context, bool capture)
@@ -814,13 +855,15 @@ new file mode 100644
 +    bool valid = context == &fw_start && context->active && !context->poisoned && ml_get_interrupts_enabled() &&
 +        !fw_probe_check(&fw_probe, fw_probe.nonce) && fw_start_metadata_contract(context, false) &&
 +        (!context->power || !redfin_wifi_power_held()) &&
-+        (!context->transport_mode || fw_start_glink_contract());
++        (!context->transport_mode || fw_start_glink_contract()) &&
++        (!context->host_mode || fw_start_assets_contract(context, false));
 +    if (valid) for (unsigned i = 0; i < FW_START_MAPS; ++i) {
 +        const fw_start_map *entry = &context->mapping[i];
 +        if (!entry->map && !entry->memory && !entry->base) continue;
 +        if (!entry->map || !entry->memory || !entry->base ||
 +            entry->map->getVirtualAddress() != entry->base ||
-+            entry->map->getLength() != (i == FW_START_METADATA_MAP ? context->metadata[1] :
++            entry->map->getLength() != (i == FW_START_ASSETS_MAP ? context->assets_reg[1] :
++                i == FW_START_METADATA_MAP ? context->metadata[1] :
 +                fw_start_ranges[2u * i + 1u])) { valid = false; break; }
 +    }
 +    if (valid && context->locked)
@@ -839,12 +882,16 @@ new file mode 100644
 +        (index == FW_START_MPSS && (!context->reset || !context->setup))) return EPERM;
 +    fw_start_map *entry = &context->mapping[index];
 +    if (entry->memory || entry->map || entry->base) return EBUSY;
-+    uint64_t physical = index == FW_START_METADATA_MAP ? context->metadata[0] : fw_start_ranges[2u * index];
-+    uint64_t bytes = index == FW_START_METADATA_MAP ? context->metadata[1] : fw_start_ranges[2u * index + 1u];
-+    entry->memory = IOMemoryDescriptor::withPhysicalAddress(physical, bytes, kIODirectionInOut);
-+    entry->map = entry->memory ? entry->memory->map(
++    uint64_t physical = index == FW_START_ASSETS_MAP ? context->assets_reg[0] :
++        index == FW_START_METADATA_MAP ? context->metadata[0] : fw_start_ranges[2u * index];
++    uint64_t bytes = index == FW_START_ASSETS_MAP ? context->assets_reg[1] :
++        index == FW_START_METADATA_MAP ? context->metadata[1] : fw_start_ranges[2u * index + 1u];
++    bool readonly = index == FW_START_ASSETS_MAP;
++    entry->memory = IOMemoryDescriptor::withPhysicalAddress(physical, bytes, readonly ? kIODirectionIn : kIODirectionInOut);
++    IOOptionBits options = readonly ? kIOMapReadOnly | kIOMapDefaultCache :
 +        index == FW_START_SMEM || index == FW_START_MPSS || index == FW_START_METADATA_MAP ?
-+            kIOMapWriteCombineCache : kIOMapInhibitCache) : NULL;
++            kIOMapWriteCombineCache : kIOMapInhibitCache;
++    entry->map = entry->memory ? entry->memory->map(options) : NULL;
 +    if (!entry->map || !entry->map->getVirtualAddress() ||
 +        entry->map->getLength() != bytes) return ENOMEM;
 +    entry->base = (uintptr_t)entry->map->getVirtualAddress();
@@ -1071,15 +1118,62 @@ new file mode 100644
 +    __asm__ volatile("dsb osh" ::: "memory");
 +    return fw_start_glink_check(context);
 +}
-+static void fw_start_qrtr_control(fw_start_context *context, uint32_t type, uint32_t from,
-+    uint32_t node, uint32_t to, uint32_t a, uint32_t b)
++static int fw_start_glink_payload(void *opaque, uint32_t offset, const uint8_t *data, uint32_t bytes)
 +{
-+    if (context->pending_count >= 32) { context->poisoned = true; return; }
++    fw_start_context *context = (fw_start_context *)opaque;
++    uint32_t tx = context->glink.tx;
++    if (!tx || !data || !bytes || offset < tx || bytes > 16384u || offset - tx > 16384u - bytes ||
++        (offset | bytes) % 4u || fw_start_glink_check(context)) return EPERM;
++    memcpy((void *)(context->mapping[FW_START_SMEM].base + offset), data, bytes);
++    __asm__ volatile("dsb osh" ::: "memory");
++    return fw_start_glink_check(context);
++}
++static int fw_start_qrtr_queue(fw_start_context *context, uint32_t type, uint32_t from,
++    uint32_t node, uint32_t to, const uint8_t *data, uint32_t bytes)
++{
++    if (!data || !bytes || bytes > RF_HOST_BLOCK + 4u || context->pending_count >= 32 || fw_start_glink_check(context))
++        return ENOBUFS;
 +    uint8_t *packet = context->pending[context->pending_head];
-+    memset(packet, 0, 64);
-+    const uint32_t fields[13] = {1, type, 1, from, 0, 20, node, to, type, a, b, 0, 0};
-+    for (unsigned i = 0; i < 13; ++i) rf_gl_encode(packet + 4u * i, fields[i]);
++    uint32_t length = 32u + ((bytes + 3u) & ~3u);
++    memset(packet, 0, length);
++    const uint32_t fields[8] = {1, type, 1, from, 0, bytes, node, to};
++    for (unsigned i = 0; i < 8; ++i) rf_gl_encode(packet + 4u * i, fields[i]);
++    memcpy(packet + 32u, data, bytes);
++    context->pending_bytes[context->pending_head] = length;
 +    context->pending_head = (context->pending_head + 1u) % 32u; ++context->pending_count;
++    return 0;
++}
++static void fw_start_qrtr_control(fw_start_context *context, uint32_t type, uint32_t from,
++    uint32_t node, uint32_t to, uint32_t a, uint32_t b, uint32_t c = 0, uint32_t d = 0)
++{
++    uint8_t control[20];
++    const uint32_t fields[5] = {type, a, b, c, d};
++    for (unsigned i = 0; i < 5; ++i) rf_gl_encode(control + 4u * i, fields[i]);
++    if (fw_start_qrtr_queue(context, type, from, node, to, control, sizeof(control))) context->poisoned = true;
++}
++static int fw_start_host_lookup(void *opaque, const char *path, const uint8_t **data, uint32_t *bytes)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (fw_start_glink_check(context)) return EPERM;
++    if (!rf_wlan_asset_find(&context->assets, path, data, bytes)) return 0;
++    const redfin_mpss_image *image = &fw_probe.workspace.image;
++    if (!strcmp(path, "image/modem.mdt")) { *data = image->asset[0].data; *bytes = image->asset[0].bytes; return 0; }
++    if (!strncmp(path, "image/modem.b", 13) && strlen(path) == 15 &&
++        path[13] >= '0' && path[13] <= '9' && path[14] >= '0' && path[14] <= '9') {
++        unsigned index = (unsigned)(path[13] - '0') * 10u + (unsigned)(path[14] - '0');
++        for (unsigned i = 1; i < image->assets; ++i) if (image->asset[i].index == index) {
++            *data = image->asset[i].data; *bytes = image->asset[i].bytes; return 0;
++        }
++    }
++    return ENOENT;
++}
++static int fw_start_host_send(void *opaque, uint32_t from, uint32_t node, uint32_t to,
++    const uint8_t *data, uint32_t bytes)
++{ return fw_start_qrtr_queue((fw_start_context *)opaque, 1, from, node, to, data, bytes); }
++static void fw_start_host_event(void *opaque, unsigned kind, const char *name, uint32_t bytes)
++{
++    (void)opaque;
++    IOLog("REDFIN WIFI HOST: event=%u file/service=%s bytes=%u; RAM only\n", kind, name, bytes);
 +}
 +static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t length)
 +{
@@ -1103,12 +1197,35 @@ new file mode 100644
 +        (destination != 1 && destination != UINT32_MAX)) { context->poisoned = true; return; }
 +    if (!context->qrtr_seen) { context->qrtr_peer = source; context->qrtr_seen = 1; }
 +    if (confirm) fw_start_qrtr_control(context, 7, to, source, from, destination, to);
++    if (context->host_mode && to != 0xfffffffeu) {
++        int error = 0;
++        if (type == 1 && to == 0x4001) error = rf_host_pd(&context->host, &context->host_ops, source, from, data + at, size);
++        else if (type == 1 && to == 0x4002) error = rf_host_tftp_request(&context->host, &context->host_ops,
++            source, from, data + at, size);
++        else if (type == 1 && to >= 0x4100 && to < 0x5100) error = rf_host_tftp_packet(&context->host,
++            &context->host_ops, source, from, to, data + at, size);
++        else if (type == 1 && to == 0x4004 && context->cap_sent && source == context->wlfw_node &&
++            from == context->wlfw_port && !rf_wlfw_cap_parse(&context->cap, data + at, size, 1)) {
++            context->cap_received = 1;
++            IOLog("REDFIN WIFI WLFW: CAP result=%u error=%u valid=%#x chip=%#x family=%#x board=%#x SoC=%#x firmware=%#x\n",
++                context->cap.result, context->cap.error, context->cap.valid, context->cap.chip, context->cap.family,
++                context->cap.board, context->cap.soc, context->cap.firmware);
++        }
++        if (error) IOLog("REDFIN WIFI HOST: refused request to=%#x bytes=%u result=%d\n", to, size, error);
++        return;
++    }
 +    if (to != 0xfffffffeu || size < 4) return;
 +    uint32_t command = rf_gl_u32(data + at);
 +    if (command == 2 && !context->qrtr_hello) {
 +        context->qrtr_hello = 1;
 +        fw_start_qrtr_control(context, 2, 0xfffffffeu, source, 0xfffffffeu, 0, 0);
 +        IOLog("REDFIN WIFI QRTR: HELLO from node=%u queued reply\n", source);
++        if (context->host_mode && !context->host_announced) {
++            fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 0x40, 0x101, 1, 0x4001);
++            fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 4096, 1, 1, 0x4002);
++            context->host_announced = 1;
++            IOLog("REDFIN WIFI HOST: announced native pd-mapper/TFTP; no storage/RMTFS service\n");
++        }
 +    } else if (command == 4 && size >= 20) {
 +        uint32_t service = rf_gl_u32(data + at + 4), instance = rf_gl_u32(data + at + 8);
 +        uint32_t node = rf_gl_u32(data + at + 12), port = rf_gl_u32(data + at + 16);
@@ -1124,7 +1241,9 @@ new file mode 100644
 +    if (!fw_start_glink_contract() || fw_start_glink_check(context) || redfin_wifi_power_audit()) return EPERM;
 +    context->glink_ops = {context, (const volatile uint8_t *)context->mapping[FW_START_SMEM].base,
 +        fw_start_glink_check, fw_start_glink_lock, fw_start_unlock, fw_start_smem_write,
-+        fw_start_barrier, fw_start_glink_kick, fw_start_qrtr_packet};
++        fw_start_barrier, fw_start_glink_kick, fw_start_qrtr_packet, fw_start_glink_payload};
++    if (context->host_mode) context->host_ops = {context, fw_start_glink_check, fw_start_host_lookup,
++        fw_start_host_send, fw_start_host_event};
 +    int error = rf_gl_init(&context->glink, &context->glink_ops);
 +    IOLog("REDFIN WIFI GLINK: init=%d descriptor=%#x TX=%#x stores=%u\n",
 +        error, context->glink.descriptor, context->glink.tx, context->glink.stores);
@@ -1132,7 +1251,8 @@ new file mode 100644
 +    error = rf_gl_say(&context->glink, &context->glink_ops, 0, 1, 1, NULL, 0);
 +    if (error) return error;
 +    uint64_t first = fw_start_ns(context), next_report = first;
-+    while (fw_start_ns(context) - first < UINT64_C(10000000000)) {
++    uint64_t timeout = context->host_mode ? UINT64_C(45000000000) : UINT64_C(10000000000);
++    while (fw_start_ns(context) - first < timeout) {
 +        int alive = rf_wifi_smp2p_alive(&context->smp2p, &context->smp_ops);
 +        if (alive && alive != RF_WIFI_SMP2P_UNSTABLE) return alive;
 +        if (!alive) {
@@ -1146,7 +1266,8 @@ new file mode 100644
 +            }
 +            while (context->pending_count) {
 +                error = rf_gl_send_packet(&context->glink, &context->glink_ops,
-+                    context->pending[context->pending_tail], 52, context->transport, sizeof(context->transport));
++                    context->pending[context->pending_tail], context->pending_bytes[context->pending_tail],
++                    context->transport, sizeof(context->transport));
 +                if (error == RF_GL_AGAIN || (error == RF_GL_ARGUMENT && !context->glink.open)) break;
 +                if (error) return error;
 +                context->pending_tail = (context->pending_tail + 1u) % 32u; --context->pending_count;
@@ -1159,8 +1280,22 @@ new file mode 100644
 +                context->glink.open, context->glink.rx, context->glink.heard, context->glink.sent,
 +                context->glink.packets, context->qrtr_services, context->wlfw_port);
 +            next_report = now + 1000000000u;
++            if (context->host_mode) IOLog("REDFIN WIFI HOST: pd=%u TFTP=%u reads=%u writes=%u missing=%u pending=%u cap=%u/%u\n",
++                context->host.pd_requests, context->host.requests, context->host.reads, context->host.writes,
++                context->host.missing, context->pending_count, context->cap_sent, context->cap_received);
 +        }
-+        if (context->wlfw_port) return 0;
++        if (context->wlfw_port) {
++            if (!context->host_mode) return 0;
++            if (!context->cap_sent) {
++                const uint8_t request[7] = {0, 1, 0, 0x24, 0, 0, 0};
++                error = fw_start_qrtr_queue(context, 1, 0x4004, context->wlfw_node, context->wlfw_port,
++                    request, sizeof(request));
++                if (error) return error;
++                context->cap_sent = 1;
++                IOLog("REDFIN WIFI WLFW: queued native CAP transaction=1\n");
++            }
++            if (context->cap_received) return context->cap.result ? EIO : 0;
++        }
 +        if (fw_start_pause(context, 1000)) return EPERM;
 +    }
 +    return ETIMEDOUT;
@@ -1178,6 +1313,20 @@ new file mode 100644
 +        (fw_probe.boot.native_layout.ramdisk.bytes && context->metadata[0] <
 +            fw_probe.boot.native_layout.ramdisk.base + fw_probe.boot.native_layout.ramdisk.bytes) ||
 +        fw_probe.workspace.image.asset[0].bytes > context->metadata[1]) return EPERM;
++    if (context->host_mode) {
++        if (context->assets_reg[0] < fw_probe.boot.native_layout.kernel_end ||
++            (fw_probe.boot.native_layout.ramdisk.bytes && context->assets_reg[0] <
++                fw_probe.boot.native_layout.ramdisk.base + fw_probe.boot.native_layout.ramdisk.bytes)) return EPERM;
++        error = fw_start_map_range(context, FW_START_ASSETS_MAP);
++        if (error) return error;
++        const uint8_t *data = (const uint8_t *)context->mapping[FW_START_ASSETS_MAP].base;
++        for (uint64_t i = context->assets_bytes; i < context->assets_reg[1]; ++i) if (data[(size_t)i]) return EPERM;
++        error = rf_wlan_assets_open(&context->assets, data, (size_t)context->assets_bytes,
++            context->assets_sha256, redfin_mpss_kernel_sha256, NULL);
++        if (error || fw_start_check(context)) return EPERM;
++        IOLog("REDFIN WIFI HOST: verified resident assets=%u bytes=%llu\n", context->assets.count,
++            (unsigned long long)context->assets_bytes);
++    }
 +    IOLog("REDFIN WIFI START: resident source verified; native PIL begins\n");
 +    context->phase = FW_START_POWER;
 +    error = redfin_wifi_power_start();
@@ -1253,17 +1402,17 @@ new file mode 100644
 +{
 +    const char *args = PE_boot_args(); unsigned bytes = 0;
 +    int mode = 0;
-+    bool mode_valid = PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) && (mode == 2 || mode == 3);
++    bool mode_valid = PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) && mode >= 2 && mode <= 4;
 +    if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
 +    if (!args || bytes == sizeof(fw_probe.args) ||
 +        !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
 +        !fw_probe_properties(&fw_probe, true) || !fw_start_metadata_contract(&fw_start, true) ||
-+        (mode == 3 && !fw_start_glink_contract())) {
++        (mode >= 3 && !fw_start_glink_contract()) || (mode == 4 && !fw_start_assets_contract(&fw_start, true))) {
 +        IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
 +        thread_terminate_self();
 +        __builtin_unreachable();
 +    }
-+    fw_start.transport_mode = mode == 3;
++    fw_start.transport_mode = mode >= 3; fw_start.host_mode = mode == 4;
 +    memcpy(fw_probe.args, args, bytes + 1); fw_probe.bytes = bytes + 1;
 +    fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
 +    IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());
@@ -1371,7 +1520,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_glink.h b/iokit/Kernel/arm/redfin_wifi
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_glink.h
-@@ -0,0 +1,311 @@
+@@ -0,0 +1,332 @@
 +/* SPDX-License-Identifier: MIT
 + * Bounded native APPS/MPSS GLINK transport. Google msm
 + * 500b3a2059c1eec0fec08ec56add06320ea901a8 qcom_glink_{smem,native}.c;
@@ -1402,6 +1551,9 @@ new file mode 100644
 +    int (*barrier)(void *);
 +    int (*kick)(void *); /* Native MPSS client2 / GLINK signal0 only. */
 +    void (*packet)(void *, const uint8_t *, uint32_t bytes);
++    /* Optional bounded copy to the APPS-owned FIFO only. The producer checks
++     * actual readback and publishes head only after barriers/ownership checks. */
++    int (*payload)(void *, uint32_t offset, const uint8_t *, uint32_t bytes);
 +};
 +struct rf_glink_intent { uint32_t id, bytes, busy, present; };
 +struct rf_glink {
@@ -1412,6 +1564,7 @@ new file mode 100644
 +    uint32_t last_intent_bytes, last_intent_id;
 +    struct rf_glink_intent intent[32];
 +    uint8_t packet[65536];
++    uint8_t frame[16384];
 +};
 +static inline uint32_t rf_gl_word(const struct rf_glink_ops *o, uint32_t at)
 +{ return redfin_smem_u32(o->smem + at); }
@@ -1524,6 +1677,23 @@ new file mode 100644
 +        uint32_t value = i == 0 ? (uint32_t)command | (uint32_t)p1 << 16 : i == 4 ? p2 : 0;
 +        if (i >= 8) for (unsigned j = 0; j < 4; ++j)
 +            if (i - 8u + j < bytes) value |= (uint32_t)data[i - 8u + j] << (8u * j);
++        for (unsigned j = 0; j < 4; ++j) s->frame[i + j] = (uint8_t)(value >> (j * 8u));
++    }
++    if (o->payload) {
++        for (uint32_t sent = 0; sent < length;) {
++            uint32_t at = (s->head + sent) % 16384u, take = length - sent;
++            if (take > 16384u - at) take = 16384u - at;
++            if (rf_gl_gate(s, o) || o->payload(o->context, s->tx + at, s->frame + sent, take)) {
++                s->poisoned = 1; return RF_GL_PLATFORM;
++            }
++            if (o->barrier(o->context) || rf_gl_gate(s, o)) { s->poisoned = 1; return RF_GL_PLATFORM; }
++            for (uint32_t i = 0; i < take; ++i)
++                if (o->smem[s->tx + at + i] != s->frame[sent + i]) { s->poisoned = 1; return RF_GL_CHANGED; }
++            s->stores += take / 4u; sent += take;
++        }
++    } else for (uint32_t i = 0; i < length; i += 4u) {
++        uint32_t value = (uint32_t)s->frame[i] | (uint32_t)s->frame[i + 1u] << 8 |
++            (uint32_t)s->frame[i + 2u] << 16 | (uint32_t)s->frame[i + 3u] << 24;
 +        if (rf_gl_put(s, o, s->tx + (s->head + i) % 16384u, value)) return RF_GL_PLATFORM;
 +    }
 +    if (o->barrier(o->context) || rf_gl_gate(s, o)) return RF_GL_PLATFORM;
@@ -1682,4 +1852,410 @@ new file mode 100644
 +    return RF_GL_AGAIN;
 +}
 +#undef RF_GL_ZERO
++#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_assets.h b/iokit/Kernel/arm/redfin_wifi_assets.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_assets.h
+@@ -0,0 +1,60 @@
++/* SPDX-License-Identifier: MIT
++ * Immutable bounded WLAN assets, for the host-owned RAM-only TFTP service.
++ * Include after the existing native wifi_firmware.h planner/SHA ABI.
++ */
++#ifndef REDFIN_WIFI_ASSETS_H
++#define REDFIN_WIFI_ASSETS_H
++#include <string.h>
++struct rf_wlan_asset { char name[64]; const uint8_t *data; uint32_t bytes; };
++struct rf_wlan_assets { uint32_t count; struct rf_wlan_asset file[16]; };
++static inline int rf_wlan_assets_open(struct rf_wlan_assets *out, const uint8_t *data, size_t bytes,
++    const uint8_t expected[32], redfin_mpss_sha256_fn sha, void *context)
++{
++    if (!out) return -1;
++    out->count = 0;
++    if (!data || !expected || !sha || bytes < 64 || bytes > 16u * 1024u * 1024u) return -1;
++    uint8_t digest[32];
++    if (sha(context, data, bytes, digest) || !redfin_mpss_equal(digest, expected, 32) ||
++        !redfin_mpss_equal(data, (const uint8_t *)"RFWAS01\0", 8) || redfin_mpss_u32(data + 8) != 1 ||
++        redfin_mpss_u64(data + 16) != bytes || redfin_mpss_u64(data + 24) != 128) return -1;
++    for (unsigned i = 32; i < 64; ++i) if (data[i]) return -1;
++    uint32_t count = redfin_mpss_u32(data + 12);
++    if (!count || count > 16 || 64u + count * 128u > bytes) return -1;
++    size_t cursor = 64u + count * 128u;
++    for (unsigned i = 0; i < count; ++i) {
++        const uint8_t *record = data + 64u + i * 128u;
++        size_t name = 0;
++        while (name < 64 && record[name]) {
++            unsigned c = record[name];
++            if (!(c == '/' || c == '-' || c == '_' || c == '.' || (c >= 'a' && c <= 'z') ||
++                (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) return -1;
++            ++name;
++        }
++        if (name < 7 || name >= 64 || memcmp(record, "image/", 6)) return -1;
++        for (size_t j = name; j < 64; ++j) if (record[j]) return -1;
++        for (size_t j = 0; j + 1 < name; ++j) if (record[j] == '.' && record[j + 1] == '.') return -1;
++        uint64_t offset = redfin_mpss_u64(record + 64), length = redfin_mpss_u64(record + 72);
++        if (offset != cursor || !length || length > 8u * 1024u * 1024u || offset > bytes || length > bytes - offset)
++            return -1;
++        for (unsigned j = 112; j < 128; ++j) if (record[j]) return -1;
++        if (sha(context, data + cursor, (size_t)length, digest) || !redfin_mpss_equal(digest, record + 80, 32)) return -1;
++        for (unsigned j = 0; j < i; ++j) if (!memcmp(out->file[j].name, record, 64)) return -1;
++        memcpy(out->file[i].name, record, 64); out->file[i].data = data + cursor; out->file[i].bytes = (uint32_t)length;
++        cursor = (size_t)((offset + length + 15u) & ~UINT64_C(15));
++        if (cursor > bytes) return -1;
++        for (uint64_t j = offset + length; j < cursor; ++j) if (data[(size_t)j]) return -1;
++    }
++    if (cursor != bytes) return -1;
++    out->count = count;
++    return 0;
++}
++static inline int rf_wlan_asset_find(const struct rf_wlan_assets *assets, const char *name,
++    const uint8_t **data, uint32_t *bytes)
++{
++    if (!assets || !name || !data || !bytes || assets->count > 16) return -1;
++    for (unsigned i = 0; i < assets->count; ++i) if (!strcmp(assets->file[i].name, name)) {
++        *data = assets->file[i].data; *bytes = assets->file[i].bytes; return 0;
++    }
++    return -1;
++}
++#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_host.h b/iokit/Kernel/arm/redfin_wifi_host.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_host.h
+@@ -0,0 +1,276 @@
++/* SPDX-License-Identifier: MIT
++ * Bounded QRTR host services for native MPSS: servreg locator and RAM TFTP.
++ * Wire references: native servreg-locator QMI and tqftpserv; the legacy
++ * Sapphire host-service protocol was reviewed, with all partition tables,
++ * UFS/EFS/DMA access and unbounded request parsing omitted here.
++ */
++#ifndef REDFIN_WIFI_HOST_H
++#define REDFIN_WIFI_HOST_H
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#include <stdbool.h>
++#define RF_HOST_BLOCK 4096u
++#define RF_HOST_PATH 160u
++struct rf_host_ops {
++    void *context;
++    int (*check)(void *);
++    int (*lookup)(void *, const char *, const uint8_t **, uint32_t *);
++    int (*send)(void *, uint32_t from, uint32_t node, uint32_t to, const uint8_t *, uint32_t);
++    void (*event)(void *, unsigned kind, const char *name, uint32_t size);
++};
++struct rf_host_ram { char name[RF_HOST_PATH]; uint32_t used, bytes; uint8_t data[65536]; };
++struct rf_host_tftp {
++    uint32_t used, done, complete, write, node, port, local, block, block_bytes, offset, end;
++    int ram;
++    const uint8_t *data;
++    char name[RF_HOST_PATH];
++    uint32_t response_bytes;
++    uint8_t response[RF_HOST_BLOCK + 256];
++};
++struct rf_host {
++    uint32_t poisoned, serial, requests, pd_requests, reads, writes, missing;
++    struct rf_host_ram ram[4];
++    struct rf_host_tftp session[8];
++    uint8_t qmi[512];
++};
++static inline uint16_t rf_host_le16(const uint8_t *p) { return (uint16_t)p[0] | (uint16_t)p[1] << 8; }
++static inline uint16_t rf_host_be16(const uint8_t *p) { return (uint16_t)p[1] | (uint16_t)p[0] << 8; }
++static inline void rf_host_le_put(uint8_t *p, uint32_t value, unsigned bytes)
++{ for (unsigned i = 0; i < bytes; ++i) p[i] = (uint8_t)(value >> (i * 8u)); }
++static inline void rf_host_be_put(uint8_t *p, uint16_t value) { p[0] = (uint8_t)(value >> 8); p[1] = (uint8_t)value; }
++static inline int rf_host_string(const uint8_t *data, uint32_t bytes, uint32_t *cursor,
++    char *out, unsigned capacity)
++{
++    if (!cursor || !out || !capacity || *cursor >= bytes) return -1;
++    unsigned used = 0;
++    while (*cursor < bytes && data[*cursor]) {
++        unsigned c = data[(*cursor)++];
++        if (c < 32 || c > 126 || used + 1u >= capacity) return -1;
++        out[used++] = (char)c;
++    }
++    if (*cursor == bytes) return -1;
++    ++*cursor; out[used] = 0;
++    return 0;
++}
++static inline int rf_host_decimal(const char *text, uint32_t *value)
++{
++    if (!text || !text[0] || !value) return -1;
++    uint32_t out = 0;
++    for (unsigned i = 0; text[i]; ++i) {
++        unsigned digit = (unsigned)(text[i] - '0');
++        if (i >= 10 || digit > 9 || out > (UINT32_MAX - digit) / 10u) return -1;
++        out = out * 10u + digit;
++    }
++    *value = out; return 0;
++}
++static inline int rf_host_path(const char *name)
++{
++    if (!name || !name[0]) return -1;
++    for (unsigned i = 0; name[i]; ++i) {
++        if (i + 1u >= RF_HOST_PATH || (name[i] == '.' && name[i + 1u] == '.') ||
++            (name[i] == '/' && name[i + 1u] == '/')) return -1;
++    }
++    return 0;
++}
++static inline int rf_host_gate(struct rf_host *h, const struct rf_host_ops *o)
++{
++    if (!h || !o || !o->check || !o->lookup || !o->send || !o->event || h->poisoned) return -1;
++    if (o->check(o->context)) { h->poisoned = 1; return -1; }
++    return 0;
++}
++static inline int rf_host_emit(struct rf_host *h, const struct rf_host_ops *o, struct rf_host_tftp *s)
++{
++    if (rf_host_gate(h, o)) return -1;
++    if (o->send(o->context, s->local, s->node, s->port, s->response, s->response_bytes)) {
++        h->poisoned = 1; return -1;
++    }
++    return 0;
++}
++static inline int rf_host_error(struct rf_host *h, const struct rf_host_ops *o,
++    struct rf_host_tftp *s, uint16_t code)
++{
++    rf_host_be_put(s->response, 5); rf_host_be_put(s->response + 2, code);
++    memcpy(s->response + 4, "unavailable", 12); s->response_bytes = 16; s->done = s->complete = 1;
++    return rf_host_emit(h, o, s);
++}
++static inline int rf_host_data(struct rf_host *h, const struct rf_host_ops *o, struct rf_host_tftp *s)
++{
++    if (s->offset > s->end || !s->block || s->block > 65535 || !s->data) return -1;
++    uint32_t bytes = s->end - s->offset;
++    if (bytes > s->block_bytes) bytes = s->block_bytes;
++    rf_host_be_put(s->response, 3); rf_host_be_put(s->response + 2, (uint16_t)s->block);
++    memcpy(s->response + 4, s->data + s->offset, bytes); s->response_bytes = bytes + 4u;
++    s->done = bytes < s->block_bytes;
++    return rf_host_emit(h, o, s);
++}
++static inline int rf_host_option(uint8_t *out, uint32_t *used, const char *name, uint32_t value)
++{
++    unsigned name_bytes = (unsigned)strlen(name) + 1u;
++    char digits[11]; unsigned count = 0;
++    do { digits[count++] = (char)('0' + value % 10u); value /= 10u; } while (value);
++    if (*used + name_bytes + count + 1u > RF_HOST_BLOCK + 256u) return -1;
++    memcpy(out + *used, name, name_bytes); *used += name_bytes;
++    while (count) out[(*used)++] = (uint8_t)digits[--count];
++    out[(*used)++] = 0;
++    return 0;
++}
++static inline int rf_host_tftp_request(struct rf_host *h, const struct rf_host_ops *o,
++    uint32_t node, uint32_t port, const uint8_t *data, uint32_t bytes)
++{
++    if (rf_host_gate(h, o) || bytes < 4 || bytes > 1024) return -1;
++    uint16_t command = rf_host_be16(data);
++    if (command != 1 && command != 2) return -1;
++    char name[RF_HOST_PATH], mode[16]; uint32_t cursor = 2;
++    if (rf_host_string(data, bytes, &cursor, name, sizeof(name)) || rf_host_path(name) ||
++        rf_host_string(data, bytes, &cursor, mode, sizeof(mode)) || strcmp(mode, "octet")) return -1;
++    for (unsigned i = 0; i < 8; ++i) if (h->session[i].used && h->session[i].node == node &&
++        h->session[i].port == port && !h->session[i].complete && !strcmp(h->session[i].name, name))
++        return rf_host_emit(h, o, &h->session[i]);
++    int slot = -1;
++    for (unsigned i = 0; i < 8; ++i) if (!h->session[i].used || h->session[i].complete) { slot = (int)i; break; }
++    if (slot < 0 || h->serial >= 4096) return -1;
++    struct rf_host_tftp *s = &h->session[slot];
++    memset(s, 0, sizeof(*s)); s->used = 1; s->write = command == 2; s->node = node; s->port = port;
++    s->local = 0x4100u + h->serial++; s->block_bytes = 512; s->ram = -1; memcpy(s->name, name, strlen(name) + 1u);
++    bool options = cursor < bytes; uint32_t seek = 0, requested = UINT32_MAX, flags = 0, timeout = 1000, transfer_size = 0;
++    for (unsigned count = 0; cursor < bytes; ++count) {
++        char option[24], text[16]; uint32_t value;
++        if (count >= 16 || rf_host_string(data, bytes, &cursor, option, sizeof(option)) ||
++            rf_host_string(data, bytes, &cursor, text, sizeof(text)) || rf_host_decimal(text, &value))
++            return rf_host_error(h, o, s, 8);
++        unsigned bit = !strcmp(option, "blksize") ? 1u : !strcmp(option, "wsize") ? 2u :
++            !strcmp(option, "seek") ? 4u : !strcmp(option, "rsize") ? 8u : !strcmp(option, "tsize") ? 16u :
++            !strcmp(option, "timeoutms") ? 32u : 0;
++        if (bit && (flags & bit)) return rf_host_error(h, o, s, 8);
++        flags |= bit;
++        if (bit == 1) {
++            if (value < 8 || value > 65535) return rf_host_error(h, o, s, 8);
++            s->block_bytes = value > RF_HOST_BLOCK ? RF_HOST_BLOCK : value;
++        } else if (bit == 2 && !value) return rf_host_error(h, o, s, 8);
++        else if (bit == 4) seek = value;
++        else if (bit == 8) requested = value ? value : UINT32_MAX;
++        else if (bit == 16) transfer_size = value;
++        else if (bit == 32) { if (!value || value > 10000) return rf_host_error(h, o, s, 8); timeout = value; }
++    }
++    bool writable = !strncmp(name, "/readwrite/", 11);
++    if (writable) {
++        for (unsigned i = 0; i < 4; ++i) if (h->ram[i].used && !strcmp(h->ram[i].name, name)) s->ram = (int)i;
++        if (s->ram < 0 && s->write) for (unsigned i = 0; i < 4; ++i) if (!h->ram[i].used) {
++            s->ram = (int)i; h->ram[i].used = 1; memcpy(h->ram[i].name, name, strlen(name) + 1u); break;
++        }
++        if (s->ram < 0) return rf_host_error(h, o, s, 1);
++        struct rf_host_ram *ram = &h->ram[s->ram];
++        if (s->write && !seek) ram->bytes = 0;
++        s->data = ram->data; s->end = ram->bytes;
++    } else {
++        if (s->write) return rf_host_error(h, o, s, 2);
++        const char *path = name;
++        if (!strncmp(path, "/readonly/firmware/", 19)) path += 19;
++        else if (!strncmp(path, "/vendor/firmware_mnt/", 21)) path += 21;
++        uint32_t length = 0;
++        if (strncmp(path, "image/", 6) || o->lookup(o->context, path, &s->data, &length)) {
++            ++h->missing; o->event(o->context, 3, name, 0); return rf_host_error(h, o, s, 1);
++        }
++        s->end = length;
++    }
++    uint32_t logical_size = s->end;
++    if (s->write) {
++        if (!writable || seek > sizeof(h->ram[0].data)) return rf_host_error(h, o, s, 3);
++        if ((flags & 16u) && transfer_size > sizeof(h->ram[0].data) - seek) return rf_host_error(h, o, s, 3);
++        logical_size = transfer_size;
++    } else {
++        if (seek > s->end) return rf_host_error(h, o, s, 0);
++        if (requested < s->end - seek) s->end = seek + requested;
++    }
++    s->offset = seek; ++h->requests; o->event(o->context, s->write ? 2 : 1, name, s->end);
++    options = options && flags != 0;
++    if (options) {
++        rf_host_be_put(s->response, 6); s->response_bytes = 2;
++        if ((flags & 1u) && rf_host_option(s->response, &s->response_bytes, "blksize", s->block_bytes)) return -1;
++        if ((flags & 2u) && rf_host_option(s->response, &s->response_bytes, "wsize", 1)) return -1;
++        if ((flags & 16u) && rf_host_option(s->response, &s->response_bytes, "tsize", logical_size)) return -1;
++        if ((flags & 32u) && rf_host_option(s->response, &s->response_bytes, "timeoutms", timeout)) return -1;
++        if ((flags & 4u) && seek && rf_host_option(s->response, &s->response_bytes, "seek", seek)) return -1;
++        if ((flags & 8u) && requested != UINT32_MAX &&
++            rf_host_option(s->response, &s->response_bytes, "rsize", requested)) return -1;
++    } else if (s->write) {
++        rf_host_be_put(s->response, 4); rf_host_be_put(s->response + 2, 0); s->response_bytes = 4;
++    } else { s->block = 1; return rf_host_data(h, o, s); }
++    return rf_host_emit(h, o, s);
++}
++static inline int rf_host_tftp_packet(struct rf_host *h, const struct rf_host_ops *o,
++    uint32_t node, uint32_t from, uint32_t to, const uint8_t *data, uint32_t bytes)
++{
++    if (rf_host_gate(h, o) || bytes < 4 || bytes > RF_HOST_BLOCK + 4u) return -1;
++    struct rf_host_tftp *s = NULL;
++    for (unsigned i = 0; i < 8; ++i) if (h->session[i].used && h->session[i].local == to &&
++        h->session[i].node == node && h->session[i].port == from) { s = &h->session[i]; break; }
++    if (!s) return -1;
++    uint16_t command = rf_host_be16(data), block = rf_host_be16(data + 2);
++    if (command == 5) { s->done = s->complete = 1; return 0; }
++    if (s->write) {
++        if (command != 3 || s->ram < 0 || bytes - 4u > s->block_bytes) return -1;
++        if (block == s->block) return rf_host_emit(h, o, s);
++        if (s->done || block != s->block + 1u || bytes - 4u > sizeof(h->ram[0].data) - s->offset)
++            return rf_host_error(h, o, s, 3);
++        memcpy(h->ram[s->ram].data + s->offset, data + 4u, bytes - 4u);
++        s->offset += bytes - 4u; s->block = block;
++        if (h->ram[s->ram].bytes < s->offset) h->ram[s->ram].bytes = s->offset;
++        s->done = s->complete = bytes - 4u < s->block_bytes; ++h->writes;
++        rf_host_be_put(s->response, 4); rf_host_be_put(s->response + 2, block); s->response_bytes = 4;
++        return rf_host_emit(h, o, s);
++    }
++    if (command != 4 || bytes != 4) return -1;
++    if (block + 1u == s->block) return rf_host_emit(h, o, s);
++    if (block != s->block) return -1;
++    if (s->block && s->done) { s->complete = 1; return 0; }
++    if (s->block) s->offset += s->response_bytes - 4u;
++    if (++s->block > 65535) return -1;
++    ++h->reads; return rf_host_data(h, o, s);
++}
++static inline int rf_host_pd(struct rf_host *h, const struct rf_host_ops *o, uint32_t node,
++    uint32_t from, const uint8_t *data, uint32_t bytes)
++{
++    if (rf_host_gate(h, o) || bytes < 7 || bytes > 512 || data[0] || rf_host_le16(data + 5) != bytes - 7u)
++        return -1;
++    uint8_t *out = h->qmi; memset(out, 0, 512); out[0] = 2;
++    memcpy(out + 1, data + 1, 4);
++    uint32_t used = 14; out[7] = 2; rf_host_le_put(out + 8, 4, 2);
++    uint16_t message = rf_host_le16(data + 3);
++    char name[80] = {0}; bool found = false;
++    if (message == 0x21) for (uint32_t at = 7; at < bytes;) {
++        if (bytes - at < 3) return -1;
++        uint32_t count = rf_host_le16(data + at + 1);
++        if (count > bytes - at - 3u) return -1;
++        if (data[at] == 1) {
++            if (found || !count || count >= sizeof(name)) return -1;
++            for (unsigned i = 0; i < count; ++i) if (data[at + 3u + i] < 32 || data[at + 3u + i] > 126) return -1;
++            memcpy(name, data + at + 3u, count); found = true;
++        }
++        at += 3u + count;
++    }
++    if (message == 0x21 && found) {
++        bool matched = !strcmp(name, "wlan/fw") || !strcmp(name, "kernel/elf_loader") || !strcmp(name, "tms/servreg");
++        out[used++] = 0x10; rf_host_le_put(out + used, 2, 2); used += 2;
++        rf_host_le_put(out + used, matched ? 1 : 0, 2); used += 2;
++        out[used++] = 0x11; rf_host_le_put(out + used, 2, 2); used += 2;
++        rf_host_le_put(out + used, 1, 2); used += 2;
++        if (matched) {
++            static const char domain[] = "msm/modem/wlan_pd";
++            unsigned length = (unsigned)strlen(domain), count = 1u + 1u + length + 4u + 1u + 4u;
++            out[used++] = 0x12; rf_host_le_put(out + used, count, 2); used += 2;
++            out[used++] = 1; out[used++] = (uint8_t)length;
++            memcpy(out + used, domain, length); used += length;
++            rf_host_le_put(out + used, 180, 4); used += 4;
++            out[used++] = 0; memset(out + used, 0, 4); used += 4;
++        }
++        ++h->pd_requests; o->event(o->context, 4, name, matched ? 1 : 0);
++    } else if (message != 0x20) {
++        rf_host_le_put(out + 10, 1, 2); rf_host_le_put(out + 12, 0x5e, 2);
++    }
++    rf_host_le_put(out + 5, used - 7u, 2);
++    if (o->send(o->context, 0x4001, node, from, out, used)) { h->poisoned = 1; return -1; }
++    return 0;
++}
++#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_qmi.h b/iokit/Kernel/arm/redfin_wifi_qmi.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_qmi.h
+@@ -0,0 +1,55 @@
++/* SPDX-License-Identifier: MIT
++ * Legacy ICNSS WLFW capability framing, QMI service0x45/v1/message0x24.
++ * Pinned native icnss_qmi.c and preferred redwood_wlfw.c were reviewed.
++ */
++#ifndef REDFIN_WIFI_QMI_H
++#define REDFIN_WIFI_QMI_H
++#include <stdint.h>
++#include <string.h>
++struct rf_wlfw_cap {
++    uint32_t valid, chip, family, board, soc, firmware;
++    uint16_t result, error;
++};
++static inline uint16_t rf_qmi_u16(const uint8_t *p) { return (uint16_t)p[0] | (uint16_t)p[1] << 8; }
++static inline uint32_t rf_qmi_u32(const uint8_t *p)
++{ return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
++static inline int rf_wlfw_cap_parse(struct rf_wlfw_cap *out, const uint8_t *data, uint32_t bytes, uint16_t transaction)
++{
++    if (!out || !data || bytes < 7 || bytes > 4096 || data[0] != 2 ||
++        rf_qmi_u16(data + 1) != transaction || rf_qmi_u16(data + 3) != 0x24 ||
++        rf_qmi_u16(data + 5) != bytes - 7u) return -1;
++    struct rf_wlfw_cap parsed;
++    memset(&parsed, 0, sizeof(parsed));
++    uint32_t seen = 0;
++    for (uint32_t at = 7; at < bytes;) {
++        if (bytes - at < 3) return -1;
++        uint32_t length = rf_qmi_u16(data + at + 1), type = data[at], bit = 0;
++        if (length > bytes - at - 3u) return -1;
++        const uint8_t *value = data + at + 3u;
++        if (type == 2) {
++            bit = 1;
++            if (length != 4) return -1;
++            parsed.result = rf_qmi_u16(value); parsed.error = rf_qmi_u16(value + 2);
++        } else if (type == 0x10) {
++            bit = 2;
++            if (length != 8) return -1;
++            parsed.chip = rf_qmi_u32(value); parsed.family = rf_qmi_u32(value + 4); parsed.valid |= 1;
++        } else if (type == 0x11 || type == 0x12) {
++            bit = type == 0x11 ? 4u : 8u;
++            if (length != 4) return -1;
++            if (type == 0x11) { parsed.board = rf_qmi_u32(value); parsed.valid |= 2; }
++            else { parsed.soc = rf_qmi_u32(value); parsed.valid |= 4; }
++        } else if (type == 0x13) {
++            bit = 16;
++            if (length < 4 || length > 128) return -1;
++            parsed.firmware = rf_qmi_u32(value); parsed.valid |= 8;
++        }
++        if (bit && (seen & bit)) return -1;
++        seen |= bit; at += 3u + length;
++    }
++    if (!(seen & 1u) || parsed.result > 1 || (!parsed.result && parsed.error)) return -1;
++    if (parsed.result) parsed.valid = 0;
++    *out = parsed;
++    return 0;
++}
 +#endif

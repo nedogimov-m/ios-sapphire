@@ -199,12 +199,13 @@ static uint32_t fw_probe_attempted;
 
 static bool fw_probe_args(const char *args, unsigned bytes, uint64_t *nonce_out, unsigned mode = 1)
 {
-    if (mode < 1 || mode > 3) return false;
+    if (mode < 1 || mode > 4) return false;
     const char *const required[] = {
         "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
         "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
         "modem=0", "wifi=0", "gpu=0", "redfinwifi=2", "redfinwifinative=1",
-        mode == 1 ? "redfinwififw=1" : mode == 2 ? "redfinwififw=2" : "redfinwififw=3", "redfinspmi=1", "redfinreturn=1"};
+        mode == 1 ? "redfinwififw=1" : mode == 2 ? "redfinwififw=2" : mode == 3 ? "redfinwififw=3" : "redfinwififw=4",
+        "redfinspmi=1", "redfinreturn=1"};
     uint32_t seen = 0;
     uint64_t nonce = 0;
     bool nonce_seen = false, trace_seen = false;

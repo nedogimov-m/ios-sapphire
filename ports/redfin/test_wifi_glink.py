@@ -14,7 +14,7 @@ HARNESS = r'''
 #include "wifi_glink.h"
 static uint8_t smem[REDFIN_SMEM_BYTES],received[65536],scratch[8256];
 static struct rf_glink session;
-static unsigned live,locked,locks,unlocks,writes,fail_write,kicks,received_bytes,unsafe;
+static unsigned live,locked,locks,unlocks,writes,fail_write,kicks,received_bytes,unsafe,bulk_failure;
 static int check(void *p){return p==&session && live ? 0 : -1;}
 static int lock(void *p){if(check(p)||locked)return -1;locked=1;++locks;return 0;}
 static int unlock(void *p){if(p!=&session||!locked)return -1;locked=0;++unlocks;return 0;}
@@ -28,10 +28,14 @@ static int kick(void *p){++kicks;return check(p);}
 static void packet(void *p,const uint8_t *data,uint32_t bytes){
  if(check(p)||bytes>sizeof(received)){++unsafe;return;}memcpy(received,data,bytes);received_bytes=bytes;
 }
-static struct rf_glink_ops ops={&session,smem,check,lock,unlock,write32,barrier,kick,packet};
+static int payload(void *p,uint32_t at,const uint8_t *data,uint32_t bytes){
+ if(check(p)||at<session.tx||bytes>16384||at-session.tx>16384-bytes){++unsafe;return -1;}
+ memcpy(smem+at,data,bulk_failure ? bytes/2 : bytes);return bulk_failure ? -1 : 0;
+}
+static struct rf_glink_ops ops={&session,smem,check,lock,unlock,write32,barrier,kick,packet,NULL};
 uint8_t *memory(void){return smem;}
-void reset(void){memset(&session,0,sizeof(session));memset(smem,0,sizeof(smem));live=1;locked=locks=unlocks=writes=fail_write=kicks=received_bytes=unsafe=0;}
-void option(unsigned which,unsigned value){if(which==0)live=value;if(which==1)fail_write=value;}
+void reset(void){memset(&session,0,sizeof(session));memset(smem,0,sizeof(smem));live=1;locked=locks=unlocks=writes=fail_write=kicks=received_bytes=unsafe=bulk_failure=0;ops.payload=NULL;}
+void option(unsigned which,unsigned value){if(which==0)live=value;if(which==1)fail_write=value;if(which==2)ops.payload=payload;if(which==3)bulk_failure=value;}
 int initialize(void){return rf_gl_init(&session,&ops);}
 int pump(void){int e=rf_gl_pump(&session,&ops);if(e && e!=RF_GL_AGAIN)session.poisoned=1;return e;}
 int say(void){return rf_gl_say(&session,&ops,0,1,1,NULL,0);}
@@ -163,6 +167,23 @@ class NativeGlinkTests(unittest.TestCase):
         self.assertEqual(self.library.metric(6), 1)
         self.assertEqual(self.library.send_packet(b'ours', 4), 0)
         self.assertEqual(self.library.send_packet(b'ours', 4), 6)
+
+    def test_bulk_fifo_copy_reads_back_before_head_publication_and_partial_failure_is_terminal(self):
+        self.handshake()
+        self.library.option(2, 1)
+        data = bytes((i * 7) % 256 for i in range(4096))
+        head = self.library.metric(2)
+        self.assertEqual(self.library.send_packet(data, len(data)), 0)
+        at = self.library.metric(1) + head
+        self.assertEqual(bytes(self.memory[at + 16:at + 16 + len(data)]), data)
+        self.remote(self.frame(14, 7, 41))
+        self.assertEqual(self.library.pump(), 0)
+        head = self.library.metric(2)
+        self.library.option(3, 1)
+        self.assertNotEqual(self.library.send_packet(data, len(data)), 0)
+        self.assertEqual(self.library.metric(2), head)
+        self.assertEqual(self.library.metric(16), 1)
+        self.assertNotEqual(self.library.say(), 0)
 
     def test_foreign_owner_indices_and_malformed_packets_fail_without_reset_or_advance(self):
         for bad in ('owner', 'length', 'intent'):

@@ -296,7 +296,7 @@ def add_start_contract(tree, nodes):
                           0x408000, 0x1000, 0x8c000000, 0x11800000))]))
 
 
-def add_glink_contract(tree, nodes):
+def add_glink_contract(tree, nodes, services=False):
     start_contract(nodes)
     modem = '/soc/qcom,glink/modem'
     ipcc = nodes['/soc/qcom,ipcc@408000']
@@ -313,6 +313,9 @@ def add_glink_contract(tree, nodes):
     tree.children.append(mkadt.node('redfin-wifi-glink', [
         ('source-contract', mkadt.u32(1, 4, 1, 478, 479, 480, 16384, 0x20000, 3, 1)),
         ('channel', b'IPCRTR\0')]))
+    if services:
+        tree.children[-1].props.append(('host-services', 0,
+            mkadt.u32(1, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096)))
 
 
 def main():

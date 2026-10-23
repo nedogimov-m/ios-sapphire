@@ -235,5 +235,16 @@ SMEM478/479/480 and IPCRTR, using bounded allocation/rings and a continued
 native ready lease. No Redwood WPSS geometry is imported. The first stage
 discovers QRTR/WLFW services; its hardware evidence is recorded separately.
 
+Native GLINK/IPCRTR/QRTR is now observed on Redfin, including bidirectional
+HELLO and remote servreg/sysmon announcements. Legacy ICNSS additionally
+needs APPS pd-mapper/TFTP, which the preferred WCN6750/WPSS backend does not
+provide. Reviewed Sapphire's host-service wire contracts in0121 and the
+captured native `modemuw.jsn`, retaining only bounded servreg/TFTP logic and
+the actual Redfin WLAN domain. Partition tables, UFS/EFS/RMTFS, pool addresses
+and assignment code are excluded. The captured WLAN files stay private and
+read-only; base-vendor compatibility remains a live firmware question. The
+preferred kernel's WLFW/QMI framing and native `icnss_qmi.c` inform the next
+CAP0x24 query, without importing ath11k/WCN6750 hardware or radio settings.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

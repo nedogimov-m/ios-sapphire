@@ -723,3 +723,25 @@ yet perform QMI capability/MSA/RF setup or publish a network interface.
 76targeted transport/SMP2P/dispatch/build/return checks and native build160808
 pass, as does complete real Image/live-FDT/shim-return preflight. Hardware
 version/channel/QRTR discovery is the next independent observation.
+
+The v3 hardware capture now proves native GLINK version1, IPCRTR open in
+both directions (remote channel2), QRTR HELLO/reply and two real services:
+0x42/v1/instance180 and0x2b/v2/instance18. WLFW0x45 does not yet appear.
+This exposes the missing APPS host services used by legacy ICNSS.
+
+`--wifi-host-services --wifi-assets-inventory PRIVATE_HOST_INVENTORY` selects
+redfinwififw4. Five captured WLAN files are packed into a distinct read-only
+resident segment, bound by original inventory hashes and native per-file/
+whole-bundle checks. The producer preserves the source's raw-vendor-base
+limitations; it does not assert effective-snapshot or stock compatibility.
+The native caller advertises servreg locator0x40/0x101 and TFTP4096/v1.
+PDM returns the captured WLAN PD/instance180. TFTP serves immutable firmware
+and four bounded64KiB RAM files for `/readwrite/`, with no storage/EFS/RMTFS
+interface. Requests, options, callers, blocks and replay state are bounded.
+
+The APPS FIFO gains a bounded optional bulk-copy/readback callback, retaining
+barriers and owner/index checks before publishing head. QRTR responses use
+a bounded32-entry queue. A fresh WLFW announcement queues CAP0x24 with a
+new transaction, accepting identity only from its exact node/port/transaction
+and valid response/result/TLVs. The first hardware run must independently
+prove host-service requests, domain loading and any WLFW capability reply.

@@ -113,7 +113,8 @@ def verify_bundle(verifier, path, digest, excluded):
     return report
 
 
-def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_exclusions=None, start=False, transport=False):
+def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_exclusions=None, start=False, transport=False,
+         auxiliary=None):
     require(type(max_payload_bytes) is int and 0 < max_payload_bytes <= MAX_PAYLOAD, 'explicit payload cap outside implementation bound')
     require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'expected bundle SHA256 must be lowercase hex')
     require(64 <= len(firmware) <= MAX_BUNDLE and hashlib.sha256(firmware).hexdigest() == digest,
@@ -142,15 +143,32 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
                 (0xA0000000, 0x2300000) in map(tuple, probe_exclusions),
                 'source probe lacks native kernel/display exclusions')
         command = payload[72:HEADER].split(b'\0', 1)[0].decode('ascii').split()
-        require(command.count('redfinwififw=3' if transport else 'redfinwififw=2' if start else 'redfinwififw=1') == 1 and
+        require(command.count('redfinwififw=4' if auxiliary is not None else 'redfinwififw=3' if transport else 'redfinwififw=2' if start else 'redfinwififw=1') == 1 and
                 'redfinwifi=2' in command and 'redfinwifinative=1' in command,
                 'source-probe payload has no exact native selector')
         probe = [('probe-contract', mkadt.u32(1, 4, 64, 0)),
                  ('probe-exclusions', mkadt.u64(*(value for pair in probe_exclusions for value in pair)))]
     reserved = aligned(len(firmware), PAGE)
-    require(not start or len(info['segments']) <= 62, 'native metadata needs a second free segment')
-    metadata = info['physical'] + info['end'] - info['virt'] if start else 0
-    source_end = info['end'] + (PAGE if start else 0)
+    extra = (1 if start else 0) + (1 if auxiliary is not None else 0)
+    require(len(info['segments']) + 1 + extra <= 64, 'native firmware/metadata/assets exceed segment slots')
+    auxiliary_bytes = 0
+    if auxiliary is not None:
+        require(start and transport and type(auxiliary) is tuple and len(auxiliary) == 2,
+                'host assets require native firmware/transport and their verified report')
+        auxiliary_data, auxiliary_report = auxiliary
+        require(type(auxiliary_data) is bytes and 64 <= len(auxiliary_data) <= 16 * 1024 * 1024 and
+                auxiliary_report.get('schema') == 1 and auxiliary_report.get('bytes') == len(auxiliary_data) and
+                hashlib.sha256(auxiliary_data).hexdigest() == auxiliary_report.get('sha256'), 'invalid immutable host asset source')
+        auxiliary_bytes = aligned(len(auxiliary_data), PAGE)
+        auxiliary_physical = info['physical'] + info['end'] - info['virt']
+        require(not any(child.name == 'redfin-wifi-assets' for child in info['root'].children) and
+                info['memory_map'].prop('RedfinWiFiAssets') is None, 'duplicate native WLAN assets')
+        info['memory_map'].props.append(('RedfinWiFiAssets', 0, mkadt.u64(auxiliary_physical, auxiliary_bytes)))
+        info['root'].children.append(mkadt.node('redfin-wifi-assets', [
+            ('reg', mkadt.u64(auxiliary_physical, auxiliary_bytes)), ('bundle-bytes', mkadt.u64(len(auxiliary_data))),
+            ('bundle-sha256', bytes.fromhex(auxiliary_report['sha256'])), ('source-contract', mkadt.u32(1, 16, 128, PAGE))]))
+    metadata = info['physical'] + info['end'] - info['virt'] + auxiliary_bytes if start else 0
+    source_end = info['end'] + auxiliary_bytes + (PAGE if start else 0)
     physical = info['physical'] + source_end - info['virt']
     new_end = source_end + reserved
     if start:
@@ -170,7 +188,9 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
     pieces = [(address, size, memoryview(payload)[offset:offset + length])
               for address, size, offset, length in info['segments']]
     if start:
-        pieces.append((info['end'], PAGE, memoryview(bytes(PAGE))))
+        if auxiliary is not None:
+            pieces.append((info['end'], auxiliary_bytes, memoryview(auxiliary_data)))
+        pieces.append((info['end'] + auxiliary_bytes, PAGE, memoryview(bytes(PAGE))))
     pieces.append((source_end, reserved, memoryview(firmware)))
     projected = aligned(HEADER + 32 * len(pieces), 16) + sum(aligned(len(data), 16) for _address, _size, data in pieces) + aligned(len(tree), 16)
     require(projected <= max_payload_bytes, 'complete payload exceeds explicit host cap')

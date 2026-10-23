@@ -9,6 +9,9 @@
 #include "../../../bsd/dev/redfin_wifi_smp2p.h"
 #include "redfin_wifi_pas.h"
 #include "redfin_wifi_glink.h"
+#include "redfin_wifi_assets.h"
+#include "redfin_wifi_host.h"
+#include "redfin_wifi_qmi.h"
 
 extern "C" int redfin_wifi_power_start(void);
 extern "C" int redfin_wifi_power_held(void);
@@ -20,7 +23,8 @@ extern "C" void thread_terminate_self(void);
 enum { FW_START_SOURCE = 1, FW_START_POWER, FW_START_ABI, FW_START_RESET,
     FW_START_SMP2P, FW_START_METADATA, FW_START_INIT, FW_START_SETUP,
     FW_START_COPY, FW_START_AUTH, FW_START_READY, FW_START_GLINK };
-enum { FW_START_SMEM, FW_START_TCSR, FW_START_IPCC, FW_START_MPSS, FW_START_METADATA_MAP, FW_START_MAPS };
+enum { FW_START_SMEM, FW_START_TCSR, FW_START_IPCC, FW_START_MPSS, FW_START_METADATA_MAP,
+    FW_START_ASSETS_MAP, FW_START_MAPS };
 static const uint64_t fw_start_ranges[8] = {
     UINT64_C(0x80900000), 0x200000, 0x1f40000, 0x20000,
     0x408000, 0x1000, 0x8c000000, 0x11800000};
@@ -38,8 +42,16 @@ struct fw_start_context {
     rf_glink_ops glink_ops;
     uint8_t transport[8256], qrtr[8256];
     uint32_t qrtr_peer, qrtr_seen, qrtr_hello, qrtr_hello_sent, qrtr_services, wlfw_node, wlfw_port;
-    uint8_t pending[32][64];
+    uint8_t pending[32][RF_HOST_BLOCK + 64];
+    uint32_t pending_bytes[32];
     unsigned pending_head, pending_tail, pending_count, transport_mode;
+    unsigned host_mode, host_announced, cap_sent, cap_received;
+    uint64_t assets_reg[2], assets_bytes;
+    uint8_t assets_sha256[32];
+    rf_wlan_assets assets;
+    rf_host host;
+    rf_host_ops host_ops;
+    rf_wlfw_cap cap;
 };
 static fw_start_context fw_start;
 
@@ -47,9 +59,37 @@ static bool fw_start_glink_contract(void)
 {
     const uint32_t expected[10] = {1, 4, 1, 478, 479, 480, 16384, 0x20000, 3, 1};
     uint32_t witness[10] = {}; char name[7] = {}; DTEntry node;
-    return SecureDTLookupEntry(NULL, "/redfin-wifi-glink", &node) == kSuccess &&
+    bool valid = SecureDTLookupEntry(NULL, "/redfin-wifi-glink", &node) == kSuccess &&
         fw_property(node, "source-contract", witness, sizeof(witness)) && !memcmp(witness, expected, sizeof(witness)) &&
         fw_property(node, "channel", name, sizeof(name)) && !memcmp(name, "IPCRTR", sizeof(name));
+    if (valid && fw_start.host_mode) {
+        const uint32_t required[11] = {1, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096};
+        uint32_t actual[11] = {};
+        valid = fw_property(node, "host-services", actual, sizeof(actual)) && !memcmp(actual, required, sizeof(actual));
+    }
+    return valid;
+}
+
+static bool fw_start_assets_contract(fw_start_context *context, bool capture)
+{
+    DTEntry node, memory;
+    const uint32_t required[4] = {1, 16, 128, 16384};
+    uint32_t witness[4] = {}; uint64_t reg[2] = {}, mapped[2] = {}, bytes = 0; uint8_t digest[32] = {};
+    if (SecureDTLookupEntry(NULL, "/redfin-wifi-assets", &node) != kSuccess ||
+        !fw_property(node, "source-contract", witness, sizeof(witness)) || memcmp(witness, required, sizeof(witness)) ||
+        !fw_property(node, "reg", reg, sizeof(reg)) || !fw_property(node, "bundle-bytes", &bytes, sizeof(bytes)) ||
+        !fw_property(node, "bundle-sha256", digest, sizeof(digest)) ||
+        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory) != kSuccess ||
+        !fw_property(memory, "RedfinWiFiAssets", mapped, sizeof(mapped)) || memcmp(reg, mapped, sizeof(reg)) ||
+        bytes < 64 || bytes > 16u * 1024u * 1024u || reg[1] != ((bytes + 16383u) & ~UINT64_C(16383)) ||
+        reg[0] < UINT64_C(0x180000000) || reg[0] > UINT64_C(0x200000000) - reg[1] || (reg[0] & 16383u) ||
+        reg[0] + reg[1] != context->metadata[0]) return false;
+    if (capture) {
+        memcpy(context->assets_reg, reg, sizeof(reg)); memcpy(context->assets_sha256, digest, sizeof(digest));
+        context->assets_bytes = bytes;
+    }
+    return !memcmp(reg, context->assets_reg, sizeof(reg)) && !memcmp(digest, context->assets_sha256, sizeof(digest)) &&
+        bytes == context->assets_bytes;
 }
 
 static bool fw_start_metadata_contract(fw_start_context *context, bool capture)
@@ -72,13 +112,15 @@ static int fw_start_check(void *opaque)
     bool valid = context == &fw_start && context->active && !context->poisoned && ml_get_interrupts_enabled() &&
         !fw_probe_check(&fw_probe, fw_probe.nonce) && fw_start_metadata_contract(context, false) &&
         (!context->power || !redfin_wifi_power_held()) &&
-        (!context->transport_mode || fw_start_glink_contract());
+        (!context->transport_mode || fw_start_glink_contract()) &&
+        (!context->host_mode || fw_start_assets_contract(context, false));
     if (valid) for (unsigned i = 0; i < FW_START_MAPS; ++i) {
         const fw_start_map *entry = &context->mapping[i];
         if (!entry->map && !entry->memory && !entry->base) continue;
         if (!entry->map || !entry->memory || !entry->base ||
             entry->map->getVirtualAddress() != entry->base ||
-            entry->map->getLength() != (i == FW_START_METADATA_MAP ? context->metadata[1] :
+            entry->map->getLength() != (i == FW_START_ASSETS_MAP ? context->assets_reg[1] :
+                i == FW_START_METADATA_MAP ? context->metadata[1] :
                 fw_start_ranges[2u * i + 1u])) { valid = false; break; }
     }
     if (valid && context->locked)
@@ -97,12 +139,16 @@ static int fw_start_map_range(fw_start_context *context, unsigned index)
         (index == FW_START_MPSS && (!context->reset || !context->setup))) return EPERM;
     fw_start_map *entry = &context->mapping[index];
     if (entry->memory || entry->map || entry->base) return EBUSY;
-    uint64_t physical = index == FW_START_METADATA_MAP ? context->metadata[0] : fw_start_ranges[2u * index];
-    uint64_t bytes = index == FW_START_METADATA_MAP ? context->metadata[1] : fw_start_ranges[2u * index + 1u];
-    entry->memory = IOMemoryDescriptor::withPhysicalAddress(physical, bytes, kIODirectionInOut);
-    entry->map = entry->memory ? entry->memory->map(
+    uint64_t physical = index == FW_START_ASSETS_MAP ? context->assets_reg[0] :
+        index == FW_START_METADATA_MAP ? context->metadata[0] : fw_start_ranges[2u * index];
+    uint64_t bytes = index == FW_START_ASSETS_MAP ? context->assets_reg[1] :
+        index == FW_START_METADATA_MAP ? context->metadata[1] : fw_start_ranges[2u * index + 1u];
+    bool readonly = index == FW_START_ASSETS_MAP;
+    entry->memory = IOMemoryDescriptor::withPhysicalAddress(physical, bytes, readonly ? kIODirectionIn : kIODirectionInOut);
+    IOOptionBits options = readonly ? kIOMapReadOnly | kIOMapDefaultCache :
         index == FW_START_SMEM || index == FW_START_MPSS || index == FW_START_METADATA_MAP ?
-            kIOMapWriteCombineCache : kIOMapInhibitCache) : NULL;
+            kIOMapWriteCombineCache : kIOMapInhibitCache;
+    entry->map = entry->memory ? entry->memory->map(options) : NULL;
     if (!entry->map || !entry->map->getVirtualAddress() ||
         entry->map->getLength() != bytes) return ENOMEM;
     entry->base = (uintptr_t)entry->map->getVirtualAddress();
@@ -329,15 +375,62 @@ static int fw_start_glink_kick(void *opaque)
     __asm__ volatile("dsb osh" ::: "memory");
     return fw_start_glink_check(context);
 }
-static void fw_start_qrtr_control(fw_start_context *context, uint32_t type, uint32_t from,
-    uint32_t node, uint32_t to, uint32_t a, uint32_t b)
+static int fw_start_glink_payload(void *opaque, uint32_t offset, const uint8_t *data, uint32_t bytes)
 {
-    if (context->pending_count >= 32) { context->poisoned = true; return; }
+    fw_start_context *context = (fw_start_context *)opaque;
+    uint32_t tx = context->glink.tx;
+    if (!tx || !data || !bytes || offset < tx || bytes > 16384u || offset - tx > 16384u - bytes ||
+        (offset | bytes) % 4u || fw_start_glink_check(context)) return EPERM;
+    memcpy((void *)(context->mapping[FW_START_SMEM].base + offset), data, bytes);
+    __asm__ volatile("dsb osh" ::: "memory");
+    return fw_start_glink_check(context);
+}
+static int fw_start_qrtr_queue(fw_start_context *context, uint32_t type, uint32_t from,
+    uint32_t node, uint32_t to, const uint8_t *data, uint32_t bytes)
+{
+    if (!data || !bytes || bytes > RF_HOST_BLOCK + 4u || context->pending_count >= 32 || fw_start_glink_check(context))
+        return ENOBUFS;
     uint8_t *packet = context->pending[context->pending_head];
-    memset(packet, 0, 64);
-    const uint32_t fields[13] = {1, type, 1, from, 0, 20, node, to, type, a, b, 0, 0};
-    for (unsigned i = 0; i < 13; ++i) rf_gl_encode(packet + 4u * i, fields[i]);
+    uint32_t length = 32u + ((bytes + 3u) & ~3u);
+    memset(packet, 0, length);
+    const uint32_t fields[8] = {1, type, 1, from, 0, bytes, node, to};
+    for (unsigned i = 0; i < 8; ++i) rf_gl_encode(packet + 4u * i, fields[i]);
+    memcpy(packet + 32u, data, bytes);
+    context->pending_bytes[context->pending_head] = length;
     context->pending_head = (context->pending_head + 1u) % 32u; ++context->pending_count;
+    return 0;
+}
+static void fw_start_qrtr_control(fw_start_context *context, uint32_t type, uint32_t from,
+    uint32_t node, uint32_t to, uint32_t a, uint32_t b, uint32_t c = 0, uint32_t d = 0)
+{
+    uint8_t control[20];
+    const uint32_t fields[5] = {type, a, b, c, d};
+    for (unsigned i = 0; i < 5; ++i) rf_gl_encode(control + 4u * i, fields[i]);
+    if (fw_start_qrtr_queue(context, type, from, node, to, control, sizeof(control))) context->poisoned = true;
+}
+static int fw_start_host_lookup(void *opaque, const char *path, const uint8_t **data, uint32_t *bytes)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    if (fw_start_glink_check(context)) return EPERM;
+    if (!rf_wlan_asset_find(&context->assets, path, data, bytes)) return 0;
+    const redfin_mpss_image *image = &fw_probe.workspace.image;
+    if (!strcmp(path, "image/modem.mdt")) { *data = image->asset[0].data; *bytes = image->asset[0].bytes; return 0; }
+    if (!strncmp(path, "image/modem.b", 13) && strlen(path) == 15 &&
+        path[13] >= '0' && path[13] <= '9' && path[14] >= '0' && path[14] <= '9') {
+        unsigned index = (unsigned)(path[13] - '0') * 10u + (unsigned)(path[14] - '0');
+        for (unsigned i = 1; i < image->assets; ++i) if (image->asset[i].index == index) {
+            *data = image->asset[i].data; *bytes = image->asset[i].bytes; return 0;
+        }
+    }
+    return ENOENT;
+}
+static int fw_start_host_send(void *opaque, uint32_t from, uint32_t node, uint32_t to,
+    const uint8_t *data, uint32_t bytes)
+{ return fw_start_qrtr_queue((fw_start_context *)opaque, 1, from, node, to, data, bytes); }
+static void fw_start_host_event(void *opaque, unsigned kind, const char *name, uint32_t bytes)
+{
+    (void)opaque;
+    IOLog("REDFIN WIFI HOST: event=%u file/service=%s bytes=%u; RAM only\n", kind, name, bytes);
 }
 static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t length)
 {
@@ -361,12 +454,35 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
         (destination != 1 && destination != UINT32_MAX)) { context->poisoned = true; return; }
     if (!context->qrtr_seen) { context->qrtr_peer = source; context->qrtr_seen = 1; }
     if (confirm) fw_start_qrtr_control(context, 7, to, source, from, destination, to);
+    if (context->host_mode && to != 0xfffffffeu) {
+        int error = 0;
+        if (type == 1 && to == 0x4001) error = rf_host_pd(&context->host, &context->host_ops, source, from, data + at, size);
+        else if (type == 1 && to == 0x4002) error = rf_host_tftp_request(&context->host, &context->host_ops,
+            source, from, data + at, size);
+        else if (type == 1 && to >= 0x4100 && to < 0x5100) error = rf_host_tftp_packet(&context->host,
+            &context->host_ops, source, from, to, data + at, size);
+        else if (type == 1 && to == 0x4004 && context->cap_sent && source == context->wlfw_node &&
+            from == context->wlfw_port && !rf_wlfw_cap_parse(&context->cap, data + at, size, 1)) {
+            context->cap_received = 1;
+            IOLog("REDFIN WIFI WLFW: CAP result=%u error=%u valid=%#x chip=%#x family=%#x board=%#x SoC=%#x firmware=%#x\n",
+                context->cap.result, context->cap.error, context->cap.valid, context->cap.chip, context->cap.family,
+                context->cap.board, context->cap.soc, context->cap.firmware);
+        }
+        if (error) IOLog("REDFIN WIFI HOST: refused request to=%#x bytes=%u result=%d\n", to, size, error);
+        return;
+    }
     if (to != 0xfffffffeu || size < 4) return;
     uint32_t command = rf_gl_u32(data + at);
     if (command == 2 && !context->qrtr_hello) {
         context->qrtr_hello = 1;
         fw_start_qrtr_control(context, 2, 0xfffffffeu, source, 0xfffffffeu, 0, 0);
         IOLog("REDFIN WIFI QRTR: HELLO from node=%u queued reply\n", source);
+        if (context->host_mode && !context->host_announced) {
+            fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 0x40, 0x101, 1, 0x4001);
+            fw_start_qrtr_control(context, 4, 0xfffffffeu, source, 0xfffffffeu, 4096, 1, 1, 0x4002);
+            context->host_announced = 1;
+            IOLog("REDFIN WIFI HOST: announced native pd-mapper/TFTP; no storage/RMTFS service\n");
+        }
     } else if (command == 4 && size >= 20) {
         uint32_t service = rf_gl_u32(data + at + 4), instance = rf_gl_u32(data + at + 8);
         uint32_t node = rf_gl_u32(data + at + 12), port = rf_gl_u32(data + at + 16);
@@ -382,7 +498,9 @@ static int fw_start_transport_run(fw_start_context *context)
     if (!fw_start_glink_contract() || fw_start_glink_check(context) || redfin_wifi_power_audit()) return EPERM;
     context->glink_ops = {context, (const volatile uint8_t *)context->mapping[FW_START_SMEM].base,
         fw_start_glink_check, fw_start_glink_lock, fw_start_unlock, fw_start_smem_write,
-        fw_start_barrier, fw_start_glink_kick, fw_start_qrtr_packet};
+        fw_start_barrier, fw_start_glink_kick, fw_start_qrtr_packet, fw_start_glink_payload};
+    if (context->host_mode) context->host_ops = {context, fw_start_glink_check, fw_start_host_lookup,
+        fw_start_host_send, fw_start_host_event};
     int error = rf_gl_init(&context->glink, &context->glink_ops);
     IOLog("REDFIN WIFI GLINK: init=%d descriptor=%#x TX=%#x stores=%u\n",
         error, context->glink.descriptor, context->glink.tx, context->glink.stores);
@@ -390,7 +508,8 @@ static int fw_start_transport_run(fw_start_context *context)
     error = rf_gl_say(&context->glink, &context->glink_ops, 0, 1, 1, NULL, 0);
     if (error) return error;
     uint64_t first = fw_start_ns(context), next_report = first;
-    while (fw_start_ns(context) - first < UINT64_C(10000000000)) {
+    uint64_t timeout = context->host_mode ? UINT64_C(45000000000) : UINT64_C(10000000000);
+    while (fw_start_ns(context) - first < timeout) {
         int alive = rf_wifi_smp2p_alive(&context->smp2p, &context->smp_ops);
         if (alive && alive != RF_WIFI_SMP2P_UNSTABLE) return alive;
         if (!alive) {
@@ -404,7 +523,8 @@ static int fw_start_transport_run(fw_start_context *context)
             }
             while (context->pending_count) {
                 error = rf_gl_send_packet(&context->glink, &context->glink_ops,
-                    context->pending[context->pending_tail], 52, context->transport, sizeof(context->transport));
+                    context->pending[context->pending_tail], context->pending_bytes[context->pending_tail],
+                    context->transport, sizeof(context->transport));
                 if (error == RF_GL_AGAIN || (error == RF_GL_ARGUMENT && !context->glink.open)) break;
                 if (error) return error;
                 context->pending_tail = (context->pending_tail + 1u) % 32u; --context->pending_count;
@@ -417,8 +537,22 @@ static int fw_start_transport_run(fw_start_context *context)
                 context->glink.open, context->glink.rx, context->glink.heard, context->glink.sent,
                 context->glink.packets, context->qrtr_services, context->wlfw_port);
             next_report = now + 1000000000u;
+            if (context->host_mode) IOLog("REDFIN WIFI HOST: pd=%u TFTP=%u reads=%u writes=%u missing=%u pending=%u cap=%u/%u\n",
+                context->host.pd_requests, context->host.requests, context->host.reads, context->host.writes,
+                context->host.missing, context->pending_count, context->cap_sent, context->cap_received);
         }
-        if (context->wlfw_port) return 0;
+        if (context->wlfw_port) {
+            if (!context->host_mode) return 0;
+            if (!context->cap_sent) {
+                const uint8_t request[7] = {0, 1, 0, 0x24, 0, 0, 0};
+                error = fw_start_qrtr_queue(context, 1, 0x4004, context->wlfw_node, context->wlfw_port,
+                    request, sizeof(request));
+                if (error) return error;
+                context->cap_sent = 1;
+                IOLog("REDFIN WIFI WLFW: queued native CAP transaction=1\n");
+            }
+            if (context->cap_received) return context->cap.result ? EIO : 0;
+        }
         if (fw_start_pause(context, 1000)) return EPERM;
     }
     return ETIMEDOUT;
@@ -436,6 +570,20 @@ static int fw_start_run(fw_start_context *context)
         (fw_probe.boot.native_layout.ramdisk.bytes && context->metadata[0] <
             fw_probe.boot.native_layout.ramdisk.base + fw_probe.boot.native_layout.ramdisk.bytes) ||
         fw_probe.workspace.image.asset[0].bytes > context->metadata[1]) return EPERM;
+    if (context->host_mode) {
+        if (context->assets_reg[0] < fw_probe.boot.native_layout.kernel_end ||
+            (fw_probe.boot.native_layout.ramdisk.bytes && context->assets_reg[0] <
+                fw_probe.boot.native_layout.ramdisk.base + fw_probe.boot.native_layout.ramdisk.bytes)) return EPERM;
+        error = fw_start_map_range(context, FW_START_ASSETS_MAP);
+        if (error) return error;
+        const uint8_t *data = (const uint8_t *)context->mapping[FW_START_ASSETS_MAP].base;
+        for (uint64_t i = context->assets_bytes; i < context->assets_reg[1]; ++i) if (data[(size_t)i]) return EPERM;
+        error = rf_wlan_assets_open(&context->assets, data, (size_t)context->assets_bytes,
+            context->assets_sha256, redfin_mpss_kernel_sha256, NULL);
+        if (error || fw_start_check(context)) return EPERM;
+        IOLog("REDFIN WIFI HOST: verified resident assets=%u bytes=%llu\n", context->assets.count,
+            (unsigned long long)context->assets_bytes);
+    }
     IOLog("REDFIN WIFI START: resident source verified; native PIL begins\n");
     context->phase = FW_START_POWER;
     error = redfin_wifi_power_start();
@@ -511,17 +659,17 @@ static void fw_start_worker(void *, wait_result_t)
 {
     const char *args = PE_boot_args(); unsigned bytes = 0;
     int mode = 0;
-    bool mode_valid = PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) && (mode == 2 || mode == 3);
+    bool mode_valid = PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) && mode >= 2 && mode <= 4;
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
         !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
         !fw_probe_properties(&fw_probe, true) || !fw_start_metadata_contract(&fw_start, true) ||
-        (mode == 3 && !fw_start_glink_contract())) {
+        (mode >= 3 && !fw_start_glink_contract()) || (mode == 4 && !fw_start_assets_contract(&fw_start, true))) {
         IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
         thread_terminate_self();
         __builtin_unreachable();
     }
-    fw_start.transport_mode = mode == 3;
+    fw_start.transport_mode = mode >= 3; fw_start.host_mode = mode == 4;
     memcpy(fw_probe.args, args, bytes + 1); fw_probe.bytes = bytes + 1;
     fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
     IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());

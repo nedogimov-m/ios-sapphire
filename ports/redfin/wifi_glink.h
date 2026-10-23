@@ -28,6 +28,9 @@ struct rf_glink_ops {
     int (*barrier)(void *);
     int (*kick)(void *); /* Native MPSS client2 / GLINK signal0 only. */
     void (*packet)(void *, const uint8_t *, uint32_t bytes);
+    /* Optional bounded copy to the APPS-owned FIFO only. The producer checks
+     * actual readback and publishes head only after barriers/ownership checks. */
+    int (*payload)(void *, uint32_t offset, const uint8_t *, uint32_t bytes);
 };
 struct rf_glink_intent { uint32_t id, bytes, busy, present; };
 struct rf_glink {
@@ -38,6 +41,7 @@ struct rf_glink {
     uint32_t last_intent_bytes, last_intent_id;
     struct rf_glink_intent intent[32];
     uint8_t packet[65536];
+    uint8_t frame[16384];
 };
 static inline uint32_t rf_gl_word(const struct rf_glink_ops *o, uint32_t at)
 { return redfin_smem_u32(o->smem + at); }
@@ -150,6 +154,23 @@ static inline int rf_gl_say(struct rf_glink *s, const struct rf_glink_ops *o,
         uint32_t value = i == 0 ? (uint32_t)command | (uint32_t)p1 << 16 : i == 4 ? p2 : 0;
         if (i >= 8) for (unsigned j = 0; j < 4; ++j)
             if (i - 8u + j < bytes) value |= (uint32_t)data[i - 8u + j] << (8u * j);
+        for (unsigned j = 0; j < 4; ++j) s->frame[i + j] = (uint8_t)(value >> (j * 8u));
+    }
+    if (o->payload) {
+        for (uint32_t sent = 0; sent < length;) {
+            uint32_t at = (s->head + sent) % 16384u, take = length - sent;
+            if (take > 16384u - at) take = 16384u - at;
+            if (rf_gl_gate(s, o) || o->payload(o->context, s->tx + at, s->frame + sent, take)) {
+                s->poisoned = 1; return RF_GL_PLATFORM;
+            }
+            if (o->barrier(o->context) || rf_gl_gate(s, o)) { s->poisoned = 1; return RF_GL_PLATFORM; }
+            for (uint32_t i = 0; i < take; ++i)
+                if (o->smem[s->tx + at + i] != s->frame[sent + i]) { s->poisoned = 1; return RF_GL_CHANGED; }
+            s->stores += take / 4u; sent += take;
+        }
+    } else for (uint32_t i = 0; i < length; i += 4u) {
+        uint32_t value = (uint32_t)s->frame[i] | (uint32_t)s->frame[i + 1u] << 8 |
+            (uint32_t)s->frame[i + 2u] << 16 | (uint32_t)s->frame[i + 3u] << 24;
         if (rf_gl_put(s, o, s->tx + (s->head + i) % 16384u, value)) return RF_GL_PLATFORM;
     }
     if (o->barrier(o->context) || rf_gl_gate(s, o)) return RF_GL_PLATFORM;

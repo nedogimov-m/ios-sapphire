@@ -22,6 +22,8 @@ PROFILES = (
     (dict(wifi_native_probe=True, wifi_fw_source_probe=True), ' redfinwifi=2 redfinwifinative=1 redfinwififw=1'),
     (dict(wifi_native_probe=True, wifi_fw_start=True), ' redfinwifi=2 redfinwifinative=1 redfinwififw=2'),
     (dict(wifi_native_probe=True, wifi_fw_start=True, wifi_glink_start=True), ' redfinwifi=2 redfinwifinative=1 redfinwififw=3'),
+    (dict(wifi_native_probe=True, wifi_fw_start=True, wifi_glink_start=True, wifi_host_services=True),
+     ' redfinwifi=2 redfinwifinative=1 redfinwififw=4'),
     (dict(scm_probe=True), ' redfingpu=3 redfinscm=1'))
 
 
