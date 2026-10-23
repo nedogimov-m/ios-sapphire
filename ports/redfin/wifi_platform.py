@@ -368,7 +368,7 @@ def add_wlfw_contract(tree, nodes):
         ('shim-verified', mkadt.u32(0))]))
 
 
-def add_wlan_observer_contract(tree, nodes):
+def add_wlan_observer_contract(tree, nodes, power=False):
     """Bind the native ICNSS consumers/providers before reading VRM metadata."""
     names = ('ldoa1', 'ldoa14', 'ldoc2', 'ldoc11', 'ldoc10')
     supply_keys = ('vdd-cx-mx', 'vdd-1.8-xo', 'vdd-1.3-rfa', 'vdd-3.3-ch1', 'vdd-3.3-ch0')
@@ -404,10 +404,13 @@ def add_wlan_observer_contract(tree, nodes):
             raise ValueError('native WLAN consumer voltage/load/delay config changed')
     if any(child.name == 'redfin-wifi-wlan' for child in tree.children):
         raise ValueError('duplicate native WLAN observer contract')
+    if type(power) is not bool:
+        raise ValueError('native WLAN power selector must be boolean')
     tree.children.append(mkadt.node('redfin-wifi-wlan', [
-        ('source-contract', mkadt.u32(1, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000)),
+        ('source-contract', mkadt.u32(2 if power else 1, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000)),
         ('resource-names', b''.join(name.encode().ljust(8, b'\0') for name in names)),
-        ('observe-only', mkadt.u32(1))]))
+        ('observe-only', mkadt.u32(0 if power else 1))] + ([
+        ('resource-addresses', mkadt.u32(0x40800, 0x42100, 0x41d00, 0x41a00, 0x41900))] if power else [])))
 
 
 def main():

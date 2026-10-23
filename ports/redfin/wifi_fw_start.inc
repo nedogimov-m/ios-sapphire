@@ -20,6 +20,7 @@ extern "C" int redfin_wifi_power_start(void);
 extern "C" int redfin_wifi_power_held(void);
 extern "C" int redfin_wifi_power_audit(void);
 extern "C" int redfin_wifi_wlan_resources_observe(void);
+extern "C" int redfin_wifi_wlan_power_start(unsigned, uint32_t, void *, int (*)(void *));
 /* Built-in XNU worker exit; declaration is private to Mach compilation in
  * this pinned kernel's kern/thread.h. This is not an external kext KPI. */
 extern "C" void thread_terminate_self(void);
@@ -63,7 +64,7 @@ struct fw_start_context {
     void *rmtfs_shadow;
     rf_rmtfs rmtfs;
     rf_rm_ops rmtfs_ops;
-    bool wlfw_mode, wlan_observe_mode, wlan_observed;
+    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed;
     rf_wlfw_setup wlfw_setup;
     rf_wlfw_ops wlfw_ops;
 };
@@ -181,14 +182,21 @@ static bool fw_start_wlfw_contract(void)
 static bool fw_start_wlan_contract(void)
 {
     DTEntry node;
-    const uint32_t expected[10] = {1, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000};
+    const uint32_t expected[10] = {fw_start.wlan_power_mode ? 2u : 1u, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000};
     const uint8_t expected_names[5][8] = {"ldoa1", "ldoa14", "ldoc2", "ldoc11", "ldoc10"};
     uint32_t actual[10] = {}, observe = 0; uint8_t names[40] = {};
-    return fw_start.wlfw_mode && fw_start.wlan_observe_mode &&
+    bool valid = fw_start.wlfw_mode && fw_start.wlan_observe_mode &&
         SecureDTLookupEntry(NULL, "/redfin-wifi-wlan", &node) == kSuccess &&
         fw_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
         fw_property(node, "resource-names", names, sizeof(names)) && !memcmp(names, expected_names, sizeof(names)) &&
-        fw_property(node, "observe-only", &observe, sizeof(observe)) && observe == 1;
+        fw_property(node, "observe-only", &observe, sizeof(observe)) && observe == (fw_start.wlan_power_mode ? 0u : 1u);
+    if (valid && fw_start.wlan_power_mode) {
+        const uint32_t expected_addresses[5] = {0x40800, 0x42100, 0x41d00, 0x41a00, 0x41900};
+        uint32_t actual_addresses[5] = {};
+        valid = fw_property(node, "resource-addresses", actual_addresses, sizeof(actual_addresses)) &&
+            !memcmp(actual_addresses, expected_addresses, sizeof(actual_addresses));
+    }
+    return valid;
 }
 
 static int fw_start_check(void *opaque)
@@ -552,6 +560,15 @@ static int fw_start_wlfw_send(void *opaque, const uint8_t *data, uint32_t bytes)
     if (!error && rf_qmi_u16(data + 3) == 0x24) context->cap_sent = 1;
     return error;
 }
+static int fw_start_wlan_power_policy(void *opaque)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    return !fw_start_wlfw_check(context) && context->wlan_power_mode && fw_start_wlan_contract() &&
+        context->wlfw_setup.stage == RF_WLFW_COMPLETE && context->wlfw_setup.msa_accepted &&
+        !context->cap.result && !context->cap.error && (context->cap.valid & 13u) == 13u &&
+        context->cap.chip == 0x4320 && context->cap.family == 0x4001 && context->cap.soc == 0x400b0000 &&
+        context->cap.firmware == 0x33197fff && (!(context->cap.valid & 16u) || context->cap.chain <= 2) ? 0 : EPERM;
+}
 static void fw_start_host_event(void *opaque, unsigned kind, const char *name, uint32_t bytes)
 {
     (void)opaque;
@@ -671,7 +688,8 @@ static int fw_start_transport_run(fw_start_context *context)
     error = rf_gl_say(&context->glink, &context->glink_ops, 0, 1, 1, NULL, 0);
     if (error) return error;
     uint64_t first = fw_start_ns(context), next_report = first;
-    uint64_t timeout = context->host_mode ? UINT64_C(45000000000) : UINT64_C(10000000000);
+    uint64_t timeout = context->wlan_observe_mode ? UINT64_C(30000000000) :
+        context->host_mode ? UINT64_C(45000000000) : UINT64_C(10000000000);
     while (fw_start_ns(context) - first < timeout) {
         unsigned previous_ipa = context->smp2p.ipa_responses;
         int alive = context->host_mode ? rf_wifi_smp2p_ipa_respond(&context->smp2p, &context->smp_ops) :
@@ -731,8 +749,15 @@ static int fw_start_transport_run(fw_start_context *context)
                 if (context->wlfw_setup.stage == RF_WLFW_COMPLETE) {
                     if (!context->wlan_observe_mode) return 0;
                     if (!context->wlan_observed) {
-                        error = redfin_wifi_wlan_resources_observe();
-                        IOLog("REDFIN WIFI WLAN: resource observer=%d; no WLAN power writes, waiting for FW_READY\n", error);
+                        if (context->wlan_power_mode) {
+                            if (fw_start_wlan_power_policy(context)) return EPERM;
+                            error = redfin_wifi_wlan_power_start((context->cap.valid & 16u) != 0, context->cap.chain,
+                                context, fw_start_wlan_power_policy);
+                            IOLog("REDFIN WIFI WLAN: native power sequence=%d; waiting for FW_READY\n", error);
+                        } else {
+                            error = redfin_wifi_wlan_resources_observe();
+                            IOLog("REDFIN WIFI WLAN: resource observer=%d; no WLAN power writes, waiting for FW_READY\n", error);
+                        }
                         if (error) return error;
                         context->wlan_observed = true;
                     }
@@ -919,6 +944,8 @@ static void fw_start_worker(void *, wait_result_t)
     DTEntry wlan_node;
     bool wlan_present = SecureDTLookupEntry(NULL, "/redfin-wifi-wlan", &wlan_node) == kSuccess;
     fw_start.wlan_observe_mode = wlan_present && fw_start.wlfw_mode;
+    uint32_t observe = 2;
+    fw_start.wlan_power_mode = wlan_present && fw_property(wlan_node, "observe-only", &observe, sizeof(observe)) && !observe;
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
         !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||

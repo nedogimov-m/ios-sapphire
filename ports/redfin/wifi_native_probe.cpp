@@ -171,6 +171,12 @@ struct wf_power_context {
     rf_wifi_aop_session aop;
     rf_wifi_bcm bcm[RF_WIFI_BW_COUNT];
     uint32_t bandwidth[RF_WIFI_BW_COUNT], bandwidth_held;
+    bool wlan_attempted, wlan_resources_valid, wlan_busy, wlan_powered;
+    rf_wlan_resources wlan_resources;
+    rf_wlan_plan wlan_plan;
+    uint32_t wlan_held;
+    void *wlan_context;
+    int (*wlan_policy)(void *);
 };
 static wf_power_context wf_power;
 
@@ -332,6 +338,15 @@ static bool wf_power_tables(wf_power_context *context, bool capture)
                 context->bandwidth[i]);
         } else if (memcmp(&context->bcm[i], &resource, sizeof(resource))) return false;
     }
+    if (context->wlan_resources_valid) {
+        rf_wlan_resources fresh = {};
+        if (rf_wlan_resources_read((const volatile uint8_t *)context->base[WFP_DB], &fresh)) return false;
+        for (unsigned i = 0; i < RF_WLAN_SUPPLIES; ++i) {
+            const rf_cmddb_resource *a = &fresh.supply[i], *b = &context->wlan_resources.supply[i];
+            if (a->address != b->address || a->type != b->type || a->aux_version != b->aux_version ||
+                a->aux_bytes != b->aux_bytes || a->priority[0] != b->priority[0] || a->priority[1] != b->priority[1]) return false;
+        }
+    }
     return !wf_power_check(context);
 }
 
@@ -388,10 +403,20 @@ static bool wf_power_snapshot(wf_power_context *context, bool compare, bool skip
     return !wf_power_check(context);
 }
 
+static unsigned wf_power_targets(const wf_power_context *context)
+{ return context->wlan_busy ? 3u + RF_WIFI_BW_COUNT + context->wlan_plan.votes : context->firmware ? 3u + RF_WIFI_BW_COUNT : 3u; }
 static uint32_t wf_power_address(wf_power_context *context, unsigned target)
-{ return target < 3 ? wf_arc_address[target] : context->bcm[target - 3].address; }
+{
+    return target < 3 ? wf_arc_address[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bcm[target - 3u].address :
+        context->wlan_plan.vote[target - 3u - RF_WIFI_BW_COUNT].address;
+}
 static uint32_t wf_power_data(wf_power_context *context, unsigned target)
-{ return target < 3 ? wf_arc_selector[target] : context->bandwidth[target - 3]; }
+{
+    return target < 3 ? wf_arc_selector[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bandwidth[target - 3u] :
+        context->wlan_plan.vote[target - 3u - RF_WIFI_BW_COUNT].value;
+}
+static bool wf_power_child_live(wf_power_context *context)
+{ return !context->wlan_busy || (context->wlan_policy && context->wlan_context && !context->wlan_policy(context->wlan_context)); }
 
 static bool wf_power_rsc_guard(wf_power_context *context)
 {
@@ -415,9 +440,10 @@ static bool wf_power_rsc_guard(wf_power_context *context)
 static int wf_power_store(wf_power_context *context, unsigned unit, uint32_t offset, uint32_t value)
 {
     if (unit >= WFP_MAPS || offset % 4u || offset > wf_power_ranges[2u * unit + 1u] - 4u ||
-        wf_power_check(context) || !wf_power_rsc_guard(context) || !wf_power_tables(context, false)) return EPERM;
+        wf_power_check(context) || !wf_power_rsc_guard(context) || !wf_power_tables(context, false) ||
+        !wf_power_child_live(context)) return EPERM;
     if (unit == WFP_RSC) {
-        if (context->phase != WFP_ARC || context->target >= (context->firmware ? 3 + RF_WIFI_BW_COUNT : 3) || context->step >= 13) return EPERM;
+        if (context->phase != WFP_ARC || context->target >= wf_power_targets(context) || context->step >= 13) return EPERM;
         static const uint32_t offsets[13] = {
             0xd30, 0xd34, 0xd38, 0xd10, 0xd1c, 0xd14, 0xd14, 0xd14, 0xd14, 0xd14, 0xd1c, 0xd10, 0xd08};
         const uint32_t values[13] = {0x10108, wf_power_address(context, context->target), wf_power_data(context, context->target),
@@ -459,7 +485,8 @@ static int wf_power_store(wf_power_context *context, unsigned unit, uint32_t off
 static int wf_power_pause(void *opaque, uint32_t microseconds)
 {
     wf_power_context *context = (wf_power_context *)opaque;
-    if (!microseconds || microseconds > 1000 || wf_power_check(context) || !wf_power_rsc_guard(context)) return EPERM;
+    if (!microseconds || microseconds > 1000 || wf_power_check(context) || !wf_power_rsc_guard(context) ||
+        !wf_power_child_live(context)) return EPERM;
     IODelay(microseconds);
     return wf_power_check(context);
 }
@@ -478,7 +505,8 @@ static bool wf_power_sync(wf_power_context *context, uint32_t offset, uint32_t v
 
 static int wf_power_vote(wf_power_context *context, unsigned target)
 {
-    if (target >= (context->firmware ? 3 + RF_WIFI_BW_COUNT : 3) || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
+    if (target >= wf_power_targets(context) || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
+        !wf_power_child_live(context) ||
         wf_power_word(context, WFP_RSC, 0xd04u) || !wf_power_word(context, WFP_RSC, 0xd18u)) return EBUSY;
     context->target = target; context->step = 0;
     if (!wf_power_sync(context, 0xd30, 0x10108) || !wf_power_sync(context, 0xd34, wf_power_address(context, target)) ||
@@ -488,7 +516,7 @@ static int wf_power_vote(wf_power_context *context, unsigned target)
         wf_power_store(context, WFP_RSC, 0xd14, (1u << 16) | (1u << 24))) return EIO;
     bool complete = false;
     for (unsigned poll = 0; poll <= 1000; ++poll) {
-        if (!wf_power_rsc_guard(context)) return EBUSY;
+        if (!wf_power_rsc_guard(context) || !wf_power_child_live(context)) return EBUSY;
         context->irq = wf_power_word(context, WFP_RSC, 0xd04u);
         context->command_status = wf_power_word(context, WFP_RSC, 0xd3cu);
         uint32_t idle = wf_power_word(context, WFP_RSC, 0xd18u);
@@ -499,12 +527,16 @@ static int wf_power_vote(wf_power_context *context, unsigned target)
     }
     if (!complete) return ETIMEDOUT;
     if (target < 3) context->held |= 1u << target;
-    else context->bandwidth_held |= 1u << (target - 3);
+    else if (target < 3u + RF_WIFI_BW_COUNT) context->bandwidth_held |= 1u << (target - 3u);
+    else context->wlan_held |= 1u << (target - 3u - RF_WIFI_BW_COUNT);
     if (target < 3)
         IOLog("REDFIN WIFI POWER: ARC address=%#x selector=%u held=1 polls=%u IRQ=%#x CMD=%#x\n",
             wf_arc_address[target], wf_arc_selector[target], context->polls, context->irq, context->command_status);
-    else IOLog("REDFIN WIFI POWER: BCM address=%#x value=%#x held=1 polls=%u IRQ=%#x CMD=%#x\n",
+    else if (target < 3u + RF_WIFI_BW_COUNT) IOLog("REDFIN WIFI POWER: BCM address=%#x value=%#x held=1 polls=%u IRQ=%#x CMD=%#x\n",
         wf_power_address(context, target), wf_power_data(context, target), context->polls, context->irq, context->command_status);
+    else IOLog("REDFIN WIFI WLAN: VRM vote=%u address=%#x value=%u accepted=1 polls=%u IRQ=%#x CMD=%#x\n",
+        target - 3u - RF_WIFI_BW_COUNT, wf_power_address(context, target), wf_power_data(context, target),
+        context->polls, context->irq, context->command_status);
     if (!wf_power_sync(context, 0xd14, 1u << 16) || !wf_power_sync(context, 0xd14, 0) ||
         !wf_power_sync(context, 0xd1c, 0) || !wf_power_sync(context, 0xd10, 0) ||
         wf_power_store(context, WFP_RSC, 0xd08, 1) || wf_power_word(context, WFP_RSC, 0xd04u) ||
@@ -617,11 +649,18 @@ extern "C" int redfin_wifi_power_held(void)
      * the complete immutable CMD-DB directory for every copy/readback chunk.
      * Full inherited-table/CMD-DB audits run at phase boundaries and checkpoints.
      */
-    return context->firmware && context->held == 7 &&
+    bool base_held = context->firmware && context->held == 7 &&
         context->bandwidth_held == (1u << RF_WIFI_BW_COUNT) - 1u &&
-        context->phase == WFP_AOP_ON && context->aop.load_state == 1 &&
+        context->aop.load_state == 1 &&
         !wf_power_check(context) && wf_power_word(context, WFP_RSC, 0) == context->id &&
-        wf_power_word(context, WFP_RSC, 0xcu) == context->config &&
+        wf_power_word(context, WFP_RSC, 0xcu) == context->config;
+    /* The same serialized child may request typed WLAN votes after CAP. The
+     * base ARC/BCM/AOP votes remain held while the owned ACTIVE slot is busy.
+     * Do not call the child policy here: its own lease check calls us. */
+    if (base_held && context->wlan_busy && context->wlan_attempted && context->wlan_resources_valid &&
+        context->wlan_policy && context->wlan_context && context->phase == WFP_ARC &&
+        context->wlan_plan.votes && context->wlan_plan.votes <= RF_WLAN_MAX_VOTES && wf_power_rsc_guard(context)) return 0;
+    return base_held && context->phase == WFP_AOP_ON &&
         wf_power_word(context, WFP_RSC, 0xd04u) == 0 &&
         wf_power_word(context, WFP_RSC, 0xd14u) == 0 &&
         wf_power_word(context, WFP_RSC, 0xd1cu) == 0 &&
@@ -634,15 +673,26 @@ extern "C" int redfin_wifi_power_audit(void)
         wf_power_rsc_guard(&wf_power) ? 0 : EPERM;
 }
 
-extern "C" int redfin_wifi_wlan_resources_observe(void)
+static bool wf_wlan_platform(bool power)
 {
     DTEntry node;
-    const uint32_t expected[10] = {1, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000};
+    const uint32_t expected[10] = {power ? 2u : 1u, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000};
     uint32_t actual[10] = {}, observe = 0; uint8_t names[sizeof(rf_wlan_supply_names)] = {};
-    if (redfin_wifi_power_audit() || SecureDTLookupEntry(NULL, "/redfin-wifi-wlan", &node) != kSuccess ||
+    if (SecureDTLookupEntry(NULL, "/redfin-wifi-wlan", &node) != kSuccess ||
         !wf_property(node, "source-contract", actual, sizeof(actual)) || memcmp(actual, expected, sizeof(actual)) ||
         !wf_property(node, "resource-names", names, sizeof(names)) || memcmp(names, rf_wlan_supply_names, sizeof(names)) ||
-        !wf_property(node, "observe-only", &observe, sizeof(observe)) || observe != 1) return EPERM;
+        !wf_property(node, "observe-only", &observe, sizeof(observe)) || observe != (power ? 0u : 1u)) return false;
+    if (power) {
+        uint32_t addresses[RF_WLAN_SUPPLIES] = {};
+        if (!wf_property(node, "resource-addresses", addresses, sizeof(addresses)) ||
+            memcmp(addresses, rf_wlan_supply_addresses, sizeof(addresses))) return false;
+    }
+    return true;
+}
+
+extern "C" int redfin_wifi_wlan_resources_observe(void)
+{
+    if (redfin_wifi_power_audit() || !wf_wlan_platform(false)) return EPERM;
     rf_wlan_resources resources = {};
     if (rf_wlan_resources_read((const volatile uint8_t *)wf_power.base[WFP_DB], &resources) ||
         redfin_wifi_power_audit()) return EIO;
@@ -660,6 +710,38 @@ extern "C" int redfin_wifi_wlan_resources_observe(void)
         }
     }
     return redfin_wifi_power_audit();
+}
+
+extern "C" int redfin_wifi_wlan_power_start(unsigned chain_present, uint32_t chain,
+    void *child, int (*policy)(void *))
+{
+    wf_power_context *context = &wf_power;
+    if (!child || !policy || context->wlan_attempted || !wf_wlan_platform(true) ||
+        redfin_wifi_power_audit() || policy(child)) return EPERM;
+    context->wlan_attempted = true;
+    if (rf_wlan_resources_read((const volatile uint8_t *)context->base[WFP_DB], &context->wlan_resources) ||
+        rf_wlan_power_plan(&context->wlan_resources, chain_present, chain, &context->wlan_plan) || policy(child)) return ENXIO;
+    context->wlan_resources_valid = true;
+    context->wlan_context = child; context->wlan_policy = policy;
+    if (!wf_power_tables(context, false) || !wf_power_rsc_guard(context)) return EPERM;
+    context->wlan_busy = true; context->phase = WFP_ARC;
+    IOLog("REDFIN WIFI WLAN: native provider/consumer sequence votes=%u chain1=%u; retained until reset\n",
+        context->wlan_plan.votes, context->wlan_plan.chain1);
+    int error = 0;
+    for (unsigned i = 0; i < context->wlan_plan.votes; ++i) {
+        error = wf_power_vote(context, 3u + RF_WIFI_BW_COUNT + i);
+        if (error) break;
+    }
+    if (!error) {
+        context->phase = WFP_AOP_ON; context->wlan_busy = false;
+        context->wlan_powered = context->wlan_held == (1u << context->wlan_plan.votes) - 1u &&
+            !redfin_wifi_power_audit() && !policy(child);
+        if (!context->wlan_powered) error = EPERM;
+    }
+    if (error) context->poisoned = true;
+    IOLog("REDFIN WIFI WLAN: power result=%d accepted=%#x phase=%u quarantined=%u\n",
+        error, context->wlan_held, context->phase, context->poisoned);
+    return error;
 }
 
 static void wf_power_probe(void)

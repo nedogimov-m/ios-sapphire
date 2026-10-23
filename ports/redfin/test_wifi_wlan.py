@@ -55,6 +55,7 @@ HARNESS = r'''
 #include "wifi_qmi.h"
 static struct rf_wlan_resources resources;
 static struct rf_wlfw_cap cap;
+static struct rf_wlan_plan plan;
 int observe(const uint8_t *data){memset(&resources,0,sizeof(resources));return rf_wlan_resources_read(data,&resources);}
 uint32_t value(unsigned index,unsigned which){
  if(index>=5)return 0;const struct rf_cmddb_resource *r=&resources.supply[index];
@@ -62,6 +63,14 @@ uint32_t value(unsigned index,unsigned which){
 }
 int capability(const uint8_t *data,uint32_t bytes){memset(&cap,0,sizeof(cap));return rf_wlfw_cap_parse(&cap,data,bytes,4);}
 uint32_t cap_value(unsigned which){return which==0 ? cap.valid : cap.chain;}
+int power_plan(const uint8_t *data,unsigned present,uint32_t chain){
+ memset(&resources,0,sizeof(resources));memset(&plan,0,sizeof(plan));
+ if(rf_wlan_resources_read(data,&resources))return -1;return rf_wlan_power_plan(&resources,present,chain,&plan);
+}
+uint32_t plan_value(unsigned index,unsigned which){
+ if(which==0)return plan.votes;if(which==1)return plan.chain1;if(index>=plan.votes)return 0;
+ return which==2 ? plan.vote[index].address : plan.vote[index].value;
+}
 '''
 
 
@@ -84,6 +93,8 @@ class WlanMetadataTests(unittest.TestCase):
         cls.lib.value.restype = C.c_uint32
         cls.lib.cap_value.restype = C.c_uint32
         cls.lib.capability.argtypes = [C.c_void_p, C.c_uint32]
+        cls.lib.power_plan.argtypes = [C.c_void_p, C.c_uint, C.c_uint32]
+        cls.lib.plan_value.restype = C.c_uint32
 
     def test_native_resource_reader_preserves_bytes_and_returns_five_distinct_vrm_addresses(self):
         data = bytes(database()); memory = C.create_string_buffer(data)
@@ -136,6 +147,36 @@ class WlanMetadataTests(unittest.TestCase):
             if case == 'disabled': source[parent]['status'] = b'disabled\0'
             with self.assertRaises(ValueError):
                 P.add_wlan_observer_contract(self.tree(source), source)
+
+    def test_power_plan_uses_observed_resources_native_voltages_modes_and_chain_policy(self):
+        data = database()
+        addresses = [0x40800, 0x42100, 0x41d00, 0x41a00, 0x41900]
+        for index, address in enumerate(addresses):
+            struct.pack_into('<IIIHH', data, 144 + 24 * index + 8, 0, 0, address, 4, 4 * index)
+        struct.pack_into('<H', data, 16, 0x100)
+        self.assertEqual(self.lib.power_plan(bytes(data), 0, 0), 0)
+        expected = [(0x40800, 352), (0x40808, 4), (0x40804, 1),
+                    (0x42100, 1800), (0x42108, 4), (0x42104, 1),
+                    (0x41d00, 1304), (0x41d08, 4), (0x41d04, 1),
+                    (0x41a00, 3000), (0x41a08, 4), (0x41a04, 1),
+                    (0x41900, 3000), (0x41908, 4), (0x41904, 1)]
+        self.assertEqual(self.lib.plan_value(0, 0), 15)
+        self.assertEqual([(self.lib.plan_value(i, 2), self.lib.plan_value(i, 3)) for i in range(15)], expected)
+        self.assertEqual(self.lib.power_plan(bytes(data), 1, 1), 0)
+        self.assertEqual(self.lib.plan_value(0, 0), 12); self.assertEqual(self.lib.plan_value(0, 1), 0)
+        self.assertFalse(any(self.lib.plan_value(i, 2) in (0x41a00, 0x41a04, 0x41a08) for i in range(12)))
+        self.assertNotEqual(self.lib.power_plan(bytes(data), 1, 3), 0)
+        struct.pack_into('<I', data, 144 + 16, 0x40900)
+        self.assertNotEqual(self.lib.power_plan(bytes(data), 0, 0), 0)
+        self.assertEqual(self.lib.plan_value(0, 0), 0)
+
+    def test_power_contract_requires_an_explicit_profile_and_pins_observed_addresses(self):
+        source = source_nodes(); root = self.tree(source)
+        P.add_wlan_observer_contract(root, source, power=True)
+        node = next(n for n in root.children if n.name == 'redfin-wifi-wlan')
+        self.assertEqual(struct.unpack('<I', node.prop('source-contract')[:4])[0], 2)
+        self.assertEqual(node.prop('observe-only'), bytes(4))
+        self.assertEqual(struct.unpack('<5I', node.prop('resource-addresses')), (0x40800, 0x42100, 0x41d00, 0x41a00, 0x41900))
 
 
 if __name__ == '__main__':

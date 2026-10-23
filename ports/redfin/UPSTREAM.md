@@ -315,5 +315,16 @@ inherited TCS entries retain their enabled/idle metadata; they are not a
 measurement of current aggregate regulator outputs. No WLAN VRM/PMIC/clock
 write is added in this observation stage.
 
+The subsequent native observer confirms VRM addresses40800/42100/41d00/
+41a00/41900 for ldoa1/ldoa14/ldoc2/ldoc11/ldoc10, aux0x100/4bytes and
+zero priorities. The optional power profile pins these exact records and
+the reviewed PMIC5 provider/consumer sequence: final352/1800/1304/3000/
+3000mV requests, native LPM mode4, then enable1 for each selected supply.
+CX352mV emulates its provider initialization, which native ICNSS's0/0
+consumer override preserves. Missing chain capability retains native two
+chains; reported1x1 omits chain1. Only the already-owned DRV2 ACTIVE slot is
+used, with the base ARC/BCM/AOP ledger retained and the same live MPSS child
+checking every write/poll. Uncertain requests remain held until reset.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

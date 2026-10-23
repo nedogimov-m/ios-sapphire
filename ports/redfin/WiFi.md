@@ -818,3 +818,21 @@ absent optional XO pin clock. Native TLV0x1b chain capability is retained
 separately from RF identity. The observer reports `ldoa1`, `ldoa14`, `ldoc2`,
 `ldoc11`, `ldoc10` addresses/metadata and any matching inherited TCS entries;
 it adds no RSC, PMIC, clock or WLAN write operation.
+
+The fresh native resource observation confirms `ldoa1=0x40800`,
+`ldoa14=0x42100`, `ldoc2=0x41d00`, `ldoc11=0x41a00`, `ldoc10=0x41900`;
+all have VRM4, aux0x100/4bytes and priorities0/0. Chain capability is absent,
+so native ICNSS's default enables both chains. FW_READY is still absent.
+
+The mutually exclusive `--wifi-wlan-power` profile pins those observations
+and the live provider/consumer contracts, then applies native voltage,
+LPM-mode and enable requests through the owned DRV2 ACTIVE slot after
+successful native MSA/CAP identity. It preserves the base ARC/BCM/AOP votes,
+checks the live MPSS child and immutable resources throughout, and retains
+any uncertain votes until reset. Other TCS slots and interrupt masks remain
+outside its writer. The five final native requests are352/1800/1304/3000/
+3000mV; chain1 is omitted for a reported1x1 capability. No optional XO pin
+clock is present in this DT profile. Host services continue while waiting
+for FW_READY, with a30-second transport deadline for a captured final result.
+TCS acceptance records a resource request; it does not measure a regulator
+output or demonstrate association/data transfer.

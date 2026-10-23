@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN typed native WLAN supply sequence prepared — 2026-10-23
+
+Continues `84cb367`. New explicit `--wifi-wlan-power` is mutually exclusive
+with the read-only observer. Its schema2 handoff pins the observed five
+VRM identities (addresses, aux0x100/4 and priorities0/0) and live native
+provider/consumer inputs. The final native requests are352/1800/1304/3000/
+3000mV, PMIC5 LPM4 and enable1. CX352mV emulates provider initialization
+preserved by ICNSS's0/0 override; an explicit1x1 capability omits chain1,
+while the observed absent capability retains native two-chain behavior.
+No arbitrary regulator address/value or optional-clock API is exposed.
+
+After fresh successful MSA/CAP with the observed chip/family/SoC/firmware,
+the same CPU0 child may resume the already-owned DRV2 ACTIVE slot for12/15
+typed votes. Base ARC/BCM/AOP votes remain held. The live child/MPSS proof is
+checked before writes and polling; immutable VRM metadata is revalidated,
+other TCS/interrupt masks stay outside the writer, and completion reseals
+the ACTIVE slot. Any uncertain write/ACK/epoch retains mappings and votes
+for full reset, with no cleanup stores. The parent-held check permits only
+this typed in-progress child and avoids recursive policy evaluation.
+The explicit WLAN observation window is now30s for a captured final result.
+
+All209 Wi-Fi checks PASS (3 optional private cases skipped). New tests run
+actual C++ RSC/ARC/VRM paths with a modeled established BCM ledger, including
+every195 MMIO failure/readback position and every195 owner-loss position,
+foreign controller/metadata mutation and missing/incomplete ACK cases.
+Native `build-20261023-185754.log` PASS; no CI run. Complete actual Image/
+live-FDT/shim-return preflight PASS; WLAN power hardware execution is pending.
+Kernel `bd2c0d63d37ebb8f36c0fc7028e07a8fcde0e2b07b057c4a3ca22f8f5d6371a9`; image `73cc54fd058b881d3b87c7c7293053a3f394fb24bc8be2338538a62d905d9b30`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x8384126435d38590`.
+
+Next: temporary power-v1 boot; authenticate RSC acceptance and FW_READY/
+subsequent file requests, then continue toward CE/HTC/WMI/HTT and actual
+association/data. GPU/native Metal and Bluetooth remain unfinished.
+
 ## REDFIN WLAN VRM resource hardware PASS; FW_READY still absent — 2026-10-23
 
 Source `9856fc4`, local native `build-20261023-183559.log`. Authenticated,
