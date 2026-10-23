@@ -28,6 +28,7 @@ class Session(C.Structure):
                 ('peer', 'peer_seen', 'peer_features', 'peer_restart', 'peer_valid',
                  'slave_index', 'slave_found', 'last_state', 'handover')]
     _fields_ += [('names', (C.c_uint8 * 16) * 16), ('stores', C.c_uint32), ('kicks', C.c_uint32)]
+    _fields_ += [(name, C.c_uint32) for name in ('ipa_index', 'ipa_found', 'ipa_state', 'ipa_responses')]
 
 
 class Ops(C.Structure):
@@ -183,7 +184,7 @@ class Smp2pTests(unittest.TestCase):
                         '-I', str(HERE), '-I', str(PORT), str(HERE / 'wifi_smp2p.c'), str(helper),
                         '-o', str(library)], check=True, capture_output=True)
         cls.library = C.CDLL(str(library))
-        for name in ('prepare', 'auth_begin'):
+        for name in ('prepare', 'auth_begin', 'alive', 'ipa_respond'):
             getattr(cls.library, 'rf_wifi_smp2p_' + name).argtypes = [C.POINTER(Session), C.POINTER(Ops)]
         for name in ('wait_ready', 'stop'):
             getattr(cls.library, 'rf_wifi_smp2p_' + name).argtypes = [C.POINTER(Session), C.POINTER(Ops), C.c_uint32]
@@ -214,6 +215,22 @@ class Smp2pTests(unittest.TestCase):
         model.peer(**peer)
         self.assertEqual(self.call(model, 'wait_ready', 10), 0)
         return model
+
+    def test_native_ipa_query_publishes_only_the_owned_absent_vote_once_after_ready(self):
+        model = self.ready(names=[('slave-kernel', 6), ('ipa', 1)])
+        before = model.session.stores
+        self.assertEqual(self.call(model, 'ipa_respond'), 0)
+        self.assertEqual(model.u32(model.session.data + 56), 1)
+        self.assertEqual(model.session.ipa_responses, 1)
+        self.assertEqual(model.session.stores, before + 1)
+        self.assertEqual(self.call(model, 'ipa_respond'), 0)
+        self.assertEqual(model.session.stores, before + 1)
+        model = self.ready(names=[('slave-kernel', 6), ('ipa', 0)])
+        before = model.session.stores
+        self.assertEqual(self.call(model, 'ipa_respond'), 0)
+        self.assertEqual(model.session.stores, before)
+        not_started = self.prepared()
+        self.assertNotEqual(self.call(not_started, 'ipa_respond'), 0)
 
     def test_prepare_appends_only_exact_outbound_and_publishes_version_last(self):
         model = Model()

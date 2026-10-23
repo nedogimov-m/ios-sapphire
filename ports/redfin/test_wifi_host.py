@@ -172,6 +172,18 @@ class NativeWifiHostTests(unittest.TestCase):
         self.assertEqual(self.library.metric(10), 1)
         self.assertNotEqual(self.receive(request[:-1], to=0x4001), 0)
 
+    def test_pd_mapper_uses_both_captured_domains_without_inventing_pdr_or_dump_services(self):
+        for name, count in ((b'tms/servreg', 2), (b'gps/gps_service', 1), (b'tms/pdr_enabled', 0),
+                            (b'tms/pddump_disabled', 0)):
+            body = b'\1' + struct.pack('<H', len(name)) + name
+            request = struct.pack('<BHHH', 0, 6, 0x21, len(body)) + body
+            self.assertEqual(self.receive(request, to=0x4001), 0)
+            output = self.output()
+            self.assertIn(b'\x10\x02\0' + struct.pack('<H', count), output)
+            if count == 2:
+                self.assertIn(b'msm/modem/root_pd', output)
+                self.assertIn(b'msm/modem/wlan_pd', output)
+
     def test_captured_inventory_hashes_are_consumed_by_the_actual_native_asset_parser(self):
         directory = Path(self.temporary.name) / 'assets'
         directory.mkdir(exist_ok=True)

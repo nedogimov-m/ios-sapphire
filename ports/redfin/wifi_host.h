@@ -251,21 +251,30 @@ static inline int rf_host_pd(struct rf_host *h, const struct rf_host_ops *o, uin
         at += 3u + count;
     }
     if (message == 0x21 && found) {
-        bool matched = !strcmp(name, "wlan/fw") || !strcmp(name, "kernel/elf_loader") || !strcmp(name, "tms/servreg");
+        /* Captured modemr.jsn supplies root servreg/GPS; modemuw.jsn supplies
+         * WLAN servreg/ELF loader/fw. Absent PDR/dump services stay absent. */
+        bool wlan = !strcmp(name, "wlan/fw") || !strcmp(name, "kernel/elf_loader") || !strcmp(name, "tms/servreg");
+        bool root = !strcmp(name, "tms/servreg") || !strcmp(name, "gps/gps_service");
+        unsigned matched = (unsigned)wlan + (unsigned)root;
         out[used++] = 0x10; rf_host_le_put(out + used, 2, 2); used += 2;
-        rf_host_le_put(out + used, matched ? 1 : 0, 2); used += 2;
+        rf_host_le_put(out + used, matched, 2); used += 2;
         out[used++] = 0x11; rf_host_le_put(out + used, 2, 2); used += 2;
         rf_host_le_put(out + used, 1, 2); used += 2;
         if (matched) {
-            static const char domain[] = "msm/modem/wlan_pd";
-            unsigned length = (unsigned)strlen(domain), count = 1u + 1u + length + 4u + 1u + 4u;
-            out[used++] = 0x12; rf_host_le_put(out + used, count, 2); used += 2;
-            out[used++] = 1; out[used++] = (uint8_t)length;
-            memcpy(out + used, domain, length); used += length;
-            rf_host_le_put(out + used, 180, 4); used += 4;
-            out[used++] = 0; memset(out + used, 0, 4); used += 4;
+            static const char *const domain[2] = {"msm/modem/root_pd", "msm/modem/wlan_pd"};
+            uint32_t start = used;
+            out[used++] = 0x12; used += 2; out[used++] = (uint8_t)matched;
+            for (unsigned i = 0; i < 2; ++i) {
+                if (i == 0 ? !root : !wlan) continue;
+                unsigned length = (unsigned)strlen(domain[i]);
+                out[used++] = (uint8_t)length;
+                memcpy(out + used, domain[i], length); used += length;
+                rf_host_le_put(out + used, 180, 4); used += 4;
+                out[used++] = 0; memset(out + used, 0, 4); used += 4;
+            }
+            rf_host_le_put(out + start + 1u, used - start - 3u, 2);
         }
-        ++h->pd_requests; o->event(o->context, 4, name, matched ? 1 : 0);
+        ++h->pd_requests; o->event(o->context, 4, name, matched);
     } else if (message != 0x20) {
         rf_host_le_put(out + 10, 1, 2); rf_host_le_put(out + 12, 0x5e, 2);
     }

@@ -246,5 +246,15 @@ read-only; base-vendor compatibility remains a live firmware question. The
 preferred kernel's WLFW/QMI framing and native `icnss_qmi.c` inform the next
 CAP0x24 query, without importing ath11k/WCN6750 hardware or radio settings.
 
+After the first host-service hardware run, reviewed native IPA's
+`drivers/platform/msm/ipa/ipa_v3/{ipa.c,ipa_i.h}` at the same Google pin.
+Its SMP2P response uses complete bit0/APPS clock-vote bit1. Redfin's absent
+APPS IPA vote can be acknowledged once through the owned outbound entry,
+without asserting an aggregate power reading or touching IPA registers.
+The live FDT's IPA entry/consumer-bit route is bound explicitly. The saved
+modemr.jsn root_pd metadata adds only its actual servreg/GPS services; absent
+PDR/dump services are preserved. The previous root metadata and the reviewed
+Sapphire IPA wire behavior are cross-checks, not replacement hardware IDs.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

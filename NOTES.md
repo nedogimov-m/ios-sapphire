@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native pd-mapper request/response hardware PASS; IPA query added — 2026-10-23
+
+Source1b7075c / native build164615. Authenticated/image/nonce-matched
+`wifi-host-v1-20261023-165248`, bootid467b59b2c2074dba, validates all5resident
+WLAN assets on-device, repeats PAS4/full copy/ready and native GLINK/QRTR.
+The modem receives our host-service advertisements and sends real QMI domain
+queries for tms/pdr_enabled and tms/pddump_disabled; bounded replies return0
+captured domains. Final49GLINK frames/18sent/5QRTR packets,2remote services,
+2PDM requests,0TFTP requests through45s. No file is requested or served, and
+WLFW remains absent. PID1 lives; authenticated recovery observes unchanged
+clean HFSX/write_count462335 and verifies final fastboot.
+V1 kernelf0a06f424f03eb0745ea88916523b93eb26874eed687c9d12c6ea97ac9d9389e;
+imagee4a268a14408e2299d2c7cf8948e79c0b3ffe8e89e18ca45bfab865047e69925.
+Exact v1 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x467b59b2c2074dba`.
+
+Review of pinned native ipa.c/ipa_i.h establishes IPA response complete bit0,
+APPS clock-vote bit1. The existing port does not own/request an APPS IPA vote.
+V2 answers a newly observed native inbound ipa bit0 query once with outbound
+ipa=1 (complete, vote absent), through the same ready/owner/SMEM gates. This
+reports our software vote, not aggregate power; no IPA register/clock or DMA
+operation is introduced. Exact IPA FDT entry/consumer bit binding is required
+by the new schema2host contract. Incoming/query/response counts are logged.
+
+The bounded saved modem FAT reader also reviews modemr.jsn: root_pd,
+instance180, tms/servreg and gps/gps_service only. PDM now returns both root
+and WLAN domains where captured, preserving absent PDR/dump services instead
+of inventing positive entries. Native producer/session hashes remain private.
+41actual SMP2P/IPA/PDM/TFTP/GLINK checksPASS in1.934s. Local native build
+`build-20261023-170237.log`PASS; complete real Image/live-FDT/return preflightPASS; no CI run.
+Kernel`d2752c08bc6e3c50c7e578af902128d3d37191faaaa81d280ceb3121fc04b28c`;image`4ce192041758ad63afdd1fdd5250d26a69153d2f0aae6083165d8deda88ea269`.
+Exact v2 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xfabaa0c834c9b743`.
+Next: fresh host-v2run to observe/answer IPA and continue toward actual WLAN
+firmware requests/WLFW. If still absent, inspect further native host dependency
+metadata and requests rather than claim WLAN from MPSS readiness.
+
 ## REDFIN GLINK/IPCRTR/QRTR hardware PASS; WLAN host services prepared — 2026-10-23
 
 Sourcea44543d / native build162015. Fresh authenticated/image/nonce matched

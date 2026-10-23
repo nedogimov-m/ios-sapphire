@@ -70,6 +70,7 @@ struct rf_wifi_smp2p_session {
     uint32_t slave_index, slave_found, last_state, handover;
     uint8_t names[16][16];
     uint32_t stores, kicks;
+    uint32_t ipa_index, ipa_found, ipa_state, ipa_responses;
 };
 
 #ifdef __cplusplus
@@ -90,6 +91,9 @@ int rf_wifi_smp2p_auth_begin(struct rf_wifi_smp2p_session *, const struct rf_wif
 int rf_wifi_smp2p_wait_ready(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *, uint32_t timeout_ms);
 /* Read-only continuing liveness/identity check for this established session. */
 int rf_wifi_smp2p_alive(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *);
+/* Respond to a fresh native IPA bit0 query with this port's absent APPS IPA
+ * clock vote (complete=1,vote=0). This does not report aggregate hardware power. */
+int rf_wifi_smp2p_ipa_respond(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *);
 /* Require stop-ack low before setting only master-kernel bit0, then a fresh
  * high ACK. Clear our stop bit only after that ACK; timeout retains it and
  * quarantines. PAS shutdown is the caller's next step after success. */

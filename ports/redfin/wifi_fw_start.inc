@@ -63,8 +63,8 @@ static bool fw_start_glink_contract(void)
         fw_property(node, "source-contract", witness, sizeof(witness)) && !memcmp(witness, expected, sizeof(witness)) &&
         fw_property(node, "channel", name, sizeof(name)) && !memcmp(name, "IPCRTR", sizeof(name));
     if (valid && fw_start.host_mode) {
-        const uint32_t required[11] = {1, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096};
-        uint32_t actual[11] = {};
+        const uint32_t required[13] = {2, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1};
+        uint32_t actual[13] = {};
         valid = fw_property(node, "host-services", actual, sizeof(actual)) && !memcmp(actual, required, sizeof(actual));
     }
     return valid;
@@ -510,7 +510,11 @@ static int fw_start_transport_run(fw_start_context *context)
     uint64_t first = fw_start_ns(context), next_report = first;
     uint64_t timeout = context->host_mode ? UINT64_C(45000000000) : UINT64_C(10000000000);
     while (fw_start_ns(context) - first < timeout) {
-        int alive = rf_wifi_smp2p_alive(&context->smp2p, &context->smp_ops);
+        unsigned previous_ipa = context->smp2p.ipa_responses;
+        int alive = context->host_mode ? rf_wifi_smp2p_ipa_respond(&context->smp2p, &context->smp_ops) :
+            rf_wifi_smp2p_alive(&context->smp2p, &context->smp_ops);
+        if (context->smp2p.ipa_responses != previous_ipa)
+            IOLog("REDFIN WIFI HOST: native IPA query=%#x response=1 (APPS IPA vote absent)\n", context->smp2p.ipa_state);
         if (alive && alive != RF_WIFI_SMP2P_UNSTABLE) return alive;
         if (!alive) {
             error = rf_gl_pump(&context->glink, &context->glink_ops);
@@ -537,9 +541,10 @@ static int fw_start_transport_run(fw_start_context *context)
                 context->glink.open, context->glink.rx, context->glink.heard, context->glink.sent,
                 context->glink.packets, context->qrtr_services, context->wlfw_port);
             next_report = now + 1000000000u;
-            if (context->host_mode) IOLog("REDFIN WIFI HOST: pd=%u TFTP=%u reads=%u writes=%u missing=%u pending=%u cap=%u/%u\n",
+            if (context->host_mode) IOLog("REDFIN WIFI HOST: pd=%u TFTP=%u reads=%u writes=%u missing=%u pending=%u cap=%u/%u IPA=%u/%#x/%u\n",
                 context->host.pd_requests, context->host.requests, context->host.reads, context->host.writes,
-                context->host.missing, context->pending_count, context->cap_sent, context->cap_received);
+                context->host.missing, context->pending_count, context->cap_sent, context->cap_received,
+                context->smp2p.ipa_found, context->smp2p.ipa_state, context->smp2p.ipa_responses);
         }
         if (context->wlfw_port) {
             if (!context->host_mode) return 0;

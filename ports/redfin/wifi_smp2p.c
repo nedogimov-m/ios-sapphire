@@ -15,6 +15,7 @@
 #define SMP_HANDOVER 4u
 #define SMP_STOP_ACK 8u
 #define SMP_MASTER_VALUE 36u
+#define SMP_IPA_VALUE 56u
 
 struct smp_heap {
     uint32_t partition, bytes, cacheline, free_u, free_c;
@@ -182,7 +183,8 @@ static int update(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_op
     if (error) return error;
     if ((relative != 4u || (value != 1u && value != SMP_VALID_VERSION)) &&
         (relative != 16u || (value != 0u && value != 2u)) &&
-        (relative != SMP_MASTER_VALUE || (value != 0u && value != 1u)))
+        (relative != SMP_MASTER_VALUE || (value != 0u && value != 1u)) &&
+        (relative != SMP_IPA_VALUE || value != 1u || s->stage != RF_WIFI_SMP2P_READY))
         return RF_WIFI_SMP2P_ARGUMENT;
     if (s->own[relative / 4u] == value) return RF_WIFI_SMP2P_OK;
     ++s->stores;
@@ -289,7 +291,7 @@ static int peer(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
     if (s->peer_seen && (features != s->peer_features || restart != s->peer_restart || valid < s->peer_valid))
         return RF_WIFI_SMP2P_RESTART;
     uint8_t names[16][16];
-    uint32_t slave = 0, found = 0;
+    uint32_t slave = 0, found = 0, ipa = 0, ipa_found = 0;
     for (unsigned i = 0; i < valid; ++i) {
         int terminated = 0;
         for (unsigned j = 0; j < 16; ++j) {
@@ -309,6 +311,10 @@ static int peer(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
         unsigned different = 0;
         for (unsigned j = 0; j < 16; ++j) different |= names[i][j] ^ slave_name[j];
         if (!different) { slave = i; found = 1; }
+        static const uint8_t ipa_name[16] = "ipa";
+        different = 0;
+        for (unsigned j = 0; j < 16; ++j) different |= names[i][j] ^ ipa_name[j];
+        if (!different) { ipa = i; ipa_found = 1; }
     }
     uint32_t state_value = found ? first[9u + 5u * slave] : 0;
     if (state_value & SMP_FATAL) return RF_WIFI_SMP2P_FATAL;
@@ -328,6 +334,8 @@ static int peer(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
         for (unsigned j = 0; j < 16; ++j) s->names[i][j] = names[i][j];
     s->slave_found = found; s->slave_index = slave; s->last_state = state_value;
     s->handover |= (state_value & SMP_HANDOVER) != 0;
+    s->ipa_found = ipa_found; s->ipa_index = ipa;
+    s->ipa_state = ipa_found ? first[9u + 5u * ipa] : 0;
     *state = state_value;
     error = gate(s, o);
     return error ? error : negotiated ? RF_WIFI_SMP2P_UNSTABLE : RF_WIFI_SMP2P_OK;
@@ -394,6 +402,24 @@ int rf_wifi_smp2p_alive(struct rf_wifi_smp2p_session *s, const struct rf_wifi_sm
     if (!error) error = peer(s, o, &state);
     if (error == RF_WIFI_SMP2P_UNSTABLE) return error;
     if (!error && !(state & SMP_READY)) error = RF_WIFI_SMP2P_STATE;
+    return error ? poison(s, error) : RF_WIFI_SMP2P_OK;
+}
+
+int rf_wifi_smp2p_ipa_respond(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *o)
+{
+    if (!s || !valid_ops(o)) return RF_WIFI_SMP2P_ARGUMENT;
+    if (s->stage != RF_WIFI_SMP2P_READY || s->poisoned) return RF_WIFI_SMP2P_STATE;
+    uint32_t state = 0;
+    int error = gate(s, o);
+    if (!error && o->pas_started(o->context)) error = RF_WIFI_SMP2P_STATE;
+    if (!error) error = peer(s, o, &state);
+    if (error == RF_WIFI_SMP2P_UNSTABLE) return error;
+    if (!error && !(state & SMP_READY)) error = RF_WIFI_SMP2P_STATE;
+    if (!error && s->ipa_found && (s->ipa_state & 1u) && !s->ipa_responses) {
+        error = update(s, o, SMP_IPA_VALUE, 1);
+        if (!error) error = kick(s, o);
+        if (!error) ++s->ipa_responses;
+    }
     return error ? poison(s, error) : RF_WIFI_SMP2P_OK;
 }
 

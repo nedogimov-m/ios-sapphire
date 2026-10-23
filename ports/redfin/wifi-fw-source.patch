@@ -740,7 +740,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,701 @@
+@@ -0,0 +1,706 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -806,8 +806,8 @@ new file mode 100644
 +        fw_property(node, "source-contract", witness, sizeof(witness)) && !memcmp(witness, expected, sizeof(witness)) &&
 +        fw_property(node, "channel", name, sizeof(name)) && !memcmp(name, "IPCRTR", sizeof(name));
 +    if (valid && fw_start.host_mode) {
-+        const uint32_t required[11] = {1, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096};
-+        uint32_t actual[11] = {};
++        const uint32_t required[13] = {2, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1};
++        uint32_t actual[13] = {};
 +        valid = fw_property(node, "host-services", actual, sizeof(actual)) && !memcmp(actual, required, sizeof(actual));
 +    }
 +    return valid;
@@ -1253,7 +1253,11 @@ new file mode 100644
 +    uint64_t first = fw_start_ns(context), next_report = first;
 +    uint64_t timeout = context->host_mode ? UINT64_C(45000000000) : UINT64_C(10000000000);
 +    while (fw_start_ns(context) - first < timeout) {
-+        int alive = rf_wifi_smp2p_alive(&context->smp2p, &context->smp_ops);
++        unsigned previous_ipa = context->smp2p.ipa_responses;
++        int alive = context->host_mode ? rf_wifi_smp2p_ipa_respond(&context->smp2p, &context->smp_ops) :
++            rf_wifi_smp2p_alive(&context->smp2p, &context->smp_ops);
++        if (context->smp2p.ipa_responses != previous_ipa)
++            IOLog("REDFIN WIFI HOST: native IPA query=%#x response=1 (APPS IPA vote absent)\n", context->smp2p.ipa_state);
 +        if (alive && alive != RF_WIFI_SMP2P_UNSTABLE) return alive;
 +        if (!alive) {
 +            error = rf_gl_pump(&context->glink, &context->glink_ops);
@@ -1280,9 +1284,10 @@ new file mode 100644
 +                context->glink.open, context->glink.rx, context->glink.heard, context->glink.sent,
 +                context->glink.packets, context->qrtr_services, context->wlfw_port);
 +            next_report = now + 1000000000u;
-+            if (context->host_mode) IOLog("REDFIN WIFI HOST: pd=%u TFTP=%u reads=%u writes=%u missing=%u pending=%u cap=%u/%u\n",
++            if (context->host_mode) IOLog("REDFIN WIFI HOST: pd=%u TFTP=%u reads=%u writes=%u missing=%u pending=%u cap=%u/%u IPA=%u/%#x/%u\n",
 +                context->host.pd_requests, context->host.requests, context->host.reads, context->host.writes,
-+                context->host.missing, context->pending_count, context->cap_sent, context->cap_received);
++                context->host.missing, context->pending_count, context->cap_sent, context->cap_received,
++                context->smp2p.ipa_found, context->smp2p.ipa_state, context->smp2p.ipa_responses);
 +        }
 +        if (context->wlfw_port) {
 +            if (!context->host_mode) return 0;
@@ -1922,7 +1927,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_host.h b/iokit/Kernel/arm/redfin_wifi_
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_host.h
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,285 @@
 +/* SPDX-License-Identifier: MIT
 + * Bounded QRTR host services for native MPSS: servreg locator and RAM TFTP.
 + * Wire references: native servreg-locator QMI and tqftpserv; the legacy
@@ -2176,21 +2181,30 @@ new file mode 100644
 +        at += 3u + count;
 +    }
 +    if (message == 0x21 && found) {
-+        bool matched = !strcmp(name, "wlan/fw") || !strcmp(name, "kernel/elf_loader") || !strcmp(name, "tms/servreg");
++        /* Captured modemr.jsn supplies root servreg/GPS; modemuw.jsn supplies
++         * WLAN servreg/ELF loader/fw. Absent PDR/dump services stay absent. */
++        bool wlan = !strcmp(name, "wlan/fw") || !strcmp(name, "kernel/elf_loader") || !strcmp(name, "tms/servreg");
++        bool root = !strcmp(name, "tms/servreg") || !strcmp(name, "gps/gps_service");
++        unsigned matched = (unsigned)wlan + (unsigned)root;
 +        out[used++] = 0x10; rf_host_le_put(out + used, 2, 2); used += 2;
-+        rf_host_le_put(out + used, matched ? 1 : 0, 2); used += 2;
++        rf_host_le_put(out + used, matched, 2); used += 2;
 +        out[used++] = 0x11; rf_host_le_put(out + used, 2, 2); used += 2;
 +        rf_host_le_put(out + used, 1, 2); used += 2;
 +        if (matched) {
-+            static const char domain[] = "msm/modem/wlan_pd";
-+            unsigned length = (unsigned)strlen(domain), count = 1u + 1u + length + 4u + 1u + 4u;
-+            out[used++] = 0x12; rf_host_le_put(out + used, count, 2); used += 2;
-+            out[used++] = 1; out[used++] = (uint8_t)length;
-+            memcpy(out + used, domain, length); used += length;
-+            rf_host_le_put(out + used, 180, 4); used += 4;
-+            out[used++] = 0; memset(out + used, 0, 4); used += 4;
++            static const char *const domain[2] = {"msm/modem/root_pd", "msm/modem/wlan_pd"};
++            uint32_t start = used;
++            out[used++] = 0x12; used += 2; out[used++] = (uint8_t)matched;
++            for (unsigned i = 0; i < 2; ++i) {
++                if (i == 0 ? !root : !wlan) continue;
++                unsigned length = (unsigned)strlen(domain[i]);
++                out[used++] = (uint8_t)length;
++                memcpy(out + used, domain[i], length); used += length;
++                rf_host_le_put(out + used, 180, 4); used += 4;
++                out[used++] = 0; memset(out + used, 0, 4); used += 4;
++            }
++            rf_host_le_put(out + start + 1u, used - start - 3u, 2);
 +        }
-+        ++h->pd_requests; o->event(o->context, 4, name, matched ? 1 : 0);
++        ++h->pd_requests; o->event(o->context, 4, name, matched);
 +    } else if (message != 0x20) {
 +        rf_host_le_put(out + 10, 1, 2); rf_host_le_put(out + 12, 0x5e, 2);
 +    }

@@ -314,8 +314,17 @@ def add_glink_contract(tree, nodes, services=False):
         ('source-contract', mkadt.u32(1, 4, 1, 478, 479, 480, 16384, 0x20000, 3, 1)),
         ('channel', b'IPCRTR\0')]))
     if services:
+        output = '/soc/qcom,smp2p-mpss/qcom,smp2p-ipa-1-out'
+        incoming = '/soc/qcom,smp2p-mpss/qcom,smp2p-ipa-1-in'
+        mapping = '/soc/qcom,ipa@1e00000/qcom,smp2p_map_ipa_1_out'
+        handle = nodes.get(output, {}).get('phandle', nodes.get(output, {}).get('linux,phandle'))
+        if (nodes.get(output, {}).get('qcom,entry-name') != b'ipa\0' or
+                nodes.get(output, {}).get('#qcom,smem-state-cells') != words(1) or
+                nodes.get(incoming, {}).get('qcom,entry-name') != b'ipa\0' or not handle or
+                nodes.get(mapping, {}).get('qcom,smem-states') != handle + words(0)):
+            raise ValueError('native IPA SMP2P query/reply binding changed')
         tree.children[-1].props.append(('host-services', 0,
-            mkadt.u32(1, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096)))
+            mkadt.u32(2, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1)))
 
 
 def main():
