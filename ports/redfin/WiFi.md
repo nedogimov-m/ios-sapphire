@@ -867,3 +867,10 @@ Unknown layouts stay header-only. Every command is EXT_READL; no PMIC write
 channel is used. Owner/mapping loss, a changed sample, error or timeout
 stops this diagnostic until full platform reset. The existing power-only
 profile remains available without these additional observations.
+
+Hardware module-pmic-v2 completes all three snapshots. Candidate PPIDs
+`140/14d/541/54a/549` report configured=VALID voltages
+`680/1800/1304/3312/3312`mV, MODE7, ENABLE80 and STATUS87 before the WLAN
+votes, after their ACKs and at the final timeout. These stable raw points
+are already powered; SID5 supply attribution and RF-clock readiness remain
+separate questions. Native power/mask ACKs still do not produce FW_READY.

@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN three physical WLAN PMIC snapshots PASS; FW_READY absent — 2026-10-24
+
+Source `7aa286c`, native `build-20261024-015003.log`, authenticated
+module-pmic-v2 capture matched boot ID `f76eec02e8e820bf`. Both physical
+identities match (`SID0=1e51`, `SID4=2751`). All three ordered snapshots
+complete, each with stable double samples and unchanged before/after/final
+tuples. The five candidate PPIDs are already enabled before the new WLAN
+votes:140=680mV,14d=1800mV,541=1304mV,54a=3312mV,549=3312mV. Configured
+and VALID voltages agree, MODE7/ENABLE80/STATUS87/READY1 throughout.
+Observed APIDs85/98/171/180/179 all have write-owner4 and unified LDO
+headers6b04/7204/6b04/7d04/7d04. SID5 ordinal attribution remains a candidate;
+this does not measure RF clocks or prove the complete WLAN power topology.
+
+Native MSA/CAP, all15 supply requests (accepted7fff/quarantine0) and dynamic
+mask1 succeed again. FW_READY and pin-result indications remain absent;
+captured final resultETIMEDOUT60/phase12/SMP2P stage4. The unchanged higher
+physical voltages/mode are aggregate-state observations, not evidence that
+the accepted lower requests failed. Recovery authenticates the log, verifies
+image/nonce, observes clean HFSX/write_count462335 and leaves verified
+fastboot with the next public RAM metadata primed. No persistent disk change.
+
+Kernel `31df57d6b1f8f846687fb5d8aff68e7467cdbba2246d91d657cc8373909bcd53`;
+image `d420dd965ce28772563f02fafb2a895ad7afb78b202df3389b49a6fe60f58d14`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xf76eec02e8e820bf`.
+
+Next: retain raw native inbound SMP2P `wlan` state. Native ICNSS registers
+bit0 force-error-fatal and bit1 early-crash after CAP/power; only master
+MPSS liveness and IPA are currently logged. Reuse the already validated
+stable peer snapshot without new MMIO, writes, IRQ handling or recovery.
+Association/data, GPU/native Metal and Bluetooth remain unfinished.
+
 ## REDFIN PMIC observer pins authenticated SID4 identity — 2026-10-24
 
 Continues `3fd0dc4`. Rechecked Google's pinned `qpnp-revid.c` and Linux
