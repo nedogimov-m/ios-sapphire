@@ -1,5 +1,52 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN fixed-buffer RMTFS ABI correction prepared — 2026-10-23
+
+After source `b74feb6`, align the service with native node/caller ownership
+and fixed-buffer allocation, including size0. Cross-port traffic from the
+same MPSS node remains bounded to the same successfully shared buffer;
+foreign nodes and unknown handles still fail. Requested byte counts and
+source node/port are now logged on ALLOC failures. All13 actual RMTFS/SCM/
+producer/loader tests and19 topology reconstruction tests PASS. The stale
+SMP fixture context is fixed while preserving the new RMTFS preflight on
+both sides of its historical delta. Native `build-20261023-174735.log` PASS;
+no CI run. Complete actual Image/live-FDT/shim-return preflight PASS.
+Kernel `253aa4ab05f62b0dde63f28ea6d981fb0196fbe533b8a180ba2e800a5908de37`; image `a4bad8c92b3613ef943d75823347bc0cd797f56343298dcd5d0db9344caf2143`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x3256ecd1a25d0e35`.
+
+Next: temporary RMTFS-v2 boot to establish actual ALLOC size/endpoint and
+IOVEC/WLFW results. This version has not yet run on hardware.
+
+## REDFIN RMTFS sharing and two OPENs hardware PASS; ALLOC still refused — 2026-10-23
+
+Source `b74feb6`, local native `build-20261023-173812.log`. Authenticated,
+image/nonce-matched `wifi-host-rmtfs-v1-20261023-174500`, boot ID
+`03ef31dcd063d8d5`, verifies all four private snapshots and volatile shadows.
+The shim-owned low buffer passes its zero/guard checks. HLOS3/MSS15 sharing
+succeeds with status0/value0 in one SCM call. PAS4 authentication and fresh
+SMP2P ready0x6 repeat; GLINK/QRTR again work. Native OPENs succeed for the
+first two partition handles. ALLOC for caller1 is refused (error1), then
+SMP2P reports fatal. This capture did not log the requested size or endpoint,
+so its exact ALLOC rejection cause is not established. No IOVEC transfer or
+WLFW readiness is claimed.
+
+Recovery authenticates the capture, observes unchanged clean HFSX with
+`write_count=462335`, and verifies final fastboot. Kernel SHA256
+`1e0329a239eb15fd8a990bc6776d5934ac2905f27522cf3648accf53f6d2e097`;
+image `b7ecf446f5ae69173b2560183913d22aa4743607c4e16f94e700ff22d265c738`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x03ef31dcd063d8d5`.
+
+Review identifies two differences from native linux-msm/rmtfs: handles bind
+to node/caller, not an individual QRTR port, and the fixed-buffer allocator
+accepts size0. The next version corrects both semantics, retains the strict
+owned-buffer limit, and records each request's endpoint and requested size.
+The complete host suite ran1161 tests with2 historical SMP-topology fixture
+setup errors, caused by stale patch context at the new loader preflight;
+no test assertion failed. The topology fixture is updated to preserve the
+RMTFS guard on both sides of its reconstructed SMP delta. Recheck those
+fixtures and the RMTFS cases before the next native build/temporary boot.
+No persistent EFS/boot/recovery/modem writes were introduced.
+
 ## REDFIN native RMTFS RAM backend and checked low-buffer handoff — 2026-10-23
 
 Continues source `1e41f51`. A new read-only recovery session independently

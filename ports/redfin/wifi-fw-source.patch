@@ -740,7 +740,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,857 @@
+@@ -0,0 +1,860 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -1278,6 +1278,9 @@ new file mode 100644
 +        int error = 0;
 +        if (type == 1 && to == 0x4001) error = rf_host_pd(&context->host, &context->host_ops, source, from, data + at, size);
 +        else if (type == 1 && to == 0x4003) {
++            if (context->rmtfs_mode && size >= 7)
++                IOLog("REDFIN WIFI RMTFS: request node=%u port=%#x message=%u payload_bytes=%u\n",
++                    source, from, (unsigned)rf_qmi_u16(data + at + 3), size);
 +            if (source != context->qrtr_peer) error = EPERM;
 +            else error = context->rmtfs_mode ? rf_rm_request(&context->rmtfs, &context->rmtfs_ops,
 +                source, from, data + at, size) : rf_host_rmtfs_refuse(&context->host, &context->host_ops,
@@ -2465,7 +2468,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_rmtfs.h b/iokit/Kernel/arm/redfin_wifi
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_rmtfs.h
-@@ -0,0 +1,207 @@
+@@ -0,0 +1,212 @@
 +/* SPDX-License-Identifier: MIT
 + * Native RMTFS QMI framing, with private snapshots and volatile RAM shadows.
 + * Wire reference: linux-msm/rmtfs b30a3eb38f9af283f18dbd3c7755653efc52c094.
@@ -2608,7 +2611,7 @@ new file mode 100644
 +    if (!error && message == 1) {
 +        for (unsigned i = 0; i < 4; ++i) if (length[0] == strlen(rf_rm_names[i]) &&
 +            !memcmp(value[0], rf_rm_names[i], length[0])) { file = &s->file[i]; caller = i + 1u; break; }
-+        if (!file || (file->open && (file->node != node || file->port != port))) error = 1;
++        if (!file || (file->open && file->node != node)) error = 1;
 +        if (!error) {
 +            file->open = 1; file->node = node; file->port = port;
 +            response[14] = 16; rf_rm_put(response + 15, 4, 2); rf_rm_put(response + 17, caller, 4); used += 7;
@@ -2619,16 +2622,21 @@ new file mode 100644
 +        else {
 +            caller = rf_rm_u32(value[0]);
 +            if (caller >= 1 && caller <= 4) file = &s->file[caller - 1u];
-+            if (!file || !file->open || file->node != node || file->port != port) error = 1;
++            /* Native handles belong to a QRTR node. MPSS can use another
++             * client socket/port for subsequent requests on the same handle. */
++            if (!file || !file->open || file->node != node) error = 1;
 +        }
 +        if (!error && message == 2) { file->open = 0; file->allocated = 0; }
 +        else if (!error && message == 4) {
 +            if (length[1] != 4) error = 2;
 +            else {
 +                uint32_t requested = rf_rm_u32(value[1]);
-+                if (!requested || requested > RF_RM_SHARED) error = 1;
++                transferred = requested;
++                if (requested > RF_RM_SHARED) error = 1;
 +                else {
-+                    file->allocated = requested;
++                    /* rmtfs_mem_alloc returns the same fixed buffer even for
++                     * size0; it does not carve a per-request suballocation. */
++                    file->allocated = RF_RM_SHARED;
 +                    response[14] = 16; rf_rm_put(response + 15, 8, 2); rf_rm_put(response + 17, s->physical, 8);
 +                    used += 11; ++s->allocations; transferred = requested;
 +                }

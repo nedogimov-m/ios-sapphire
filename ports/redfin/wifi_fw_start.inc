@@ -535,6 +535,9 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
         int error = 0;
         if (type == 1 && to == 0x4001) error = rf_host_pd(&context->host, &context->host_ops, source, from, data + at, size);
         else if (type == 1 && to == 0x4003) {
+            if (context->rmtfs_mode && size >= 7)
+                IOLog("REDFIN WIFI RMTFS: request node=%u port=%#x message=%u payload_bytes=%u\n",
+                    source, from, (unsigned)rf_qmi_u16(data + at + 3), size);
             if (source != context->qrtr_peer) error = EPERM;
             else error = context->rmtfs_mode ? rf_rm_request(&context->rmtfs, &context->rmtfs_ops,
                 source, from, data + at, size) : rf_host_rmtfs_refuse(&context->host, &context->host_ops,

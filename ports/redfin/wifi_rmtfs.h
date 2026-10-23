@@ -140,7 +140,7 @@ static inline int rf_rm_request(struct rf_rmtfs *s, const struct rf_rm_ops *o, u
     if (!error && message == 1) {
         for (unsigned i = 0; i < 4; ++i) if (length[0] == strlen(rf_rm_names[i]) &&
             !memcmp(value[0], rf_rm_names[i], length[0])) { file = &s->file[i]; caller = i + 1u; break; }
-        if (!file || (file->open && (file->node != node || file->port != port))) error = 1;
+        if (!file || (file->open && file->node != node)) error = 1;
         if (!error) {
             file->open = 1; file->node = node; file->port = port;
             response[14] = 16; rf_rm_put(response + 15, 4, 2); rf_rm_put(response + 17, caller, 4); used += 7;
@@ -151,16 +151,21 @@ static inline int rf_rm_request(struct rf_rmtfs *s, const struct rf_rm_ops *o, u
         else {
             caller = rf_rm_u32(value[0]);
             if (caller >= 1 && caller <= 4) file = &s->file[caller - 1u];
-            if (!file || !file->open || file->node != node || file->port != port) error = 1;
+            /* Native handles belong to a QRTR node. MPSS can use another
+             * client socket/port for subsequent requests on the same handle. */
+            if (!file || !file->open || file->node != node) error = 1;
         }
         if (!error && message == 2) { file->open = 0; file->allocated = 0; }
         else if (!error && message == 4) {
             if (length[1] != 4) error = 2;
             else {
                 uint32_t requested = rf_rm_u32(value[1]);
-                if (!requested || requested > RF_RM_SHARED) error = 1;
+                transferred = requested;
+                if (requested > RF_RM_SHARED) error = 1;
                 else {
-                    file->allocated = requested;
+                    /* rmtfs_mem_alloc returns the same fixed buffer even for
+                     * size0; it does not carve a per-request suballocation. */
+                    file->allocated = RF_RM_SHARED;
                     response[14] = 16; rf_rm_put(response + 15, 8, 2); rf_rm_put(response + 17, s->physical, 8);
                     used += 11; ++s->allocations; transferred = requested;
                 }

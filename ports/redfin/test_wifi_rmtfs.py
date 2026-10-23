@@ -179,12 +179,19 @@ class RmtfsTests(unittest.TestCase):
             self.assertEqual(C.string_at(self.lib.buffer(1), R.SHARED_BYTES), before)
         self.assertEqual(self.lib.metric(6), 0); self.assertEqual(self.lib.guards(), 0)
 
-    def test_caller_node_port_and_allocated_length_are_enforced(self):
+    def test_caller_node_and_complete_fixed_buffer_bounds_are_enforced(self):
         self.opened(512)
-        for kwargs in ({'caller': 0}, {'caller': 99}, {'node': 2}, {'port': 8}):
+        for kwargs in ({'caller': 0}, {'caller': 99}, {'node': 2}):
             self.assertNotEqual(self.io(0, [(0, PHYSICAL, 1)], **kwargs)[10:14], bytes(4))
-        self.assertNotEqual(self.io(0, [(0, PHYSICAL, 2)])[10:14], bytes(4))
+        self.assertNotEqual(self.io(0, [(0, PHYSICAL + R.SHARED_BYTES, 1)])[10:14], bytes(4))
         self.assertEqual(self.lib.metric(6), 0)
+
+    def test_native_zero_size_alloc_and_cross_port_requests_use_the_fixed_buffer(self):
+        self.qmi(1, [(1, b'/boot/modem_fs1')], port=7)
+        response = self.qmi(4, [(1, struct.pack('<I', 1)), (2, bytes(4))], port=8)
+        self.assertEqual(struct.unpack_from('<Q', response, 17)[0], PHYSICAL)
+        self.assertEqual(self.io(0, [(0, PHYSICAL + R.SHARED_BYTES - 512, 1)], port=9)[10:14], bytes(4))
+        self.assertEqual(self.lib.metric(6), 1)
 
     def test_close_reopen_keeps_ram_changes_without_reopening_storage(self):
         self.opened(); C.memset(self.lib.buffer(1), 0xab, 512)

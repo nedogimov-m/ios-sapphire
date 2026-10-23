@@ -399,7 +399,7 @@ diff --git a/ports/redfin/loader.c b/ports/redfin/loader.c
      if ((p->adt_offset & 15) || (p->adt_size & 3) || p->adt_size < 8 || p->adt_size > UINT32_MAX ||
          p->adt_offset < table || p->adt_offset > size || p->adt_size > size - p->adt_offset) return "ADT bounds";
      uint64_t last = p->virt;
-@@ -158,7 +474,10 @@
+@@ -158,8 +474,11 @@
      q->top = (q->args + sizeof(struct boot_args) + PAGE - 1) & ~(PAGE - 1);
      if (q->top > p->phys + p->memory) return "boot args outside RAM";
      q->entry = p->phys + (p->entry - p->virt);
@@ -408,6 +408,7 @@ diff --git a/ports/redfin/loader.c b/ports/redfin/loader.c
 +    int gui = REDFIN_GUI_BUILD_READY && redfin_gui_profile(p->command, sizeof(p->command), NULL);
 +    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, 1) : adt_valid_smp(tree, p->adt_size)) :
 +        adt_valid_up(tree, p->adt_size, mpidr, p->phys, p->memory))) return "ADT CPU or RAM mismatch";
+     if (!rmtfs_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "RMTFS RAM ownership";
      return NULL;
  }
  
