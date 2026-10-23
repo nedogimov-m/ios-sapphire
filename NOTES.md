@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN access restored; USB TX completed on hardware — 2026-10-23
+
+Source11fcd6e. User returned the device to fastboot. Temporary safe recovery
+`gmu-tcm-rescue-20261023-113632` observes journaled16GiBHFSXv5 with clean_unmounted=true,
+inconsistent=false, write_count462335; a header observation does not certify
+all filesystem contents. Existing4MiBRAM and4096-byte metadata were saved,
+but AES-GCM authentication failed: no old plaintext or GMU outcome is accepted.
+The ordinary collector refused priming and returned to fastboot. After verifying
+both saved hashes, an explicit RAM-only public-key bootstrap uses the existing
+verified Cycle helpers in `ramoops-reprime-20261023-113829`; it also preserves
+that recovery's raw bank/metadata, verifies root/no mounts/no swap, pushes only
+the public key and pinned vendor executable, and verifies the cleared AES block.
+No private key was sent; no disk partition/mount/flash/Android boot was requested.
+The automatic collector's authentication policy is unchanged.
+
+USB image `usb-net-v8` SHA256 `2895eb16616ce214ae0204e9b7f4ca64ddbaa470c11c2b0c031bca0da2b0c1ab`;
+local build053033/kernel `2ba70c080e479452574f626998d68844e65747bf40a3992de690c2c7443153c7`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xa559cbffdc50dfc9`.
+Fresh authenticated/image/nonce-matched `usb-net-v8-20261023-113935` observes
+staticPID1, submitted78/completed78frames/17485bytes, expected lease timeout60
+(ETIMEDOUT), owned halt1 and retained slab, then verified fastboot return.
+No panic; HFS header/462335write_count unchanged. Native ECM `en9` has ARP and
+14209bytes UDP text, but no solicited nonce echo/boot-ID marker: host status
+probe-incomplete. Many empty IOService snapshots are recorded. This proves
+actual checked TRB completion and some USB traffic, not the full native-host
+freshness/ACK protocol or combined USB/GPU operation.
+
+GMU `gmu-tcm-v2` image `5cd7789a5d40307ecfb098bac337cbe981ac029f3a14eb095d10db4f911d16f5`,
+local build051157/kernel `03949cc195ff69f121e318e6c9729501f4cb5acbc5c421f4b9f234a13cd711f3`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x510d59111137311b`.
+Fresh authenticated/image/nonce-matched `gmu-tcm-v2-20261023-114224` returns
+automatically, but its log ends after iBoot Stage2, before any GPU/GMU marker
+or PID1; no panic line. No GMU hardware result can be inferred. HFS header
+remains clean/unmodified. A fresh same-profile image on the newer USB-proven
+kernel with the hardware maximum29s bark is being tested to distinguish a
+stale build/early-boot issue. Watchdog range remains10..29s; shim prearm only
+sets the verified bootloader reason, not a separate longer watchdog.
+
 ## REDFIN final regression and checked USB TX image prepared — 2026-10-23
 
 Source8c99cfc links the resident Wi-Fi firmware mechanism and fixes the ADT
