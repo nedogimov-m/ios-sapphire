@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native PAS4 coordinator prepared — 2026-10-23
+
+Source parent ddd4d02. Added isolated `--wifi-fw-start`, exact
+`redfinwififw=2`, resident bundle identity and a serialized CPU0 kernel worker.
+The source and return contracts remain separate from the source-only and
+power-only modes. Native live-FDT validation binds modem LLCC129->EBI512
+and default SCM crypto125's unique route through CE0/SN6/SN0/SH0/MC0/ACV.
+The native CMD-DB supplies each BCM address/unit/width/VCD. Bounded votes
+preserve observed inherited X/Y floors and foreign ACV bits and remain held.
+The existing CX/MSS/XO/AOP lease stays checked around every child operation.
+
+The new coordinator detects the native SCM convention, requires a successful
+PAS4 SHUTDOWN before granting reset/write authority, prepares outbound SMP2P
+428 under physically owned TCSR lock3, copies/readbacks metadata at MPSS base,
+then calls INIT/MEM_SETUP, copies/readbacks all native segments/BSS, calls
+AUTH and requires a fresh inbound435 ready. Every stage is one attempt;
+uncertainty retains mappings/votes until the bounded platform reset. The
+worker invalidates its software lease before exit. No media/UFS/EFS API,
+legacy modem/Wi-Fi backend, GPIO radio start or network interface is added.
+
+Native source correction: pinned Google's `peripheral-loader.c:1292` passes
+region_start to `subsys-pil-tz.c:pil_init_image_trusted`; this supports the
+existing metadata-at-MPSS-base mechanism. It does not require inventing a
+separate low-memory DMA pool. Native PAS does not gate on PAS_SUPPORTED.
+The native PIL bus contracts are now included rather than inferred from
+the already proven ARC/AOP power result.
+
+Observation: 115 existing focused firmware/source/SMP2P/build/return cases
+complete (3 optional private cases skipped), seven new actual C BCM/PAS
+cases PASS; final 69 power/dispatch/BCM/PAS/build/return checks PASS in10.149s.
+Local complete native build151816 passes; worker private-exit declaration
+was corrected after compile152409, final build `build-20261023-152546.log`
+passes. No CI run was launched. Actual full Image/live-FDT/C-loader and
+compiled shim-return preflight PASS. Boot image79,351,808 bytes,
+decompressed Image117,138,848 bytes. Hardware execution is next, unclaimed.
+
+Kernel `55be04c7e0f4f851f05344281084c59d17f3de13d0b6d7db104588cb48471915`;
+image `bf9af60aceaa22230e4687a098fc0f00ed57c101d1f09a90208aeae063f589de`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=2 redfinspmi=1 redfinreturn=1 redfinbootid=0xe80a7d529f0ab70a`.
+
+Next: temporary `wifi-fw-start-v1` boot and authenticated collection/HFS
+observation; continue directly from its actual failing stage or ready result
+to native GLINK/QRTR/WLFW and station/ifnet integration. No functional Wi-Fi
+or successful PAS invocation is claimed by this software milestone.
+
 ## REDFIN resident MPSS source hardware PASS — 2026-10-23
 
 Source f46c2e5; local native build `build-20261023-144832.log` (no new CI run).

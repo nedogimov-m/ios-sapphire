@@ -1,11 +1,12 @@
 diff --git a/bsd/conf/files b/bsd/conf/files
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -122,6 +122,7 @@
+@@ -122,6 +122,8 @@
  bsd/dev/redfin_gpu_power.c			standard
  bsd/dev/redfin_gmu_probe.c			standard
  bsd/dev/redfin_wifi_aop.c			standard
 +bsd/dev/redfin_wifi_fw_source.c		standard
++bsd/dev/redfin_wifi_smp2p.c		standard
  bsd/dev/redfin_rpmh_touch.c			standard
  bsd/dev/sweet_spmi.c			standard
  bsd/dev/sweet_usb.c			standard

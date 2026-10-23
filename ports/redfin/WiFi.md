@@ -623,3 +623,41 @@ PAS_SUPPORTED gate. The earlier zero query is an unresolved capability fact,
 not proof that native PIL cannot work. The next integration requires complete
 metadata/cache ownership, native bandwidth/proxy votes, PAS4 and fresh SMP2P
 ready/stop before GLINK/WLFW or an iOS interface can be enabled.
+
+## Native PAS4 startup coordinator — 2026-10-23
+
+`--wifi-fw-start` selects a separate CPU0/md0 image with the same private
+bundle/SHA256 arguments and required bootloader return. It cannot mix with
+source-only, power-only, UFS/GUI, SMP, USB or another diagnostic. The exact
+selector is `redfinwifi=2 redfinwifinative=1 redfinwififw=2`.
+
+The verified live bus graph binds native SCM crypto125->EBI512 through
+CE0/SN6/SN0/SH0/MC0/ACV, and modem LLCC129->EBI512. CMD-DB supplies each
+resource's address, unit, width and VCD; conversion follows native BCM X/Y
+votes. The native crypto AB/IB and modem IB requests are explicit. Existing
+observed floors and foreign ACV bits are retained. The three proven ARC
+votes, six new BCM votes and acknowledged AOP state remain held until reset.
+
+A single kernel worker owns the source, power and exact SMEM/TCSR/IPCC/MPSS
+mappings. Successful PAS4 shutdown establishes its reset proof. It then
+prepares the native SMP2P allocation, copies/readbacks metadata at MPSS base,
+calls PAS INIT/MEM_SETUP, copies/readbacks all planned loads/BSS and calls
+AUTH. Fresh ready requires a newly created inbound435 with the native PIDs,
+ABI, feature/restart state and ready bit. Source pointers alone cannot grant
+destination authority. Failed/uncertain operations cannot retry or force
+shutdown; the temporary platform watchdog returns to fastboot. Software
+ownership is invalidated before worker exit, retaining remote-visible state.
+
+Google's peripheral-loader passes region_start to init_image, and its
+trusted adapter maps that address for the metadata copy. This confirms the
+existing metadata-at-base design. There is no guessed extra DMA pool or
+hardware-address substitution. PAS and SCM transport results must both pass;
+busy/interrupt continuations are bounded and retain the native cookie.
+
+Seven actual C BCM/PAS tests pass, including malformed tables, observed
+floors, both SCM conventions, exact PAS4 registers, resume cookies, busy
+retry bounds, separate PAS/transport errors and ownership loss. The final
+69 targeted power/dispatch/build/return checks and native build152546 pass.
+The complete real Image/live-FDT/return preflight passes. This documents a
+prepared hardware run; MPSS authentication/readiness and all Wi-Fi packets
+still need their separate device observations in NOTES.md.

@@ -197,5 +197,24 @@ WPSS/PAS6 destinations or WCN6750 radio backend. Local build144832 and host
 preflight establish the new source-only profile; hardware results belong
 in NOTES.md, independently of upstream's stage descriptions.
 
+## Native PIL integration review — 2026-10-23
+
+Continued the preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`
+`redwood_wifi.c` review for its serialized worker and later GLINK/QRTR stages.
+Redfin's actual MPSS boot remains derived from Google msm
+`500b3a2059c1eec0fec08ec56add06320ea901a8`: `peripheral-loader.c`,
+`subsys-pil-tz.c`, `scm.c`, `msm_bus_arb_rpmh.c` and
+`msm_bus_fabric_rpmh.c`. Reviewed Lito bus definitions at DT commit
+`afc98e2bb0716a57bf4f8d2b6191378dd7123ce4`, `qcom/lito-bus.dtsi`,
+and verified every selected route/member against the saved live Redfin FDT.
+
+The native peripheral loader passes region_start to PAS metadata init;
+metadata-at-MPSS-base is therefore source-backed. The two PIL bandwidth
+clients require six APPS BCMs (CE0/SN6/SN0/SH0/MC0/ACV), with native CMD-DB
+geometry and the APPS ACV bit. Redfin now implements these before its
+PAS4/SMP2P boot sequence; Redwood's PAS6/RF backend is not substituted.
+Software/native-build results and pending device execution are recorded
+separately in NOTES.md. Upstream's WLAN/ifnet remains a later consumer.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

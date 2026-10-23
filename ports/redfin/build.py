@@ -95,6 +95,7 @@ def main():
     p.add_argument('--wifi-native-probe', action='store_true', help='isolated md0/UP read-only AOP/SMEM/CMD-DB prerequisite snapshot')
     p.add_argument('--wifi-power-probe', action='store_true', help='isolated md0/UP retained CX/MSS/XO votes and AOP modem-on transaction')
     p.add_argument('--wifi-fw-source-probe', action='store_true', help='isolated md0 native resident MPSS source pin/hash/parse; no radio start')
+    p.add_argument('--wifi-fw-start', action='store_true', help='isolated native PAS4 MPSS boot with retained power/bandwidth and fresh SMP2P ready')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -121,10 +122,13 @@ def main():
         a.gpu_power_probe = True
     if a.wifi_power_probe:
         a.wifi_native_probe = True
-    if a.wifi_fw_source_probe:
+    if a.wifi_fw_start and a.wifi_fw_source_probe:
+        p.error('--wifi-fw-start cannot combine with --wifi-fw-source-probe')
+    if a.wifi_fw_source_probe or a.wifi_fw_start:
         a.wifi_native_probe = True
         if not (a.wifi_fw_bundle and a.wifi_fw_sha256) or a.wifi_power_probe:
-            p.error('--wifi-fw-source-probe requires its private bundle/SHA256 and separate source-only profile')
+            p.error('--wifi-fw-start requires its private bundle/SHA256 and isolated profile' if a.wifi_fw_start else
+                    '--wifi-fw-source-probe requires its private bundle/SHA256 and separate source-only profile')
     elif a.wifi_fw_bundle or a.wifi_fw_sha256:
         p.error('--wifi-fw-bundle/--wifi-fw-sha256 require --wifi-fw-source-probe')
     if a.scm_probe:
@@ -136,7 +140,7 @@ def main():
                 any(value for name, value in vars(a).items() if name.endswith('_probe') and name != 'scm_probe')):
             p.error('--scm-probe requires its separate RAM-only profile')
     if a.wifi_native_probe:
-        label = '--wifi-fw-source-probe' if a.wifi_fw_source_probe else '--wifi-power-probe' if a.wifi_power_probe else '--wifi-native-probe'
+        label = '--wifi-fw-start' if a.wifi_fw_start else '--wifi-fw-source-probe' if a.wifi_fw_source_probe else '--wifi-power-probe' if a.wifi_power_probe else '--wifi-native-probe'
         if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
             p.error(f'{label} requires kernel, live DTB, CPU0 and --return-bootloader')
         competing = ('display', 'splash', 'touch_events', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
@@ -368,10 +372,16 @@ def main():
                 add_probe_contract(tree, nodes)
             except ValueError as error:
                 p.error(str(error))
-        if a.wifi_power_probe:
+        if a.wifi_power_probe or a.wifi_fw_start:
             from wifi_platform import add_power_contract
             try:
                 add_power_contract(tree, nodes)
+            except ValueError as error:
+                p.error(str(error))
+        if a.wifi_fw_start:
+            from wifi_platform import add_start_contract
+            try:
+                add_start_contract(tree, nodes)
             except ValueError as error:
                 p.error(str(error))
         if a.scm_probe:
@@ -505,6 +515,8 @@ def main():
             command_line += ' redfinwifinative=1'
         if a.wifi_fw_source_probe:
             command_line += ' redfinwififw=1'
+        if a.wifi_fw_start:
+            command_line += ' redfinwififw=2'
         if a.wifi_power_probe:
             command_line += ' redfinwifipower=1'
         if a.touch_id_probe or a.touch_events:
@@ -545,7 +557,7 @@ def main():
             out / 'payload.bin', '--ramdisk', out / 'init', '--cmdline',
             command_line])
         payload = (out / 'payload.bin').read_bytes()
-        if a.wifi_fw_source_probe:
+        if a.wifi_fw_source_probe or a.wifi_fw_start:
             import wifi_fw_blob
             from wifi_firmware import live_layout, read_regular
             try:
@@ -562,7 +574,7 @@ def main():
                 verified = wifi_fw_blob.verify_bundle(verifier, a.wifi_fw_bundle, a.wifi_fw_sha256, excluded)
                 firmware = read_regular(a.wifi_fw_bundle, wifi_fw_blob.MAX_BUNDLE)
                 payload, firmware_report = wifi_fw_blob.pack(payload, firmware, a.wifi_fw_sha256,
-                    verified, 0x8000000, probe_exclusions=excluded)
+                    verified, 0x8000000, probe_exclusions=excluded, start=a.wifi_fw_start)
                 (out / 'payload.bin').write_bytes(payload)
                 at, size = struct.unpack_from('<QQ', payload, 32)
                 (out / 'redfin.adt').write_bytes(payload[at:at + size])
@@ -660,6 +672,8 @@ def main():
         manifest['wifi_native_probe'] = True
     if a.wifi_fw_source_probe:
         manifest['wifi_fw_source_probe'] = True
+    if a.wifi_fw_start:
+        manifest['wifi_fw_start'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

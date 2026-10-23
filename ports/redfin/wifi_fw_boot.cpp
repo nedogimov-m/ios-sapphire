@@ -197,13 +197,14 @@ struct fw_probe_context {
 static fw_probe_context fw_probe;
 static uint32_t fw_probe_attempted;
 
-static bool fw_probe_args(const char *args, unsigned bytes, uint64_t *nonce_out)
+static bool fw_probe_args(const char *args, unsigned bytes, uint64_t *nonce_out, unsigned mode = 1)
 {
-    static const char *const required[] = {
+    if (mode != 1 && mode != 2) return false;
+    const char *const required[] = {
         "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
         "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
         "modem=0", "wifi=0", "gpu=0", "redfinwifi=2", "redfinwifinative=1",
-        "redfinwififw=1", "redfinspmi=1", "redfinreturn=1"};
+        mode == 1 ? "redfinwififw=1" : "redfinwififw=2", "redfinspmi=1", "redfinreturn=1"};
     uint32_t seen = 0;
     uint64_t nonce = 0;
     bool nonce_seen = false, trace_seen = false;
@@ -317,4 +318,5 @@ extern "C" void redfin_wifi_fw_source_probe(void)
     redfin_wifi_fw_boot_close(&context->boot);
     context->active = false;
 }
+#include "redfin_wifi_fw_start.inc"
 #endif

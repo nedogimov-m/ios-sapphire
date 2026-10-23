@@ -87,6 +87,15 @@ class BuildFlagTests(unittest.TestCase):
         for extra in ('--ufs-root', '--smp-probe', '--usb-probe'):
             self.refused([*base, extra], '--wifi-fw-source-probe requires its separate RAM-only profile')
 
+    def test_native_firmware_start_requires_the_private_isolated_profile(self):
+        self.refused(['--wifi-fw-start'], '--wifi-fw-start requires its private bundle/SHA256 and isolated profile')
+        selected = ['--wifi-fw-start', '--wifi-fw-bundle', '/private-bundle', '--wifi-fw-sha256', '0' * 64]
+        self.refused(selected, '--wifi-fw-start requires kernel, live DTB, CPU0 and --return-bootloader')
+        base = [*selected, '--kernel', '/missing-kernel', '--dtb', '/missing-dtb', '--return-bootloader']
+        for extra in ('--ufs-root', '--smp-probe', '--usb-probe'):
+            self.refused([*base, extra], '--wifi-fw-start requires its separate RAM-only profile')
+        self.refused([*base, '--wifi-fw-source-probe'], '--wifi-fw-start cannot combine with --wifi-fw-source-probe')
+
     def test_cpu_capability_probe_requires_runtime_return_and_cpu0(self):
         self.refused(['--cpu-capability-probe'],
                      '--cpu-capability-probe requires --kernel, --dtb and --return-bootloader')

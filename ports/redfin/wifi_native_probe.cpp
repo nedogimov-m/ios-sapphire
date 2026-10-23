@@ -16,9 +16,11 @@
 #include "../../../bsd/dev/redfin_wifi_aop.h"
 #include "../../../bsd/dev/redfin_rpmh.h"
 #include "../../bsddev/redfin_wifi_smem.h"
+#include "redfin_wifi_bw.h"
 
 extern "C" int redfin_spmi_return_ready(void);
 extern "C" void redfin_wifi_fw_source_probe(void);
+extern "C" void redfin_wifi_fw_start(void);
 
 struct wf_map {
     IOMemoryDescriptor *memory;
@@ -159,23 +161,25 @@ struct wf_power_context {
     char args[608];
     unsigned arg_bytes;
     thread_t owner;
-    bool active, poisoned;
+    bool active, poisoned, firmware;
     unsigned phase, stores, notifications, held, target, step, polls;
     uint32_t id, config, commands, irq_enable, irq, command_status;
     wf_slot inherited[8];
     uint32_t own_control, own_enabled, own_wait, own_command[3];
     rf_cmddb_resource resource[3];
     rf_wifi_aop_session aop;
+    rf_wifi_bcm bcm[RF_WIFI_BW_COUNT];
+    uint32_t bandwidth[RF_WIFI_BW_COUNT], bandwidth_held;
 };
 static wf_power_context wf_power;
 
-static bool wf_power_args(const char *args, unsigned bytes)
+static bool wf_power_args(const char *args, unsigned bytes, bool firmware = false)
 {
-    static const char *const required[] = {
+    const char *const required[] = {
         "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
         "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
         "modem=0", "wifi=0", "gpu=0", "redfinwifi=2", "redfinwifinative=1",
-        "redfinwifipower=1", "redfinspmi=1", "redfinreturn=1"};
+        firmware ? "redfinwififw=2" : "redfinwifipower=1", "redfinspmi=1", "redfinreturn=1"};
     uint32_t seen = 0;
     bool nonce_seen = false, trace_seen = false;
     if (!args || !bytes || bytes > sizeof(wf_power.args) || args[bytes - 1]) return false;
@@ -231,6 +235,22 @@ static bool wf_power_platform(void)
         wf_property(chosen, "dram-size", &ram_bytes, sizeof(ram_bytes)) && ram_bytes == UINT64_C(0x80000000);
 }
 
+static bool wf_start_platform(void)
+{
+    const uint32_t expected[11] = {1, 4, 2, 435, 428, 3, 1, 125, 129, 512, 6};
+    const uint64_t bandwidth[4] = {393600000, 3936000000, 0, UINT64_C(8171520000)};
+    const uint64_t reg[8] = {UINT64_C(0x80900000), 0x200000, 0x1f40000, 0x20000,
+        0x408000, 0x1000, 0x8c000000, 0x11800000};
+    static const char names[] = "CE0\0SN6\0SN0\0SH0\0MC0\0ACV";
+    uint32_t actual[11] = {}; uint64_t rates[4] = {}, ranges[8] = {}; char keys[sizeof(names)] = {};
+    DTEntry node;
+    return SecureDTLookupEntry(NULL, "/redfin-wifi-start", &node) == kSuccess &&
+        wf_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
+        wf_property(node, "bandwidth", rates, sizeof(rates)) && !memcmp(rates, bandwidth, sizeof(rates)) &&
+        wf_property(node, "reg", ranges, sizeof(ranges)) && !memcmp(ranges, reg, sizeof(ranges)) &&
+        wf_property(node, "bcm-names", keys, sizeof(keys)) && !memcmp(keys, names, sizeof(keys));
+}
+
 static int wf_power_check(void *opaque)
 {
     wf_power_context *context = (wf_power_context *)opaque;
@@ -240,7 +260,7 @@ static int wf_power_check(void *opaque)
         !memcmp(args, context->args, context->arg_bytes) &&
         __builtin_arm_rsr64("CurrentEL") == 4 &&
         !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
-        redfin_spmi_return_ready() == 1;
+        redfin_spmi_return_ready() == 1 && (!context->firmware || wf_start_platform());
     if (valid) for (unsigned i = 0; i < WFP_MAPS; ++i) {
         if (!context->maps[i].mapping || !context->base[i] ||
             context->maps[i].mapping->getVirtualAddress() != context->base[i] ||
@@ -288,6 +308,28 @@ static bool wf_power_tables(wf_power_context *context, bool capture)
         else if (resource.priority[0] != context->resource[i].priority[0] ||
             resource.priority[1] != context->resource[i].priority[1]) return false;
     }
+    if (context->firmware) for (unsigned i = 0; i < RF_WIFI_BW_COUNT; ++i) {
+        rf_wifi_bcm resource = {};
+        if (rf_wifi_bcm_lookup((const volatile uint8_t *)context->base[WFP_DB], i, &resource)) {
+            if (capture) {
+                rf_cmddb_resource raw = {};
+                unsigned status = rf_cmddb_lookup((const volatile uint8_t *)context->base[WFP_DB], RF_CMDDB_BYTES,
+                    rf_wifi_bcm_names[i], RF_CMDDB_BCM, &raw);
+                IOLog("REDFIN WIFI POWER: BCM %.8s rejected status=%u addr=%#x aux-version=%#x aux-bytes=%u\n",
+                    rf_wifi_bcm_names[i], status, raw.address, raw.aux_version, raw.aux_bytes);
+            }
+            return false;
+        }
+        if (capture) {
+            context->bcm[i] = resource;
+            context->bandwidth[i] = rf_wifi_bcm_vote(&resource, i);
+            if (!context->bandwidth[i]) return false;
+            for (unsigned j = 0; j < i; ++j) if (context->bcm[j].address == resource.address) return false;
+            IOLog("REDFIN WIFI POWER: BCM %.8s addr=%#x unit=%u width=%u VCD=%u vote=%#x\n",
+                rf_wifi_bcm_names[i], resource.address, resource.unit, resource.width, resource.vcd,
+                context->bandwidth[i]);
+        } else if (memcmp(&context->bcm[i], &resource, sizeof(resource))) return false;
+    }
     return !wf_power_check(context);
 }
 
@@ -329,12 +371,25 @@ static bool wf_power_snapshot(wf_power_context *context, bool compare, bool skip
                     (address != wf_arc_address[resource] || !(message & (1u << 16)) || data > wf_arc_selector[resource]))
                     return false;
             }
+            if (context->firmware) for (unsigned resource = 0; resource < RF_WIFI_BW_COUNT; ++resource) {
+                if ((address & ~3u) != context->bcm[resource].address) continue;
+                uint32_t held = 0;
+                if (address != context->bcm[resource].address || !(message & (1u << 16)) ||
+                    rf_wifi_bcm_floor(resource, context->bandwidth[resource], data, &held)) return false;
+                if (compare && held != context->bandwidth[resource]) return false;
+                if (!compare) context->bandwidth[resource] = held;
+            }
         }
         if (compare && memcmp(&current, &context->inherited[tcs], sizeof(current))) return false;
         if (!compare) context->inherited[tcs] = current;
     }
     return !wf_power_check(context);
 }
+
+static uint32_t wf_power_address(wf_power_context *context, unsigned target)
+{ return target < 3 ? wf_arc_address[target] : context->bcm[target - 3].address; }
+static uint32_t wf_power_data(wf_power_context *context, unsigned target)
+{ return target < 3 ? wf_arc_selector[target] : context->bandwidth[target - 3]; }
 
 static bool wf_power_rsc_guard(wf_power_context *context)
 {
@@ -360,10 +415,10 @@ static int wf_power_store(wf_power_context *context, unsigned unit, uint32_t off
     if (unit >= WFP_MAPS || offset % 4u || offset > wf_power_ranges[2u * unit + 1u] - 4u ||
         wf_power_check(context) || !wf_power_rsc_guard(context) || !wf_power_tables(context, false)) return EPERM;
     if (unit == WFP_RSC) {
-        if (context->phase != WFP_ARC || context->target >= 3 || context->step >= 13) return EPERM;
+        if (context->phase != WFP_ARC || context->target >= (context->firmware ? 3 + RF_WIFI_BW_COUNT : 3) || context->step >= 13) return EPERM;
         static const uint32_t offsets[13] = {
             0xd30, 0xd34, 0xd38, 0xd10, 0xd1c, 0xd14, 0xd14, 0xd14, 0xd14, 0xd14, 0xd1c, 0xd10, 0xd08};
-        const uint32_t values[13] = {0x10108, wf_arc_address[context->target], wf_arc_selector[context->target],
+        const uint32_t values[13] = {0x10108, wf_power_address(context, context->target), wf_power_data(context, context->target),
             1, 1, 0, 1u << 16, (1u << 16) | (1u << 24), 1u << 16, 0, 0, 0, 1};
         if (offset != offsets[context->step] || value != values[context->step]) return EPERM;
     } else {
@@ -421,11 +476,11 @@ static bool wf_power_sync(wf_power_context *context, uint32_t offset, uint32_t v
 
 static int wf_power_vote(wf_power_context *context, unsigned target)
 {
-    if (target >= 3 || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
+    if (target >= (context->firmware ? 3 + RF_WIFI_BW_COUNT : 3) || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
         wf_power_word(context, WFP_RSC, 0xd04u) || !wf_power_word(context, WFP_RSC, 0xd18u)) return EBUSY;
     context->target = target; context->step = 0;
-    if (!wf_power_sync(context, 0xd30, 0x10108) || !wf_power_sync(context, 0xd34, wf_arc_address[target]) ||
-        !wf_power_sync(context, 0xd38, wf_arc_selector[target]) || !wf_power_sync(context, 0xd10, 1) ||
+    if (!wf_power_sync(context, 0xd30, 0x10108) || !wf_power_sync(context, 0xd34, wf_power_address(context, target)) ||
+        !wf_power_sync(context, 0xd38, wf_power_data(context, target)) || !wf_power_sync(context, 0xd10, 1) ||
         !wf_power_sync(context, 0xd1c, 1) || !wf_power_sync(context, 0xd14, 0) ||
         !wf_power_sync(context, 0xd14, 1u << 16) ||
         wf_power_store(context, WFP_RSC, 0xd14, (1u << 16) | (1u << 24))) return EIO;
@@ -441,9 +496,13 @@ static int wf_power_vote(wf_power_context *context, unsigned target)
         if (poll == 1000 || wf_power_pause(context, 100)) break;
     }
     if (!complete) return ETIMEDOUT;
-    context->held |= 1u << target;
-    IOLog("REDFIN WIFI POWER: ARC address=%#x selector=%u held=1 polls=%u IRQ=%#x CMD=%#x\n",
-        wf_arc_address[target], wf_arc_selector[target], context->polls, context->irq, context->command_status);
+    if (target < 3) context->held |= 1u << target;
+    else context->bandwidth_held |= 1u << (target - 3);
+    if (target < 3)
+        IOLog("REDFIN WIFI POWER: ARC address=%#x selector=%u held=1 polls=%u IRQ=%#x CMD=%#x\n",
+            wf_arc_address[target], wf_arc_selector[target], context->polls, context->irq, context->command_status);
+    else IOLog("REDFIN WIFI POWER: BCM address=%#x value=%#x held=1 polls=%u IRQ=%#x CMD=%#x\n",
+        wf_power_address(context, target), wf_power_data(context, target), context->polls, context->irq, context->command_status);
     if (!wf_power_sync(context, 0xd14, 1u << 16) || !wf_power_sync(context, 0xd14, 0) ||
         !wf_power_sync(context, 0xd1c, 0) || !wf_power_sync(context, 0xd10, 0) ||
         wf_power_store(context, WFP_RSC, 0xd08, 1) || wf_power_word(context, WFP_RSC, 0xd04u) ||
@@ -493,6 +552,10 @@ static int wf_power_run(wf_power_context *context)
         error = wf_power_vote(context, i);
         if (error) return error;
     }
+    if (context->firmware) for (unsigned i = 0; i < RF_WIFI_BW_COUNT; ++i) {
+        error = wf_power_vote(context, i + 3);
+        if (error) return error;
+    }
     context->phase = WFP_AOP_ON;
     error = rf_wifi_aop_open(&context->aop, &operations);
     if (!error) error = rf_wifi_aop_load_state(&context->aop, &operations, 1);
@@ -503,15 +566,17 @@ static int wf_power_run(wf_power_context *context)
     return error;
 }
 
-static void wf_power_probe(void)
+static int wf_power_acquire(bool firmware)
 {
     wf_power_context *context = &wf_power;
     const char *args = PE_boot_args();
     unsigned bytes = 0;
     if (args) while (bytes < sizeof(context->args) && args[bytes]) ++bytes;
-    if (!args || bytes == sizeof(context->args) || !wf_power_args(args, bytes + 1u) || !wf_power_platform()) {
-        IOLog("REDFIN WIFI POWER: refused exact args/live-FDT/RAM contract before mapping\n"); return;
+    if (context->arg_bytes || !args || bytes == sizeof(context->args) ||
+        !wf_power_args(args, bytes + 1u, firmware) || !wf_power_platform() || (firmware && !wf_start_platform())) {
+        IOLog("REDFIN WIFI POWER: refused exact args/live-FDT/RAM contract before mapping\n"); return EPERM;
     }
+    context->firmware = firmware;
     memcpy(context->args, args, bytes + 1u); context->arg_bytes = bytes + 1u;
     context->owner = current_thread(); context->phase = WFP_MAPPING;
     bool mapped = true;
@@ -529,6 +594,31 @@ static void wf_power_probe(void)
     context->active = mapped;
     int error = mapped && !wf_power_check(context) ? wf_power_run(context) : ENXIO;
     if (error) context->poisoned = true;
+    return error;
+}
+
+extern "C" int redfin_wifi_power_start(void)
+{
+    int error = wf_power_acquire(true);
+    IOLog("REDFIN WIFI POWER: firmware result=%d phase=%u ARC=%#x BCM=%#x stores=%u quarantine=%u\n",
+        error, wf_power.phase, wf_power.held, wf_power.bandwidth_held, wf_power.stores, wf_power.poisoned);
+    return error;
+}
+
+extern "C" int redfin_wifi_power_held(void)
+{
+    wf_power_context *context = &wf_power;
+    return context->firmware && context->held == 7 &&
+        context->bandwidth_held == (1u << RF_WIFI_BW_COUNT) - 1u &&
+        context->phase == WFP_AOP_ON && context->aop.load_state == 1 &&
+        !wf_power_check(context) && wf_power_tables(context, false) && wf_power_rsc_guard(context) ? 0 : EPERM;
+}
+
+static void wf_power_probe(void)
+{
+    wf_power_context *context = &wf_power;
+    int error = wf_power_acquire(false);
+    if (!context->arg_bytes) return;
     IOLog("REDFIN WIFI POWER: result=%d phase=%u held_mask=%#x writes=%u kicks=%u quarantined=%u; retained until reset; PAS/SMEM/firmware untouched\n",
         error, context->phase, context->held, context->stores, context->notifications, context->poisoned);
     context->active = false; context->phase = WFP_FINISHED;
@@ -552,6 +642,7 @@ extern "C" void redfin_wifi_native_observe(void)
     int source = 0;
     if (PE_parse_boot_argn("redfinwififw", &source, sizeof(source)) && source) {
         if (source == 1) redfin_wifi_fw_source_probe();
+        else if (source == 2) redfin_wifi_fw_start();
         else IOLog("REDFIN WIFI FW: refused unsupported source mode\n");
         return;
     }

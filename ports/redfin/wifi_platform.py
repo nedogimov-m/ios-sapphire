@@ -221,6 +221,81 @@ def add_power_contract(tree, nodes):
         ('source-contract', mkadt.u32(*POWER_WITNESS))]))
 
 
+def start_contract(nodes):
+    """Bind the native PIL clients and their one exact live interconnect path."""
+    result = power_contract(nodes)
+    words = lambda *values: struct.pack('>' + 'I' * len(values), *values)
+
+    def need(path, key, value):
+        if nodes.get(path, {}).get(key) != value:
+            raise ValueError(f'native MPSS startup FDT mismatch: {path} {key}')
+
+    modem = '/soc/qcom,mss@4080000'
+    for name in ('qcom,no-auth', 'qcom,subsys-vmid', 'qcom,mas-crypto'):
+        if name in nodes[modem]:
+            raise ValueError('native MPSS startup requires its cold native PAS4/crypto binding')
+    need(modem, 'qcom,msm-bus,name', b'pil-modem\0')
+    need(modem, 'qcom,msm-bus,num-cases', words(2))
+    need(modem, 'qcom,msm-bus,num-paths', words(1))
+    need(modem, 'qcom,msm-bus,vectors-KBps', words(129, 512, 0, 0, 129, 512, 0, 8171520))
+    bus = '/soc/ad-hoc-bus/'
+    handles = {props.get('phandle', props.get('linux,phandle')): path
+               for path, props in nodes.items() if props.get('phandle', props.get('linux,phandle'))}
+
+    def links(path, key):
+        raw = nodes[path].get(key, b'')
+        if len(raw) % 4:
+            raise ValueError('unaligned MPSS bus phandles')
+        try:
+            return [handles[raw[i:i + 4]] for i in range(0, len(raw), 4)]
+        except KeyError as error:
+            raise ValueError('unresolved MPSS bus phandle') from error
+
+    route = [('mas-qxm-crypto', 8, 1, ['CE0']), ('slv-qns-a2noc-snoc', 16, 1, []),
+             ('mas-qnm-aggre2-noc', 16, 1, ['SN6']), ('slv-qns-gemnoc-sf', 16, 1, ['SN0']),
+             ('mas-qnm-snoc-sf', 16, 1, []), ('slv-qns-llcc', 16, 2, ['SH0']),
+             ('mas-llcc-mc', 4, 2, []), ('slv-ebi', 4, 2, ['MC0', 'ACV'])]
+    apps = bus + 'rsc-apps'
+    need(apps, 'cell-id', words(8000))
+    need(apps, 'label', b'apps_rsc\0')
+    need(apps, 'qcom,req_state', words(2))
+    need(apps, 'qcom,rsc-dev', b'')
+    for i, (name, width, ports, names) in enumerate(route):
+        path = bus + name
+        need(path, 'qcom,buswidth', words(width))
+        need(path, 'qcom,agg-ports', words(ports))
+        expected_next = bus + route[i + 1][0] if i + 1 < len(route) else None
+        selected = [target for target in links(path, 'qcom,connections')
+                    if target == expected_next]
+        if expected_next and selected != [expected_next]:
+            raise ValueError('native MPSS bus route changed')
+        actual = []
+        for bcm in links(path, 'qcom,bcms'):
+            raw = nodes[bcm].get('qcom,bcm-name', b'')
+            if not raw.endswith(b'\0') or links(bcm, 'qcom,rscs') != [apps]:
+                raise ValueError('native MPSS BCM/RSC binding changed')
+            actual.append(raw[:-1].decode('ascii'))
+        if actual != names:
+            raise ValueError('native MPSS BCM membership changed')
+    need(bus + 'mas-qxm-crypto', 'cell-id', words(125))
+    need(bus + 'mas-llcc-mc', 'cell-id', words(129))
+    need(bus + 'slv-ebi', 'cell-id', words(512))
+    result['start'] = {'schema': 1, 'pas': 4, 'bcms': ['CE0', 'SN6', 'SN0', 'SH0', 'MC0', 'ACV']}
+    return result
+
+
+def add_start_contract(tree, nodes):
+    start_contract(nodes)
+    if any(child.name == 'redfin-wifi-start' for child in tree.children):
+        raise ValueError('duplicate native Wi-Fi startup contract')
+    tree.children.append(mkadt.node('redfin-wifi-start', [
+        ('source-contract', mkadt.u32(1, 4, 2, 435, 428, 3, 1, 125, 129, 512, 6)),
+        ('bandwidth', mkadt.u64(393600000, 3936000000, 0, 8171520000)),
+        ('bcm-names', b'CE0\0SN6\0SN0\0SH0\0MC0\0ACV\0'),
+        ('reg', mkadt.u64(0x80900000, 0x200000, 0x1f40000, 0x20000,
+                          0x408000, 0x1000, 0x8c000000, 0x11800000))]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dtb', required=True, type=Path)

@@ -36,6 +36,8 @@ void redfin_wifi_fw_boot_close(struct rf_wifi_fw_boot *);
 /* Separate exact CPU0/md0 probe: validate/pin/hash/parse source, then close.
  * No destination mapping, PAS, power, SMEM or firmware start. */
 void redfin_wifi_fw_source_probe(void);
+/* Separate native PAS4 startup. Requires the exact firmware/power/bus contract. */
+void redfin_wifi_fw_start(void);
 #ifdef __cplusplus
 }
 #endif

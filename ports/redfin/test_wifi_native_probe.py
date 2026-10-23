@@ -25,6 +25,7 @@ HARNESS = r'''
 #include "wifi_aop.h"
 #include "wifi_smem.h"
 #include "redfin_rpmh.h"
+#include "wifi_bw.h"
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
 typedef uintptr_t DTEntry;
@@ -43,6 +44,8 @@ static int enabled,cpus,spmi,returned,ready,modem,wifi,gpu,usb,gui,smp,wifi_mode
 static int source_mode;
 static unsigned source_calls;
 extern "C" void redfin_wifi_fw_source_probe(void){++source_calls;}
+static unsigned start_calls;
+extern "C" void redfin_wifi_fw_start(void){++start_calls;}
 static int bad_board,bad_node,bad_length,fail_descriptor,fail_mapping,short_mapping,null_mapping;
 static unsigned descriptors,mappings,created_memory,created_maps,released_memory,released_maps,unsafe;
 static unsigned proof_calls,lose_proof;
@@ -150,7 +153,7 @@ extern "C" void reset(void) {
     memcpy(ranges,r,sizeof(r));memcpy(witness,w,sizeof(w));marker=1;
     ram_base=0x180000000;ram_bytes=0x80000000;boot_id=1234;
     enabled=cpus=spmi=returned=ready=1;modem=wifi=gpu=usb=gui=smp=0;
-    wifi_mode=2;source_mode=0;source_calls=0;
+    wifi_mode=2;source_mode=0;source_calls=start_calls=0;
     bad_board=bad_node=bad_length=fail_descriptor=fail_mapping=short_mapping=null_mapping=0;
     descriptors=mappings=created_memory=created_maps=released_memory=released_maps=unsafe=0;
     proof_calls=lose_proof=0;memset(root,0,sizeof(root));memcpy(root,"md0",3);
@@ -177,8 +180,8 @@ extern "C" void mutate_witness(unsigned index,uint32_t value){if(index<12)witnes
 extern "C" const char *get_output(void){return output;}
 extern "C" uint8_t *get_region(unsigned which){return which==0 ? aop : which==1 ? smem : db;}
 extern "C" unsigned metric(unsigned which) {
-    const unsigned values[]={descriptors,mappings,created_memory,created_maps,released_memory,released_maps,unsafe,proof_calls,source_calls};
-    return which<9 ? values[which] : 0;
+    const unsigned values[]={descriptors,mappings,created_memory,created_maps,released_memory,released_maps,unsafe,proof_calls,source_calls,start_calls};
+    return which<10 ? values[which] : 0;
 }
 extern "C" int select_turbo(const uint16_t *levels,unsigned count) {
     if(count>16)return -2;rf_cmddb_resource resource={};resource.level_count=count;
@@ -257,9 +260,14 @@ class NativeWifiProbeTests(unittest.TestCase):
         self.assertEqual(self.library.metric(8), 1)
         self.assertEqual((self.library.metric(0), self.library.metric(1)), (0, 0))
         self.library.reset()
-        self.library.set_option(26, 2)
+        self.library.set_option(26, 3)
         self.assertIn('refused unsupported source mode', self.run_probe())
         self.assertEqual(self.library.metric(8), 0)
+        self.assertEqual((self.library.metric(0), self.library.metric(1)), (0, 0))
+        self.library.reset()
+        self.library.set_option(26, 2)
+        self.run_probe()
+        self.assertEqual(self.library.metric(9), 1)
         self.assertEqual((self.library.metric(0), self.library.metric(1)), (0, 0))
 
     def test_md0_up_identity_and_return_failures_map_nothing(self):
