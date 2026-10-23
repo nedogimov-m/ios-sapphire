@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN WLAN VRM resource hardware PASS; FW_READY still absent — 2026-10-23
+
+Source `9856fc4`, local native `build-20261023-183559.log`. Authenticated,
+image/nonce-matched `wifi-host-rmtfs-wlfw-observe-v1-20261023-183900`, boot ID
+`030a9c2f01f2ec6d`, repeats successful legacy MSA/CAP and unchanged RF IDs.
+Optional chain capability is absent (valid0xd), so native ICNSS retains its
+default two-chain behavior. The bounded native CMD-DB reader observes:
+ldoa1=0x40800, ldoa14=0x42100, ldoc2=0x41d00, ldoc11=0x41a00,
+ldoc10=0x41900. All are VRM4, aux version0x100/4bytes, priorities0/0.
+No matching inherited queued TCS entries were printed. These are resource
+identity observations, not measurements of current aggregate voltages.
+The observer adds no WLAN power command.
+
+GLINK/host/RMTFS continue with43 remote services,1072 QRTR packets,931 TFTP
+read blocks,2 RAM writes and10 RMTFS requests/0 failures. FW_READY remains
+unobserved; the captured tail still contains regular progress/PID1 lines,
+without a worker-final-result line. Do not claim a complete45s deadline
+observation from that truncated end. Recovery authenticates the capture,
+observes clean/unmodified HFSX/write_count462335 and verifies fastboot.
+Kernel `25a837b7f646dc942e7f11cda6cdd00902899a98254aa95cf5a1abe675c91d44`;
+image `6e56b5db8b8c6f01c661901f8a59cd4314ac10a8fdb24122c2c4f1661fa2ea6c`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x030a9c2f01f2ec6d`.
+
+Next: explicit native WLAN-power profile. Pin these five observed resource
+records, PMIC5 provider init/consumer constraints and chain policy; reuse
+only the owned DRV2 ACTIVE writer with continuous MPSS/owner checks. Apply
+the native provider/consumer voltage-mode-enable sequence, retain uncertain
+votes until reset and await FW_READY while serving firmware requests. Use
+a shorter explicit observation deadline so the worker's result is captured
+before the platform watchdog. Association/data, GPU/Metal and Bluetooth
+remain unfinished. Persistent EFS/boot/recovery/modem remain untouched.
+
 ## REDFIN native WLAN VRM observer and chain capability prepared — 2026-10-23
 
 Continues `68f4e57`. Reviewed native ICNSS consumer overrides and PMIC5 VRM
