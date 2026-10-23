@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN all15 native WLAN VRM requests hardware PASS; FW_READY wait remains — 2026-10-23
+
+Source `26c87c9`, local native `build-20261023-185754.log`. Authenticated,
+image/nonce-matched `wifi-host-rmtfs-wlfw-power-v1-20261023-190000`, boot ID
+`8384126435d38590`, repeats native MSA/CAP identity and default two-chain
+selection. All15 pinned voltage/mode/enable requests are accepted through
+the owned DRV2 ACTIVE slot (IRQ1/CMD0x10101); cumulative polls advance10..24.
+Final accepted bitmap0x7fff, parent phase4 sealed, quarantine0. This proves
+accepted native resource requests, not a measured physical regulator output.
+MPSS remains ready and RMTFS/TFTP continue. No FW_READY arrives in the30s
+transport window; worker returnsETIMEDOUT60/phase12 with SMP2P stage4.
+
+A few later modem MCFG file lookups are absent; no WLAN board-file request
+is observed. No association, packet DMA or iOS network interface is claimed.
+The complete host suite passes1206 tests (3 optional private cases skipped).
+Recovery authenticates the log, observes unchanged clean HFSX/write_count
+462335 and verifies fastboot. Kernel
+`bd2c0d63d37ebb8f36c0fc7028e07a8fcde0e2b07b057c4a3ca22f8f5d6371a9`;
+image `73cc54fd058b881d3b87c7c7293053a3f394fb24bc8be2338538a62d905d9b30`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x8384126435d38590`.
+
+Next: complete the native post-power dynamic-feature/notification sequence
+and continue observing FW_READY/pin results. Native defaults enable
+rejuvenation notification and send dynamic feature mask1 after power;
+those steps were absent from power-v1. A rejuvenation/epoch change must
+quarantine this bounded diagnostic until platform reset. Further native
+request/PMIC-state evidence is needed if readiness still does not appear.
+Persistent EFS/boot/recovery/modem remain unchanged; GPU/Metal/Bluetooth
+and Wi-Fi association/data remain unfinished.
+
 ## REDFIN typed native WLAN supply sequence prepared — 2026-10-23
 
 Continues `84cb367`. New explicit `--wifi-wlan-power` is mutually exclusive
