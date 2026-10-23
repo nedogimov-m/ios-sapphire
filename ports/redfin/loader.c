@@ -24,7 +24,7 @@ struct boot_args {
     char command[608];
     uint64_t flags, actual_memory;
 };
-struct plan { uint64_t adt, args, top, entry, rmtfs_pool, rmtfs_owned; };
+struct plan { uint64_t adt, args, top, entry, rmtfs_pool, rmtfs_owned, wlfw_verified; };
 _Static_assert(offsetof(struct payload, segments) == 680, "payload ABI");
 _Static_assert(sizeof(struct boot_args) == 736, "boot args ABI");
 
@@ -109,9 +109,9 @@ static int rmtfs_plan(const struct payload *p, const struct hardware *hw,
     const volatile unsigned char *b = (const volatile unsigned char *)p + p->adt_offset;
     uint32_t pending[32], kinds[32];
     uint64_t pool[2] = {0}, shared[2] = {0}, snapshot[2] = {0}, scratch[2] = {0}, maps[6] = {0}, bytes = 0;
-    uint64_t off = 0, owned = 0;
-    unsigned depth = 0, nodes = 0, map_seen = 0;
-    q->rmtfs_pool = q->rmtfs_owned = 0;
+    uint64_t off = 0, owned = 0, wlfw_reg[2] = {0}, wlfw_verified = 0;
+    unsigned depth = 0, nodes = 0, map_seen = 0, wlfw_nodes = 0;
+    q->rmtfs_pool = q->rmtfs_owned = q->wlfw_verified = 0;
     pending[0] = 1; kinds[0] = 0;
     for (;;) {
         while (!pending[depth]) { if (!depth) goto parsed; --depth; }
@@ -133,6 +133,9 @@ static int rmtfs_plan(const struct payload *p, const struct hardware *hw,
                 if (depth == 1 && same(value, length, "redfin-rmtfs")) {
                     if (++nodes != 1 || props != 9 || children) return 0;
                     kind = 1;
+                } else if (depth == 1 && same(value, length, "redfin-wifi-wlfw")) {
+                    if (++wlfw_nodes != 1 || props != 4 || children) return 0;
+                    kind = 4;
                 } else if (depth == 1 && same(value, length, "chosen")) kind = 2;
                 else if (depth == 2 && kinds[depth] == 2 && same(value, length, "memory-map")) kind = 3;
             } else if (kind == 1) {
@@ -160,6 +163,20 @@ static int rmtfs_plan(const struct payload *p, const struct hardware *hw,
                 if (seen & bit) return 0;
                 seen |= bit;
                 if (region) { if (length != 16) return 0; region[0] = quad(value); region[1] = quad(value + 8); }
+            } else if (kind == 4) {
+                unsigned bit = 0;
+                if (same(key, 32, "reg")) {
+                    bit = 1; if (length != 16) return 0;
+                    wlfw_reg[0] = quad(value); wlfw_reg[1] = quad(value + 8);
+                } else if (same(key, 32, "source-contract")) {
+                    const uint32_t expected[10] = {1, 0x45, 1, 0, 0x4b4e454c, 0, 2, 4096, 0x2d, 0x2e};
+                    bit = 2; if (length != sizeof(expected)) return 0;
+                    for (unsigned j = 0; j < 10; ++j) if (word(value + 4u * j, 0) != expected[j]) return 0;
+                } else if (same(key, 32, "shim-verified")) {
+                    bit = 4; if (length != 4 || word(value, 0)) return 0; wlfw_verified = off;
+                } else return 0;
+                if (seen & bit) return 0;
+                seen |= bit;
             } else if (kind == 3) {
                 unsigned index = 0, bit = 0;
                 if (same(key, 32, "RedfinRMTFSPool")) { index = 0; bit = 1; }
@@ -173,11 +190,12 @@ static int rmtfs_plan(const struct payload *p, const struct hardware *hw,
             off += padded;
         }
         if (kind == 1 && seen != 255) return 0;
+        if (kind == 4 && seen != 7) return 0;
         ++depth; pending[depth] = children; kinds[depth] = kind;
     }
 parsed:
     if (off != p->adt_size) return 0;
-    if (!nodes && !map_seen) return 1;
+    if (!nodes && !map_seen) return wlfw_nodes ? 0 : 1;
     if (nodes != 1 || map_seen != 7 || !owned || pool[0] != maps[0] || pool[1] != maps[1] ||
         snapshot[0] != maps[2] || snapshot[1] != maps[3] || scratch[0] != maps[4] || scratch[1] != maps[5] ||
         pool[0] < 0x80000000ULL || pool[0] > 0x100000000ULL - 0x288000 || pool[1] != 0x288000 ||
@@ -221,6 +239,20 @@ parsed:
         }
     }
     if (source != 1 || arguments != 1) return 0;
+    if (wlfw_nodes) {
+        unsigned reserved = 0;
+        if (!wlfw_verified || wlfw_reg[0] != 0x8ba00000 || wlfw_reg[1] != 0x200000 ||
+            overlap(wlfw_reg[0], wlfw_reg[1], p->phys, p->memory) ||
+            overlap(wlfw_reg[0], wlfw_reg[1], image, image_bytes) ||
+            overlap(wlfw_reg[0], wlfw_reg[1], dtb, dtb_bytes)) return 0;
+        for (unsigned i = 0; i < hw->reservations; ++i) {
+            struct region r = hw->reserved[i];
+            if (r.base == wlfw_reg[0] && r.size == wlfw_reg[1]) ++reserved;
+            else if (overlap(r.base, r.size, wlfw_reg[0], wlfw_reg[1])) return 0;
+        }
+        if (reserved != 1) return 0;
+        q->wlfw_verified = wlfw_verified;
+    }
     q->rmtfs_pool = pool[0]; q->rmtfs_owned = owned;
     return 1;
 }
@@ -648,6 +680,7 @@ const char *redfin_boot(uint64_t dtb, const struct hardware *hw)
     for (uint64_t i = 0; i < p->adt_size; i += 4)
         *(volatile uint32_t *)(tree + i) = *(const volatile uint32_t *)(adt + i);
     if (q.rmtfs_pool) *(volatile uint32_t *)(tree + q.rmtfs_owned) = 1;
+    if (q.wlfw_verified) *(volatile uint32_t *)(tree + q.wlfw_verified) = 1;
     volatile struct boot_args *args = (void *)(uintptr_t)q.args;
     for (unsigned i = 0; i < sizeof(*args); i += 8)
         *(volatile uint64_t *)((volatile unsigned char *)args + i) = 0;

@@ -331,6 +331,43 @@ def add_glink_contract(tree, nodes, services=False):
             mkadt.u32(3, 64, 257, 0x4001, 4096, 1, 0x4002, 4, 65536, 8, 4096, 0, 1, 14, 1, 0x4003)))
 
 
+def add_wlfw_contract(tree, nodes):
+    """Legacy ICNSS fixed MSA, with the live board's absent hyp_enabled flag.
+
+    Native icnss_assign_msa_perm() returns without a permission transition
+    when qcom,hyp_enabled is absent. This profile preserves that behavior and
+    never maps/zeroes the firmware's MSA memory on the host CPU.
+    """
+    words = lambda *values: struct.pack('>' + 'I' * len(values), *values)
+    icnss = nodes.get('/soc/qcom,icnss@18800000', {})
+    region = nodes.get('/reserved-memory/pil_wlan_fw_region@8ba00000', {})
+    reference = icnss.get('qcom,wlan-msa-fixed-region')
+    if (icnss.get('compatible') != b'qcom,icnss\0' or
+            icnss.get('status', b'okay\0') not in (b'okay\0', b'ok\0') or
+            region.get('status', b'okay\0') not in (b'okay\0', b'ok\0') or
+            'qcom,hyp_enabled' in icnss or 'qcom,wlan-msa-memory' in icnss or
+            region.get('compatible') != b'removed-dma-pool\0' or region.get('no-map') != b'' or
+            region.get('reg') != struct.pack('>QQ', 0x8ba00000, 0x200000) or
+            'reusable' in region or not reference or len(reference) != 4 or
+            reference in (words(0), words(0xffffffff))):
+        raise ValueError('native fixed-permission ICNSS/MSA binding changed')
+    matches = []
+    for path, properties in nodes.items():
+        if properties.get('phandle', properties.get('linux,phandle')) == reference:
+            matches.append(path)
+        if ('phandle' in properties and 'linux,phandle' in properties and
+                properties['phandle'] != properties['linux,phandle']):
+            raise ValueError('native ICNSS phandle aliases disagree')
+    if matches != ['/reserved-memory/pil_wlan_fw_region@8ba00000']:
+        raise ValueError('native ICNSS MSA reference is missing or ambiguous')
+    if any(child.name == 'redfin-wifi-wlfw' for child in tree.children):
+        raise ValueError('duplicate native WLFW setup contract')
+    tree.children.append(mkadt.node('redfin-wifi-wlfw', [
+        ('reg', mkadt.u64(0x8ba00000, 0x200000)),
+        ('source-contract', mkadt.u32(1, 0x45, 1, 0, 0x4b4e454c, 0, 2, 4096, 0x2d, 0x2e)),
+        ('shim-verified', mkadt.u32(0))]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dtb', required=True, type=Path)

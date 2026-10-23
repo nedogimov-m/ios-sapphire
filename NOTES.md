@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native legacy WLFW indication/MSA/CAP setup prepared — 2026-10-23
+
+Continues `3256b22`. Reviewed pinned Google ICNSS and generated WLFW/QMI
+wire definitions plus the preferred kernel's redwood_wlfw.c. Error90 is
+confirmed incompatible state. New `--wifi-wlfw-setup` requires the proven
+native host services/RMTFS snapshots and runs IND_REGISTER0x20 (client
+0x4b4e454c), MSA_INFO0x2d, MSA_READY0x2e, then CAP0x24. One in-flight
+transaction and exact remote node/port are bound; malformed/duplicate TLVs,
+foreign responses, QMI failures and at most two returned MSA subregions
+are checked before advancing. FW_READY and CAP identity remain distinct.
+An already-registered response is preserved as an ownership conflict,
+without inventing a QMI failure or repeating MSA setup.
+
+Live ICNSS references the fixed8ba00000+2MiB reservation and lacks
+qcom,hyp_enabled. Native ICNSS therefore skips MSA permission assignment;
+this implementation does likewise. The shim independently verifies that
+exact fixed reservation before marking the handoff. No MSA CPU mapping,
+clearing, added memory assignment, RF supplies/clocks, WLAN mission request
+or packet DMA is added. The existing frozen CPU0/md0/return args are retained.
+
+All195 Wi-Fi tests PASS (3 optional private cases skipped), including9new
+actual WLFW/state/region/producer/loader cases;19 topology reconstruction
+checks PASS. Local native `build-20261023-181558.log` PASS; no CI run.
+Full actual Image/live-FDT/shim-return preflight PASS. Hardware execution of
+this handshake is still unverified.
+Kernel `44135516fb164cf00805351d9340e10f6f65be9e09ea8a9ec4b44a635fe5d225`; image `2d8957c2ff89444d277ceff5fd018fa2031a99e079ec6d2f3da81bb0fc734780`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xdd972d7c88f9e4d3`.
+
+Next: temporary WLFW-v1 boot; authenticate its capture, inspect registration
+status, actual MSA regions/acceptance, CAP identity and readiness indications.
+Wi-Fi association/data, GPU/Metal and Bluetooth remain unfinished.
+
 ## REDFIN RMTFS/EFS volatile backend hardware PASS; native WLFW appears — 2026-10-23
 
 Source `846fcbb`, local native `build-20261023-175333.log`. Authenticated,

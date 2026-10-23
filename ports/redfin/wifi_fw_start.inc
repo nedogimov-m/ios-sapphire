@@ -14,6 +14,7 @@
 #include "redfin_wifi_qmi.h"
 #include "redfin_wifi_rmtfs.h"
 #include "redfin_wifi_hyp.h"
+#include "redfin_wifi_wlfw.h"
 
 extern "C" int redfin_wifi_power_start(void);
 extern "C" int redfin_wifi_power_held(void);
@@ -61,6 +62,9 @@ struct fw_start_context {
     void *rmtfs_shadow;
     rf_rmtfs rmtfs;
     rf_rm_ops rmtfs_ops;
+    bool wlfw_mode;
+    rf_wlfw_setup wlfw_setup;
+    rf_wlfw_ops wlfw_ops;
 };
 static fw_start_context fw_start;
 
@@ -160,6 +164,19 @@ static const uint64_t *fw_start_region(const fw_start_context *context, unsigned
         index == FW_START_RMTFS_POOL_MAP ? context->rmtfs_pool : &fw_start_ranges[2u * index];
 }
 
+static bool fw_start_wlfw_contract(void)
+{
+    DTEntry node;
+    const uint32_t expected[10] = {1, 0x45, 1, 0, 0x4b4e454c, 0, 2, 4096, 0x2d, 0x2e};
+    const uint64_t expected_reg[2] = {RF_WLFW_MSA_BASE, RF_WLFW_MSA_BYTES};
+    uint32_t actual[10] = {}, verified = 0; uint64_t reg[2] = {};
+    return fw_start.host_mode && fw_start.rmtfs_mode && fw_start.wlfw_mode &&
+        SecureDTLookupEntry(NULL, "/redfin-wifi-wlfw", &node) == kSuccess &&
+        fw_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
+        fw_property(node, "reg", reg, sizeof(reg)) && !memcmp(reg, expected_reg, sizeof(reg)) &&
+        fw_property(node, "shim-verified", &verified, sizeof(verified)) && verified == 1;
+}
+
 static int fw_start_check(void *opaque)
 {
     fw_start_context *context = (fw_start_context *)opaque;
@@ -168,7 +185,8 @@ static int fw_start_check(void *opaque)
         (!context->power || !redfin_wifi_power_held()) &&
         (!context->transport_mode || fw_start_glink_contract()) &&
         (!context->host_mode || fw_start_assets_contract(context, false)) &&
-        (!context->rmtfs_mode || (!context->rmtfs.poisoned && fw_start_rmtfs_contract(context, false)));
+        (!context->rmtfs_mode || (!context->rmtfs.poisoned && fw_start_rmtfs_contract(context, false))) &&
+        (!context->wlfw_mode || (!context->wlfw_setup.poisoned && fw_start_wlfw_contract()));
     if (valid) for (unsigned i = 0; i < FW_START_MAPS; ++i) {
         const fw_start_map *entry = &context->mapping[i];
         if (!entry->map && !entry->memory && !entry->base) continue;
@@ -504,6 +522,19 @@ static void fw_start_rmtfs_event(void *, unsigned message, unsigned caller, unsi
     IOLog("REDFIN WIFI RMTFS: message=%u caller=%u bytes=%u error=%u; volatile shadow only\n",
         message, caller, bytes, error);
 }
+static int fw_start_wlfw_check(void *opaque)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    return !fw_start_glink_check(context) && context->wlfw_mode && context->rmtfs_shared &&
+        context->wlfw_port && context->qrtr_seen && context->wlfw_node == context->qrtr_peer &&
+        fw_start_wlfw_contract() ? 0 : EPERM;
+}
+static int fw_start_wlfw_send(void *opaque, const uint8_t *data, uint32_t bytes)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    if (fw_start_wlfw_check(context) || !data || bytes < 7 || bytes > 48) return EPERM;
+    return fw_start_qrtr_queue(context, 1, 0x4004, context->wlfw_node, context->wlfw_port, data, bytes);
+}
 static void fw_start_host_event(void *opaque, unsigned kind, const char *name, uint32_t bytes)
 {
     (void)opaque;
@@ -547,12 +578,31 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
             source, from, data + at, size);
         else if (type == 1 && to >= 0x4100 && to < 0x5100) error = rf_host_tftp_packet(&context->host,
             &context->host_ops, source, from, to, data + at, size);
-        else if (type == 1 && to == 0x4004 && context->cap_sent && source == context->wlfw_node &&
-            from == context->wlfw_port && !rf_wlfw_cap_parse(&context->cap, data + at, size, 1)) {
-            context->cap_received = 1;
-            IOLog("REDFIN WIFI WLFW: CAP result=%u error=%u valid=%#x chip=%#x family=%#x board=%#x SoC=%#x firmware=%#x\n",
-                context->cap.result, context->cap.error, context->cap.valid, context->cap.chip, context->cap.family,
-                context->cap.board, context->cap.soc, context->cap.firmware);
+        else if (type == 1 && to == 0x4004 && source == context->wlfw_node && from == context->wlfw_port) {
+            if (context->wlfw_mode && context->wlfw_setup.attempted) {
+                unsigned previous = context->wlfw_setup.stage;
+                error = rf_wlfw_receive(&context->wlfw_setup, &context->wlfw_ops, data + at, size);
+                if (error < 0) { context->poisoned = true; return; }
+                if (!error) IOLog("REDFIN WIFI WLFW: received=%#x stage=%u->%u transaction=%u result=%u error=%u status=%#llx regions=%u MSA=%u FWready=%u\n",
+                    (unsigned)rf_qmi_u16(data + at + 3), previous, context->wlfw_setup.stage,
+                    context->wlfw_setup.transaction, context->wlfw_setup.result, context->wlfw_setup.error,
+                    (unsigned long long)context->wlfw_setup.fw_status, context->wlfw_setup.regions,
+                    context->wlfw_setup.msa_accepted, context->wlfw_setup.fw_ready);
+                if (!error && previous == RF_WLFW_MSA_INFO && context->wlfw_setup.stage == RF_WLFW_MSA_READY)
+                    for (unsigned i = 0; i < context->wlfw_setup.regions; ++i)
+                        IOLog("REDFIN WIFI WLFW: MSA region=%u base=%#llx bytes=%#x secure=%u; native fixed permissions retained\n",
+                            i, (unsigned long long)context->wlfw_setup.region[i].base,
+                            context->wlfw_setup.region[i].bytes, context->wlfw_setup.region[i].secure);
+                if (error == 1) error = 0;
+                if (context->wlfw_setup.stage == RF_WLFW_COMPLETE) {
+                    context->cap = context->wlfw_setup.cap; context->cap_received = 1;
+                }
+            } else if (!context->wlfw_mode && context->cap_sent &&
+                !rf_wlfw_cap_parse(&context->cap, data + at, size, 1)) context->cap_received = 1;
+            if (context->cap_received)
+                IOLog("REDFIN WIFI WLFW: CAP result=%u error=%u valid=%#x chip=%#x family=%#x board=%#x SoC=%#x firmware=%#x\n",
+                    context->cap.result, context->cap.error, context->cap.valid, context->cap.chip, context->cap.family,
+                    context->cap.board, context->cap.soc, context->cap.firmware);
         }
         if (error) IOLog("REDFIN WIFI HOST: refused request to=%#x bytes=%u result=%d\n", to, size, error);
         return;
@@ -577,7 +627,11 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
         ++context->qrtr_services;
         IOLog("REDFIN WIFI QRTR: service=%#x version=%u instance=%u node=%u port=%#x\n",
             service, instance & 255u, instance >> 8, node, port);
-        if (service == 0x45 && (instance & 255u) == 1) { context->wlfw_node = node; context->wlfw_port = port; }
+        if (service == 0x45 && (instance & 255u) == 1 && (!context->wlfw_mode || !(instance >> 8))) {
+            if (context->wlfw_mode && (node != source || (context->wlfw_port &&
+                (context->wlfw_node != node || context->wlfw_port != port)))) { context->poisoned = true; return; }
+            context->wlfw_node = node; context->wlfw_port = port;
+        }
     }
 }
 static int fw_start_transport_run(fw_start_context *context)
@@ -591,6 +645,7 @@ static int fw_start_transport_run(fw_start_context *context)
         fw_start_host_send, fw_start_host_event};
     if (context->rmtfs_mode) context->rmtfs_ops = {context, fw_start_rmtfs_check, fw_start_rmtfs_barrier,
         fw_start_rmtfs_send, fw_start_rmtfs_event};
+    if (context->wlfw_mode) context->wlfw_ops = {context, fw_start_wlfw_check, fw_start_wlfw_send};
     int error = rf_gl_init(&context->glink, &context->glink_ops);
     IOLog("REDFIN WIFI GLINK: init=%d descriptor=%#x TX=%#x stores=%u\n",
         error, context->glink.descriptor, context->glink.tx, context->glink.stores);
@@ -644,7 +699,19 @@ static int fw_start_transport_run(fw_start_context *context)
         }
         if (context->wlfw_port) {
             if (!context->host_mode) return 0;
-            if (!context->cap_sent) {
+            if (context->wlfw_mode) {
+                if (!context->wlfw_setup.attempted) {
+                    error = rf_wlfw_begin(&context->wlfw_setup, &context->wlfw_ops);
+                    if (error) return error;
+                    IOLog("REDFIN WIFI WLFW: native legacy indication/MSA/CAP handshake begins; fixed permissions, no MSA CPU map\n");
+                }
+                if (context->wlfw_setup.stage == RF_WLFW_FAILED) {
+                    IOLog("REDFIN WIFI WLFW: stopped result=%u error=%u already_registered=%u\n",
+                        context->wlfw_setup.result, context->wlfw_setup.error, context->wlfw_setup.already_registered);
+                    return context->wlfw_setup.already_registered ? EBUSY : EIO;
+                }
+                if (context->wlfw_setup.stage == RF_WLFW_COMPLETE) return 0;
+            } else if (!context->cap_sent) {
                 const uint8_t request[7] = {0, 1, 0, 0x24, 0, 0, 0};
                 error = fw_start_qrtr_queue(context, 1, 0x4004, context->wlfw_node, context->wlfw_port,
                     request, sizeof(request));
@@ -652,7 +719,7 @@ static int fw_start_transport_run(fw_start_context *context)
                 context->cap_sent = 1;
                 IOLog("REDFIN WIFI WLFW: queued native CAP transaction=1\n");
             }
-            if (context->cap_received) return context->cap.result ? EIO : 0;
+            if (!context->wlfw_mode && context->cap_received) return context->cap.result ? EIO : 0;
         }
         if (fw_start_pause(context, 1000)) return EPERM;
     }
@@ -819,12 +886,16 @@ static void fw_start_worker(void *, wait_result_t)
     bool rmtfs_present = SecureDTLookupEntry(NULL, "/redfin-rmtfs", &rmtfs_node) == kSuccess;
     fw_start.transport_mode = mode >= 3; fw_start.host_mode = mode == 4;
     fw_start.rmtfs_mode = rmtfs_present && mode == 4;
+    DTEntry wlfw_node;
+    bool wlfw_present = SecureDTLookupEntry(NULL, "/redfin-wifi-wlfw", &wlfw_node) == kSuccess;
+    fw_start.wlfw_mode = wlfw_present && mode == 4 && rmtfs_present;
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
         !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
         !fw_probe_properties(&fw_probe, true) || !fw_start_metadata_contract(&fw_start, true) ||
         (mode >= 3 && !fw_start_glink_contract()) || (mode == 4 && !fw_start_assets_contract(&fw_start, true)) ||
-        (rmtfs_present && (mode != 4 || !fw_start_rmtfs_contract(&fw_start, true)))) {
+        (rmtfs_present && (mode != 4 || !fw_start_rmtfs_contract(&fw_start, true))) ||
+        (wlfw_present && (!fw_start.wlfw_mode || !fw_start_wlfw_contract()))) {
         IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
         thread_terminate_self();
         __builtin_unreachable();

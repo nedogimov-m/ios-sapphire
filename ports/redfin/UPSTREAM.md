@@ -284,5 +284,22 @@ the guarded low buffer. Assignment failures remain failures; buffers and
 mappings remain retained until the platform resets. Hardware results are
 recorded separately in NOTES.md.
 
+Legacy WLFW setup review, 2026-10-23: Google pin
+`500b3a2059c1eec0fec08ec56add06320ea901a8`, `icnss.c`, `icnss_qmi.c`,
+`wlan_firmware_service_v01.{c,h}` and `include/linux/soc/qcom/qmi.h`.
+The observed CAP error90 is `QMI_ERR_INCOMPATIBLE_STATE_V01`. Native order
+is IND_REGISTER0x20 (client0x4b4e454c), MSA_INFO0x2d, MSA_READY0x2e,
+then CAP0x24. MSA_INFO has at most two13-byte wire records. Redfin's
+captured live ICNSS references `pil_wlan_fw_region@8ba00000`,2MiB,
+`removed-dma-pool`/`no-map`; `qcom,hyp_enabled` is absent. The native driver
+therefore skips `hyp_assign_phys` for this fixed MSA. The new optional QMI
+handshake preserves that behavior, validates every returned subregion, and
+does not map/zero MSA on the CPU or enable WLAN clocks, supplies or mission
+mode. The shim independently requires that exact fixed reservation in its
+actual FDT hardware view before validating the handoff. Reviewed preferred
+kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`, `redwood_wlfw.c`:
+its WCN6750 indication/HOST_CAP/CAP order is useful protocol context, but
+does not replace Redfin's legacy MSA exchange or native client/instance IDs.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

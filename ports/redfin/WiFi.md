@@ -783,3 +783,21 @@ callers, endpoint ownership and every vector before transfer. Writes and
 forced synchronization affect RAM shadows only and are lost on reset.
 This still requires an independent hardware request/readiness result; it
 does not demonstrate WLAN association, packets or an iOS network interface.
+
+Hardware now validates the RMTFS backend:10 requests,5248 sectors read,
+10240 sectors written to volatile shadows,0 failures. Independent read-only
+captures after the run confirm all four persistent EFS partitions remain
+byte-for-byte unchanged. MPSS stays ready, serves the captured WLAN image
+over TFTP and announces WLFW0x45/v1/instance0. CAP before native setup fails
+with QMI incompatible-state90. Association and data remain unimplemented.
+
+`--wifi-wlfw-setup`, with host services and RMTFS snapshots, opts into the
+native legacy IND_REGISTER0x20/MSA_INFO0x2d/MSA_READY0x2e/CAP0x24 order.
+Transactions, source node/port, mandatory/duplicate TLVs, indication bounds
+and at most two returned MSA regions are checked. The actual Redfin FDT
+uses a fixed2MiB MSA reservation and has no `qcom,hyp_enabled`; native ICNSS
+skips permission assignment in this case, which this profile preserves.
+The shim verifies the real fixed reservation before marking the handoff.
+No MSA CPU mapping, clearing, additional memory assignment, RF supply/
+clock command, WLAN mission request or packet DMA is introduced here.
+CAP success and observed FW_READY are reported independently.

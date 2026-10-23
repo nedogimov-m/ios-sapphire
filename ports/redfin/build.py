@@ -100,6 +100,7 @@ def main():
     p.add_argument('--wifi-host-services', action='store_true', help='native GLINK with captured WLAN assets, pd-mapper and RAM-only TFTP')
     p.add_argument('--wifi-assets-inventory', type=Path, help='private captured base-vendor host-inventory.json for --wifi-host-services')
     p.add_argument('--wifi-rmtfs-inventory', type=Path, help='verified private read-only EFS inventory; enables volatile RMTFS with --wifi-host-services')
+    p.add_argument('--wifi-wlfw-setup', action='store_true', help='legacy WLFW indication/MSA/CAP handshake; requires native host services and RMTFS snapshots')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -134,6 +135,8 @@ def main():
         p.error('--wifi-assets-inventory requires --wifi-host-services')
     if a.wifi_rmtfs_inventory and not a.wifi_host_services:
         p.error('--wifi-rmtfs-inventory requires --wifi-host-services')
+    if a.wifi_wlfw_setup and not (a.wifi_host_services and a.wifi_rmtfs_inventory):
+        p.error('--wifi-wlfw-setup requires --wifi-host-services and --wifi-rmtfs-inventory')
     if a.wifi_glink_start:
         a.wifi_fw_start = True
     if a.wifi_fw_start and a.wifi_fw_source_probe:
@@ -402,6 +405,12 @@ def main():
             from wifi_platform import add_glink_contract
             try:
                 add_glink_contract(tree, nodes, services=a.wifi_host_services)
+            except ValueError as error:
+                p.error(str(error))
+        if a.wifi_wlfw_setup:
+            from wifi_platform import add_wlfw_contract
+            try:
+                add_wlfw_contract(tree, nodes)
             except ValueError as error:
                 p.error(str(error))
         if a.scm_probe:
@@ -711,6 +720,8 @@ def main():
         manifest['wifi_host_services'] = True
     if a.wifi_rmtfs_inventory:
         manifest['wifi_rmtfs'] = True
+    if a.wifi_wlfw_setup:
+        manifest['wifi_wlfw_setup'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:
