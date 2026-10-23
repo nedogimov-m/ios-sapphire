@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN optional RO SMMU image and GMU breadcrumbs prepared — 2026-10-23
+
+Source cddcb54 binds opt-in redfinsmmu=1 to the exact GMU1 mode. The full
+native64KiB SMMU/clock/IRQ/stream ADT is checked before parent ARC writes;
+snapshot requires this call's successful reset-held GMU and fresh parent/
+source/reset/clock/IRQ proof before each explicit scalar LDR. Only the
+0x8000 global half is mapped; no CB pages/TCU/TBU/TLB/fault acknowledgements,
+route writes, table install, firmware execution or ownership claim. First
+GMU accesses and restoration now have bounded pre-access breadcrumbs.
+Observed offline:116focusedGPUtests,42adapter/FDTtests,13,558sanitized
+scenarios and private nativeARM64-Werror object/disassembly PASS. Root's
+native build `build-20261023-051157.log` links successfully; common parent9,
+builder30 and prearm5 focused tests PASS. The unresolved043115 run still has
+no fresh log and no hardware GMU/SMMU success is inferred.
+
+Prepared `gmu-tcm-v2` kernel `03949cc195ff69f121e318e6c9729501f4cb5acbc5c421f4b9f234a13cd711f3`; image `5cd7789a5d40307ecfb098bac337cbe981ac029f3a14eb095d10db4f911d16f5`. Exact intended args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x510d59111137311b`. Real complete payload/ADT/liveFDT plus compiled shim/kernel return policy PASS; not booted.
+
+Prepared `gpu-smmu-v1` kernel `03949cc195ff69f121e318e6c9729501f4cb5acbc5c421f4b9f234a13cd711f3`; image `595c4c101d35bf23a7740fa98d36afe93e79b310916998220599be257b30a99b`. Exact intended args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x5d19401c742f912f`. Real complete payload/ADT/liveFDT plus compiled shim/kernel return policy PASS; not booted.
+
+USB source231e732 now propagates Redfin log-worker creation failure to the
+existing sticky gadget error/owned-quiesce path. Four actual-source injection
+tests PASS: preserve active slab/routes if halt is denied, never free in-flight
+DMA, no retry. Normal and legacy optional-logger cases are preserved.
+Prepared source plus both builders include the additive patch after the USB
+network worker. Root native build `build-20261023-051524.log` succeeds; no
+new USB device test or host-ready/combined GPU profile is claimed. Independent
+nonce-bound host ACK/flush work is ongoing; existing strict separate USB/GPU
+gates remain in force. Preferred oosexgang upstream HEADs rechecked and
+unchanged. The passive rescue waiter still has no matching fastboot event.
+Next: collect pre-existing RAM/HFS when fastboot is available; then use the
+new prearmed GMU image for real evidence before RO SMMU or table publication.
+
 ## REDFIN GMU attempt unresolved; autonomous device access unavailable — 2026-10-23
 
 Source `3bd5dc8`/GMU`ab1f463`; local ARM64 build

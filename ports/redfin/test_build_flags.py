@@ -64,7 +64,7 @@ class BuildFlagTests(unittest.TestCase):
                 self.refused([*base, option], expected + ' requires its separate RAM-only profile')
 
     def test_scm_and_wifi_power_keep_separate_md0_cpu0_profiles(self):
-        for flag in ('--scm-probe', '--wifi-power-probe'):
+        for flag in ('--scm-probe', '--wifi-power-probe', '--gpu-smmu-probe'):
             self.refused([flag], flag + ' requires kernel, live DTB, CPU0 and --return-bootloader')
             base = [flag, '--kernel', '/missing-kernel', '--dtb', '/missing-dtb', '--return-bootloader']
             self.refused([*base, '--boot-mpidr', '0x100'],

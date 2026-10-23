@@ -224,7 +224,7 @@ def main(argv=None):
                                          'usb-fault-diagnostic.patch',
                                          'usb-aarch64-context.patch',
                                          'usb-context-format-status.patch',
-                                         'usb-network-worker.patch', 'usb-network-start.patch',
+                                         'usb-network-worker.patch', 'usb-log-worker-check.patch', 'usb-network-start.patch',
                                          'peripheral-start.patch', 'touch-event-start.patch',
                                          'cpu-probe.patch', 'cpu-probe-start.patch', 'cpu-target.patch',
                                          'early-return.patch', 'early-return-start.patch',

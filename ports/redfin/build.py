@@ -88,6 +88,7 @@ def main():
     p.add_argument('--gpu-probe', action='store_true', help='observe Adreno 620 clock handoff; requires --display')
     p.add_argument('--gpu-power-probe', action='store_true', help='isolated md0/UP CX parent/ARC/GDSC test; requires verified bootloader return')
     p.add_argument('--gmu-tcm-probe', action='store_true', help='isolated md0/UP held-CX plus reset-held GMU clock/counter/TCM test')
+    p.add_argument('--gpu-smmu-probe', action='store_true', help='GMU test followed by read-only GPU-SMMU global/route metadata')
     p.add_argument('--scm-probe', action='store_true', help='isolated md0/UP read-only TrustZone ABI/call/PAS capability queries')
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
     p.add_argument('--wifi-native-probe', action='store_true', help='isolated md0/UP read-only AOP/SMEM/CMD-DB prerequisite snapshot')
@@ -108,6 +109,8 @@ def main():
     a = p.parse_args()
     if a.display_fit and not a.smp_gui:
         p.error('--display-fit requires the strict --smp-gui profile')
+    if a.gpu_smmu_probe:
+        a.gmu_tcm_probe = True
     if a.gmu_tcm_probe:
         a.gpu_power_probe = True
     if a.wifi_power_probe:
@@ -130,13 +133,13 @@ def main():
                 any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('wifi_native_probe', 'wifi_power_probe'))):
             p.error(f'{label} requires its separate RAM-only profile')
     if a.gpu_power_probe:
-        label = '--gmu-tcm-probe' if a.gmu_tcm_probe else '--gpu-power-probe'
+        label = '--gpu-smmu-probe' if a.gpu_smmu_probe else '--gmu-tcm-probe' if a.gmu_tcm_probe else '--gpu-power-probe'
         if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
             p.error(f'{label} requires kernel, live DTB, CPU0 and --return-bootloader')
         competing = ('display', 'splash', 'touch_events', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
                      'capture_screen', 'userspace_stacks', 'trace_syscalls', 'smp_gui', 'shim_early_return')
         if (any(getattr(a, name) for name in competing) or
-                any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('gpu_power_probe', 'gmu_tcm_probe'))):
+                any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('gpu_power_probe', 'gmu_tcm_probe', 'gpu_smmu_probe'))):
             p.error(f'{label} requires its separate RAM-only profile')
         a.rpmh_probe = True
     if a.smp_cpus is not None and not (a.smp_probe or a.smp_gui):
@@ -344,7 +347,7 @@ def main():
         if a.gmu_tcm_probe:
             from gmu_probe import add_contract
             try:
-                add_contract(tree, nodes)
+                add_contract(tree, nodes, smmu=a.gpu_smmu_probe)
             except ValueError as error:
                 p.error(str(error))
         if a.wifi_native_probe:
@@ -482,6 +485,8 @@ def main():
             command_line += ' redfingpupower=1'
         if a.gmu_tcm_probe:
             command_line += ' redfingmu=1'
+        if a.gpu_smmu_probe:
+            command_line += ' redfinsmmu=1'
         if a.scm_probe:
             command_line += ' redfinscm=1'
         if a.wifi_native_probe:
@@ -607,6 +612,8 @@ def main():
         manifest['gpu_power_probe'] = True
     if a.gmu_tcm_probe:
         manifest['gmu_tcm_probe'] = True
+    if a.gpu_smmu_probe:
+        manifest['gpu_smmu_probe'] = True
     if a.scm_probe:
         manifest['scm_probe'] = True
     if a.wifi_native_probe:

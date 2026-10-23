@@ -74,7 +74,7 @@ def xnu_return_proof(image):
 
 def diagnostic_return_profile(image, manifest, tokens):
     """Bind new UP diagnostics to the proven pre-kernel shim return leaf."""
-    flags = ('gpu_power_probe', 'gmu_tcm_probe', 'wifi_native_probe',
+    flags = ('gpu_power_probe', 'gmu_tcm_probe', 'gpu_smmu_probe', 'wifi_native_probe',
              'wifi_power_probe', 'scm_probe')
     if any(type(manifest.get(name, False)) is not bool for name in flags):
         raise ValueError('UP diagnostic selectors must be boolean')
@@ -87,6 +87,7 @@ def diagnostic_return_profile(image, manifest, tokens):
             any(manifest.get(name) is not False for name in ('root_writable', 'cpu_copy_display',
                 'capture_screen', 'userspace_stacks', 'syscall_tracing', 'splash_reservation_assumption')) or
             (manifest.get('gmu_tcm_probe') is True and primary != ['gpu_power_probe']) or
+            (manifest.get('gpu_smmu_probe') is True and manifest.get('gmu_tcm_probe') is not True) or
             (manifest.get('wifi_power_probe') is True and primary != ['wifi_native_probe'])):
         raise ValueError('UP prearm requires one isolated md0 diagnostic')
     required = set(('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
@@ -96,6 +97,8 @@ def diagnostic_return_profile(image, manifest, tokens):
         required.update(('redfingpu=2', 'redfingpupower=1', 'redfinrpmh=1'))
         if manifest.get('gmu_tcm_probe') is True:
             required.add('redfingmu=1')
+        if manifest.get('gpu_smmu_probe') is True:
+            required.add('redfinsmmu=1')
     elif primary == ['wifi_native_probe']:
         required.update(('redfinwifi=2', 'redfinwifinative=1'))
         if manifest.get('wifi_power_probe') is True:
