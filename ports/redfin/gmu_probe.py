@@ -1,7 +1,8 @@
 """Translate the native Lito reset-held GMU experiment into its exact ADT.
 
-The optional SMMU leaf permits only a separately selected global snapshot.
-No firmware, SMMU context, PDC or GX startup is authorized by either contract.
+The optional SMMU leaf permits a separately selected global snapshot;
+context=True additionally binds read-only CB0/1 inspection.
+No firmware, PDC, GX or SMMU writes are authorized.
 All native inputs are checked before appending any new node.
 """
 import struct
@@ -23,9 +24,10 @@ SMMU_CLOCK_POLICY = (0, 0x7100C, 0x80000001, 1,
                      1, 0x1078, 1, 1,
                      1, 0x5000, 0x80000001, 1)
 SMMU_INTERRUPTS = (705, *range(710, 718))
+CONTEXT_POLICY = (1, 0x8000, 0x4000, 2, 0x1000, 12)
 
 
-def add_contract(tree, nodes, *, smmu=False):
+def add_contract(tree, nodes, *, smmu=False, context=False):
     def need(path, key, expected):
         if nodes.get(path, {}).get(key) != expected:
             raise ValueError(f'GMU FDT mismatch: {path} {key}')
@@ -46,6 +48,8 @@ def add_contract(tree, nodes, *, smmu=False):
         raise ValueError('duplicate GMU contract')
     if not isinstance(smmu, bool):
         raise ValueError('GMU SMMU selection must be a boolean')
+    if not isinstance(context, bool) or (context and not smmu):
+        raise ValueError('GPU context snapshot requires boolean selection and SMMU')
     if smmu and any(child.name == 'redfin-gpu-smmu' for child in tree.children):
         raise ValueError('duplicate GPU SMMU contract')
     parents = [child for child in tree.children if child.name == 'redfin-gpu-power']
@@ -136,5 +140,5 @@ def add_contract(tree, nodes, *, smmu=False):
             ('format-policy', mkadt.u32(*SMMU_FORMAT_POLICY)),
             ('clock-policy', mkadt.u32(*SMMU_CLOCK_POLICY)),
             ('gic-intids', mkadt.u32(*SMMU_INTERRUPTS)),
-        ]))
+        ] + ([('context-policy', mkadt.u32(*CONTEXT_POLICY))] if context else [])))
     tree.children.extend(additions)

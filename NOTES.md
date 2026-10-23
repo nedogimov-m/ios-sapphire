@@ -1,5 +1,64 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CB0/1 read-only hardware PASS; user switches priority to Wi-Fi — 2026-10-23
+
+Source parentdee6f34. New explicit `--gpu-smmu-context-probe`/
+redfinsmmu2 binds additional exact context-policy before parent power writes.
+After fresh GMU/TCM and stable global snapshot, reads only CB0/1's12registers
+twice. Every access retains parent/source/reset/IRQ/ADT/argument guards.
+CPU mapping is16KiB because XNU's granule; CB2/3 are mapped but never
+addressed. No context stores, table dereferences, fault ack, TLB or firmware.
+Modes0/1 retain their original mapping/write boundaries.
+
+111focusedtestsPASS plus5return-profile tests; all1125hosttestsPASS in93.009s
+(`peripherals-host-tests-v46.txt`). Additional regression for nonzero disabled
+hardware-like context state passes49adapter/FDTtests in13.691s. ASan/UBSan
+28,974scenariosPASS, including14,619context-mode parent-lease edges.
+Local native build `build-20261023-134153.log` and complete real
+image/ADT/FDT/return validationPASS.
+
+Fresh authenticated/image/nonce-matched `gpu-context-v1-20261023-134317`
+reports GMU0/stage10, SMMU0/stage4/stable1/format1, then context0/stage3,
+48reads/completed48/stable1/disabled3/faults0. Both SCTLR.M bits are clear;
+other TTBR/TCR/MAIR configuration is nonzero and remains private, never
+dereferenced. Disabled is not blank or owned. StaticPID1,verified fastboot
+return,HFS clean/unmodified atwrite_count462335. No flash/media operation.
+
+Kernel `4fc20ca23a662c7f67cba169f7004c534de331dfd8d08d388baeb8af5b7bb7fa`;
+image `48a6f9fd771b351609f917503bd991208085aae0a2cd9531a6b692417048763b`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=2 redfinspmi=1 redfinreturn=1 redfinbootid=0x040221cb6a408414`.
+
+User now requests iOS with Wi-Fi: prioritize native firmware/start/transport.
+Retained CX/MSS/XO/AOP power is hardware-proven; PAS4/firmware, SMP2P,
+GLINK/WLFW, association/data and iOS network interface are still unfinished.
+Do not boot a legacy wifi=1 Sapphire path or claim connection from power.
+GPU next is separately owned context/memory, firmware and HFI; no rendering.
+
+## REDFIN GPU-SMMU global hardware snapshot PASS — 2026-10-23
+
+Source dee6f34. Frozen `gpu-smmu-v3` passes real image/ADT/FDT/return
+validation and fresh authenticated/image/nonce-matched capture
+`gpu-smmu-v3-20261023-123556`. GMU repeats result0/stage10/377reads/20writes,
+source200=1/counter=1/restored=1/dirty=0, reset1/INIT0/HFI0.
+SMMU reports result0/stage4/guard5,58reads/completed58,stable1/format1.
+IDR0/1/2/7=4c017e05/20000005/5511/24:5streamslots,5contexts,4KiBpages,
+32KiBglobals,SID15/input36/output36/VA48. CR0=220406,GFSR/syndromes0.
+All five SMRs/CBARs/CBA2Rs0; invalid S2CRs are preserved as raw private
+evidence, not normalized. Streams4/5 have no active match; unreferenced1f
+does not establish ownership. Only global-half reads; no CB/table/route
+access or DMA. StaticPID1,verified fastboot return,HFS clean/unmodified
+atwrite_count462335. No new native build: uses122808 from dee6f34.
+
+Kernel `8d0a114f9f34434d9f39894af2faa67619180336aa9d4ec165380273f0b34cbf`;
+image `727a8692d9a5cac8c44cb0f04ed252cec2ebe704761ccf3eef237364675ec7bb`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x452aa2fdebcbdea6`.
+
+Next: explicitly selected read-only context0 inspection using preferred
+HackiOS step9 and native register definitions, retaining fresh CX/clocks/
+reset/IRQs and bounded return. Do not infer blank or nonsecure context
+from globals alone. Firmware/HFI/GPU commands/rendering and Wi-Fi remain
+unfinished; all device runs remain temporary md0 boots.
+
 ## REDFIN GMU clocked CSR and reset-held TCM hardware PASS — 2026-10-23
 
 Source parent4987f8c. Corrected the native Lito clock-before-CSR order:

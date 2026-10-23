@@ -26,6 +26,14 @@ licenses.
 
 ## Compatibility boundary
 
+Reviewed 2026-10-23: the same pinned kernel's `redwood_adreno.c` step9
+reads CB0, while step13 prepares a separate GMU context1. Redfin's new
+explicit read-only CB0/1 observer uses native Lito's 64KiB resource, global
+offset0x8000 and 4KiB context pages. It reads two stable passes, never follows
+inherited TTBRs and introduces no context writes, firmware or iOS ABI change.
+Hardware observes both translations disabled, faults zero and nonzero
+residual configuration. This is observation, not a context-ownership grant.
+
 Rechecked 2026-10-23: kernel HEAD remains `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`.
 Userland now has HEAD `a79ff0772a3454fd1ef127e181e5b3bce6c9ce18`; its two
 functional additions are `fcc3214` (thermald/bootok) and `a79ff07`

@@ -12,6 +12,7 @@
 #include "redfin_gmu_probe.h"
 #include "redfin_gmu_tcm.h"
 #include "redfin_gpu_smmu.h"
+#include "redfin_gpu_context.h"
 
 extern int redfin_spmi_return_ready(void);
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
@@ -19,15 +20,16 @@ static bool gm_attempted;
 
 struct gm_binding { const void *live, *expected; unsigned bytes; };
 struct gm_context {
-    vm_offset_t base[3], gic, smmu;
+    vm_offset_t base[3], gic, smmu, cb;
     const char *parent_args;
     void *parent_context;
     redfin_gmu_parent_valid_fn parent_valid;
     unsigned args_bytes;
     char args[608];
-    struct gm_binding bindings[14];
+    struct gm_binding bindings[15];
     uint64_t breadcrumbs;
     unsigned binding_count, dtcm_writes, smmu_reads, smmu_guard, smmu_breadcrumbs;
+    unsigned smmu_mode, cb_reads, cb_breadcrumbs;
     bool active, smmu_requested, smmu_ready;
 };
 
@@ -51,6 +53,7 @@ static const uint32_t gm_smmu_clocks[][4] = {
     {RF_GT_GPUCC, 0x5000, 0x80000001u, 1}
 };
 static const uint32_t gm_smmu_irqs[] = {705, 710, 711, 712, 713, 714, 715, 716, 717};
+static const uint32_t gm_cb_policy[] = {1, 0x8000, RF_GC_MAP_BYTES, RF_GC_BANKS, 0x1000, RF_GC_WORDS};
 
 static bool
 gm_property(struct gm_context *context, const char *path, const char *key,
@@ -75,7 +78,7 @@ gm_property(struct gm_context *context, const char *path, const char *key,
 }
 
 static bool
-gm_contract(struct gm_context *context, bool smmu)
+gm_contract(struct gm_context *context, unsigned mode)
 {
     bool base = gm_property(context, "/chosen", "dram-base", &gm_dram_base, sizeof(gm_dram_base)) &&
         gm_property(context, "/chosen", "dram-size", &gm_dram_size, sizeof(gm_dram_size)) &&
@@ -85,25 +88,27 @@ gm_contract(struct gm_context *context, bool smmu)
         gm_property(context, "/redfin-gmu", "tcm-policy", gm_tcm, sizeof(gm_tcm)) &&
         gm_property(context, "/redfin-gmu", "cx-parent", gm_parent, sizeof(gm_parent)) &&
         gm_property(context, "/redfin-gmu", "gic-intids", gm_irqs, sizeof(gm_irqs));
-    if (!base || !smmu)
+    if (!base || !mode)
         return base;
     return gm_property(context, "/redfin-gpu-smmu", "reg", gm_smmu_reg, sizeof(gm_smmu_reg)) &&
         gm_property(context, "/redfin-gpu-smmu", "chip-id", &gm_chip, sizeof(gm_chip)) &&
         gm_property(context, "/redfin-gpu-smmu", "stream-map", gm_smmu_streams, sizeof(gm_smmu_streams)) &&
         gm_property(context, "/redfin-gpu-smmu", "format-policy", gm_smmu_format, sizeof(gm_smmu_format)) &&
         gm_property(context, "/redfin-gpu-smmu", "clock-policy", gm_smmu_clocks, sizeof(gm_smmu_clocks)) &&
-        gm_property(context, "/redfin-gpu-smmu", "gic-intids", gm_smmu_irqs, sizeof(gm_smmu_irqs));
+        gm_property(context, "/redfin-gpu-smmu", "gic-intids", gm_smmu_irqs, sizeof(gm_smmu_irqs)) &&
+        (mode != 2 || gm_property(context, "/redfin-gpu-smmu", "context-policy",
+            gm_cb_policy, sizeof(gm_cb_policy)));
 }
 
 int
 redfin_gmu_probe_contract(const char *frozen_args, unsigned args_bytes)
 {
     const char *live = PE_boot_args();
-    bool smmu = false;
-    if (!redfin_gmu_args_select(frozen_args, args_bytes, &smmu) || !live ||
+    unsigned mode = 0;
+    if (!redfin_gmu_args_mode(frozen_args, args_bytes, &mode) || !live ||
         memcmp(live, frozen_args, args_bytes))
         return ENOTSUP;
-    return gm_contract(NULL, smmu) ? 0 : ENXIO;
+    return gm_contract(NULL, mode) ? 0 : ENXIO;
 }
 
 static uint32_t
@@ -307,6 +312,15 @@ gm_smmu_step(struct gm_context *context, unsigned bit, const char *phase, uint32
     return true;
 }
 
+static uint32_t
+gm_scalar_read(vm_offset_t address)
+{
+    uint32_t raw;
+    __asm__ volatile("ldr %w0, [%1]" : "=r"(raw) : "r"(address) : "memory");
+    __asm__ volatile("dmb oshld" ::: "memory");
+    return raw;
+}
+
 static int
 gm_smmu_read(void *argument, uint32_t at, uint32_t *value)
 {
@@ -332,13 +346,59 @@ gm_smmu_read(void *argument, uint32_t at, uint32_t *value)
     if (logged && !gm_smmu_valid(context))
         return ECANCELED;
     /* Explicit scalar LDR for HYP-intercepted globals; never a CB page. */
-    uint32_t raw;
-    vm_offset_t address = context->smmu + at;
-    __asm__ volatile("ldr %w0, [%1]" : "=r"(raw) : "r"(address) : "memory");
-    __asm__ volatile("dmb oshld" ::: "memory");
-    *value = raw;
+    *value = gm_scalar_read(context->smmu + at);
     context->smmu_reads++;
     return 0;
+}
+
+static int
+gm_cb_read(void *argument, unsigned bank, uint32_t at, uint32_t *value)
+{
+    struct gm_context *context = argument;
+    if (!context || !context->cb || context->smmu_mode != 2 ||
+        !value || !rf_gc_allowed(bank, at))
+        return EINVAL;
+    if (!gm_smmu_valid(context))
+        return ECANCELED;
+    if (!(context->cb_breadcrumbs & (1u << bank))) {
+        context->cb_breadcrumbs |= 1u << bank;
+        printf("REDFIN GPU CONTEXT ACCESS: bank=%u first-offset=%#x; read-only\n", bank, at);
+        if (!gm_smmu_valid(context))
+            return ECANCELED;
+    }
+    *value = gm_scalar_read(context->cb + bank * 0x1000 + at);
+    context->cb_reads++;
+    return 0;
+}
+
+static int
+gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
+{
+    struct rf_gc_snapshot snapshot = {0};
+    int result = ECANCELED;
+    if (context->smmu_mode == 2 && global->stable && global->map_format_supported &&
+        !global->error && global->stage == 4 && global->contexts >= RF_GC_BANKS &&
+        !global->stage2_contexts && gm_smmu_valid(context)) {
+        printf("REDFIN GPU CONTEXT STEP: stable globals; inspect CB0/1, no table dereference\n");
+        if (gm_smmu_valid(context)) {
+            context->cb = ml_io_map(RF_GS_PHYS + 0x8000, RF_GC_MAP_BYTES);
+            if (!context->cb) {
+                result = ENOMEM;
+            } else {
+                const struct rf_gc_ops ops = {context, gm_smmu_valid, gm_cb_read};
+                result = rf_gc_snapshot_run(&ops, global, &snapshot);
+            }
+        }
+    }
+    printf("REDFIN GPU CONTEXT: result=%d stage=%u reads=%u completed=%u stable=%u disabled=%#x faults=%#x changed=%u/%#x; no writes/ownership\n",
+        result, snapshot.stage, snapshot.reads, context->cb_reads, snapshot.stable,
+        snapshot.disabled_mask, snapshot.fault_mask, snapshot.changed_bank, snapshot.changed_offset);
+    for (unsigned bank = 0; bank < RF_GC_BANKS; bank++) {
+        const uint32_t *w = snapshot.words[bank];
+        printf("REDFIN GPU CONTEXT BANK: bank=%u SCTLR=%#x TCR2=%#x TTBR0=%#x/%#x TCR=%#x CONTEXTID=%#x MAIR=%#x/%#x FSR=%#x FAR=%#x/%#x FSYNR=%#x\n",
+            bank, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11]);
+    }
+    return result;
 }
 
 static int
@@ -382,6 +442,8 @@ gm_smmu_run(struct gm_context *context, const struct rf_gt_report *gmu)
         printf("REDFIN SMMU ANALYSIS: stream4=%u/%u stream5=%u/%u unreferenced=%#x malformed=%u; unreferenced is not owned\n",
             snapshot.gmu_matches[0], snapshot.gmu_slot[0], snapshot.gmu_matches[1], snapshot.gmu_slot[1],
             snapshot.unreferenced_mask, snapshot.malformed_routes);
+    if (!result && context->smmu_mode == 2)
+        result = gm_cb_run(context, &snapshot);
     return result;
 }
 
@@ -404,10 +466,11 @@ redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
     context.parent_valid = held_cx_valid;
     context.args_bytes = args_bytes;
     memcpy(context.args, frozen_args, args_bytes);
-    if (!redfin_gmu_args_select(frozen_args, args_bytes, &context.smmu_requested))
+    if (!redfin_gmu_args_mode(frozen_args, args_bytes, &context.smmu_mode))
         return ENOTSUP;
+    context.smmu_requested = context.smmu_mode != 0;
     context.active = true;
-    if (!gm_contract(&context, context.smmu_requested) || !gm_valid(&context))
+    if (!gm_contract(&context, context.smmu_mode) || !gm_valid(&context))
         return EPERM;
     context.base[RF_GT_GCC] = ml_io_map(0x100000, 0x1f0000);
     if (!context.base[RF_GT_GCC])

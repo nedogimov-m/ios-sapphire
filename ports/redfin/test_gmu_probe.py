@@ -19,6 +19,7 @@ ARGS = ('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
         'modem=0 wifi=0 gpu=0 redfingpu=2 redfingpupower=1 redfinrpmh=1 '
         'redfinspmi=1 redfinreturn=1 redfingmu=1 redfinbootid=0x1234567890abcdef')
 SMMU_ARGS = ARGS + ' redfinsmmu=1'
+CONTEXT_ARGS = ARGS + ' redfinsmmu=2'
 
 
 def fixture(smmu=False):
@@ -83,9 +84,9 @@ def fixture(smmu=False):
     return tree, nodes
 
 
-def properties(smmu=False):
+def properties(smmu=False, context=False):
     tree, nodes = fixture(smmu)
-    gmu_probe.add_contract(tree, nodes, smmu=smmu)
+    gmu_probe.add_contract(tree, nodes, smmu=smmu, context=context)
     leaf = next(n for n in tree.children if n.name == 'redfin-gmu')
     result = [mkadt.u64(0x180000000), mkadt.u64(0x80000000)] + [
         leaf.prop(name) for name in ('reg', 'chip-id', 'clock-policy',
@@ -94,6 +95,8 @@ def properties(smmu=False):
         leaf = next(n for n in tree.children if n.name == 'redfin-gpu-smmu')
         result += [leaf.prop(name) for name in ('reg', 'chip-id', 'stream-map',
                                               'format-policy', 'clock-policy', 'gic-intids')]
+        if context:
+            result.append(leaf.prop('context-policy'))
     return result
 
 
@@ -111,6 +114,7 @@ class RedfinGMUContractTests(unittest.TestCase):
                 'bsd/dev/redfin_gmu_probe.h': HERE/'gmu-probe.h',
                 'bsd/dev/redfin_gmu_tcm.h': HERE/'include/redfin_gmu_tcm.h',
                 'bsd/dev/redfin_gpu_smmu.h': HERE/'include/redfin_gpu_smmu.h',
+                'bsd/dev/redfin_gpu_context.h': HERE/'include/redfin_gpu_context.h',
             }
             actual = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
             self.assertEqual(actual, set(wanted))
@@ -250,6 +254,18 @@ class RedfinGMUContractTests(unittest.TestCase):
         gmu_probe.add_contract(tree, nodes)
         self.assertFalse(any(n.name == 'redfin-gpu-smmu' for n in tree.children))
 
+    def test_context_contract_is_opt_in_and_requires_the_same_native_smmu(self):
+        tree, nodes = fixture(True)
+        gmu_probe.add_contract(tree, nodes, smmu=True, context=True)
+        leaf = next(n for n in tree.children if n.name == 'redfin-gpu-smmu')
+        self.assertEqual(leaf.prop('context-policy'), mkadt.u32(1, 0x8000, 0x4000, 2, 0x1000, 12))
+        for smmu, context in ((False, True), (True, 1), (True, 'yes')):
+            tree, nodes = fixture(True)
+            before = mkadt.adt.serialize(tree)
+            with self.assertRaises(ValueError):
+                gmu_probe.add_contract(tree, nodes, smmu=smmu, context=context)
+            self.assertEqual(mkadt.adt.serialize(tree), before)
+
 
 def adapter_source():
     code = (HERE/'gmu-probe.c').read_text()
@@ -280,6 +296,7 @@ HARNESS = r'''
 #include "redfin_gmu_probe.h"
 #include "redfin_gmu_tcm.h"
 #include "redfin_gpu_smmu.h"
+#include "redfin_gpu_context.h"
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
 typedef uintptr_t vm_offset_t;
@@ -287,6 +304,7 @@ typedef uintptr_t vm_size_t;
 typedef void *DTEntry;
 static uint32_t gcc[0x1f0000/4],gpucc[0x9000/4],gmu[0x30000/4],gic[0x4000/4];
 static uint32_t smmu[0x8000/4],smmu_offsets[1024],write_trace[128][3];
+static uint32_t cb[RF_GC_MAP_BYTES/4],cb_offsets[128];
 static char live_args[608],parent_args[608];
 static unsigned arg_bytes,scenario,maps,bad,raw_reads,raw_writes,dtcm_writes;
 static unsigned parent_calls,fail_parent,after_loss,map_mask;
@@ -294,12 +312,13 @@ static uint64_t host_el,host_mpidr,now_ns;
 static bool parent_lost;
 static int parent_cookie;
 static unsigned smmu_reads,smmu_maps,smmu_gic_reads,changed_smmu_read,revoke_smmu_read;
+static unsigned cb_reads,cb_maps,changed_cb_read,revoke_cb_read;
 static unsigned event_clock,events[6],logs,log_events[512];
 static char log_lines[512][320];
 struct property {uint8_t data[128];unsigned bytes;bool present;};
-static struct property props[14];
-static const char *keys[14]={"dram-base","dram-size","reg","chip-id","clock-policy","tcm-policy","cx-parent","gic-intids",
- "reg","chip-id","stream-map","format-policy","clock-policy","gic-intids"};
+static struct property props[15];
+static const char *keys[15]={"dram-base","dram-size","reg","chip-id","clock-policy","tcm-policy","cx-parent","gic-intids",
+ "reg","chip-id","stream-map","format-policy","clock-policy","gic-intids","context-policy"};
 static int log_sink(const char *text,...) {
  if(logs>=512){bad++;return 0;}
  va_list ap;va_start(ap,text);vsnprintf(log_lines[logs],sizeof(log_lines[logs]),text,ap);va_end(ap);
@@ -307,6 +326,9 @@ static int log_sink(const char *text,...) {
  if(strstr(log_lines[logs],"REDFIN GMU: result=0 stage=10"))events[5]=event_clock;
  if(scenario==53&&strstr(log_lines[logs],"unit=0 offset=0 first-read"))parent_lost=true;
  if(scenario==54&&strstr(log_lines[logs],"REDFIN SMMU ACCESS: phase=ids"))parent_lost=true;
+ if(scenario==70&&strstr(log_lines[logs],"REDFIN GPU CONTEXT STEP:"))parent_lost=true;
+ if(scenario==71&&strstr(log_lines[logs],"REDFIN GPU CONTEXT ACCESS:"))parent_lost=true;
+ if(scenario==72&&strstr(log_lines[logs],"REDFIN GPU CONTEXT STEP:"))props[14].data[0]^=1;
  if(strstr(text,"REDFIN SMMU STEP: fresh GMU DONE")) {
   if(scenario==39)gpucc[0x1124/4]^=0x100;
   if(scenario==40)gmu[0x14000/4]=0;
@@ -342,7 +364,7 @@ int SecureDTLookupEntry(void *root,const char *path,DTEntry *out) {
  return -1;
 }
 int SecureDTGetProperty(DTEntry node,const char *key,const void **out,unsigned *n) {
- for(unsigned i=0;i<14;i++)if(node==(void*)(uintptr_t)(i<2?1:i<8?2:3)&&!strcmp(key,keys[i])&&props[i].present) {
+ for(unsigned i=0;i<15;i++)if(node==(void*)(uintptr_t)(i<2?1:i<8?2:3)&&!strcmp(key,keys[i])&&props[i].present) {
   *out=props[i].data;*n=props[i].bytes;return 0;
  }
  return -1;
@@ -364,6 +386,11 @@ vm_offset_t ml_io_map(vm_offset_t address,vm_size_t size) {
   smmu_maps++;events[4]=++event_clock;
   if(scenario==30)return 0;
   map_mask|=16;return (uintptr_t)smmu;
+ }
+ if(address==RF_GS_PHYS+0x8000&&size==sizeof(cb)) {
+  cb_maps++;
+  if(scenario==69)return 0;
+  map_mask|=32;return (uintptr_t)cb;
  }
  bad++;return 0;
 }
@@ -426,6 +453,18 @@ static void host_mmio_write(vm_offset_t address,uint32_t value) {
  }
 }
 static uint32_t host_smmu_read(vm_offset_t address) {
+ if(address>=(uintptr_t)cb&&address-(uintptr_t)cb<sizeof(cb)) {
+  uint32_t at=(uint32_t)(address-(uintptr_t)cb);
+  if(!rf_gc_allowed(at/0x1000,at%0x1000)||!cb_maps||smmu_reads!=114||
+   !events[5]||gmu[0x14000/4]!=1)bad++;
+  if(parent_lost)after_loss++;
+  if(cb_reads<128)cb_offsets[cb_reads]=at;else bad++;
+  cb_reads++;raw_reads++;event_clock++;now_ns+=20;
+  if(changed_cb_read==cb_reads)*(uint32_t*)address^=1;
+  uint32_t value=*(uint32_t*)address;
+  if(revoke_cb_read==cb_reads)parent_lost=true;
+  return value;
+ }
  unsigned unit;uint32_t at;
  if(!unit_and_offset(address,&unit,&at))return UINT32_MAX;
  if(unit!=4||at>=0x8000||!events[5]||gmu[0x14000/4]!=1||
@@ -454,6 +493,11 @@ ACTUAL_SOURCE
 void host_reset(const char *args,unsigned n,unsigned issue,unsigned failure) {
  memset(gcc,0,sizeof(gcc));memset(gpucc,0,sizeof(gpucc));memset(gmu,0,sizeof(gmu));memset(gic,0,sizeof(gic));
  memset(smmu,0,sizeof(smmu));memset(props,0,sizeof(props));memset(events,0,sizeof(events));
+ memset(cb,0,sizeof(cb));cb_reads=cb_maps=changed_cb_read=revoke_cb_read=0;
+ if(issue==73) {
+  cb[0]=0x2bc9e310;cb[0x20/4]=0x7bd023f1;cb[0x24/4]=0x5df93b4f;
+  cb[0x1000/4]=0x1f0d4100;cb[0x1020/4]=0xea6276ab;cb[0x1024/4]=0x8c7537d2;
+ }
  memset(write_trace,0,sizeof(write_trace));smmu_reads=smmu_maps=smmu_gic_reads=0;
  changed_smmu_read=revoke_smmu_read=event_clock=logs=0;
  memset(live_args,0,sizeof(live_args));memset(parent_args,0,sizeof(parent_args));
@@ -489,7 +533,7 @@ void host_reset(const char *args,unsigned n,unsigned issue,unsigned failure) {
  if(issue==49)smmu[0x20/4]|=1u<<8;
 }
 void host_property(unsigned index,const void *p,unsigned n,int present) {
- if(index>=14||n>128)abort();memset(&props[index],0,sizeof(props[index]));
+ if(index>=15||n>128)abort();memset(&props[index],0,sizeof(props[index]));
  if(n)memcpy(props[index].data,p,n);props[index].bytes=n;props[index].present=present!=0;
 }
 int host_contract(void){return redfin_gmu_probe_contract(parent_args,arg_bytes);}
@@ -497,6 +541,11 @@ int host_probe(void){return redfin_gmu_probe(scenario==22?NULL:parent_args,arg_b
  scenario==24?NULL:&parent_cookie,scenario==23?NULL:parent_valid);}
 int host_args(const char *s,unsigned n){return redfin_gmu_args_valid(s,n);}
 int host_select(const char *s,unsigned n,bool *out){return redfin_gmu_args_select(s,n,out);}
+int host_mode(const char *s,unsigned n,unsigned *out){return redfin_gmu_args_mode(s,n,out);}
+void host_cb_fault(unsigned change,unsigned revoke){changed_cb_read=change;revoke_cb_read=revoke;}
+unsigned host_cb_metric(unsigned i){unsigned v[]={cb_reads,cb_maps};return i<2?v[i]:999;}
+uint32_t host_cb_offset(unsigned i){return i<cb_reads&&i<128?cb_offsets[i]:UINT32_MAX;}
+int host_cb_allowed(unsigned bank,uint32_t at){return rf_gc_allowed(bank,at);}
 void host_smmu_fault(unsigned change,unsigned revoke){changed_smmu_read=change;revoke_smmu_read=revoke;}
 unsigned host_smmu_metric(unsigned i) {
  unsigned v[]={smmu_reads,smmu_maps,smmu_gic_reads,logs};return i<4?v[i]:999;
@@ -534,6 +583,7 @@ class RedfinGMUAdapterTests(unittest.TestCase):
         cls.lib.host_property.argtypes = [ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint, ctypes.c_int]
         cls.lib.host_args.argtypes = [ctypes.c_char_p, ctypes.c_uint]
         cls.lib.host_select.argtypes = [ctypes.c_char_p, ctypes.c_uint, ctypes.POINTER(ctypes.c_bool)]
+        cls.lib.host_mode.argtypes = [ctypes.c_char_p, ctypes.c_uint, ctypes.POINTER(ctypes.c_uint)]
         cls.lib.host_final.restype = ctypes.c_uint32
         cls.lib.host_smmu_offset.restype = ctypes.c_uint32
         cls.lib.host_write_trace.restype = ctypes.c_uint32
@@ -543,11 +593,12 @@ class RedfinGMUAdapterTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.directory.cleanup()
 
-    def reset(self, scenario=0, failure=0, args=None, values=None, smmu=False):
-        args = (SMMU_ARGS if smmu else ARGS) if args is None else args
+    def reset(self, scenario=0, failure=0, args=None, values=None, smmu=False, context=False):
+        smmu = smmu or context
+        args = (CONTEXT_ARGS if context else SMMU_ARGS if smmu else ARGS) if args is None else args
         encoded = args.encode()+b'\0'
         self.lib.host_reset(encoded, len(encoded), scenario, failure)
-        for i, value in enumerate(properties(smmu) if values is None else values):
+        for i, value in enumerate(properties(smmu, context) if values is None else values):
             self.lib.host_property(i, value or b'', len(value or b''), value is not None)
 
     def metrics(self):
@@ -684,13 +735,13 @@ class RedfinGMUAdapterTests(unittest.TestCase):
             self.assertEqual(self.metrics(), before)
 
     def test_optional_smmu_selection_is_exact_unique_and_cannot_escape_gmu_mode(self):
-        for args, expected in ((ARGS, False), (SMMU_ARGS, True),
+        for args, expected in ((ARGS, False), (SMMU_ARGS, True), (CONTEXT_ARGS, True),
                                (SMMU_ARGS+' -enable_kprintf_spam', True)):
             selected = ctypes.c_bool(not expected)
             raw = args.encode()+b'\0'
             self.assertEqual(self.lib.host_select(raw, len(raw), ctypes.byref(selected)), 1)
             self.assertEqual(selected.value, expected)
-        bad = [ARGS+' '+word for word in ('redfinsmmu=0', 'redfinsmmu=2', 'redfinsmmu=01',
+        bad = [ARGS+' '+word for word in ('redfinsmmu=0', 'redfinsmmu=3', 'redfinsmmu=01',
                                           'redfinsmmu=1x', 'redfinsmmu=+1',
                                           'redfinsmmu=1 redfinsmmu=1')]
         bad += [SMMU_ARGS.replace(word, '', 1) for word in ('redfingmu=1', 'redfinreturn=1', 'rd=md0')]
@@ -904,6 +955,91 @@ class RedfinGMUAdapterTests(unittest.TestCase):
             self.reset(failure=failure, smmu=True)
             self.assertNotEqual(self.lib.host_probe(), 0)
             self.assertEqual(self.metrics()[5], failure)
+
+    def test_context_mode_returns_exact_value_and_rejects_mixed_duplicates(self):
+        for args, expected in ((ARGS, 0), (SMMU_ARGS, 1), (CONTEXT_ARGS, 2)):
+            mode = ctypes.c_uint(99)
+            raw = args.encode()+b'\0'
+            self.assertEqual(self.lib.host_mode(raw, len(raw), ctypes.byref(mode)), 1)
+            self.assertEqual(mode.value, expected)
+        for args in (CONTEXT_ARGS+' redfinsmmu=1', CONTEXT_ARGS+' redfinsmmu=2',
+                     CONTEXT_ARGS.replace('=2', '=02'), CONTEXT_ARGS+'x'):
+            mode = ctypes.c_uint(99)
+            raw = args.encode()+b'\0'
+            self.assertEqual(self.lib.host_mode(raw, len(raw), ctypes.byref(mode)), 0)
+            self.assertEqual(mode.value, 99)
+
+    def test_context_mode_reads_only_two_banks_after_global_snapshot_without_new_stores(self):
+        self.reset(smmu=True)
+        self.assertEqual(self.lib.host_probe(), 0)
+        original = self.writes()
+        self.assertEqual(self.lib.host_cb_metric(0), 0)
+        self.reset(context=True)
+        self.assertEqual(self.lib.host_contract(), 0)
+        self.assertEqual(self.metrics(), (0,)*8)
+        self.assertEqual(self.lib.host_probe(), 0)
+        self.assertEqual(self.writes(), original)
+        self.assertEqual((self.metrics()[0], self.metrics()[7]), (6, 63))
+        self.assertEqual((self.lib.host_cb_metric(0), self.lib.host_cb_metric(1)), (48, 1))
+        fields = (0, 0x10, 0x20, 0x24, 0x30, 0x34, 0x38, 0x3c, 0x58, 0x60, 0x64, 0x68)
+        expected = [bank*0x1000+at for bank in range(2) for at in fields]*2
+        self.assertEqual([self.lib.host_cb_offset(i) for i in range(48)], expected)
+        self.assertTrue(any('stable=1 disabled=0x3 faults=0' in line for line in self.logs()))
+
+    def test_context_policy_every_bit_and_missing_or_old_contract_rejects_before_arc(self):
+        baseline = properties(True, True)
+        replacements = (None, b'', baseline[14][:-1], baseline[14]+b'\0')
+        replacements += tuple(bytes(byte ^ (1 << bit) if i == index else byte
+                                    for i, byte in enumerate(baseline[14]))
+                              for index in range(len(baseline[14])) for bit in range(8))
+        for replacement in replacements:
+            changed = list(baseline)
+            changed[14] = replacement
+            self.reset(context=True, values=changed)
+            self.assertEqual(self.lib.host_contract(), errno.ENXIO)
+            self.assertEqual(self.lib.host_probe(), errno.ENXIO)
+            self.assertEqual(self.metrics(), (0,)*8)
+
+    def test_context_mapping_failure_and_logging_lease_or_binding_loss_never_continue(self):
+        for issue, expected_maps, expected_reads in ((69, 1, 0), (70, 0, 0),
+                                                    (71, 1, 0), (72, 0, 0)):
+            self.reset(issue, context=True)
+            self.assertNotEqual(self.lib.host_probe(), 0)
+            self.metrics()
+            self.assertEqual(self.lib.host_cb_metric(0), expected_reads)
+            self.assertEqual(self.lib.host_cb_metric(1), expected_maps)
+        for issue in (34, 35, 36, 37, 46):
+            self.reset(issue, context=True)
+            self.lib.host_probe()
+            self.metrics()
+            self.assertEqual(self.lib.host_cb_metric(1), 0)
+
+    def test_context_changes_and_every_read_lease_loss_stop_at_first_access(self):
+        for changed in range(25, 49):
+            self.reset(context=True)
+            self.lib.host_cb_fault(changed, 0)
+            self.assertEqual(self.lib.host_probe(), errno.EAGAIN)
+            self.metrics()
+            self.assertEqual(self.lib.host_cb_metric(0), changed)
+        for revoked in range(1, 49):
+            self.reset(context=True)
+            self.lib.host_cb_fault(0, revoked)
+            self.assertEqual(self.lib.host_probe(), errno.ECANCELED)
+            self.metrics()
+            self.assertEqual(self.lib.host_cb_metric(0), revoked)
+
+    def test_nonzero_disabled_contexts_are_observed_without_blank_or_ownership_claim(self):
+        self.reset(73, context=True)
+        self.assertEqual(self.lib.host_probe(), 0)
+        self.metrics()
+        lines = self.logs()
+        self.assertTrue(any('stable=1 disabled=0x3 faults=0' in line for line in lines))
+        self.assertTrue(any('bank=0 SCTLR=0x2bc9e310' in line for line in lines))
+        self.assertTrue(any('bank=1 SCTLR=0x1f0d4100' in line for line in lines))
+        allowed = {0, 0x10, 0x20, 0x24, 0x30, 0x34, 0x38, 0x3c, 0x58, 0x60, 0x64, 0x68}
+        for bank in range(6):
+            for at in range(0x1000):
+                self.assertEqual(bool(self.lib.host_cb_allowed(bank, at)), bank < 2 and at in allowed)
 
 
 if __name__ == '__main__':

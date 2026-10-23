@@ -4,9 +4,38 @@
 read-only global-register snapshot. It has no write callback, reads no
 context-bank page and grants no DMA/context ownership. The optional adapter
 mode below requires this call's fresh held-CX and successful reset-held TCM
-proof from [GMU.md](GMU.md). Its hardware result remains unobserved.
+proof from [GMU.md](GMU.md).
 The private IRQ list uses `gic-intids`; a standard `interrupts` property here
 would enter IOKit's interrupt resolver before the observer can run.
+
+Authenticated hardware capture `gpu-smmu-v3` passes: result0/stage4,
+58 completed reads, stable=1 and format=1. IDR0/1/2/7 are
+`0x4c017e05/0x20000005/0x5511/0x24`: five stream slots, five contexts,
+4KiB register pages, 32KiB global half, 15 SID bits and 36-bit output.
+CR0 is `0x220406`; global fault/syndromes are zero. All five SMRs and
+GR1 CBAR/CBA2R pairs are zero; raw invalid-slot S2CR values are retained
+privately. Streams4/5 have no active match and the metadata-only unreferenced
+mask is `0x1f`. No context register, route write or DMA was attempted.
+The same run repeats the GMU clock/counter/TCM proof, reaches PID1 and returns
+to fastboot; HFS remains clean with the same write count.
+
+The separate `--gpu-smmu-context-probe` selects `redfinsmmu=2`. It repeats
+that global snapshot, then reads only CB0/1 using
+[`include/redfin_gpu_context.h`](include/redfin_gpu_context.h).
+Its additional exact `context-policy` is `[1,0x8000,0x4000,2,0x1000,12]`.
+The 16KiB CPU mapping includes CB2/3 because of XNU's granule, but callbacks
+address only the two selected low banks and twelve read-only registers each.
+No TTBR dereference, fault acknowledgement, TLB operation or store exists.
+All inherited exact argument/ADT/parent/source/reset/IRQ checks apply before
+mapping, after breadcrumbs and before every access. Two passes must agree.
+Modes0/1 do not map or access any context page.
+
+Authenticated `gpu-context-v1` hardware passes 48 reads/stage3/stable1:
+both SCTLR.M bits are clear and both FSRs zero. Other configuration registers
+are nonzero; disabled does not mean blank or owned. The current stable raw
+TTBR/TCR/MAIR words remain private evidence and are never followed as pointers.
+The test reaches PID1 and returns to fastboot with the same clean HFS header.
+This supplies the next memory-manager prerequisite; it installs no translation.
 [`include/redfin_gmu_pagetables.h`](include/redfin_gmu_pagetables.h) separately
 constructs CPU-only 4KiB tables from owned allocations. It installs no table
 or route and is also unwired.
