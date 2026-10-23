@@ -384,6 +384,19 @@ int rf_wifi_smp2p_wait_ready(struct rf_wifi_smp2p_session *s, const struct rf_wi
     return RF_WIFI_SMP2P_OK;
 }
 
+int rf_wifi_smp2p_alive(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *o)
+{
+    if (!s || !valid_ops(o)) return RF_WIFI_SMP2P_ARGUMENT;
+    if (s->stage != RF_WIFI_SMP2P_READY || s->poisoned) return RF_WIFI_SMP2P_STATE;
+    uint32_t state = 0;
+    int error = gate(s, o);
+    if (!error && o->pas_started(o->context)) error = RF_WIFI_SMP2P_STATE;
+    if (!error) error = peer(s, o, &state);
+    if (error == RF_WIFI_SMP2P_UNSTABLE) return error;
+    if (!error && !(state & SMP_READY)) error = RF_WIFI_SMP2P_STATE;
+    return error ? poison(s, error) : RF_WIFI_SMP2P_OK;
+}
+
 int rf_wifi_smp2p_stop(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *o, uint32_t timeout_ms)
 {
     if (!s || !valid_ops(o) || !timeout_ms || timeout_ms > RF_WIFI_SMP2P_MAX_STOP_MS)

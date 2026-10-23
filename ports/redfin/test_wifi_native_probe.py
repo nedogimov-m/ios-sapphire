@@ -260,7 +260,7 @@ class NativeWifiProbeTests(unittest.TestCase):
         self.assertEqual(self.library.metric(8), 1)
         self.assertEqual((self.library.metric(0), self.library.metric(1)), (0, 0))
         self.library.reset()
-        self.library.set_option(26, 3)
+        self.library.set_option(26, 4)
         self.assertIn('refused unsupported source mode', self.run_probe())
         self.assertEqual(self.library.metric(8), 0)
         self.assertEqual((self.library.metric(0), self.library.metric(1)), (0, 0))

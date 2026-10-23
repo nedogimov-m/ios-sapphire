@@ -2,7 +2,7 @@ diff --git a/bsd/dev/redfin_wifi_smp2p.h b/bsd/dev/redfin_wifi_smp2p.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_wifi_smp2p.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,100 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin APPS/MPSS SMP2P: allocation, fresh ready and acknowledged stop.
 + * Hardware bindings remain the platform manager's responsibility.
@@ -93,6 +93,8 @@ new file mode 100644
 + * A timeout permits only the bounded shutdown path, not another ready attempt.
 + */
 +int rf_wifi_smp2p_wait_ready(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *, uint32_t timeout_ms);
++/* Read-only continuing liveness/identity check for this established session. */
++int rf_wifi_smp2p_alive(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *);
 +/* Require stop-ack low before setting only master-kernel bit0, then a fresh
 + * high ACK. Clear our stop bit only after that ACK; timeout retains it and
 + * quarantines. PAS shutdown is the caller's next step after success. */
@@ -105,7 +107,7 @@ diff --git a/bsd/dev/redfin_wifi_smp2p.c b/bsd/dev/redfin_wifi_smp2p.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_wifi_smp2p.c
-@@ -0,0 +1,409 @@
+@@ -0,0 +1,422 @@
 +/* SPDX-License-Identifier: MIT
 + * Native implementation from the wire/ordering contracts reviewed at Google
 + * kernel/msm 500b3a2059c1eec0fec08ec56add06320ea901a8: smem.c, smp2p.c,
@@ -490,6 +492,19 @@ new file mode 100644
 +    if (error) return poison(s, error);
 +    s->stage = RF_WIFI_SMP2P_READY;
 +    return RF_WIFI_SMP2P_OK;
++}
++
++int rf_wifi_smp2p_alive(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *o)
++{
++    if (!s || !valid_ops(o)) return RF_WIFI_SMP2P_ARGUMENT;
++    if (s->stage != RF_WIFI_SMP2P_READY || s->poisoned) return RF_WIFI_SMP2P_STATE;
++    uint32_t state = 0;
++    int error = gate(s, o);
++    if (!error && o->pas_started(o->context)) error = RF_WIFI_SMP2P_STATE;
++    if (!error) error = peer(s, o, &state);
++    if (error == RF_WIFI_SMP2P_UNSTABLE) return error;
++    if (!error && !(state & SMP_READY)) error = RF_WIFI_SMP2P_STATE;
++    return error ? poison(s, error) : RF_WIFI_SMP2P_OK;
 +}
 +
 +int rf_wifi_smp2p_stop(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *o, uint32_t timeout_ms)

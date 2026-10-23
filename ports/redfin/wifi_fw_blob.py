@@ -113,7 +113,7 @@ def verify_bundle(verifier, path, digest, excluded):
     return report
 
 
-def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_exclusions=None, start=False):
+def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_exclusions=None, start=False, transport=False):
     require(type(max_payload_bytes) is int and 0 < max_payload_bytes <= MAX_PAYLOAD, 'explicit payload cap outside implementation bound')
     require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'expected bundle SHA256 must be lowercase hex')
     require(64 <= len(firmware) <= MAX_BUNDLE and hashlib.sha256(firmware).hexdigest() == digest,
@@ -126,6 +126,7 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
     info = payload_info(payload)
     require(type(start) is bool and (not start or probe_exclusions is not None),
             'native startup requires its live source exclusions')
+    require(type(transport) is bool and (not transport or start), 'GLINK requires native firmware startup')
     probe = []
     if probe_exclusions is not None:
         require(type(probe_exclusions) in (list, tuple) and 2 <= len(probe_exclusions) <= 64,
@@ -141,7 +142,7 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
                 (0xA0000000, 0x2300000) in map(tuple, probe_exclusions),
                 'source probe lacks native kernel/display exclusions')
         command = payload[72:HEADER].split(b'\0', 1)[0].decode('ascii').split()
-        require(command.count('redfinwififw=2' if start else 'redfinwififw=1') == 1 and
+        require(command.count('redfinwififw=3' if transport else 'redfinwififw=2' if start else 'redfinwififw=1') == 1 and
                 'redfinwifi=2' in command and 'redfinwifinative=1' in command,
                 'source-probe payload has no exact native selector')
         probe = [('probe-contract', mkadt.u32(1, 4, 64, 0)),

@@ -226,5 +226,14 @@ Redfin's high-only XNU RAM and removes the unneeded cold shutdown. The scratch
 pointer's acceptance by TrustZone is still a device question; native code and
 the preferred HackiOS PAS6 result cannot establish it for MPSS4.
 
+The corrected high metadata route is now verified by Redfin PAS4 INIT,
+MEM_SETUP, complete copy/readback, AUTH and a new SMP2P ready/handover0x6.
+For the following transport work, re-reviewed the same preferred kernel's
+`redwood_wifi.c` GLINK/QRTR frame and worker interfaces alongside Google's
+native `qcom_glink_smem.c`. Redfin binds its own live PID1, IPCC2/signal0,
+SMEM478/479/480 and IPCRTR, using bounded allocation/rings and a continued
+native ready lease. No Redwood WPSS geometry is imported. The first stage
+discovers QRTR/WLFW services; its hardware evidence is recorded separately.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

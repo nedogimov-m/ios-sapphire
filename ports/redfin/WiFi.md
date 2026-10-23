@@ -701,3 +701,25 @@ entire4478chunk copy/readback. Authenticated recovery matches image/nonce,
 observes unchanged clean HFSX and leaves verified fastboot. This establishes
 native MPSS execution. GLINK/QRTR/WLFW, WLAN identity, association and packets
 remain the next work; firmware readiness is not a Wi-Fi connection.
+
+## Native GLINK and QRTR discovery — 2026-10-23
+
+`--wifi-glink-start` adds the separate redfinwififw3 profile after the proven
+native PAS4 startup. The live contract binds the actual modem SMEM/IPCC edge,
+PID1 and IPCRTR channel. A continuing native SMP2P check rejects lost ready,
+fatal/restart/identity changes before transport work. The worker uses lock3
+for bounded descriptor478/APPS-TX479 allocation, with remote-owned RX480.
+Existing nonzero APPS indices are refused. Only APPS head/tail and freshly
+unpublished APPS allocation metadata are written; there is no queue reset.
+
+The actual portable codec checks ring geometry, wrapped/partial/fragmented
+frames and bounded version/open/intent handshakes. Remote indices and RX
+contents remain untouched. One64KiB reusable receive buffer and32remote
+intent slots live in the caller's static worker context. QRTR validates v1
+and compressed-version3 headers, replies to HELLO and flow confirmations,
+and records service announcements including WLFW0x45/version1. It does not
+yet perform QMI capability/MSA/RF setup or publish a network interface.
+
+76targeted transport/SMP2P/dispatch/build/return checks and native build160808
+pass, as does complete real Image/live-FDT/shim-return preflight. Hardware
+version/channel/QRTR discovery is the next independent observation.

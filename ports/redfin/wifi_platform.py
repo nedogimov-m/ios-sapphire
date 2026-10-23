@@ -296,6 +296,25 @@ def add_start_contract(tree, nodes):
                           0x408000, 0x1000, 0x8c000000, 0x11800000))]))
 
 
+def add_glink_contract(tree, nodes):
+    start_contract(nodes)
+    modem = '/soc/qcom,glink/modem'
+    ipcc = nodes['/soc/qcom,ipcc@408000']
+    handle = ipcc.get('phandle', ipcc.get('linux,phandle'))
+    words = lambda *values: struct.pack('>' + 'I' * len(values), *values)
+    expected = {'qcom,remote-pid': words(1), 'transport': b'smem\0',
+                'mboxes': handle + words(2, 0), 'mbox-names': b'modem_smem\0',
+                'interrupt-parent': handle, 'interrupts': words(2, 0, 1), 'qcom,glink-label': b'mpss\0'}
+    if any(nodes.get(modem, {}).get(key) != value for key, value in expected.items()) or \
+            nodes.get(modem + '/qcom,modem_qrtr', {}).get('qcom,glink-channels') != b'IPCRTR\0':
+        raise ValueError('native MPSS GLINK/QRTR live route changed')
+    if any(child.name == 'redfin-wifi-glink' for child in tree.children):
+        raise ValueError('duplicate native GLINK contract')
+    tree.children.append(mkadt.node('redfin-wifi-glink', [
+        ('source-contract', mkadt.u32(1, 4, 1, 478, 479, 480, 16384, 0x20000, 3, 1)),
+        ('channel', b'IPCRTR\0')]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dtb', required=True, type=Path)

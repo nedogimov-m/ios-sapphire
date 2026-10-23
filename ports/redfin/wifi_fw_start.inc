@@ -8,6 +8,7 @@
 #include "../../../bsd/dev/redfin_scm_query.h"
 #include "../../../bsd/dev/redfin_wifi_smp2p.h"
 #include "redfin_wifi_pas.h"
+#include "redfin_wifi_glink.h"
 
 extern "C" int redfin_wifi_power_start(void);
 extern "C" int redfin_wifi_power_held(void);
@@ -18,7 +19,7 @@ extern "C" void thread_terminate_self(void);
 
 enum { FW_START_SOURCE = 1, FW_START_POWER, FW_START_ABI, FW_START_RESET,
     FW_START_SMP2P, FW_START_METADATA, FW_START_INIT, FW_START_SETUP,
-    FW_START_COPY, FW_START_AUTH, FW_START_READY };
+    FW_START_COPY, FW_START_AUTH, FW_START_READY, FW_START_GLINK };
 enum { FW_START_SMEM, FW_START_TCSR, FW_START_IPCC, FW_START_MPSS, FW_START_METADATA_MAP, FW_START_MAPS };
 static const uint64_t fw_start_ranges[8] = {
     UINT64_C(0x80900000), 0x200000, 0x1f40000, 0x20000,
@@ -33,8 +34,23 @@ struct fw_start_context {
     bool active, power, reset, initialized, setup, auth_attempted, authenticated, locked, poisoned;
     uint64_t function, metadata[2];
     uint8_t readback[REDFIN_MPSS_COPY_CHUNK];
+    rf_glink glink;
+    rf_glink_ops glink_ops;
+    uint8_t transport[8256], qrtr[8256];
+    uint32_t qrtr_peer, qrtr_seen, qrtr_hello, qrtr_hello_sent, qrtr_services, wlfw_node, wlfw_port;
+    uint8_t pending[32][64];
+    unsigned pending_head, pending_tail, pending_count, transport_mode;
 };
 static fw_start_context fw_start;
+
+static bool fw_start_glink_contract(void)
+{
+    const uint32_t expected[10] = {1, 4, 1, 478, 479, 480, 16384, 0x20000, 3, 1};
+    uint32_t witness[10] = {}; char name[7] = {}; DTEntry node;
+    return SecureDTLookupEntry(NULL, "/redfin-wifi-glink", &node) == kSuccess &&
+        fw_property(node, "source-contract", witness, sizeof(witness)) && !memcmp(witness, expected, sizeof(witness)) &&
+        fw_property(node, "channel", name, sizeof(name)) && !memcmp(name, "IPCRTR", sizeof(name));
+}
 
 static bool fw_start_metadata_contract(fw_start_context *context, bool capture)
 {
@@ -55,7 +71,8 @@ static int fw_start_check(void *opaque)
     fw_start_context *context = (fw_start_context *)opaque;
     bool valid = context == &fw_start && context->active && !context->poisoned && ml_get_interrupts_enabled() &&
         !fw_probe_check(&fw_probe, fw_probe.nonce) && fw_start_metadata_contract(context, false) &&
-        (!context->power || !redfin_wifi_power_held());
+        (!context->power || !redfin_wifi_power_held()) &&
+        (!context->transport_mode || fw_start_glink_contract());
     if (valid) for (unsigned i = 0; i < FW_START_MAPS; ++i) {
         const fw_start_map *entry = &context->mapping[i];
         if (!entry->map && !entry->memory && !entry->base) continue;
@@ -153,11 +170,14 @@ static int fw_start_started(void *opaque)
 static int fw_start_lock(void *opaque, uint32_t timeout_ms)
 {
     fw_start_context *context = (fw_start_context *)opaque;
-    if (!timeout_ms || timeout_ms > 1000 || context->locked || fw_start_reset(context)) return EPERM;
+    bool live = context->phase == FW_START_GLINK && context->authenticated &&
+        context->smp2p.stage == RF_WIFI_SMP2P_READY;
+    if (!timeout_ms || timeout_ms > 1000 || context->locked || fw_start_check(context) ||
+        (!live && fw_start_reset(context))) return EPERM;
     volatile uint32_t *lock = (volatile uint32_t *)(context->mapping[FW_START_TCSR].base + RF_WIFI_SMP2P_LOCK_OFFSET);
     uint64_t first = fw_start_ns(context);
     do {
-        if (fw_start_reset(context)) return EPERM;
+        if (fw_start_check(context) || (!live && fw_start_reset(context))) return EPERM;
         uint32_t value = *lock;
         __asm__ volatile("dmb oshld" ::: "memory");
         if (!value) {
@@ -288,6 +308,116 @@ static int fw_start_sync(void *opaque, uint64_t physical, uint64_t bytes)
     return fw_start_check(context);
 }
 
+static int fw_start_glink_check(void *opaque)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    if (fw_start_check(context) || !context->authenticated || context->phase != FW_START_GLINK ||
+        context->smp2p.stage != RF_WIFI_SMP2P_READY || context->smp2p.poisoned ||
+        !context->smp2p.peer || context->smp2p.slave_index >= 16) return EPERM;
+    uint32_t at = context->smp2p.peer + 36u + 20u * context->smp2p.slave_index;
+    if (at > REDFIN_SMEM_BYTES - 4u) return EPERM;
+    uint32_t state = redfin_smem_u32((const volatile uint8_t *)context->mapping[FW_START_SMEM].base + at);
+    return (state & 3u) == 2u ? 0 : EPERM;
+}
+static int fw_start_glink_lock(void *opaque) { return fw_start_lock(opaque, 1000); }
+static int fw_start_glink_kick(void *opaque)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    if (fw_start_glink_check(context)) return EPERM;
+    __asm__ volatile("dsb oshst" ::: "memory");
+    *(volatile uint32_t *)(context->mapping[FW_START_IPCC].base + 0xcu) = 0x00020000u;
+    __asm__ volatile("dsb osh" ::: "memory");
+    return fw_start_glink_check(context);
+}
+static void fw_start_qrtr_control(fw_start_context *context, uint32_t type, uint32_t from,
+    uint32_t node, uint32_t to, uint32_t a, uint32_t b)
+{
+    if (context->pending_count >= 32) { context->poisoned = true; return; }
+    uint8_t *packet = context->pending[context->pending_head];
+    memset(packet, 0, 64);
+    const uint32_t fields[13] = {1, type, 1, from, 0, 20, node, to, type, a, b, 0, 0};
+    for (unsigned i = 0; i < 13; ++i) rf_gl_encode(packet + 4u * i, fields[i]);
+    context->pending_head = (context->pending_head + 1u) % 32u; ++context->pending_count;
+}
+static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t length)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    uint32_t type, source, from, confirm, size, destination, to, at;
+    if (length >= 32 && rf_gl_u32(data) == 1) {
+        type = rf_gl_u32(data + 4); source = rf_gl_u32(data + 8); from = rf_gl_u32(data + 12);
+        confirm = rf_gl_u32(data + 16); size = rf_gl_u32(data + 20);
+        destination = rf_gl_u32(data + 24); to = rf_gl_u32(data + 28); at = 32;
+    } else if (length >= 16 && data[0] == 3 && !(data[2] & ~1u)) {
+        type = data[1]; confirm = data[2] & 1u; size = rf_gl_u32(data + 4);
+        source = (uint32_t)data[8] | (uint32_t)data[9] << 8;
+        from = (uint32_t)data[10] | (uint32_t)data[11] << 8;
+        destination = (uint32_t)data[12] | (uint32_t)data[13] << 8;
+        to = (uint32_t)data[14] | (uint32_t)data[15] << 8;
+        if (from == 0xfffeu) from = 0xfffffffeu;
+        if (to == 0xfffeu) to = 0xfffffffeu;
+        at = 16u + data[3];
+    } else { context->poisoned = true; return; }
+    if (at > length || !size || size > length - at || confirm > 1 ||
+        (destination != 1 && destination != UINT32_MAX)) { context->poisoned = true; return; }
+    if (!context->qrtr_seen) { context->qrtr_peer = source; context->qrtr_seen = 1; }
+    if (confirm) fw_start_qrtr_control(context, 7, to, source, from, destination, to);
+    if (to != 0xfffffffeu || size < 4) return;
+    uint32_t command = rf_gl_u32(data + at);
+    if (command == 2 && !context->qrtr_hello) {
+        context->qrtr_hello = 1;
+        fw_start_qrtr_control(context, 2, 0xfffffffeu, source, 0xfffffffeu, 0, 0);
+        IOLog("REDFIN WIFI QRTR: HELLO from node=%u queued reply\n", source);
+    } else if (command == 4 && size >= 20) {
+        uint32_t service = rf_gl_u32(data + at + 4), instance = rf_gl_u32(data + at + 8);
+        uint32_t node = rf_gl_u32(data + at + 12), port = rf_gl_u32(data + at + 16);
+        ++context->qrtr_services;
+        IOLog("REDFIN WIFI QRTR: service=%#x version=%u instance=%u node=%u port=%#x\n",
+            service, instance & 255u, instance >> 8, node, port);
+        if (service == 0x45 && (instance & 255u) == 1) { context->wlfw_node = node; context->wlfw_port = port; }
+    }
+}
+static int fw_start_transport_run(fw_start_context *context)
+{
+    context->phase = FW_START_GLINK;
+    if (!fw_start_glink_contract() || fw_start_glink_check(context) || redfin_wifi_power_audit()) return EPERM;
+    context->glink_ops = {context, (const volatile uint8_t *)context->mapping[FW_START_SMEM].base,
+        fw_start_glink_check, fw_start_glink_lock, fw_start_unlock, fw_start_smem_write,
+        fw_start_barrier, fw_start_glink_kick, fw_start_qrtr_packet};
+    int error = rf_gl_init(&context->glink, &context->glink_ops);
+    IOLog("REDFIN WIFI GLINK: init=%d descriptor=%#x TX=%#x stores=%u\n",
+        error, context->glink.descriptor, context->glink.tx, context->glink.stores);
+    if (error) return error;
+    error = rf_gl_say(&context->glink, &context->glink_ops, 0, 1, 1, NULL, 0);
+    if (error) return error;
+    uint64_t first = fw_start_ns(context), next_report = first;
+    while (fw_start_ns(context) - first < UINT64_C(10000000000)) {
+        int alive = rf_wifi_smp2p_alive(&context->smp2p, &context->smp_ops);
+        if (alive && alive != RF_WIFI_SMP2P_UNSTABLE) return alive;
+        if (!alive) {
+            error = rf_gl_pump(&context->glink, &context->glink_ops);
+            if (error && error != RF_GL_AGAIN) return error;
+            while (context->pending_count) {
+                error = rf_gl_send_packet(&context->glink, &context->glink_ops,
+                    context->pending[context->pending_tail], 52, context->transport, sizeof(context->transport));
+                if (error == RF_GL_AGAIN || (error == RF_GL_ARGUMENT && !context->glink.open)) break;
+                if (error) return error;
+                context->pending_tail = (context->pending_tail + 1u) % 32u; --context->pending_count;
+            }
+        }
+        uint64_t now = fw_start_ns(context);
+        if (now >= next_report) {
+            IOLog("REDFIN WIFI GLINK: version=%u channel=%u ack=%u open=%u RX=%#x heard=%u sent=%u packets=%u services=%u WLFW=%#x\n",
+                context->glink.version, context->glink.channel, context->glink.acknowledged,
+                context->glink.open, context->glink.rx, context->glink.heard, context->glink.sent,
+                context->glink.packets, context->qrtr_services, context->wlfw_port);
+            next_report = now + 1000000000u;
+        }
+        if (context->wlfw_port) return 0;
+        if (fw_start_pause(context, 1000)) return EPERM;
+    }
+    return ETIMEDOUT;
+}
+
 static int fw_start_run(fw_start_context *context)
 {
     context->phase = FW_START_SOURCE;
@@ -367,20 +497,25 @@ static int fw_start_run(fw_start_context *context)
     error = rf_wifi_smp2p_wait_ready(&context->smp2p, &context->smp_ops, RF_WIFI_SMP2P_MAX_READY_MS);
     IOLog("REDFIN WIFI START: SMP2P ready=%d stage=%u state=%#x handover=%u\n",
         error, context->smp2p.stage, context->smp2p.last_state, context->smp2p.handover);
+    if (!error && context->transport_mode) error = fw_start_transport_run(context);
     return error;
 }
 
 static void fw_start_worker(void *, wait_result_t)
 {
     const char *args = PE_boot_args(); unsigned bytes = 0;
+    int mode = 0;
+    bool mode_valid = PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) && (mode == 2 || mode == 3);
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
-        !fw_probe_args(args, bytes + 1, &fw_probe.nonce, 2) || !fw_probe_properties(&fw_probe, true) ||
-        !fw_start_metadata_contract(&fw_start, true)) {
+        !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
+        !fw_probe_properties(&fw_probe, true) || !fw_start_metadata_contract(&fw_start, true) ||
+        (mode == 3 && !fw_start_glink_contract())) {
         IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
         thread_terminate_self();
         __builtin_unreachable();
     }
+    fw_start.transport_mode = mode == 3;
     memcpy(fw_probe.args, args, bytes + 1); fw_probe.bytes = bytes + 1;
     fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
     IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());

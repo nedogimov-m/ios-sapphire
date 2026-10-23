@@ -88,6 +88,8 @@ int rf_wifi_smp2p_auth_begin(struct rf_wifi_smp2p_session *, const struct rf_wif
  * A timeout permits only the bounded shutdown path, not another ready attempt.
  */
 int rf_wifi_smp2p_wait_ready(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *, uint32_t timeout_ms);
+/* Read-only continuing liveness/identity check for this established session. */
+int rf_wifi_smp2p_alive(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *);
 /* Require stop-ack low before setting only master-kernel bit0, then a fresh
  * high ACK. Clear our stop bit only after that ACK; timeout retains it and
  * quarantines. PAS shutdown is the caller's next step after success. */

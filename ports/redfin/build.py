@@ -96,6 +96,7 @@ def main():
     p.add_argument('--wifi-power-probe', action='store_true', help='isolated md0/UP retained CX/MSS/XO votes and AOP modem-on transaction')
     p.add_argument('--wifi-fw-source-probe', action='store_true', help='isolated md0 native resident MPSS source pin/hash/parse; no radio start')
     p.add_argument('--wifi-fw-start', action='store_true', help='isolated native PAS4 MPSS boot with retained power/bandwidth and fresh SMP2P ready')
+    p.add_argument('--wifi-glink-start', action='store_true', help='native MPSS startup followed by GLINK/IPCRTR and QRTR service discovery')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -122,6 +123,8 @@ def main():
         a.gpu_power_probe = True
     if a.wifi_power_probe:
         a.wifi_native_probe = True
+    if a.wifi_glink_start:
+        a.wifi_fw_start = True
     if a.wifi_fw_start and a.wifi_fw_source_probe:
         p.error('--wifi-fw-start cannot combine with --wifi-fw-source-probe')
     if a.wifi_fw_source_probe or a.wifi_fw_start:
@@ -384,6 +387,12 @@ def main():
                 add_start_contract(tree, nodes)
             except ValueError as error:
                 p.error(str(error))
+        if a.wifi_glink_start:
+            from wifi_platform import add_glink_contract
+            try:
+                add_glink_contract(tree, nodes)
+            except ValueError as error:
+                p.error(str(error))
         if a.scm_probe:
             from scm_query import add_contract
             try:
@@ -516,7 +525,7 @@ def main():
         if a.wifi_fw_source_probe:
             command_line += ' redfinwififw=1'
         if a.wifi_fw_start:
-            command_line += ' redfinwififw=2'
+            command_line += ' redfinwififw=3' if a.wifi_glink_start else ' redfinwififw=2'
         if a.wifi_power_probe:
             command_line += ' redfinwifipower=1'
         if a.touch_id_probe or a.touch_events:
@@ -574,7 +583,7 @@ def main():
                 verified = wifi_fw_blob.verify_bundle(verifier, a.wifi_fw_bundle, a.wifi_fw_sha256, excluded)
                 firmware = read_regular(a.wifi_fw_bundle, wifi_fw_blob.MAX_BUNDLE)
                 payload, firmware_report = wifi_fw_blob.pack(payload, firmware, a.wifi_fw_sha256,
-                    verified, 0x8000000, probe_exclusions=excluded, start=a.wifi_fw_start)
+                    verified, 0x8000000, probe_exclusions=excluded, start=a.wifi_fw_start, transport=a.wifi_glink_start)
                 (out / 'payload.bin').write_bytes(payload)
                 at, size = struct.unpack_from('<QQ', payload, 32)
                 (out / 'redfin.adt').write_bytes(payload[at:at + size])
@@ -674,6 +683,8 @@ def main():
         manifest['wifi_fw_source_probe'] = True
     if a.wifi_fw_start:
         manifest['wifi_fw_start'] = True
+    if a.wifi_glink_start:
+        manifest['wifi_glink_start'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

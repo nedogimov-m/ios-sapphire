@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native GLINK/IPCRTR/QRTR path prepared after real MPSS ready — 2026-10-23
+
+Sourceparent3d069ed. Added separate `--wifi-glink-start` / redfinwififw3,
+retaining proven native PAS4 startup. The new live-FDT contract validates the
+modem SMEM edge/PID1, IPCC client2/signal0 and IPCRTR channel; source-only
+and firmware-only modes keep their own selectors/return contracts. New
+GLINK state checks continuing PAS4/SMP2P identity; lock3 protects bounded
+APPS descriptor478/TX479 allocation/adoption. Nonzero APPS-owned indices
+are refused rather than reset. RX480 belongs to the remote; remote-owned
+indices/FIFO bytes are never rewritten. Release/acquire barriers surround
+publication and every callback retains owner/profile/mapping guards.
+
+The bounded codec handles version1 negotiation, IPCRTR opens,32remote
+intents, one reusable64KiB receive intent, wrapped/partial/fragmented data,
+completion and backpressure. Caller-owned buffers stay in the static worker
+context; no packet heap or arbitrary SMEM/IRQ/reset API is added. QRTRv1 and
+native compressed-version3 frames are bounded, HELLO/flow-confirm replies
+use a32-entry queue, and service announcements identify WLFW0x45/version1.
+The first run only discovers services; it does not claim QMI capabilities,
+MSA permissions, association, RF identity or an iOS interface.
+
+76focusedGLINK/SMP2P/native-dispatch/build/return checksPASS in10.406s,
+including actual allocator/ring bytes, foreign indices, all allocation-write
+failure positions, malformed frames, read-only remote fields and lease loss.
+Local native build`build-20261023-160808.log`PASS; complete real Image/live-FDT/return
+preflightPASS; no new CI run. Kernel`12b4b1ce0b411d1b5b83900ee8d5af9977ff7495ee0ffdd347e11958f8de7211`; image`08f50d54d4767706cfb0f50267a6f524e36dc364b3cfeb641342bcfaae9645af`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xcf059ff8564cf77d`.
+Next: temporary wifi-glink-v1 run, authenticated/image/nonce matched capture,
+then continue from actual queues/version/channel/QRTR/WLFW observations.
+
 ## REDFIN native MPSS authentication and fresh ready hardware PASS — 2026-10-23
 
 Source0a026f4 / local native build155300. Fresh authenticated/image/nonce
