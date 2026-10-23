@@ -364,7 +364,11 @@ static uint64_t fw_start_ns(void *opaque)
     return ns;
 }
 static void fw_start_scm_delay(void *opaque, unsigned microseconds)
-{ if (!fw_start_check(opaque) && microseconds <= 30000) IODelay(microseconds); }
+{
+    if (fw_start_check(opaque) || microseconds > 30000) return;
+    if (microseconds >= 1000 && redfin_wifi_gui_requested()) IOSleep((microseconds + 999) / 1000);
+    else IODelay(microseconds);
+}
 static int fw_start_invoke(void *opaque, rf_sq_regs *registers)
 {
     fw_start_context *context = (fw_start_context *)opaque;
@@ -518,6 +522,7 @@ static int fw_start_copy(void *opaque, uint64_t physical, const uint8_t *data, u
         if (redfin_wifi_power_audit()) return EPERM;
         IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
     }
+    if (!(context->copies % 16u) && redfin_wifi_gui_requested()) IOSleep(1);
     return fw_start_check(context);
 }
 static int fw_start_zero(void *opaque, uint64_t physical, uint32_t bytes)
@@ -531,6 +536,7 @@ static int fw_start_zero(void *opaque, uint64_t physical, uint32_t bytes)
         if (redfin_wifi_power_audit()) return EPERM;
         IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
     }
+    if (!(context->copies % 16u) && redfin_wifi_gui_requested()) IOSleep(1);
     return fw_start_check(context);
 }
 static int fw_start_readback(void *opaque, uint64_t physical, uint8_t *data, uint32_t bytes)
@@ -940,10 +946,12 @@ static int fw_start_transport_run(fw_start_context *context)
         if (!alive) {
             error = rf_gl_pump(&context->glink, &context->glink_ops);
             if (error && error != RF_GL_AGAIN) {
-                IOLog("REDFIN WIFI GLINK: parser=%d last=%u/%u/%#x waiting=%u head=%u tail=%u RXbytes=%u channel=%u intent=%u/%u\n",
+                IOLog("REDFIN WIFI GLINK: parser=%d last=%u/%u/%#x waiting=%u head=%u tail=%u RXbytes=%u channel=%u intent=%u/%u changed=%u offset=%#x expected=%#x observed=%#x native_poisoned=%u\n",
                     error, context->glink.last_command, context->glink.last_p1, context->glink.last_p2,
                     context->glink.last_waiting, context->glink.head, context->glink.tail, context->glink.rx_bytes,
-                    context->glink.channel, context->glink.last_intent_id, context->glink.last_intent_bytes);
+                    context->glink.channel, context->glink.last_intent_id, context->glink.last_intent_bytes,
+                    context->glink.changed_reason, context->glink.changed_offset,
+                    context->glink.changed_expected, context->glink.changed_observed, context->poisoned);
                 return error;
             }
             while (context->pending_count) {
@@ -1213,8 +1221,11 @@ static int fw_start_run(fw_start_context *context)
     error = fw_start_map_range(context, FW_START_MPSS);
     if (error) return error;
     context->phase = FW_START_COPY;
+    uint64_t copy_started_ns = fw_start_ns(context);
     error = rf_wifi_fw_copy_segments(&fw_probe.boot.source, &fw_probe.boot.source_ops, &copy,
         context->readback, sizeof(context->readback));
+    IOLog("REDFIN WIFI START: segment copy result=%d chunks=%u elapsed_ms=%llu\n", error, context->copies,
+        (unsigned long long)((fw_start_ns(context) - copy_started_ns) / 1000000u));
     if (error) return error;
     error = rf_wifi_smp2p_auth_begin(&context->smp2p, &context->smp_ops);
     if (error) return error;
@@ -1298,15 +1309,17 @@ static void fw_start_worker(void *, wait_result_t)
     memcpy(fw_probe.args, args, bytes + 1); fw_probe.bytes = bytes + 1;
     fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
     IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());
+    uint64_t started_ns = fw_start_ns(&fw_start);
     int error = fw_start_run(&fw_start);
     if (error && fw_start.packets_started) redfin_wifi_radio_abandon();
-    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x bdf=%u/%u/%u cal=%u bdf_ready=%u retained=1\n",
+    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x bdf=%u/%u/%u cal=%u bdf_ready=%u elapsed_ms=%llu retained=1\n",
         error, fw_start.phase, fw_start.reset, fw_start.initialized, fw_start.setup,
         fw_start.authenticated, fw_start.smp2p.stage, fw_start.copies,
         (unsigned long long)fw_probe.boot.source.copied_bytes,
         (unsigned long long)fw_probe.boot.source.zeroed_bytes,
         fw_start.smp2p.wlan_found, fw_start.smp2p.wlan_state,
-        fw_start.bdf.stage, fw_start.bdf.offset, fw_start.bdf.bdf_acks, fw_start.bdf.cal_reported, fw_start.bdf.fw_ready);
+        fw_start.bdf.stage, fw_start.bdf.offset, fw_start.bdf.bdf_acks, fw_start.bdf.cal_reported, fw_start.bdf.fw_ready,
+        (unsigned long long)((fw_start_ns(&fw_start) - started_ns) / 1000000u));
     if (fw_start.mission_mode) IOLog("REDFIN WIFI MISSION: final stage=%u requests=%u ACKs=%u result=%u error=%u CE=%u/%u packet_transport=%u\n",
         fw_start.mission.stage, fw_start.mission.requests, fw_start.mission.responses, fw_start.mission.result,
         fw_start.mission.error, fw_start.ce.stage, fw_start.ce.stable, fw_start.packets_started);

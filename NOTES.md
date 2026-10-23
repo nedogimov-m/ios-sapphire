@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN combined touch response recovery and frozen GUI/WLAN lease prepared — 2026-10-24
+
+Continues `5169d0b` / station source `4e5cd5f`. A malformed completed SEC
+reply can now resynchronize only the already sensed, idle event session:
+release old contacts, clear once and prove an empty validated queue. Real
+GENI errors/timeouts, ownership loss and another bad resync reply still
+stop; no consumed event is replayed, no IC reset or firmware write added.
+The existing total clear budget remains eight. Header/checksum evidence
+will distinguish the actual failure on the next run. Native SEC review is
+recorded in UPSTREAM.md; a Wi-Fi cause remains unproved.
+
+The GUI/WLAN handoff validates the full GUI/touch profile before publishing
+one frozen epoch. Hot calls check exact argument bytes/pointer, CPU0 and
+the permanent touch owner without reparsing the complete profile/setup.
+Existing firmware/property/map/power/SMMU checks remain. Copying yields
+1ms per16 chunks; long SCM waits also let touch run. Timed and ordinary
+shutdown revoke the WLAN worker lease before teardown, retaining all
+remote-visible state until reset. GLINK now reports the exact changed
+field and preserves a platform error instead of relabeling it CHANGED.
+
+All1271 host tests PASS (3 optional private cases skipped), including
+10000 actual hot-lease calls with no profile/setup reparse, CPU/owner/epoch
+loss, irreversible shutdown, malformed sync/echo/checksum, fatal GENI state,
+contact release and failed resynchronization. Native local
+`build-20261024-043743.log` PASS (no CI run). Actual complete Image/live-FDT,
+GUI8 return, DMA32 disjointness and shim initialization/guards preflight
+PASS. The first verification attempt rejected an incomplete regenerated
+overlay before compiling; the complete original touch-start hunks were
+restored before the successful build. Hardware results remain pending.
+
+Kernel `1c2450ab9e122158c8f91a8936ed23cc5d491aa5323bc9c458c673e0ab48417c`;
+image `398957b29cb37d006fdd528ce939fb4a86bc8c385785de144caf69e9fa6bd3c5`.
+Decompressed Image130216688 bytes, below128MiB cap.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7822274d1eaed8a2 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Next: one temporary combined GUI8/touch/station-v3 run and authenticated
+capture. Verify touch stays active and WLAN reaches packet readiness within
+the GUI lifetime, then actual association/data/DHCP in Settings. GPU/Metal
+follows working GUI Wi-Fi. No partition flashing or persistent EFS changes.
+
 ## REDFIN first combined GUI8/station run: touch EIO and delayed firmware startup — 2026-10-24
 
 Source `4e5cd5f`, local native `build-20261024-041155.log` (no CI run).

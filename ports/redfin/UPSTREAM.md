@@ -26,6 +26,16 @@ licenses.
 
 ## Compatibility boundary
 
+Reviewed 2026-10-24: pinned Google SEC source
+`0701b191882dc408104ad8af9e2f5eb2bf34c297`, `sec_ts.c:330..430`, retries
+completed reads with bad sync/echo/checksum; `:2337..2350` clears a lost
+event queue. Redfin's event session now distinguishes a malformed completed
+reply from a GENI fault. It releases held contacts, drops the uncertain
+queue with the existing bounded clear, and requires a validated empty reply.
+It never replays consumed events. Hardware errors, ownership loss, failed
+clear and a bad resynchronization reply remain final. This adapts native SEC
+semantics; the preferred kernel's Goodix IC protocol is not substituted.
+
 Reviewed 2026-10-23: the same pinned kernel's `redwood_adreno.c` step9
 reads CB0, while step13 prepares a separate GMU context1. Redfin's new
 explicit read-only CB0/1 observer uses native Lito's 64KiB resource, global

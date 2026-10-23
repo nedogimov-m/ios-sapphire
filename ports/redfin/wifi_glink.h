@@ -39,12 +39,21 @@ struct rf_glink {
     uint32_t fill, remaining, heard, sent, packets, stores;
     uint32_t last_command, last_p1, last_p2, last_waiting;
     uint32_t last_intent_bytes, last_intent_id;
+    uint32_t changed_reason, changed_offset, changed_expected, changed_observed;
     struct rf_glink_intent intent[32];
     uint8_t packet[65536];
     uint8_t frame[16384];
 };
 static inline uint32_t rf_gl_word(const struct rf_glink_ops *o, uint32_t at)
 { return redfin_smem_u32(o->smem + at); }
+static inline int rf_gl_changed(struct rf_glink *s, uint32_t reason, uint32_t at,
+    uint32_t expected, uint32_t observed)
+{
+    s->changed_reason = reason; s->changed_offset = at;
+    s->changed_expected = expected; s->changed_observed = observed;
+    s->poisoned = 1;
+    return RF_GL_CHANGED;
+}
 static inline int rf_gl_gate(struct rf_glink *s, const struct rf_glink_ops *o)
 {
     if (!s || !o || !o->smem || !o->check || !o->lock || !o->unlock || !o->write32 ||
@@ -69,7 +78,7 @@ static inline int rf_gl_find(struct rf_glink *s, const struct rf_glink_ops *o,
     if (redfin_smem_inspect(o->smem, REDFIN_SMEM_BYTES, report) != REDFIN_SMEM_OK ||
         !report->modem_partition) return RF_GL_LAYOUT;
     if (s->partition && (s->partition != report->partition_offset || s->bytes != report->partition_bytes))
-        return RF_GL_CHANGED;
+        return rf_gl_changed(s, 1, report->partition_offset, s->bytes, report->partition_bytes);
     for (unsigned i = 0; i < 3; ++i) location[i] = lengths[i] = 0;
     uint32_t at = 32, count = 0;
     while (at < report->free_uncached) {
@@ -131,9 +140,12 @@ static inline int rf_gl_init(struct rf_glink *s, const struct rf_glink_ops *o)
 static inline int rf_gl_indices(struct rf_glink *s, const struct rf_glink_ops *o,
     uint32_t *remote_tail, uint32_t *remote_head)
 {
-    if (rf_gl_gate(s, o) || !s->descriptor || !s->tx) return RF_GL_CHANGED;
-    if (rf_gl_word(o, s->descriptor + 4u) != s->head || rf_gl_word(o, s->descriptor + 8u) != s->tail)
-        return RF_GL_CHANGED;
+    int error = rf_gl_gate(s, o);
+    if (error) return error;
+    if (!s->descriptor || !s->tx) return rf_gl_changed(s, 2, 0, 1, 0);
+    uint32_t local_head = rf_gl_word(o, s->descriptor + 4u), local_tail = rf_gl_word(o, s->descriptor + 8u);
+    if (local_head != s->head) return rf_gl_changed(s, 3, s->descriptor + 4u, s->head, local_head);
+    if (local_tail != s->tail) return rf_gl_changed(s, 4, s->descriptor + 8u, s->tail, local_tail);
     *remote_tail = rf_gl_word(o, s->descriptor);
     *remote_head = rf_gl_word(o, s->descriptor + 12u);
     if ((*remote_tail | *remote_head) % 8u || *remote_tail >= 16384u ||
@@ -165,7 +177,8 @@ static inline int rf_gl_say(struct rf_glink *s, const struct rf_glink_ops *o,
             }
             if (o->barrier(o->context) || rf_gl_gate(s, o)) { s->poisoned = 1; return RF_GL_PLATFORM; }
             for (uint32_t i = 0; i < take; ++i)
-                if (o->smem[s->tx + at + i] != s->frame[sent + i]) { s->poisoned = 1; return RF_GL_CHANGED; }
+                if (o->smem[s->tx + at + i] != s->frame[sent + i])
+                    return rf_gl_changed(s, 5, s->tx + at + i, s->frame[sent + i], o->smem[s->tx + at + i]);
             s->stores += take / 4u; sent += take;
         }
     } else for (uint32_t i = 0; i < length; i += 4u) {
@@ -208,7 +221,7 @@ static inline int rf_gl_pump(struct rf_glink *s, const struct rf_glink_ops *o)
         int error = rf_gl_find(s, o, at, sizes, &r);
         if (error) return error;
         if (at[0] != s->descriptor || at[1] != s->tx || sizes[0] != 32 || sizes[1] != 16384)
-            return RF_GL_CHANGED;
+            return rf_gl_changed(s, 6, at[0], s->tx, at[1]);
         if (!at[2]) return RF_GL_AGAIN;
         if (sizes[2] < 64 || sizes[2] > 65536 || sizes[2] % 8u) return RF_GL_LAYOUT;
         s->rx = at[2]; s->rx_bytes = sizes[2];

@@ -413,7 +413,7 @@ diff --git a/iokit/Kernel/arm/RedfinWiFiFWSource.cpp b/iokit/Kernel/arm/RedfinWi
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinWiFiFWSource.cpp
-@@ -0,0 +1,332 @@
+@@ -0,0 +1,331 @@
 +/* SPDX-License-Identifier: MIT
 + * The preferred HackiOS kernel 8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 + * redwood_image.c/redwood_wifi.c use firmware in a resident boot image. Redfin
@@ -468,10 +468,9 @@ new file mode 100644
 +static bool fw_profile(uint64_t *boot_id)
 +{
 +    if (redfin_wifi_gui_requested()) {
-+        const char *args = PE_boot_args(); unsigned bytes = 0;
-+        if (!args || !redfin_wifi_gui_ready() || !fw_identity()) return false;
-+        while (bytes < 608 && args[bytes]) ++bytes;
-+        return bytes < 608 && redfin_wifi_gui_profile(args, bytes + 1, boot_id);
++        /* The complete GUI profile/touch handoff is frozen at publication.
++         * Keep CPU0, owner, epoch and exact live bytes checked on every use. */
++        return redfin_wifi_gui_boot_id(boot_id) && fw_identity();
 +    }
 +    int cpus = 0, spmi = 0, returned = 0;
 +    char root[16] = {};
@@ -750,7 +749,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,1332 @@
+@@ -0,0 +1,1345 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -1117,7 +1116,11 @@ new file mode 100644
 +    return ns;
 +}
 +static void fw_start_scm_delay(void *opaque, unsigned microseconds)
-+{ if (!fw_start_check(opaque) && microseconds <= 30000) IODelay(microseconds); }
++{
++    if (fw_start_check(opaque) || microseconds > 30000) return;
++    if (microseconds >= 1000 && redfin_wifi_gui_requested()) IOSleep((microseconds + 999) / 1000);
++    else IODelay(microseconds);
++}
 +static int fw_start_invoke(void *opaque, rf_sq_regs *registers)
 +{
 +    fw_start_context *context = (fw_start_context *)opaque;
@@ -1271,6 +1274,7 @@ new file mode 100644
 +        if (redfin_wifi_power_audit()) return EPERM;
 +        IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
 +    }
++    if (!(context->copies % 16u) && redfin_wifi_gui_requested()) IOSleep(1);
 +    return fw_start_check(context);
 +}
 +static int fw_start_zero(void *opaque, uint64_t physical, uint32_t bytes)
@@ -1284,6 +1288,7 @@ new file mode 100644
 +        if (redfin_wifi_power_audit()) return EPERM;
 +        IOLog("REDFIN WIFI START: copying chunks=%u\n", context->copies);
 +    }
++    if (!(context->copies % 16u) && redfin_wifi_gui_requested()) IOSleep(1);
 +    return fw_start_check(context);
 +}
 +static int fw_start_readback(void *opaque, uint64_t physical, uint8_t *data, uint32_t bytes)
@@ -1693,10 +1698,12 @@ new file mode 100644
 +        if (!alive) {
 +            error = rf_gl_pump(&context->glink, &context->glink_ops);
 +            if (error && error != RF_GL_AGAIN) {
-+                IOLog("REDFIN WIFI GLINK: parser=%d last=%u/%u/%#x waiting=%u head=%u tail=%u RXbytes=%u channel=%u intent=%u/%u\n",
++                IOLog("REDFIN WIFI GLINK: parser=%d last=%u/%u/%#x waiting=%u head=%u tail=%u RXbytes=%u channel=%u intent=%u/%u changed=%u offset=%#x expected=%#x observed=%#x native_poisoned=%u\n",
 +                    error, context->glink.last_command, context->glink.last_p1, context->glink.last_p2,
 +                    context->glink.last_waiting, context->glink.head, context->glink.tail, context->glink.rx_bytes,
-+                    context->glink.channel, context->glink.last_intent_id, context->glink.last_intent_bytes);
++                    context->glink.channel, context->glink.last_intent_id, context->glink.last_intent_bytes,
++                    context->glink.changed_reason, context->glink.changed_offset,
++                    context->glink.changed_expected, context->glink.changed_observed, context->poisoned);
 +                return error;
 +            }
 +            while (context->pending_count) {
@@ -1966,8 +1973,11 @@ new file mode 100644
 +    error = fw_start_map_range(context, FW_START_MPSS);
 +    if (error) return error;
 +    context->phase = FW_START_COPY;
++    uint64_t copy_started_ns = fw_start_ns(context);
 +    error = rf_wifi_fw_copy_segments(&fw_probe.boot.source, &fw_probe.boot.source_ops, &copy,
 +        context->readback, sizeof(context->readback));
++    IOLog("REDFIN WIFI START: segment copy result=%d chunks=%u elapsed_ms=%llu\n", error, context->copies,
++        (unsigned long long)((fw_start_ns(context) - copy_started_ns) / 1000000u));
 +    if (error) return error;
 +    error = rf_wifi_smp2p_auth_begin(&context->smp2p, &context->smp_ops);
 +    if (error) return error;
@@ -2051,15 +2061,17 @@ new file mode 100644
 +    memcpy(fw_probe.args, args, bytes + 1); fw_probe.bytes = bytes + 1;
 +    fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
 +    IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());
++    uint64_t started_ns = fw_start_ns(&fw_start);
 +    int error = fw_start_run(&fw_start);
 +    if (error && fw_start.packets_started) redfin_wifi_radio_abandon();
-+    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x bdf=%u/%u/%u cal=%u bdf_ready=%u retained=1\n",
++    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x bdf=%u/%u/%u cal=%u bdf_ready=%u elapsed_ms=%llu retained=1\n",
 +        error, fw_start.phase, fw_start.reset, fw_start.initialized, fw_start.setup,
 +        fw_start.authenticated, fw_start.smp2p.stage, fw_start.copies,
 +        (unsigned long long)fw_probe.boot.source.copied_bytes,
 +        (unsigned long long)fw_probe.boot.source.zeroed_bytes,
 +        fw_start.smp2p.wlan_found, fw_start.smp2p.wlan_state,
-+        fw_start.bdf.stage, fw_start.bdf.offset, fw_start.bdf.bdf_acks, fw_start.bdf.cal_reported, fw_start.bdf.fw_ready);
++        fw_start.bdf.stage, fw_start.bdf.offset, fw_start.bdf.bdf_acks, fw_start.bdf.cal_reported, fw_start.bdf.fw_ready,
++        (unsigned long long)((fw_start_ns(&fw_start) - started_ns) / 1000000u));
 +    if (fw_start.mission_mode) IOLog("REDFIN WIFI MISSION: final stage=%u requests=%u ACKs=%u result=%u error=%u CE=%u/%u packet_transport=%u\n",
 +        fw_start.mission.stage, fw_start.mission.requests, fw_start.mission.responses, fw_start.mission.result,
 +        fw_start.mission.error, fw_start.ce.stage, fw_start.ce.stable, fw_start.packets_started);
@@ -2161,7 +2173,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_glink.h b/iokit/Kernel/arm/redfin_wifi
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_glink.h
-@@ -0,0 +1,332 @@
+@@ -0,0 +1,345 @@
 +/* SPDX-License-Identifier: MIT
 + * Bounded native APPS/MPSS GLINK transport. Google msm
 + * 500b3a2059c1eec0fec08ec56add06320ea901a8 qcom_glink_{smem,native}.c;
@@ -2203,12 +2215,21 @@ new file mode 100644
 +    uint32_t fill, remaining, heard, sent, packets, stores;
 +    uint32_t last_command, last_p1, last_p2, last_waiting;
 +    uint32_t last_intent_bytes, last_intent_id;
++    uint32_t changed_reason, changed_offset, changed_expected, changed_observed;
 +    struct rf_glink_intent intent[32];
 +    uint8_t packet[65536];
 +    uint8_t frame[16384];
 +};
 +static inline uint32_t rf_gl_word(const struct rf_glink_ops *o, uint32_t at)
 +{ return redfin_smem_u32(o->smem + at); }
++static inline int rf_gl_changed(struct rf_glink *s, uint32_t reason, uint32_t at,
++    uint32_t expected, uint32_t observed)
++{
++    s->changed_reason = reason; s->changed_offset = at;
++    s->changed_expected = expected; s->changed_observed = observed;
++    s->poisoned = 1;
++    return RF_GL_CHANGED;
++}
 +static inline int rf_gl_gate(struct rf_glink *s, const struct rf_glink_ops *o)
 +{
 +    if (!s || !o || !o->smem || !o->check || !o->lock || !o->unlock || !o->write32 ||
@@ -2233,7 +2254,7 @@ new file mode 100644
 +    if (redfin_smem_inspect(o->smem, REDFIN_SMEM_BYTES, report) != REDFIN_SMEM_OK ||
 +        !report->modem_partition) return RF_GL_LAYOUT;
 +    if (s->partition && (s->partition != report->partition_offset || s->bytes != report->partition_bytes))
-+        return RF_GL_CHANGED;
++        return rf_gl_changed(s, 1, report->partition_offset, s->bytes, report->partition_bytes);
 +    for (unsigned i = 0; i < 3; ++i) location[i] = lengths[i] = 0;
 +    uint32_t at = 32, count = 0;
 +    while (at < report->free_uncached) {
@@ -2295,9 +2316,12 @@ new file mode 100644
 +static inline int rf_gl_indices(struct rf_glink *s, const struct rf_glink_ops *o,
 +    uint32_t *remote_tail, uint32_t *remote_head)
 +{
-+    if (rf_gl_gate(s, o) || !s->descriptor || !s->tx) return RF_GL_CHANGED;
-+    if (rf_gl_word(o, s->descriptor + 4u) != s->head || rf_gl_word(o, s->descriptor + 8u) != s->tail)
-+        return RF_GL_CHANGED;
++    int error = rf_gl_gate(s, o);
++    if (error) return error;
++    if (!s->descriptor || !s->tx) return rf_gl_changed(s, 2, 0, 1, 0);
++    uint32_t local_head = rf_gl_word(o, s->descriptor + 4u), local_tail = rf_gl_word(o, s->descriptor + 8u);
++    if (local_head != s->head) return rf_gl_changed(s, 3, s->descriptor + 4u, s->head, local_head);
++    if (local_tail != s->tail) return rf_gl_changed(s, 4, s->descriptor + 8u, s->tail, local_tail);
 +    *remote_tail = rf_gl_word(o, s->descriptor);
 +    *remote_head = rf_gl_word(o, s->descriptor + 12u);
 +    if ((*remote_tail | *remote_head) % 8u || *remote_tail >= 16384u ||
@@ -2329,7 +2353,8 @@ new file mode 100644
 +            }
 +            if (o->barrier(o->context) || rf_gl_gate(s, o)) { s->poisoned = 1; return RF_GL_PLATFORM; }
 +            for (uint32_t i = 0; i < take; ++i)
-+                if (o->smem[s->tx + at + i] != s->frame[sent + i]) { s->poisoned = 1; return RF_GL_CHANGED; }
++                if (o->smem[s->tx + at + i] != s->frame[sent + i])
++                    return rf_gl_changed(s, 5, s->tx + at + i, s->frame[sent + i], o->smem[s->tx + at + i]);
 +            s->stores += take / 4u; sent += take;
 +        }
 +    } else for (uint32_t i = 0; i < length; i += 4u) {
@@ -2372,7 +2397,7 @@ new file mode 100644
 +        int error = rf_gl_find(s, o, at, sizes, &r);
 +        if (error) return error;
 +        if (at[0] != s->descriptor || at[1] != s->tx || sizes[0] != 32 || sizes[1] != 16384)
-+            return RF_GL_CHANGED;
++            return rf_gl_changed(s, 6, at[0], s->tx, at[1]);
 +        if (!at[2]) return RF_GL_AGAIN;
 +        if (sizes[2] < 64 || sizes[2] > 65536 || sizes[2] % 8u) return RF_GL_LAYOUT;
 +        s->rx = at[2]; s->rx_bytes = sizes[2];

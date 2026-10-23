@@ -1,5 +1,17 @@
 # Stage 2 draft: SEC SPI identity
 
+Current GUI event-session update, 2026-10-24: `touch-response.patch`
+logs the header and computed/received checksum of a rejected complete reply.
+Only an already sensed event session with an idle GENI host, empty FIFOs
+and no fault status can return `EILSEQ` without closing SPI. The HID worker
+releases held contacts, issues the existing exact CLEAR_EVENT_STACK and
+requires an empty validated queue before delivering more input. The total
+clear budget remains eight per boot; a clear/transport/ownership failure or
+another malformed reply while resynchronizing stops the worker. Consumed
+events are discarded, never replayed. Identity and sensing checks stay
+strict. This follows native SEC tolerance for malformed responses without
+assuming that the latest GUI failure was caused by Wi-Fi.
+
 `touch-spi.patch` adds an ID-only transport, with no startup hook of its own.
 The initial md0 caller now invokes it after verified power and cold setup.
 In the authenticated `touch-id-v3` run (2026-10-22), physical L17 power and

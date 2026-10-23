@@ -1,0 +1,55 @@
+diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
+--- a/bsd/dev/redfin_touch_spi.c
++++ b/bsd/dev/redfin_touch_spi.c
+@@ -266,7 +266,24 @@
+ 	delay(redfin_touch_read_delay(reg));
+ 	error = redfin_spi_transfer(s, NULL, response, bytes);
+ 	if (error) return error;
+-	if (!redfin_touch_response_valid(reg, count, response, bytes)) return redfin_spi_failed(s, EIO);
++	if (!redfin_touch_response_valid(reg, count, response, bytes)) {
++        /* Both CS phases completed, the host is idle and no bytes were
++         * delivered. Native SEC retries malformed replies; consumed events
++         * cannot be replayed, so the HID worker instead drops/resynchronizes
++         * its queue. GENI errors/timeouts and non-event reads stay fatal. */
++        uint8_t checksum = 0;
++        for (unsigned i = 0; i < 7u + count; ++i) checksum = (uint8_t)(checksum + response[i]);
++        printf("REDFIN TOUCH RESPONSE: reg=%#x count=%u header=%02x:%02x:%02x:%02x:%02x:%02x:%02x checksum=%02x/%02x\n",
++            reg, count, response[0], response[1], response[2], response[3], response[4], response[5], response[6],
++            checksum, response[7u + count]);
++        if (s == &redfin_spi_event_context && redfin_spi_event_open && redfin_spi_event_sensing &&
++            !s->dead && !s->command_owned && (reg == 0x60 || reg == 0x61) &&
++            !(redfin_spi_rd(s, 0x40) & 0x1001) &&
++            !(redfin_spi_rd(s, 0x800) & 0x0fffffff) &&
++            !(redfin_spi_rd(s, 0x804) & 0x01ffffff) &&
++            !(redfin_spi_rd(s, 0x610) & ~RF_SPI_STATUS_EVENTS)) return EILSEQ;
++        return redfin_spi_failed(s, EIO);
++    }
+ 	memcpy(out, response + 7, count);
+ 	return 0;
+ }
+@@ -346,7 +363,7 @@
+ 		return EINVAL;
+ 	}
+ 	int error = redfin_spi_read(&redfin_spi_event_context,reg,count,out);
+-	if (error) redfin_touch_spi_events_close();
++	if (error && error != EILSEQ) redfin_touch_spi_events_close();
+ 	return error;
+ }
+ 
+diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
+--- a/bsd/dev/redfin_touch_events.c
++++ b/bsd/dev/redfin_touch_events.c
+@@ -123,6 +123,13 @@
+ 		if (!redfin_events_owned()) { error = EBUSY; break; }
+ 		if (!(redfin_events_rd(redfin_events_gpio,0x1004) & 1) || state.down || (ticks++ % 13) == 0) {
+ 			error = redfin_events_batch(&state,&ops,true);
++			if (error == EILSEQ) {
++				/* No DOWN from this batch was committed. Release old contacts,
++				 * clear once and require an empty validated reply before resuming.
++				 * The SPI leaf caps clears at eight; a second bad reply here stops. */
++				error = redfin_events_recover(&state,&ops);
++				printf("REDFIN TOUCH RESPONSE: resync=%d recovered=%u\n",error,state.recoveries);
++			}
+ 			if (error == EOVERFLOW) {
+ 				const uint8_t *p = state.overflow_event;
+ 				printf("REDFIN TOUCH OVERFLOW: count=%u raw=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",

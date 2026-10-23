@@ -192,8 +192,11 @@ int redfin_touch_spi_events_sense_init(void){return 0;}
                 # The scripted model already produces a32-count event at read3.
                 # Add clear failure variants and reset helper facts for each run.
                 text = text.replace('fault==7 ? 32 : 0', '(fault==7 || fault==20 || fault==21) ? 32 : 0')
+                text = text.replace('if(fault==3 || fault==14)return EIO;',
+                    'if(fault==3 || fault==14)return EIO; if(fault>=22 && fault<=24)return EILSEQ;')
+                text = text.replace('read60++;', 'read60++;if(fault==24 && read60>=5)return EILSEQ;')
                 text = text.replace('redfin_events_attempted=false;',
-                    'redfin_events_attempted=false;test_clears=0;test_clear_error=fault==20?EIO:fault==21?EBUSY:0;')
+                    'redfin_events_attempted=false;test_clears=0;test_clear_error=(fault==20||fault==23)?EIO:fault==21?EBUSY:0;')
                 text += '\nunsigned clear_calls(void){return test_clears;}\n'
                 source.write_text(text)
             return old_run(command, *args, **kwargs)
@@ -219,6 +222,24 @@ int redfin_touch_spi_events_sense_init(void){return 0;}
 
     def test_clear_failure_is_final_and_never_reopens_spi(self):
         for issue, error in ((20, errno.EIO), (21, errno.EBUSY)):
+            self.assertEqual(self.lib.run(issue, 1, 1), 0)
+            self.assertEqual(self.lib.stat(10), error)
+            self.assertEqual(self.lib.clear_calls(), 1)
+            self.assertEqual(self.lib.stat(6), 1)
+            self.assertEqual(self.lib.stat(7), 1)
+            self.assertEqual(self.lib.stat(9), 0)
+
+    def test_bad_reply_releases_held_contact_and_resynchronizes_without_replaying_it(self):
+        self.assertEqual(self.lib.run(22, 1, 1), 0)
+        self.assertEqual(self.lib.stat(10), 0)
+        self.assertEqual(self.lib.clear_calls(), 1)
+        self.assertEqual(self.lib.stat(6), 1)
+        self.assertEqual(self.lib.stat(7), 1)
+        self.assertEqual(self.lib.stat(8), 2)  # One DOWN, one UP before queue clear.
+        self.assertEqual(self.lib.stat(9), 0)
+
+    def test_bad_reply_during_resynchronization_or_clear_failure_is_final(self):
+        for issue, error in ((23, errno.EIO), (24, errno.EILSEQ)):
             self.assertEqual(self.lib.run(issue, 1, 1), 0)
             self.assertEqual(self.lib.stat(10), error)
             self.assertEqual(self.lib.clear_calls(), 1)

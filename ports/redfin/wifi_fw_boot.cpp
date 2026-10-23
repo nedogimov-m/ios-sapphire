@@ -52,10 +52,9 @@ static bool fw_identity(void)
 static bool fw_profile(uint64_t *boot_id)
 {
     if (redfin_wifi_gui_requested()) {
-        const char *args = PE_boot_args(); unsigned bytes = 0;
-        if (!args || !redfin_wifi_gui_ready() || !fw_identity()) return false;
-        while (bytes < 608 && args[bytes]) ++bytes;
-        return bytes < 608 && redfin_wifi_gui_profile(args, bytes + 1, boot_id);
+        /* The complete GUI profile/touch handoff is frozen at publication.
+         * Keep CPU0, owner, epoch and exact live bytes checked on every use. */
+        return redfin_wifi_gui_boot_id(boot_id) && fw_identity();
     }
     int cpus = 0, spmi = 0, returned = 0;
     char root[16] = {};

@@ -1,15 +1,34 @@
 diff --git a/bsd/dev/redfin_touch_start.c b/bsd/dev/redfin_touch_start.c
 --- a/bsd/dev/redfin_touch_start.c
 +++ b/bsd/dev/redfin_touch_start.c
-@@ -16,6 +16,7 @@
+@@ -16,8 +16,10 @@
  extern int redfin_gui_cpu0(void);
  extern int redfin_touch_setup(bool, bool);
  extern int redfin_touch_events_start(void);
 +extern void redfin_wifi_gui_start(void);
  int redfin_touch_start_initial(void);
  bool redfin_touch_boot_lease_valid(unsigned mode);
++bool redfin_touch_boot_lease_held(unsigned mode);
  /* 0=unclaimed, 1=claimed/unpublished, 2=permanently published. */
-@@ -158,6 +159,7 @@
+ static uint32_t redfin_initial_touch_owner;
+ static unsigned redfin_touch_boot_mode;
+@@ -120,6 +122,15 @@
+ {
+  return redfin_touch_boot_owned(&redfin_touch_boot_caller, &redfin_initial_touch_owner, mode);
+ }
++/* Lifetime proof only, for the GUI/WLAN handoff after full validation.
++ * Its caller separately retains the frozen GUI arguments, CPU0 and epoch.
++ * No path releases/reassigns this boot's permanent DRV2/SE0 owner. */
++bool
++redfin_touch_boot_lease_held(unsigned mode)
++{
++ return __atomic_load_n(&redfin_initial_touch_owner, __ATOMIC_ACQUIRE) == 2 &&
++     mode == REDFIN_TOUCH_UFS_EVENTS && mode == redfin_touch_boot_mode;
++}
+ int
+ redfin_touch_start_initial(void)
+ {
+@@ -158,6 +169,7 @@
   } else if (mode == REDFIN_TOUCH_UFS_EVENTS) {
    error = redfin_touch_events_start();
    printf("REDFIN TOUCH START: asynchronous HID worker result=%d\n", error);
@@ -17,3 +36,36 @@ diff --git a/bsd/dev/redfin_touch_start.c b/bsd/dev/redfin_touch_start.c
   }
   return error;
  }
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -472,6 +472,7 @@
+ extern int redfin_shutdown_watchdog_start(uint32_t seconds);
+ extern void redfin_shutdown_watchdog_tick(unsigned final);
+ extern void redfin_fb_capture_final(void);
++extern void redfin_wifi_gui_stop(void);
+ extern void redfin_userspace_stacks(void);
+ static uint32_t redfin_shutdown_seconds;
+ 
+@@ -504,6 +505,7 @@
+ 			thread_block(THREAD_CONTINUE_NULL);
+ 	}
+ 	redfin_shutdown_watchdog_tick(1);
++	redfin_wifi_gui_stop();
+ 	redfin_userspace_stacks();
+ 	redfin_fb_capture_final();
+ 	printf("REDFIN SHUTDOWN: entering reboot_kernel(0,NULL)\n");
+diff --git a/bsd/kern/kern_shutdown.c b/bsd/kern/kern_shutdown.c
+--- a/bsd/kern/kern_shutdown.c
++++ b/bsd/kern/kern_shutdown.c
+@@ -176,6 +176,10 @@
+ int
+ reboot_kernel(int howto, char *message)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	extern void redfin_wifi_gui_stop(void);
++	redfin_wifi_gui_stop();
++#endif
+ 	int hostboot_option = 0;
+ 	uint64_t startTime;
+ 
