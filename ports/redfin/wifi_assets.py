@@ -15,7 +15,7 @@ FILES = {
 }
 
 
-def pack(manifest):
+def pack(manifest, *, modem_inventory=None, firmware_plan=None, firmware_sha256=None):
     manifest = Path(manifest).resolve()
     report = json.loads(read_regular(manifest, 1024 * 1024))
     require(type(report) is dict and type(report.get('files')) is list, 'invalid private WLAN asset inventory')
@@ -36,6 +36,13 @@ def pack(manifest):
         selected[name] = (FILES[name], data, bytes.fromhex(digest))
     require(set(selected) == set(FILES), 'private WLAN inventory lacks required captured firmware/board/config files')
     entries = [selected[name] for name in sorted(selected)]
+    module_report = None
+    if any(value is not None for value in (modem_inventory, firmware_plan, firmware_sha256)):
+        require(all(value is not None for value in (modem_inventory, firmware_plan, firmware_sha256)),
+                'observed modem module requires its inventory, main plan and selected bundle hash')
+        import wifi_modem_asset
+        module, module_report = wifi_modem_asset.load(modem_inventory, firmware_plan, firmware_sha256)
+        entries.append(module)
     out = bytearray(64 + 128 * len(entries))
     for i, (name, data, digest) in enumerate(entries):
         encoded = name.encode('ascii')
@@ -49,7 +56,7 @@ def pack(manifest):
         out[record + 80:record + 112] = digest
     struct.pack_into('<8sIIQQ', out, 0, b'RFWAS01\0', 1, len(entries), len(out), 128)
     require(len(out) <= 16 * 1024 * 1024, 'private WLAN assets exceed native RAM cap')
-    return bytes(out), {'schema': 1, 'bytes': len(out), 'assets': len(entries),
+    return bytes(out), {'schema': 1, 'bytes': len(out), 'assets': len(entries), 'modem_module': module_report,
                        'sha256': hashlib.sha256(out).hexdigest(),
                        'view': report.get('view'), 'current_effective_image_proven': report.get('current_effective_image_proven'),
                        'pristine_stock_vendor_proven': report.get('pristine_stock_vendor_proven')}

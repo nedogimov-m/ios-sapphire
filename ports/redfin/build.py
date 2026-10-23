@@ -99,6 +99,8 @@ def main():
     p.add_argument('--wifi-glink-start', action='store_true', help='native MPSS startup followed by GLINK/IPCRTR and QRTR service discovery')
     p.add_argument('--wifi-host-services', action='store_true', help='native GLINK with captured WLAN assets, pd-mapper and RAM-only TFTP')
     p.add_argument('--wifi-assets-inventory', type=Path, help='private captured base-vendor host-inventory.json for --wifi-host-services')
+    p.add_argument('--wifi-host-module-inventory', type=Path, help='private observed modem RF-config module inventory for RAM-only TFTP')
+    p.add_argument('--wifi-fw-plan', type=Path, help='original native firmware plan binding the extra module to the main MPSS bundle/source')
     p.add_argument('--wifi-rmtfs-inventory', type=Path, help='verified private read-only EFS inventory; enables volatile RMTFS with --wifi-host-services')
     p.add_argument('--wifi-wlfw-setup', action='store_true', help='legacy WLFW indication/MSA/CAP handshake; requires native host services and RMTFS snapshots')
     wlan = p.add_mutually_exclusive_group()
@@ -136,6 +138,9 @@ def main():
             p.error('--wifi-host-services requires --wifi-assets-inventory')
     elif a.wifi_assets_inventory:
         p.error('--wifi-assets-inventory requires --wifi-host-services')
+    if (a.wifi_host_module_inventory or a.wifi_fw_plan) and not (
+            a.wifi_host_services and a.wifi_host_module_inventory and a.wifi_fw_plan):
+        p.error('the observed modem module requires --wifi-host-services, --wifi-host-module-inventory and --wifi-fw-plan')
     if a.wifi_rmtfs_inventory and not a.wifi_host_services:
         p.error('--wifi-rmtfs-inventory requires --wifi-host-services')
     if a.wifi_wlfw_setup and not (a.wifi_host_services and a.wifi_rmtfs_inventory):
@@ -617,7 +622,8 @@ def main():
                 rmtfs = None
                 if a.wifi_host_services:
                     import wifi_assets
-                    auxiliary = wifi_assets.pack(a.wifi_assets_inventory)
+                    auxiliary = wifi_assets.pack(a.wifi_assets_inventory, modem_inventory=a.wifi_host_module_inventory,
+                        firmware_plan=a.wifi_fw_plan, firmware_sha256=a.wifi_fw_sha256 if a.wifi_host_module_inventory else None)
                     (out / 'wifi-host-assets.json').write_text(json.dumps(auxiliary[1], indent=2) + '\n')
                 if a.wifi_rmtfs_inventory:
                     import wifi_rmtfs

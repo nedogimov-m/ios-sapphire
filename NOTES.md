@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native feature-mask hardware PASS; requested RF module prepared — 2026-10-23
+
+Source `d65dd2d`, native `build-20261023-191352.log`. Authenticated matched
+power-v2 capture, boot ID713ae40cbd52b861, repeats MSA/CAP/all15 supply ACKs.
+Native dynamic mask transaction5 succeeds: valid3, previous1/current1.
+FW_READY remains absent through30s; finalETIMEDOUT60/phase12/SMP2P stage4.
+Recovery authenticates the log, observes unchanged clean HFSX/write_count
+462335 and verifies fastboot. V2 image
+`8b30fda981c21df5a121118d0cec192273a08baaefc9cd24e03330c2d8cd6bf4`.
+Exact v2 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x713ae40cbd52b861`.
+
+The actual repeated TFTP request image/modem_pr/so/549_38_0.mbn is present
+in the same captured modem_b:963,644 bytes, native Hexagon ELF, exports
+identify RFC hardware549/r3/PVT/ROW configuration. Its refusals are an
+observation; whether they block WLAN readiness is unproved. A reusable
+bounded read-only FAT16/32 source reader and `wifi_modem_asset.py` now
+extract only this observed path, requiring the original main firmware plan's
+whole-source image hash. The immutable extra asset binds its own length/
+hash, source-image/plan hashes and selected main bundle hash. No firmware
+signature is changed and no source/partition write or host execution occurs.
+All firmware/manifests stay ignored/private; the producer and tests are code.
+
+The optional module inventory adds one named asset to the existing native
+read-only host segment; all original per-file/whole native hashes apply.
+All217 Wi-Fi checks PASS (3 optional private cases skipped), including5new
+FAT16/32/provenance/malformed-source/native-parser cases. This is an image/
+asset-only change, reusing the proven power-v2 kernel and native build191352;
+no kernel rebuild or CI run. Complete actual Image/live-FDT/return preflight
+PASS, decompressed130,067,872 bytes below the explicit128MiB cap.
+Kernel `73e7c5de5c4f1d93ac991470881b4a654180c2d8124dad28989ae37974779a3b`; module image `e5c76982ea92f42c39be5a6e2851bb337674915b6aa24f7d493aa6c7a4cc701c`.
+Exact module args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x419972dcc1891799`.
+
+Next: temporary module-v1 run; confirm real TFTP serving of the observed
+module, later requests and FW_READY. Keep GPIO/PMIC physical observation
+as the next independent diagnostic if readiness remains absent. No persistent
+EFS/boot/recovery/modem changes; association/data, GPU/Metal/Bluetooth remain
+unfinished.
+
 ## REDFIN native post-power dynamic feature exchange prepared — 2026-10-23
 
 Continues `4c48693`. The power-only profile now matches native default
