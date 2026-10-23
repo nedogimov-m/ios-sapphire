@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native ALLOC and first sector hardware PASS; global buffer semantics — 2026-10-23
+
+Source `5da3452`, native `build-20261023-174735.log`. Authenticated and
+image/nonce-matched `wifi-host-rmtfs-v2-20261023-175000`, boot ID
+`3256ecd1a25d0e35`, repeats successful HLOS/MSS sharing and MPSS/GLINK/QRTR.
+OPENs arrive on ports0xa/0xb; ALLOC caller1 arrives on0xd and requests exactly
+2,621,440 bytes. ALLOC succeeds. IOVEC on0xe serves512 bytes for caller1.
+IOVEC for caller2 on0xf fails malformed2 because the implementation wrongly
+required a separate allocation for each file. Native storage uses one global
+buffer, so that extra restriction is removed. No WLAN readiness is claimed.
+Recovery authenticates the log, observes unchanged clean HFSX/write_count
+462335 and verifies final fastboot. Kernel
+`253aa4ab05f62b0dde63f28ea6d981fb0196fbe533b8a180ba2e800a5908de37`;
+image `a4bad8c92b3613ef943d75823347bc0cd797f56343298dcd5d0db9344caf2143`.
+Exact v2 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x3256ecd1a25d0e35`.
+
+Before this global-buffer correction the complete suite passes1181 tests
+(3 optional private cases skipped). The new version passes all15 focused
+RMTFS/SCM/producer/loader checks, including the observed cross-partition
+sequence, native no-op vectors and safe unaligned buffer offsets. Every
+nonempty vector remains bounded by its partition and the single owned
+shared buffer; complete request work is capped at16MiB. Persistent storage
+APIs remain absent. Native `build-20261023-175333.log` PASS; no CI run.
+Actual Image/live-FDT/shim-return preflight PASS.
+V3 kernel `1608609f56c8a33a8278ef329a0e735e47a2b47505064c7ce9ce8ad891ddda91`; image `647db9b93f4cecf9b2f11c513e66ec51310e64e2934b02c2e283415fc77bcbe6`.
+Exact v3 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x56b8c26894474c8d`.
+
+Next: temporaryv3 boot; inspect both EFS reads, later requests, fatal/WLFW
+state and verify that the persistent EFS snapshots remain unchanged.
+
 ## REDFIN fixed-buffer RMTFS ABI correction prepared — 2026-10-23
 
 After source `b74feb6`, align the service with native node/caller ownership

@@ -173,7 +173,7 @@ class RmtfsTests(unittest.TestCase):
         self.opened()
         before = C.string_at(self.lib.buffer(1), R.SHARED_BYTES)
         for entry in [(0, PHYSICAL - 512, 1), (7, PHYSICAL, 2), (0xffffffff, PHYSICAL, 1),
-                      (0, 0xfffffe00, 2), (0, PHYSICAL, 0), (0, PHYSICAL + 1, 1)]:
+                      (0, 0xfffffe00, 2), (0, PHYSICAL + R.SHARED_BYTES - 511, 1)]:
             response = self.io(0, [(0, PHYSICAL, 1), entry])
             self.assertEqual(response[10:14], b'\1\0\1\0')
             self.assertEqual(C.string_at(self.lib.buffer(1), R.SHARED_BYTES), before)
@@ -192,6 +192,25 @@ class RmtfsTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<Q', response, 17)[0], PHYSICAL)
         self.assertEqual(self.io(0, [(0, PHYSICAL + R.SHARED_BYTES - 512, 1)], port=9)[10:14], bytes(4))
         self.assertEqual(self.lib.metric(6), 1)
+
+    def test_second_partition_uses_the_same_global_buffer_without_another_alloc(self):
+        self.opened()
+        response = self.qmi(1, [(1, b'/boot/modem_fs2')], port=8)
+        self.assertEqual(struct.unpack_from('<I', response, 17)[0], 2)
+        self.assertEqual(self.io(0, [(0, PHYSICAL + 512, 1)], caller=2, port=9)[10:14], bytes(4))
+        second_file = self.blob[576 + 4096:576 + 4096 + 512]
+        self.assertEqual(C.string_at(self.lib.buffer(1) + 512, 512), second_file)
+        self.assertEqual(self.lib.metric(5), 1)
+
+    def test_native_noop_vectors_and_unaligned_owned_buffer_are_safe(self):
+        self.qmi(1, [(1, b'/boot/modem_fs1')])
+        before = C.string_at(self.lib.buffer(1), 1024)
+        for vectors in ([], [(0xffffffff, 0, 0)]):
+            self.assertEqual(self.io(0, vectors)[10:14], bytes(4))
+            self.assertEqual(C.string_at(self.lib.buffer(1), 1024), before)
+        self.assertEqual(self.io(0, [(0, PHYSICAL + 1, 1)])[10:14], bytes(4))
+        self.assertEqual(C.string_at(self.lib.buffer(1) + 1, 512), self.blob[576:576 + 512])
+        self.assertEqual(self.lib.guards(), 0)
 
     def test_close_reopen_keeps_ram_changes_without_reopening_storage(self):
         self.opened(); C.memset(self.lib.buffer(1), 0xab, 512)

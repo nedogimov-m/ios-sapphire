@@ -13,7 +13,7 @@
 struct rf_rm_file {
     const uint8_t *initial;
     uint8_t *shadow;
-    uint32_t bytes, open, node, port, allocated;
+    uint32_t bytes, open, node, port;
 };
 struct rf_rmtfs {
     struct rf_rm_file file[4];
@@ -155,7 +155,7 @@ static inline int rf_rm_request(struct rf_rmtfs *s, const struct rf_rm_ops *o, u
              * client socket/port for subsequent requests on the same handle. */
             if (!file || !file->open || file->node != node) error = 1;
         }
-        if (!error && message == 2) { file->open = 0; file->allocated = 0; }
+        if (!error && message == 2) file->open = 0;
         else if (!error && message == 4) {
             if (length[1] != 4) error = 2;
             else {
@@ -165,7 +165,6 @@ static inline int rf_rm_request(struct rf_rmtfs *s, const struct rf_rm_ops *o, u
                 else {
                     /* rmtfs_mem_alloc returns the same fixed buffer even for
                      * size0; it does not carve a per-request suballocation. */
-                    file->allocated = RF_RM_SHARED;
                     response[14] = 16; rf_rm_put(response + 15, 8, 2); rf_rm_put(response + 17, s->physical, 8);
                     used += 11; ++s->allocations; transferred = requested;
                 }
@@ -175,16 +174,19 @@ static inline int rf_rm_request(struct rf_rmtfs *s, const struct rf_rm_ops *o, u
         } else if (!error && message == 3) {
             uint32_t count = length[2] ? value[2][0] : 0;
             if (length[1] != 1 || value[1][0] > 1 || length[3] != 1 || value[3][0] > 1 ||
-                !count || length[2] != 1u + 12u * count || !file->allocated) error = 2;
+                length[2] != 1u + 12u * count) error = 2;
             /* Prevalidate the complete vector before copying any byte. */
             for (uint32_t i = 0; !error && i < count; ++i) {
                 const uint8_t *entry = value[2] + 1u + 12u * i;
                 uint64_t sector = rf_rm_u32(entry), physical = rf_rm_u32(entry + 4), sectors = rf_rm_u32(entry + 8);
                 uint64_t size = sectors * 512u;
-                if (!sectors || sector * 512u > file->bytes || size > file->bytes - sector * 512u ||
-                    physical < s->physical || physical - s->physical > file->allocated ||
-                    size > file->allocated - (physical - s->physical) || physical % 512u ||
-                    size > RF_RM_SHARED - transferred) error = 1;
+                /* The native buffer is global to the service, not allocated
+                 * per partition handle. A zero-sector vector is a no-op. */
+                if (!sectors) continue;
+                if (sector * 512u > file->bytes || size > file->bytes - sector * 512u ||
+                    physical < s->physical || physical - s->physical > RF_RM_SHARED ||
+                    size > RF_RM_SHARED - (physical - s->physical) ||
+                    size > 16u * 1024u * 1024u - transferred) error = 1;
                 else transferred += (uint32_t)size;
             }
             if (!error && o->barrier(o->context)) { s->poisoned = 1; return -1; }
