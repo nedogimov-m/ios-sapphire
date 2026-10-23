@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN station-v3 hardware: native readiness within54s, idle touch replies invalid — 2026-10-24
+
+Source `e0e7643`, local native `build-20261024-043743.log`; no CI run.
+Authenticated station-v3 capture matches boot ID7822274d1eaed8a2 and image
+398957b29cb37d006fdd528ce939fb4a86bc8c385785de144caf69e9fa6bd3c5.
+Exact args are the station-v3 prepared entry immediately below.
+
+Firmware segment copy now completes in17988ms. PAS AUTH, GLINK, all13
+BDF ACKs/CAL_REPORT, real FW_READY, WLAN_CFG/mission ACKs and stable CE
+observation all succeed during the GUI session. At53983ms the WLAN context
+lease stops EAGAIN35 after two stores (bank4/slot4); no route is published,
+no packet DMA/rings/interface start. The exact changed field was not logged;
+retain the refusal and expose the saved expected/fresh snapshot difference.
+The former post-shutdown GLINK CHANGED failure does not recur. Shutdown
+revocation is observed before reboot. Do not call this association/data.
+
+User again reports unresponsive touch. ID/sensing/consumer startup passes.
+Several complete READ_ONE_EVENT replies have a zero header; four bounded
+queue resynchronizations succeed. A fifth is followed by another malformed
+reply, stopping EILSEQ92 after136 batches, zero contacts. The worker was
+issuing periodic event reads even with IRQ GPIO9 high; native SEC dispatches
+only from its level IRQ and tolerates three read errors. Idle polling/timing
+is the next source-backed correction; Wi-Fi causation remains unproved.
+
+Recovery authenticates the capture, observes clean HFSX/write_count482571,
+primes public metadata and leaves verified fastboot. No partition flash or
+persistent modem/EFS write. Next: native level-driven touch handling and
+reply timing, plus exact WLAN lease failure evidence, in one integrated
+image. Continue through GUI association/data/DHCP before GPU/Metal.
+
 ## REDFIN combined touch response recovery and frozen GUI/WLAN lease prepared — 2026-10-24
 
 Continues `5169d0b` / station source `4e5cd5f`. A malformed completed SEC
