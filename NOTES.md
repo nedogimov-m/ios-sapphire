@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GMU clocked CSR and reset-held TCM hardware PASS — 2026-10-23
+
+Source parent4987f8c. Corrected the native Lito clock-before-CSR order:
+configure200MHz and enable the GMU core branch before reading reset,
+INIT or HFI. Both GMU access helpers require the running-clock proof;
+reset1/readback still precedes counter/TCM, and no reset release is written.
+Exact tcm-policy schema2 rejects older ordering contracts. Canonical C,
+overlay, Python and prepared native sources match. Fixtures now reject all
+GMU accesses with the core clock off, rather than requiring reset before
+clock enable.
+
+Observed:105focusedtestsPASS; all1119hosttestsPASS in101.796s, including the
+private Wi-Fi bundle (`peripherals-host-tests-v45.txt`); ASan/UBSan
+14,278adapter scenariosPASS. Local ARM64 build `build-20261023-122808.log`
+links successfully. Complete real image/ADT/FDT/return validationPASS.
+Fresh authenticated/image/nonce-matched capture
+`gmu-tcm-v8-20261023-123214`, boot ID977293c7cbd9f5bb, reports result0/stage10:
+377reads/20writes/8polls, source200=1, counter=1, restored=1, dirty=0.
+Reset1→1, INIT/HFI0; crystal delta28627 over1490989ns.
+Both DTCM patterns read back and original words restore; staticPID1 lives.
+Collector verifies fastboot return; HFSX remains clean/unmodified at
+write_count462335. No firmware, CM3 release, GX, DMA, flash or media write.
+
+Kernel `8d0a114f9f34434d9f39894af2faa67619180336aa9d4ec165380273f0b34cbf`;
+image `20ea232e50ec6efc354b9db2affa2887f8d94ca579f020b06481763c728b4328`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinspmi=1 redfinreturn=1 redfinbootid=0x977293c7cbd9f5bb`.
+
+Next: a freshly frozen `gpu-smmu-v3` image on this exact kernel repeats
+the TCM proof then reads only the GPU-SMMU global half. Earlier v2 predates
+this clock order/schema and must not be booted. Context ownership, firmware,
+HFI, GPU commands/rendering and Wi-Fi activation remain unfinished.
+
 ## REDFIN GMU enters real hardware; source-backed cold clocks — 2026-10-23
 
 Source13197c1 fixes the diagnostic IRQ key. Fresh authenticated v6 capture

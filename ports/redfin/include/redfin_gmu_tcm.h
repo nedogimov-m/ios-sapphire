@@ -4,6 +4,8 @@
  * This does not start CM3, configure SMMU/GX/PDC/RSC, or load firmware.
  * The caller must own a bounded single-CPU md0 session, fresh CX power and
  * its held ARC floor, exclusive GCC/GPUCC/GMU clock access and reset return.
+ * As in native Lito, clock the CSR path before reading reset; all TCM access
+ * requires reset==1 and this module never writes a reset release.
  * Added votes/clocks stay held until that platform reset. Only the two DTCM
  * words and the RCG's initial force-enable bit are restored here.
  */
@@ -202,6 +204,8 @@ rf_gt_gmu_rd(const struct rf_gt_ops *ops, struct rf_gt_report *r,
     uint32_t at, uint32_t *value, bool running, bool data)
 {
     uint32_t reset;
+    if (!running)
+        return EINVAL;
     int error = rf_gt_source_live(ops, r, running);
     if (error)
         return error;
@@ -220,6 +224,8 @@ rf_gt_gmu_wr(const struct rf_gt_ops *ops, struct rf_gt_report *r,
     uint32_t at, uint32_t value, bool running, bool data)
 {
     uint32_t reset;
+    if (!running)
+        return EINVAL;
     int error = rf_gt_source_live(ops, r, running);
     if (error)
         return error;
@@ -308,19 +314,6 @@ rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *outpu
     RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GPUCC, 0x1078, true));
     RF_GT_TRY(rf_gt_branch(ops, &r, RF_GT_GPUCC, 0x5000, false));
 
-    /* Do not clock an ambiguous inherited processor before holding reset. */
-    r.stage = RF_GT_RESET;
-    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14000, &r.reset_before, false, false));
-    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14070, &r.result_before, false, false));
-    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14600, &r.hfi_before, false, false));
-    if (r.reset_before > 1 || r.result_before != 0 || r.hfi_before != 0) {
-        error = EBUSY; goto done;
-    }
-    RF_GT_TRY(rf_gt_gmu_wr(ops, &r, 0x14000, 1, false, false));
-    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14000, &r.reset_after, false, false));
-    if (r.reset_after != 1) { error = EIO; goto done; }
-    r.reset_held = true;
-
     r.stage = RF_GT_SOURCE;
     RF_GT_TRY(rf_gt_update(ops, &r, RF_GT_GPUCC, 0x1120, 2, 2));
     RF_GT_TRY(rf_gt_poll(ops, &r, RF_GT_GPUCC, 0x1120, 0x80000000u, 0, 500));
@@ -337,6 +330,20 @@ rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *outpu
     RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GPUCC, 0x1098, &r.gmu_clock_after));
     RF_GT_TRY(rf_gt_source_live(ops, &r, true));
     r.source_200m = true;
+
+    /* Native Lito enables the GMU clock before its CSR aperture answers.
+     * Inspect inherited state only after that proof; never release reset. */
+    r.stage = RF_GT_RESET;
+    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14000, &r.reset_before, true, false));
+    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14070, &r.result_before, true, false));
+    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14600, &r.hfi_before, true, false));
+    if (r.reset_before > 1 || r.result_before != 0 || r.hfi_before != 0) {
+        error = EBUSY; goto done;
+    }
+    RF_GT_TRY(rf_gt_gmu_wr(ops, &r, 0x14000, 1, true, false));
+    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14000, &r.reset_after, true, false));
+    if (r.reset_after != 1) { error = EIO; goto done; }
+    r.reset_held = true;
 
     r.stage = RF_GT_COUNTER;
     RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_before, true, true));

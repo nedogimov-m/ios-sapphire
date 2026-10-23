@@ -408,7 +408,6 @@ static void host_mmio_write(vm_offset_t address,uint32_t value) {
     (unit==RF_GT_GPUCC&&(at==0x1078||at==0x109c||at==0x5000||at==0x1098))) {
   if(value&1)*(uint32_t*)address&=~0x80000000u;
   if(unit==RF_GT_GPUCC&&at==0x1098&&(value&1)) {
-   if(gmu[0x14000/4]!=1)bad++;
    gpucc[0x1120/4]&=~0x80000000u;
   }
  }

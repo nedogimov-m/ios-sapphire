@@ -59,7 +59,8 @@ static void access(unsigned unit,uint32_t at,bool writing) {
  if(h->lost)h->after_loss++;
  if(!rf_gt_allowed(unit,at,writing))h->bad++;
  if(unit==RF_GT_GMU) {
-  if(!h->ahb_requested || !(h->gpucc[0x109c/4]&1))h->bad++;
+  if(!h->ahb_requested || !(h->gpucc[0x109c/4]&1) ||
+     (h->gpucc[0x1098/4]&0x80000001)!=1)h->bad++;
   if(at==0x7000 || at==0x7004 || at==0x14220) {
    if((h->gpucc[0x1098/4]&0x80000001)!=1 || h->gmu[0x14000/4]!=1)h->bad++;
   }
@@ -106,7 +107,6 @@ static int write_reg(void *ctx,unsigned unit,uint32_t at,uint32_t value) {
   if(h->scenario==12 && unit==RF_GT_GPUCC && at==0x1098)*p|=0x80000000;
   if(h->scenario==26 && unit==RF_GT_GPUCC && at==0x1078)*p=old; /* AHB native delay. */
   if(unit==RF_GT_GPUCC && at==0x1098 && (value&1)) {
-   if(h->gmu[0x14000/4]!=1)h->bad++;
    h->gpucc[0x1120/4]&=~0x80000000u;
   }
  }else if(unit==RF_GT_GPUCC && at==0x1120) {
@@ -324,7 +324,7 @@ class RedfinGMUTCMTests(unittest.TestCase):
             self.assertEqual(metrics[4], 0)
             self.assertFalse(r.reset_held)
             self.assertEqual(final[0], 2 if variant == 2 else 0)
-            self.assertEqual(final[7] & 0x80000001, 0x80000000)
+            self.assertEqual(final[7] & 0x80000001, 1)
 
     def test_stuck_branches_are_bounded_and_never_touch_tcm(self):
         for scenario in (10, 11, 12):

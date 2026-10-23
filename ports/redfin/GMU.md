@@ -15,6 +15,14 @@ localized the early stop to `InitIOKit`. The same private key is used for the
 optional SMMU leaf. Native Linux FDT `interrupts` properties are still validated
 unchanged before constructing the diagnostic contract.
 
+The authenticated v8 hardware capture passes this reset-held stage:
+`result=0`, stage 10, 377 reads, 20 writes, eight polls, source200=1,
+counter=1, restored=1 and dirty=0. Reset is 1 before and after; INIT/HFI
+are zero. The crystal advances 28,627 ticks in 1,490,989 ns. Both DTCM
+patterns read back and both original words are restored. PID1 runs and the
+collector returns to fastboot with the HFS header unchanged. This proves
+clocked CSR and TCM access; CM3 firmware, DMA and GPU execution remain pending.
+
 ## Reviewed sources
 
 The user's preferred [HackiOS kernel snapshot][hackios] at
@@ -25,8 +33,9 @@ Its overview contains a stale GMU base of `0x03d69000`; the actual block
 definition uses `0x03d6a000`. Actual ITCM/DTCM offsets match Redfin.
 Its A660 image, 17-descriptor HFI table, 16KiB log, SC7280 hub clocks and
 debug-clock selections require replacement with the Lito contracts below.
-The paired preferred userland snapshot remains
-`906425b75e02b4f99eb5d7bb1ef7c9583472d772`; this work changes no private
+The paired preferred userland review includes
+`a79ff0772a3454fd1ef127e181e5b3bce6c9ce18`; the comparison worktree remains
+at `906425b75e02b4f99eb5d7bb1ef7c9583472d772`. This work changes no private
 iOS 16.5 ABI or injected library. See [UPSTREAM.md](UPSTREAM.md).
 
 Hardware definitions below come from Google msm commit
@@ -223,9 +232,14 @@ The callable leaf is [`include/redfin_gmu_tcm.h`](include/redfin_gmu_tcm.h):
 MMIO, a bounded busy wait and CPU monotonic nanoseconds. Callback units 0/1/2 mean GCC/GPUCC/GMU. It
 rejects an enabled inherited GMU/GX, mismatched PLL/GCC handoff, pending RCG
 configuration, nonzero firmware/HFI state or ambiguous reset. After enabling
-only native bus/crystal/AHB/SMMU clock votes, it examines GMU idle CSRs while
-the GMU core clock remains gated; reset 1 precedes the 200MHz core clock.
-It then checks fresh crystal ticks against 19.2MHz with a 20% tolerance over
+native bus/crystal/AHB/SMMU clock votes, it configures the 200MHz source and
+enables the GMU core branch before reading GMU CSRs. Native
+`kgsl_gmu.c:gmu_enable_clks()` and preferred HackiOS step 5 use this order.
+The authenticated v7 run stopped at the first SYSRESET read with the core
+clock gated. Every GMU callback now requires the running-clock proof.
+After checking inherited reset/completion/HFI state, the leaf writes only
+reset 1 and verifies it. It then checks fresh crystal ticks against 19.2MHz
+with a 20% tolerance over
 the CPU-measured elapsed window, including per-access guards, before the
 two-word TCM test. The busy wait is 1ms and the accepted complete window is
 1–10ms. Unsigned subtraction handles counter wrap; a stopped, backward or
@@ -300,10 +314,10 @@ failed input. The emitted little-endian contract is:
 | --- | --- |
 | `reg` (64-bit pairs) | `0x100000/0x1f0000`, `0x3d90000/0x9000`, `0x3d6a000/0x30000`, **`0x17a00000/0x4000`** |
 | `chip-id` | `0x06020001` |
-| `clock-policy` | `[200000000,31,0x4000,2,6,2]` |
-| `tcm-policy` | `[1,0x10004000,0x7000,2,1,1000]` |
+| `clock-policy` | `[200000000,31,0x4000,2,6,2,0x71028,3,3,0xf03,0x103]` |
+| `tcm-policy` | `[2,0x10004000,0x7000,2,1,1000]` |
 | `cx-parent` | `[0x30000,64,65535,7,416]` |
-| `interrupts` | `[336,337]`, native SPI 304/305 plus 32 |
+| `gic-intids` | `[336,337]`, native SPI 304/305 plus 32 |
 
 GICD registers `+0x128/+0x228/+0x328` bits 16/17 must remain disabled,
 not pending and inactive. The adapter makes no GIC write. GMU Device mapping
