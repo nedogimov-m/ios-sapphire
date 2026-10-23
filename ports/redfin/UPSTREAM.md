@@ -400,5 +400,39 @@ Android userspace host service and actual Redfin board selection are the
 next references. No generic ath10k BDF, CRC-error workaround, permission
 assignment or hardware geometry has been imported by this comparison.
 
+## Redfin DMON/BDF reference review — 2026-10-24
+
+Google redbull `3595d0b214eeeddf87e2c37477e3e74f831eca82`
+`init.hardware.rc` starts `/vendor/bin/cnss-daemon -n -l`. Statically
+reviewed that Redfin binary from TheMuppets' pinned
+`proprietary_vendor_google_redfin` commit
+`30c82c83bc03b0dfc83dd6d6a041f51fc35ebfab`, SHA256
+`9d38f1d7cf6b1b34e6f03fefbfd87135eb5938f1573e65fefeb3dad905318af7`.
+It remains private/ignored and was never executed or installed. Its embedded
+mini-debug symbols identify `wlfw_adrastea_init`, registration, CAP,
+BDF_DOWNLOAD and CAL_REPORT, permitting a bounded disassembly review.
+
+The daemon registers a distinct DMON client `444d4f4e`, waits for MSA,
+queries CAP and sends BIN BDF before its calibration report. Its
+`wlfw_send_bdf_download_req` at f590 selects prefix `bdwlan-u` for the
+actually observed chip4320. With absent-board fallbackff it tries hardware,
+revision/radio variants then `bdwlan-u-redfin.bin`; only that canonical
+fallback and the separate non-u file exist in the captured base listing.
+The new profile binds the canonical26328-byte u file and its captured SHA256,
+without claiming the unproved active Android/COW or OTA-config view.
+Native BIN messages use file_id0, full original total_size, sequential
+segments, type0 and a final end flag. The empty calibration list explicitly
+reports no cache; cal_remove_supported0 matches the native default.
+
+Re-reviewed preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`
+`redwood_wlfw.c`'s resident-file/QMI transfer interface. Redfin uses its own
+legacy BIN ABI and full total_size rather than Redwood's ath11k remaining-
+size/ELF convention or board IDs. Chunks2048 fit the established Redfin
+QRTR queue and are within the native6144-byte variable-data limit.
+The bounded DMON profile subscribes to FW/MSA only (the mainline notification
+subset) and promises no calibration download/update or persistent cache.
+Every ACK must succeed, including final CRC; no CRC-error exemption, retry,
+mission mode, new memory assignment, DMA or partition writer is added.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772

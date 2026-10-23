@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN source-backed native DMON BIN BDF exchange prepared — 2026-10-24
+
+Continues `a73c151`; immediate goal remains GUI with working Wi-Fi,
+then GPU/Metal. Google's pinned init starts cnss-daemon separately from
+kernel ICNSS. Static review of the pinned Redfin daemon (UPSTREAM.md)
+confirms DMON client444d4f4e, MSA readiness, fresh CAP, BIN BDF and a
+calibration report. Chip4320 selects prefixbdwlan-u; absent board_info
+uses the nativeff fallback and hardware/revision/radio filename candidates.
+The captured base has only the canonical u/non-u Redfin files. New explicit
+`--wifi-wlan-bdf-download` pins the canonical26328-byte u file/SHA256;
+current-effective Android/COW/OTA selection remains unproved.
+
+After the established kernel MSA/CAP/power/dynamic-mask success, separate
+QRTR port4005 runs DMON registration and matching fresh CAP before sending
+any board bytes. Thirteen chunks<=2048 fit the existing bounded queue;
+native file_id0/typeBIN0, full original total_size, sequential segments and
+one final end flag are preserved. Only a matching successful ACK commits
+its chunk. All QMI errors including final CRC, owner/epoch loss or uncertain
+send stop without retry. CAL_REPORT declares zero cached IDs/removal0.
+This bounded zero-cache profile subscribes only to FW/MSA readiness and
+promises no calibration download/update or persistent cache. FW_READY
+is independent of BDF ACKs; no mission mode, new assignment, packet DMA
+or persistent storage writer is added. Earlier profiles retain their flow.
+
+All242 Wi-Fi and full1239 host tests PASS (3 optional private cases skipped).
+Nine new actual-C tests cover complete byte reassembly/native TLVs,
+ownership/send failures, every rejected segment/final CRC, duplicates,
+transactions, identity changes, MSA wait and independent readiness.
+Actual captured BDF packing/length/SHA256 passes. Native
+`build-20261024-024407.log` PASS; no CI run. Complete actual Image/live-FDT/
+loader/shim-return preflight PASS; hardware pending. Decompressed
+Image130,085,808 bytes remains below the explicit128MiB cap.
+
+Kernel `43c5e9330681f1b9bfafe395ea25d4c9c4b63e2c8b0ad0021de0cfc2775e01dd`;
+image `a2c715d4587d4cebc03cb3fd296d3ed3c4b5e4c82422a174402d177c07dfe833`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x679b44e45b4c0441`.
+
+Next: temporary bdf-v1 run; authenticate DMON registration/CAP, each BDF
+ACK, CAL_REPORT and actual FW_READY. Continue through CE/HTC/WMI/HTT and
+association/data before GUI Wi-Fi integration. GPU/Metal follows that goal.
+Persistent partitions/EFS/backups stay unchanged; all firmware/log material
+remains private/ignored.
+
 ## REDFIN announced nonsecure hang window hardware PASS; no hang payload — 2026-10-24
 
 Source `5c5ffee`, native `build-20261024-021219.log`, authenticated

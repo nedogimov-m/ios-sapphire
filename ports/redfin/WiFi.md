@@ -903,3 +903,20 @@ nonsecure region. The bounded read completes with two stable all-zero
 samples; raw WLAN SMP2P remains present/0 and FW_READY remains absent.
 No hang reason is established. The next protocol review covers the host's
 BDF/calibration exchanges and actual Redfin board-file selection.
+
+`--wifi-wlan-bdf-download` adds a separate bounded DMON client after the
+existing native power/dynamic-mask ACKs. It requires the fresh kernel CAP
+identity and then a matching daemon CAP, actual MSA readiness and the
+reviewed captured `bdwlan-u-redfin.bin` length/SHA256. The choice follows
+Redfin's native daemon's chip4320/absent-board fallback; its active Android
+OTA/COW configuration remains unproved. The canonical bytes stay in the
+already verified read-only host segment.
+
+Thirteen2048-byte-or-smaller BIN chunks use file_id0, full original length,
+sequential segment IDs and exactly one final end flag. Each successful QMI
+ACK commits only its own chunk; CRC/error, send uncertainty or owner/epoch
+loss stops without retry. The following CAL_REPORT advertises no cached
+calibration IDs and no calibration-removal support. Only FW/MSA indications
+are subscribed; no persistent calibration cache is promised. FW_READY stays
+separate from completed BDF/calibration requests. This control-plane profile
+does not yet provide CE packets, association, an iOS interface or GUI Wi-Fi.

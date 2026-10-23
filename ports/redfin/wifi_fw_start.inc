@@ -15,6 +15,7 @@
 #include "redfin_wifi_rmtfs.h"
 #include "redfin_wifi_hyp.h"
 #include "redfin_wifi_wlfw.h"
+#include "redfin_wifi_bdf.h"
 
 extern "C" int redfin_wifi_power_start(void);
 extern "C" int redfin_wifi_power_held(void);
@@ -65,13 +66,18 @@ struct fw_start_context {
     void *rmtfs_shadow;
     rf_rmtfs rmtfs;
     rf_rm_ops rmtfs_ops;
-    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed, wlan_pmic_mode, wlan_hang_mode;
+    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed, wlan_pmic_mode, wlan_hang_mode, wlan_bdf_mode;
     rf_wlfw_setup wlfw_setup;
     rf_wlfw_ops wlfw_ops;
     unsigned dynamic_sent, dynamic_received;
     rf_wlfw_dynamic dynamic;
+    rf_bdf_session bdf;
+    rf_bdf_ops bdf_ops;
 };
 static fw_start_context fw_start;
+static const uint8_t fw_start_bdf_digest[32] = {
+    0x7b, 0x0a, 0xdd, 0x4f, 0x46, 0x9d, 0xf3, 0x9c, 0x0b, 0x26, 0x16, 0x75, 0x13, 0xda, 0x89, 0x31,
+    0x41, 0x9e, 0x91, 0x7a, 0x4d, 0x90, 0x58, 0x25, 0x2c, 0x05, 0xe0, 0xf5, 0xcf, 0xfe, 0x7b, 0x90};
 
 static bool fw_start_glink_contract(void)
 {
@@ -209,6 +215,14 @@ static bool fw_start_wlan_contract(void)
     if (valid && fw_start.wlan_hang_mode) {
         uint32_t enabled = 0;
         valid = fw_start.wlan_power_mode && fw_property(node, "msa-hang-observe", &enabled, sizeof(enabled)) && enabled == 1;
+    }
+    if (valid && fw_start.wlan_bdf_mode) {
+        const uint32_t bdf_expected[8] = {1, RF_BDF_CLIENT, RF_BDF_PORT, RF_BDF_BYTES, RF_BDF_CHUNK, 0x4320, 0xff, 0};
+        uint32_t bdf_actual[8] = {}, enabled = 0; uint8_t digest[32] = {}; char name[sizeof(RF_BDF_NAME)] = {};
+        valid = fw_start.wlan_power_mode && fw_property(node, "bdf-download", &enabled, sizeof(enabled)) && enabled == 1 &&
+            fw_property(node, "bdf-contract", bdf_actual, sizeof(bdf_actual)) && !memcmp(bdf_actual, bdf_expected, sizeof(bdf_actual)) &&
+            fw_property(node, "bdf-name", name, sizeof(name)) && !memcmp(name, RF_BDF_NAME, sizeof(name)) &&
+            fw_property(node, "bdf-sha256", digest, sizeof(digest)) && !memcmp(digest, fw_start_bdf_digest, sizeof(digest));
     }
     return valid;
 }
@@ -589,6 +603,38 @@ static int fw_start_wlan_pmic_policy(void *opaque)
     return context == &fw_start && context->wlan_pmic_mode && !fw_start_wlan_power_policy(context) &&
         !redfin_wifi_power_audit() ? 0 : EPERM;
 }
+static int fw_start_bdf_check(void *opaque)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    if (context != &fw_start || !context->wlan_bdf_mode || !context->wlan_observed ||
+        !context->dynamic_received || context->dynamic.result || context->dynamic.error ||
+        context->dynamic.valid != 3 || context->dynamic.current != 1 ||
+        (context->smp2p.wlan_found && (context->smp2p.wlan_state & 3u)) || fw_start_wlan_power_policy(context)) return EPERM;
+    if (context->bdf.attempted) {
+        const uint8_t *data = NULL; uint32_t bytes = 0;
+        if (rf_wlan_asset_find(&context->assets, RF_BDF_NAME, &data, &bytes) || data != context->bdf.data ||
+            bytes != RF_BDF_BYTES || bytes != context->bdf.bytes) return EPERM;
+    }
+    return 0;
+}
+static int fw_start_bdf_send(void *opaque, const uint8_t *data, uint32_t bytes)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    if (fw_start_bdf_check(context) || !data || bytes < 7 || bytes > RF_BDF_PACKET) return EPERM;
+    return fw_start_qrtr_queue(context, 1, RF_BDF_PORT, context->wlfw_node, context->wlfw_port, data, bytes);
+}
+static int fw_start_bdf_begin(fw_start_context *context)
+{
+    const uint8_t *data = NULL; uint32_t bytes = 0; uint8_t digest[32] = {};
+    if (fw_start_bdf_check(context) || context->bdf.attempted ||
+        rf_wlan_asset_find(&context->assets, RF_BDF_NAME, &data, &bytes) || bytes != RF_BDF_BYTES ||
+        redfin_mpss_kernel_sha256(NULL, data, bytes, digest) || memcmp(digest, fw_start_bdf_digest, sizeof(digest)) ||
+        fw_start_bdf_check(context) || redfin_wifi_power_audit()) return EPERM;
+    int error = rf_bdf_begin(&context->bdf, &context->bdf_ops, data, bytes, &context->cap);
+    IOLog("REDFIN WIFI DMON: begin=%d client=%#x port=%#x file=%s bytes=%u; immutable BIN, no cached calibration\n",
+        error, RF_BDF_CLIENT, RF_BDF_PORT, RF_BDF_NAME, bytes);
+    return error ? EIO : 0;
+}
 static int fw_start_wlan_hang_observe(fw_start_context *context)
 {
     if (!context->wlan_hang_mode || fw_start_wlan_power_policy(context)) return EPERM;
@@ -683,6 +729,21 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
             source, from, data + at, size);
         else if (type == 1 && to >= 0x4100 && to < 0x5100) error = rf_host_tftp_packet(&context->host,
             &context->host_ops, source, from, to, data + at, size);
+        else if (type == 1 && to == RF_BDF_PORT && source == context->wlfw_node && from == context->wlfw_port &&
+            context->wlan_bdf_mode && context->bdf.attempted) {
+            unsigned previous = context->bdf.stage;
+            int error = rf_bdf_receive(&context->bdf, &context->bdf_ops, data + at, size);
+            IOLog("REDFIN WIFI DMON: received=%#x stage=%u->%u transaction=%u result=%u error=%u status=%#llx ack_bytes=%u segments=%u cal=%u ready=%u parsed=%d\n",
+                size >= 7 ? (unsigned)rf_qmi_u16(data + at + 3) : 0, previous, context->bdf.stage,
+                context->bdf.transaction, context->bdf.result, context->bdf.error,
+                (unsigned long long)context->bdf.fw_status, context->bdf.offset, context->bdf.bdf_acks,
+                context->bdf.cal_reported, context->bdf.fw_ready, error);
+            if (!error && previous == RF_BDF_CAP)
+                IOLog("REDFIN WIFI DMON: CAP valid=%#x chip=%#x family=%#x board=%#x board_present=%u SoC=%#x firmware=%#x\n",
+                    context->bdf.cap.valid, context->bdf.cap.chip, context->bdf.cap.family, context->bdf.cap.board,
+                    !!(context->bdf.cap.valid & 2u), context->bdf.cap.soc, context->bdf.cap.firmware);
+            if (error < 0) { context->poisoned = true; return; }
+        }
         else if (type == 1 && to == 0x4004 && source == context->wlfw_node && from == context->wlfw_port) {
             if (context->wlan_power_mode && context->dynamic_sent && size >= 7 && rf_qmi_u16(data + at + 3) == 0x3b) {
                 error = rf_wlfw_dynamic_parse(&context->dynamic, data + at, size);
@@ -770,6 +831,7 @@ static int fw_start_transport_run(fw_start_context *context)
     if (context->rmtfs_mode) context->rmtfs_ops = {context, fw_start_rmtfs_check, fw_start_rmtfs_barrier,
         fw_start_rmtfs_send, fw_start_rmtfs_event};
     if (context->wlfw_mode) context->wlfw_ops = {context, fw_start_wlfw_check, fw_start_wlfw_send};
+    if (context->wlan_bdf_mode) context->bdf_ops = {context, fw_start_bdf_check, fw_start_bdf_send};
     int error = rf_gl_init(&context->glink, &context->glink_ops);
     IOLog("REDFIN WIFI GLINK: init=%d descriptor=%#x TX=%#x stores=%u\n",
         error, context->glink.descriptor, context->glink.tx, context->glink.stores);
@@ -865,7 +927,16 @@ static int fw_start_transport_run(fw_start_context *context)
                         context->dynamic_sent = 1;
                         IOLog("REDFIN WIFI WLFW: queued native post-power dynamic feature mask1 transaction5\n");
                     }
-                    if (context->wlfw_setup.fw_ready) return context->wlan_pmic_mode ?
+                    if (context->wlan_bdf_mode && context->dynamic_received) {
+                        if (!context->bdf.attempted && !context->wlfw_setup.fw_ready) {
+                            error = fw_start_bdf_begin(context);
+                            if (error) return error;
+                        }
+                        if (context->bdf.stage == RF_BDF_FAILED) return EIO;
+                    }
+                    bool bdf_done = !context->wlan_bdf_mode || context->bdf.stage == RF_BDF_COMPLETE ||
+                        (!context->bdf.attempted && context->wlfw_setup.fw_ready);
+                    if (bdf_done && (context->wlfw_setup.fw_ready || context->bdf.fw_ready)) return context->wlan_pmic_mode ?
                         redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
                 }
             } else if (!context->cap_sent) {
@@ -1069,6 +1140,11 @@ static void fw_start_worker(void *, wait_result_t)
     bool hang_present = wlan_present && SecureDTGetProperty(wlan_node, "msa-hang-observe", &hang_property, &hang_bytes) == kSuccess;
     uint32_t hang_enabled = 0;
     fw_start.wlan_hang_mode = hang_present && fw_property(wlan_node, "msa-hang-observe", &hang_enabled, sizeof(hang_enabled)) && hang_enabled == 1;
+    const void *bdf_property = NULL;
+    unsigned bdf_bytes = 0;
+    bool bdf_present = wlan_present && SecureDTGetProperty(wlan_node, "bdf-download", &bdf_property, &bdf_bytes) == kSuccess;
+    uint32_t bdf_enabled = 0;
+    fw_start.wlan_bdf_mode = bdf_present && fw_property(wlan_node, "bdf-download", &bdf_enabled, sizeof(bdf_enabled)) && bdf_enabled == 1;
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
         !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
@@ -1077,7 +1153,8 @@ static void fw_start_worker(void *, wait_result_t)
         (rmtfs_present && (mode != 4 || !fw_start_rmtfs_contract(&fw_start, true))) ||
         (wlfw_present && (!fw_start.wlfw_mode || !fw_start_wlfw_contract())) ||
         (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract())) ||
-        (pmic_present && !fw_start.wlan_pmic_mode) || (hang_present && !fw_start.wlan_hang_mode)) {
+        (pmic_present && !fw_start.wlan_pmic_mode) || (hang_present && !fw_start.wlan_hang_mode) ||
+        (bdf_present && !fw_start.wlan_bdf_mode)) {
         IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
         thread_terminate_self();
         __builtin_unreachable();
@@ -1086,12 +1163,13 @@ static void fw_start_worker(void *, wait_result_t)
     fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
     IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());
     int error = fw_start_run(&fw_start);
-    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x retained=1\n",
+    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x bdf=%u/%u/%u cal=%u bdf_ready=%u retained=1\n",
         error, fw_start.phase, fw_start.reset, fw_start.initialized, fw_start.setup,
         fw_start.authenticated, fw_start.smp2p.stage, fw_start.copies,
         (unsigned long long)fw_probe.boot.source.copied_bytes,
         (unsigned long long)fw_probe.boot.source.zeroed_bytes,
-        fw_start.smp2p.wlan_found, fw_start.smp2p.wlan_state);
+        fw_start.smp2p.wlan_found, fw_start.smp2p.wlan_state,
+        fw_start.bdf.stage, fw_start.bdf.offset, fw_start.bdf.bdf_acks, fw_start.bdf.cal_reported, fw_start.bdf.fw_ready);
     /* This bounded diagnostic never frees remote-visible state or retries.
      * The shim/PMIC watchdog resets the complete platform back to fastboot. */
     if (error) fw_start.poisoned = true;
