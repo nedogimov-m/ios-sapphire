@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GLINK reaches intent exchange; native channel/handle semantics — 2026-10-23
+
+Source1ef1e7d / native build161347. Authenticated/image/nonce-matched
+`wifi-glink-v2-20261023-161504`, bootid2541e7da5fa6655c, repeats successful
+native PAS4/full copy/fresh ready and GLINK allocation. Parser advances to
+SMEM RX tail96 with TX head56, then rejects command5(INTENT),p1=1,count1,
+560bytes available,RX16384. This is past version/open control processing;
+its intent body/channel identity was not yet logged, so zero handle, large
+capacity or unrelated channel are candidate causes rather than observations.
+No QRTR/WLFW discovery is claimed. PID1 lives; authenticated recovery observes
+clean/unmodified HFSX/write_count462335 and verified fastboot.
+
+V2 kernel60cdd7a2831aa7904e597d1a90f1ac8e27bfec48e311a7a7bc7b1e1fe223ca4d;
+image67b731af5e75cbbec0adf3008f7c19006bffd65cf2efdca8291427e05068346f.
+Exact v2 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x2541e7da5fa6655c`.
+
+V3 separates remote intent presence from its opaque handle, allowing valid0.
+Advertised remote capacity does not allocate local memory or expand8192byte
+local sends; it need not be limited to65536. Unhandled remote channels are
+consumed only after frame bounds validation, without adopting their intents
+or delivering data into IPCRTR. Active-channel invalid intents/data still fail.
+Diagnostics now include selected channel and the decoded last intent size/ID.
+All19actual GLINK/PAS checksPASS in0.652s. Local build`build-20261023-162015.log`PASS, full
+actual Image/live-FDT/return preflightPASS. Kernel`a7960d7abb3835b17de3e56ac4618b9975855a4d9b412a09f67c6ab04b7c26e9`;image`2415f90195e800c0fe79f10c80af21d9d0ab79c70ec79d1ba1f7f0f823a3d707`.
+Exact v3 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xcbde71f75e7f16ad`.
+Next: temporaryv3run and continue native QRTR/WLFW. Active user goal now also
+requires GPU with native Metal, then Bluetooth after Wi-Fi/GPU; do not mark
+that larger goal complete on an intermediate firmware/transport result.
+
 ## REDFIN GLINK allocation hardware PASS; negotiation diagnostics — 2026-10-23
 
 Source515ea72 / local native build160808. Fresh authenticated/image/nonce

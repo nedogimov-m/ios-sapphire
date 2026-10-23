@@ -141,8 +141,31 @@ class NativeGlinkTests(unittest.TestCase):
         self.assertEqual(bytes(self.memory[self.rx:self.rx + 16384]), before)
         self.assertEqual((bytes(self.memory[descriptor:descriptor + 4]), bytes(self.memory[descriptor + 12:descriptor + 16])), remote_words)
 
+    def test_zero_remote_intent_handle_and_large_capacity_do_not_expand_local_packets(self):
+        self.assertEqual(self.library.initialize(), 0)
+        self.assertEqual(self.library.say(), 0)
+        self.remote(self.frame(0, 1, 1) + self.frame(1, 1, 1) + self.frame(2, 7, 7, b'IPCRTR\0') +
+                    self.frame(4, 1) + self.frame(5, 7, 1, struct.pack('<II', 0x100000, 0)))
+        self.assertEqual(self.library.pump(), 0)
+        self.assertEqual(self.library.send_packet(b'bounded', 7), 0)
+        self.remote(self.frame(14, 7, 0))
+        self.assertEqual(self.library.pump(), 0)
+        self.assertEqual(self.library.send_packet(b'bounded', 7), 0)
+        self.assertNotEqual(self.library.send_packet(bytes(8193), 8193), 0)
+
+    def test_other_channels_cannot_publish_intents_or_payloads_into_ipcrtr(self):
+        self.handshake()
+        self.remote(self.frame(2, 12, 10, b'glink_ssr\0') +
+                    self.frame(5, 12, 1, struct.pack('<II', 8192, 900)) +
+                    self.frame(9, 12, 1, struct.pack('<II', 8, 0) + b'foreign!'))
+        self.assertEqual(self.library.pump(), 0)
+        self.assertEqual(self.library.metric(9), 0)
+        self.assertEqual(self.library.metric(6), 1)
+        self.assertEqual(self.library.send_packet(b'ours', 4), 0)
+        self.assertEqual(self.library.send_packet(b'ours', 4), 6)
+
     def test_foreign_owner_indices_and_malformed_packets_fail_without_reset_or_advance(self):
-        for bad in ('owner', 'length', 'channel'):
+        for bad in ('owner', 'length', 'intent'):
             with self.subTest(bad=bad):
                 self.setUp()
                 self.handshake()
@@ -151,7 +174,7 @@ class NativeGlinkTests(unittest.TestCase):
                     struct.pack_into('<I', self.memory, self.library.metric(0) + 4, 8)
                 else:
                     count = 65537 if bad == 'length' else 8
-                    self.remote(self.frame(9, 9 if bad == 'channel' else 7, 1, struct.pack('<II', count, 0) + b'12345678'))
+                    self.remote(self.frame(9, 7, 2 if bad == 'intent' else 1, struct.pack('<II', count, 0) + b'12345678'))
                 self.assertNotEqual(self.library.pump(), 0)
                 self.assertEqual(self.library.metric(3), tail)
                 self.assertEqual(self.library.metric(16), 1)

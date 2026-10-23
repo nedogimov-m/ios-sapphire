@@ -29,12 +29,13 @@ struct rf_glink_ops {
     int (*kick)(void *); /* Native MPSS client2 / GLINK signal0 only. */
     void (*packet)(void *, const uint8_t *, uint32_t bytes);
 };
-struct rf_glink_intent { uint32_t id, bytes, busy; };
+struct rf_glink_intent { uint32_t id, bytes, busy, present; };
 struct rf_glink {
     uint32_t attempted, poisoned, partition, bytes, descriptor, tx, rx, rx_bytes;
     uint32_t head, tail, features, version, asked, acknowledged, channel, open, offered;
     uint32_t fill, remaining, heard, sent, packets, stores;
     uint32_t last_command, last_p1, last_p2, last_waiting;
+    uint32_t last_intent_bytes, last_intent_id;
     struct rf_glink_intent intent[32];
     uint8_t packet[65536];
 };
@@ -172,7 +173,7 @@ static inline int rf_gl_send_packet(struct rf_glink *s, const struct rf_glink_op
     if (!s->open || !data || !bytes || bytes > 8192 || !scratch || capacity < bytes + 8u) return RF_GL_ARGUMENT;
     int slot = -1;
     for (unsigned i = 0; i < 32; ++i)
-        if (s->intent[i].id && !s->intent[i].busy && s->intent[i].bytes >= bytes) { slot = (int)i; break; }
+        if (s->intent[i].present && !s->intent[i].busy && s->intent[i].bytes >= bytes) { slot = (int)i; break; }
     if (slot < 0) return RF_GL_AGAIN;
     rf_gl_encode(scratch, bytes); rf_gl_encode(scratch + 4u, 0); memcpy(scratch + 8u, data, bytes);
     int error = rf_gl_say(s, o, 9, 1, s->intent[slot].id, scratch, bytes + 8u);
@@ -219,7 +220,13 @@ static inline int rf_gl_pump(struct rf_glink *s, const struct rf_glink_ops *o)
         uint8_t response[40] = RF_GL_ZERO;
         unsigned response_bytes = 0, response_command = 0xffffu, response_p1 = 0, response_p2 = 0;
         bool packet = false;
-        if (command == 0 || command == 1) {
+        bool foreign = ((command == 5 || command == 6 || command == 14 || command == 7 ||
+            command == 9 || command == 12 || command == 3) && p1 != s->channel) ||
+            (command == 4 && p1 != 1);
+        if (foreign) {
+            /* Other remote channels can advertise before our IPCRTR opens.
+             * Consume their bounded frames without adopting buffers or data. */
+        } else if (command == 0 || command == 1) {
             if (p1 != 1 || (command == 1 && (p2 & ~s->features))) return RF_GL_PROTOCOL;
             s->features &= p2;
             if (command == 0) { response_command = 1; response_p1 = 1; response_p2 = s->features; }
@@ -239,20 +246,26 @@ static inline int rf_gl_pump(struct rf_glink *s, const struct rf_glink_ops *o)
             for (unsigned i = 0; i < p2; ++i) {
                 uint8_t raw[8]; rf_gl_peek(s, o, 8u + i * 8u, raw, 8);
                 uint32_t size = rf_gl_u32(raw), id = rf_gl_u32(raw + 4u);
-                if (!id || !size || size > 65536) return RF_GL_PROTOCOL;
+                s->last_intent_bytes = size; s->last_intent_id = id;
+                /* An opaque remote handle may be zero. Its capacity does not
+                 * allocate or authorize local memory; sends remain <=8192. */
+                if (!size) return RF_GL_PROTOCOL;
                 int selected = -1;
                 for (unsigned j = 0; j < 32; ++j) {
-                    if (s->intent[j].id == id) { if (s->intent[j].busy) return RF_GL_PROTOCOL; selected = (int)j; break; }
-                    if (!s->intent[j].id && selected < 0) selected = (int)j;
+                    if (s->intent[j].present && s->intent[j].id == id) {
+                        if (s->intent[j].busy) return RF_GL_PROTOCOL; selected = (int)j; break;
+                    }
+                    if (!s->intent[j].present && selected < 0) selected = (int)j;
                 }
                 if (selected < 0) return RF_GL_SPACE;
                 s->intent[selected].id = id; s->intent[selected].bytes = size;
+                s->intent[selected].present = 1;
             }
         } else if (command == 6 || command == 14) {
             if (p1 != s->channel) return RF_GL_PROTOCOL;
-            for (unsigned i = 0; i < 32; ++i) if (s->intent[i].id == p2) {
+            for (unsigned i = 0; i < 32; ++i) if (s->intent[i].present && s->intent[i].id == p2) {
                 if (!s->intent[i].busy) return RF_GL_PROTOCOL;
-                s->intent[i].busy = 0; if (command == 6) s->intent[i].id = 0;
+                s->intent[i].busy = 0; if (command == 6) s->intent[i].present = 0;
                 break;
             }
         } else if (command == 9 || command == 12) {

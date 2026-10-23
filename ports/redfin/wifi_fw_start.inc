@@ -396,9 +396,10 @@ static int fw_start_transport_run(fw_start_context *context)
         if (!alive) {
             error = rf_gl_pump(&context->glink, &context->glink_ops);
             if (error && error != RF_GL_AGAIN) {
-                IOLog("REDFIN WIFI GLINK: parser=%d last=%u/%u/%#x waiting=%u head=%u tail=%u RXbytes=%u\n",
+                IOLog("REDFIN WIFI GLINK: parser=%d last=%u/%u/%#x waiting=%u head=%u tail=%u RXbytes=%u channel=%u intent=%u/%u\n",
                     error, context->glink.last_command, context->glink.last_p1, context->glink.last_p2,
-                    context->glink.last_waiting, context->glink.head, context->glink.tail, context->glink.rx_bytes);
+                    context->glink.last_waiting, context->glink.head, context->glink.tail, context->glink.rx_bytes,
+                    context->glink.channel, context->glink.last_intent_id, context->glink.last_intent_bytes);
                 return error;
             }
             while (context->pending_count) {
