@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN final regression and checked USB TX image prepared — 2026-10-23
+
+Source8c99cfc links the resident Wi-Fi firmware mechanism and fixes the ADT
+module collision; Wi-Fi357ca9f and USB protocolc3a9a06 are included. The new
+USB completion overlay now requires the same live lease, synchronized exact
+normal TX TRB, released HWO, zero residual/success status and no BUSERR/SHORT
+before reusing its DMA buffer. Errors retain the in-flight allocation/queue
+for the existing owned stop; legacy behavior is preserved. Eight tests execute
+actual queue/event handlers, including wire padding, duplicate events, malformed
+TRBs and pre/post-sync lease loss. Separate submitted/completed counters are
+logged. Exact per-marker receipt tagging/RX ACK/coordinator remains unfinished;
+this does not enable live GPU logging or combine standalone USB/GPU profiles.
+
+Observed: all1117hosttestsPASS in61.757s, including the real private firmware
+bundle (`logs/redfin/peripherals-host-tests-v42.txt`); no skipped private cases.
+Local ARM64 build `build-20261023-053033.log` links successfully; kernel
+`2ba70c080e479452574f626998d68844e65747bf40a3992de690c2c7443153c7`.
+Prepared `usb-net-v8` image `2895eb16616ce214ae0204e9b7f4ca64ddbaa470c11c2b0c031bca0da2b0c1ab`.
+Exact intended args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinusb=3 redfinusbowned=1 redfinusbbypass=1 redfinusbrw64=1 redfinusbgadget=1 redfinusbsecs=30 redfinusbnet=1 redfinusblog=1 redfinspmi=1 redfinreturn=1 redfinbootid=0xa559cbffdc50dfc9`.
+The real complete payload/ADT/liveFDT and host return-policy validation PASS;
+image/kernel/build/validation snapshots are frozen locally. This image is NOT
+booted; neither new TX completion nor firmware ingestion has a hardware result.
+
+Fresh host observation: one unauthorized ADB device, no fastboot. The running
+OS and current HFS state remain unknown. The already bounded passive rescue
+waiter still waits only for the matching fastboot identity, then collects old
+RAM/reads HFS through verified temporary recovery; no new XNU is scheduled.
+No device boot, flash or media write occurred in this milestone. Hardware
+progress needs a return to fastboot; recover the failedGMUboot's existing RAM
+before any new XNU, inspect HFS before another RW GUI, then use the frozen
+prearmedGMU test. GPU execution/rendering, Wi-Fi PAS/GLINK/WLFW/association/data,
+combined live diagnostics and physical90Hz remain unfinished. Screen/cutout fit
+and eight-core touch retain their earlier documented hardware evidence.
+
 ## REDFIN firmware source linked; USB delivery protocol prepared — 2026-10-23
 
 Wi-Fi source357ca9f adds immutable resident firmware ingestion, native read-only

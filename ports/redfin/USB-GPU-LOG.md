@@ -13,6 +13,19 @@ halt cannot be proved. It does not claim host readiness. Four tests execute
 the actual startup/outer halt with injected failure and preserve legacy
 optional-log behavior. Root reports native build `051524` linked this fix.
 
+`usb-tx-completion.patch` now checks the real Redfin bulk-IN completion before
+releasing the buffer to the next queued frame. Under the existing TX lock it
+revalidates the lease, synchronizes the TRB, then checks its exact buffer PA,
+normal type, LST/IOC, released HWO, zero residual and successful TRB/event status.
+BUSERR/SHORT, a malformed descriptor or lost lease stop further TX; uncertain
+DMA remains retained. Submitted and completed frame/byte totals are distinct
+and are logged on shutdown. Native DWC3 status definitions were reviewed at
+Google msm `500b3a2059c1eec0fec08ec56add06320ea901a8`, `core.h`/`gadget.c`.
+Eight actual queue/event-handler tests pass, including a padded512-byte frame,
+all status/error classes, duplicate events and loss before/after cache sync.
+The old optional gadget behavior is preserved. These totals still do not
+identify a particular control packet or provide a host-ACK receipt callback.
+
 ## Existing boundaries and reusable functions
 
 - `IOKitBSDInit.cpp:redfin_peripherals_observe()` dispatches GPU mode 2 before
@@ -105,9 +118,10 @@ the described access; timeout means no new diagnostic access and no lease
 release or in-flight free.
 
 `sock_send()` success and `ud.tx_frames` do not provide the needed receipt:
-the counter increments at TRB submission. Current `ud_event()` clears
-`tx_busy` on EP_TX XferComplete without checking its status/TRB residual.
-A future adapter must privately tag the exact 90-byte control frame before
+the counter increments at TRB submission. The corrected `ud_event()` checks
+completion status and the exact TRB before clearing `tx_busy`, and keeps
+separate completed totals. A future adapter must still privately tag the exact
+90-byte control frame before
 mbuf release, retain its identity while in flight, and acknowledge completion
 only after matching EP_TX success, HWO clear, successful TRB status and zero
 remaining length. It must not reuse the completion of a different log frame.
@@ -164,10 +178,10 @@ have not been tested or enabled by this milestone.
 Focused validation:
 
 ```sh
-python3 -m unittest ports.redfin.test_usb_log_worker_check ports.redfin.test_usb_log_ready -v
+python3 -m unittest ports.redfin.test_usb_log_worker_check ports.redfin.test_usb_log_ready ports.redfin.test_usb_tx_completion -v
 ```
 
-Four startup-injection tests and13 pure core/host tests pass, including C/Python
+Four startup-injection,13 pure core/host and8 actual TX-handler tests pass, including C/Python
 wire equality, no readiness from queued TX/early ACK, replay/peer/deadline
 negatives, preserved ordinary UDP, record-before-ACK and bounded duplicates.
 ASan/UBSan cover4096 malformed codec scenarios and a full16-marker lifecycle.

@@ -1,0 +1,74 @@
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -230,6 +230,8 @@
+ 	mbuf_t      txq[UD_TXQ];
+ 	unsigned    txq_head, txq_count;
+ 	bool        tx_busy;
++	uint32_t    tx_bytes;
++	uint64_t    tx_completed_frames, tx_completed_bytes;
+ 	uint64_t    rx_frames, tx_frames;
+ } ud;
+ 
+@@ -583,6 +585,7 @@
+ 			((uint8_t *)(ud.dma + UD_TX))[len++] = 0;
+ 		}
+ 		ud.tx_busy = true;
++		ud.tx_bytes = (uint32_t)len;
+ 		ud.tx_frames++;
+ 		ud_start_trb(EP_TX, UD_TRB_TX, UD_TX, (uint32_t)len, TRBCTL_NORMAL);
+ 	}
+@@ -717,6 +720,34 @@
+ 	printf("SWEET USB: ue0 192.168.7.2/24 %s (err %d)\n", err ? "NOT configured" : "up", err);
+ }
+ 
++/* ud.lock is held. A completion event alone does not release DMA ownership.
++ * Native DWC3 event status bits0/1 are BUSERR/SHORT; bits2/3 are IOC/LST.
++ * Require our exact single normal TRB, hardware ownership released, successful
++ * status and zero residual before the next frame can overwrite its buffer.
++ * These counters do not identify a particular UDP marker or prove host ACK. */
++static bool
++ud_redfin_tx_complete(uint32_t status)
++{
++ if (!ud_redfin_proof()) return false;
++ if (!ud.tx_busy || !ud.configured || !ud.tx_bytes || ud.tx_bytes > UD_FRAME_MAX || (status & 3u)) {
++  rf_usb_gadget_fail(&ud.guard,EIO);return false;
++ }
++ ud_sync(UD_TRB_TX,16);
++ if (!ud_redfin_proof()) return false;
++ volatile uint32_t *trb=(volatile uint32_t *)(ud.dma+UD_TRB_TX);
++ const uint32_t low=trb[0],high=trb[1],remaining=trb[2],control=trb[3];
++ const uint64_t buffer=ud.dma_pa+UD_TX;
++ const uint32_t mask=TRB_HWO|TRB_LST|TRB_IOC|(0x3fu<<4);
++ if (low!=(uint32_t)buffer || high!=(uint32_t)(buffer>>32) || remaining ||
++     (control&mask)!=(TRB_LST|TRB_IOC|TRBCTL_NORMAL)) {
++  rf_usb_gadget_fail(&ud.guard,EIO);return false;
++ }
++ ud.tx_completed_frames++;
++ ud.tx_completed_bytes+=ud.tx_bytes;
++ ud.tx_bytes=0;
++ return true;
++}
++
+ static void
+ ud_event(uint32_t ev)
+ {
+@@ -749,6 +780,9 @@
+ 	}
+ 	if (ep == EP_TX && type == 1) {
+ 		lck_mtx_lock(ud.lock);
++        if (ud.guard.redfin && !ud_redfin_tx_complete(status)) {
++            lck_mtx_unlock(ud.lock);return;
++        }
+ 		ud.tx_busy = false;
+ 		ud_tx_kick_locked();
+ 		lck_mtx_unlock(ud.lock);
+@@ -863,6 +897,8 @@
+ 		ud_sleep_ms(1);
+ 	}
+     bool halted=ud_redfin_stop();
++    printf("REDFIN USB TX: submitted=%llu completed=%llu bytes=%llu\n",
++        ud.tx_frames,ud.tx_completed_frames,ud.tx_completed_bytes);
+     printf("REDFIN USB GADGET: stopped error=%d halted=%u; DMA slab retained\n",ud.guard.error,halted);
+     (void)thread_terminate(current_thread());
+     __builtin_unreachable();
