@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN bounded native WLAN PMIC observer prepared — 2026-10-24
+
+Continues `4c047c2`. Native ICNSS's reviewed post-CAP order contains the
+already accepted supply sequence and dynamic mask. Added explicit
+`--wifi-wlan-pmic-observe` with the power profile to distinguish RPMh ACKs
+from physical PMIC state. The producer binds the captured PM8150/PM8150L
+SIDs and fixed candidate PPIDs. Three ordered snapshots reuse only the
+existing EE0 observer mappings: before WLAN votes, after ACKs, and at
+FW_READY/deadline. Model/type and two configured/VALID-mV, MODE, ENABLE,
+STATUS samples are recorded. SID5 page attribution remains a candidate;
+raw values do not publish a readiness proof. Unknown layouts are header-only.
+
+The live native MPSS child, CPU0/EL1/IRQs, cached return proof and exact
+APID/owner are checked through observer commands and polls. Read denial,
+timeout, changed samples or lease loss stops the observer until full reset;
+there is no channel reuse, cleanup write, new mapping or PMIC write API.
+Earlier power-only and touch profiles keep their existing selection behavior.
+
+All 225 Wi-Fi tests and the full 1222-test host suite PASS (3 optional
+private cases skipped). Eight new tests execute the actual C observer,
+including every policy-cancellation position, model/mapping/owner failures,
+timeout, phase/target/width bounds and disabled-versus-enabled raw samples.
+Native `build-20261024-014122.log` PASS; no CI run. Actual complete Image,
+captured live FDT, loader and shim/PMIC return preflight PASS. The prepared
+Image decompresses to130,068,304 bytes, below the explicit128MiB cap.
+Hardware result is pending.
+
+Kernel `31e51b3275a4d639383e2c4d1e3776056637d3c236848e74fe39a33dcf08f579`;
+image `9027a9b8efd506f9ad09ad456b4fa5b79192fefed91b66255f8209ccb59c27ad`.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xb13af599832c0deb`.
+
+Next: temporary module-pmic-v1 boot, authenticate both physical PMIC IDs
+and before/after/final supply tuples, and inspect FW_READY. Wi-Fi association/
+data, GPU/native Metal and Bluetooth remain unfinished. Persistent partitions,
+EFS and private firmware/captures remain outside this change.
+
 ## REDFIN observed RF module served; WLAN readiness still absent — 2026-10-24
 
 Resumed from `1c8d763` and assessed the already completed 2026-10-23

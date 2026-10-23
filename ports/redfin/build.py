@@ -106,6 +106,7 @@ def main():
     wlan = p.add_mutually_exclusive_group()
     wlan.add_argument('--wifi-wlan-observe', action='store_true', help='after legacy CAP, observe native VRM resource/vote metadata and await FW_READY; no WLAN power writes')
     wlan.add_argument('--wifi-wlan-power', action='store_true', help='after legacy CAP, apply the native typed WLAN supply sequence and await FW_READY')
+    p.add_argument('--wifi-wlan-pmic-observe', action='store_true', help='with --wifi-wlan-power, read fixed PMIC supply candidates before/after votes and at the observation deadline')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -147,6 +148,8 @@ def main():
         p.error('--wifi-wlfw-setup requires --wifi-host-services and --wifi-rmtfs-inventory')
     if (a.wifi_wlan_observe or a.wifi_wlan_power) and not a.wifi_wlfw_setup:
         p.error('--wifi-wlan-observe/--wifi-wlan-power require --wifi-wlfw-setup')
+    if a.wifi_wlan_pmic_observe and not a.wifi_wlan_power:
+        p.error('--wifi-wlan-pmic-observe requires --wifi-wlan-power')
     if a.wifi_glink_start:
         a.wifi_fw_start = True
     if a.wifi_fw_start and a.wifi_fw_source_probe:
@@ -426,7 +429,7 @@ def main():
         if a.wifi_wlan_observe or a.wifi_wlan_power:
             from wifi_platform import add_wlan_observer_contract
             try:
-                add_wlan_observer_contract(tree, nodes, power=a.wifi_wlan_power)
+                add_wlan_observer_contract(tree, nodes, power=a.wifi_wlan_power, pmic=a.wifi_wlan_pmic_observe)
             except ValueError as error:
                 p.error(str(error))
         if a.scm_probe:
@@ -743,6 +746,8 @@ def main():
         manifest['wifi_wlan_observe'] = True
     if a.wifi_wlan_power:
         manifest['wifi_wlan_power'] = True
+    if a.wifi_wlan_pmic_observe:
+        manifest['wifi_wlan_pmic_observe'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

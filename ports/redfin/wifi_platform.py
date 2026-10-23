@@ -368,7 +368,7 @@ def add_wlfw_contract(tree, nodes):
         ('shim-verified', mkadt.u32(0))]))
 
 
-def add_wlan_observer_contract(tree, nodes, power=False):
+def add_wlan_observer_contract(tree, nodes, power=False, pmic=False):
     """Bind the native ICNSS consumers/providers before reading VRM metadata."""
     names = ('ldoa1', 'ldoa14', 'ldoc2', 'ldoc11', 'ldoc10')
     supply_keys = ('vdd-cx-mx', 'vdd-1.8-xo', 'vdd-1.3-rfa', 'vdd-3.3-ch1', 'vdd-3.3-ch0')
@@ -404,13 +404,27 @@ def add_wlan_observer_contract(tree, nodes, power=False):
             raise ValueError('native WLAN consumer voltage/load/delay config changed')
     if any(child.name == 'redfin-wifi-wlan' for child in tree.children):
         raise ValueError('duplicate native WLAN observer contract')
-    if type(power) is not bool:
-        raise ValueError('native WLAN power selector must be boolean')
+    if type(power) is not bool or type(pmic) is not bool or (pmic and not power):
+        raise ValueError('native WLAN power/PMIC selectors must be boolean; PMIC observation requires power')
+    if pmic:
+        spmi_path = '/soc/qcom,spmi@c440000'
+        spmi = nodes.get(spmi_path, {})
+        if (spmi.get('compatible') != b'qcom,spmi-pmic-arb\0' or
+                spmi.get('qcom,ee') != words(0) or
+                spmi.get('#address-cells') != words(2) or spmi.get('#size-cells') != words(0)):
+            raise ValueError('native WLAN PMIC observer requires the captured EE0 SPMI bus')
+        for name, sid in (('pm8150', 0), ('pm8150', 1), ('pm8150l', 4), ('pm8150l', 5)):
+            props = nodes.get(f'{spmi_path}/qcom,{name}@{sid}', {})
+            if (props.get('compatible') != b'qcom,spmi-pmic\0' or props.get('reg') != words(sid, 0) or
+                    props.get('status', b'okay\0') not in (b'okay\0', b'ok\0')):
+                raise ValueError('native WLAN PMIC observer requires the captured PM8150/PM8150L SIDs')
     tree.children.append(mkadt.node('redfin-wifi-wlan', [
         ('source-contract', mkadt.u32(2 if power else 1, 5, 4, 4, 0, 352, 1800, 1304, 3000, 3000)),
         ('resource-names', b''.join(name.encode().ljust(8, b'\0') for name in names)),
         ('observe-only', mkadt.u32(0 if power else 1))] + ([
-        ('resource-addresses', mkadt.u32(0x40800, 0x42100, 0x41d00, 0x41a00, 0x41900))] if power else [])))
+        ('resource-addresses', mkadt.u32(0x40800, 0x42100, 0x41d00, 0x41a00, 0x41900))] if power else []) + ([
+        ('pmic-observe', mkadt.u32(1)),
+        ('pmic-candidates', mkadt.u32(0x001, 0x401, 0x140, 0x14d, 0x541, 0x54a, 0x549))] if pmic else [])))
 
 
 def main():

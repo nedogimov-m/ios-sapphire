@@ -21,6 +21,7 @@ extern "C" int redfin_wifi_power_held(void);
 extern "C" int redfin_wifi_power_audit(void);
 extern "C" int redfin_wifi_wlan_resources_observe(void);
 extern "C" int redfin_wifi_wlan_power_start(unsigned, uint32_t, void *, int (*)(void *));
+extern "C" int redfin_wifi_wlan_pmic_observe(unsigned, void *, int (*)(void *));
 /* Built-in XNU worker exit; declaration is private to Mach compilation in
  * this pinned kernel's kern/thread.h. This is not an external kext KPI. */
 extern "C" void thread_terminate_self(void);
@@ -64,7 +65,7 @@ struct fw_start_context {
     void *rmtfs_shadow;
     rf_rmtfs rmtfs;
     rf_rm_ops rmtfs_ops;
-    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed;
+    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed, wlan_pmic_mode;
     rf_wlfw_setup wlfw_setup;
     rf_wlfw_ops wlfw_ops;
     unsigned dynamic_sent, dynamic_received;
@@ -197,6 +198,13 @@ static bool fw_start_wlan_contract(void)
         uint32_t actual_addresses[5] = {};
         valid = fw_property(node, "resource-addresses", actual_addresses, sizeof(actual_addresses)) &&
             !memcmp(actual_addresses, expected_addresses, sizeof(actual_addresses));
+    }
+    if (valid && fw_start.wlan_pmic_mode) {
+        const uint32_t expected_candidates[7] = {0x001, 0x401, 0x140, 0x14d, 0x541, 0x54a, 0x549};
+        uint32_t candidates[7] = {}, enabled = 0;
+        valid = fw_start.wlan_power_mode && fw_property(node, "pmic-observe", &enabled, sizeof(enabled)) && enabled == 1 &&
+            fw_property(node, "pmic-candidates", candidates, sizeof(candidates)) &&
+            !memcmp(candidates, expected_candidates, sizeof(candidates));
     }
     return valid;
 }
@@ -571,6 +579,12 @@ static int fw_start_wlan_power_policy(void *opaque)
         context->cap.chip == 0x4320 && context->cap.family == 0x4001 && context->cap.soc == 0x400b0000 &&
         context->cap.firmware == 0x33197fff && (!(context->cap.valid & 16u) || context->cap.chain <= 2) ? 0 : EPERM;
 }
+static int fw_start_wlan_pmic_policy(void *opaque)
+{
+    fw_start_context *context = (fw_start_context *)opaque;
+    return context == &fw_start && context->wlan_pmic_mode && !fw_start_wlan_power_policy(context) &&
+        !redfin_wifi_power_audit() ? 0 : EPERM;
+}
 static void fw_start_host_event(void *opaque, unsigned kind, const char *name, uint32_t bytes)
 {
     (void)opaque;
@@ -768,9 +782,15 @@ static int fw_start_transport_run(fw_start_context *context)
                     if (!context->wlan_observed) {
                         if (context->wlan_power_mode) {
                             if (fw_start_wlan_power_policy(context)) return EPERM;
+                            if (context->wlan_pmic_mode) {
+                                error = redfin_wifi_wlan_pmic_observe(0, context, fw_start_wlan_pmic_policy);
+                                if (error) return error;
+                            }
                             error = redfin_wifi_wlan_power_start((context->cap.valid & 16u) != 0, context->cap.chain,
                                 context, fw_start_wlan_power_policy);
                             IOLog("REDFIN WIFI WLAN: native power sequence=%d; waiting for FW_READY\n", error);
+                            if (!error && context->wlan_pmic_mode)
+                                error = redfin_wifi_wlan_pmic_observe(1, context, fw_start_wlan_pmic_policy);
                         } else {
                             error = redfin_wifi_wlan_resources_observe();
                             IOLog("REDFIN WIFI WLAN: resource observer=%d; no WLAN power writes, waiting for FW_READY\n", error);
@@ -786,7 +806,8 @@ static int fw_start_transport_run(fw_start_context *context)
                         context->dynamic_sent = 1;
                         IOLog("REDFIN WIFI WLFW: queued native post-power dynamic feature mask1 transaction5\n");
                     }
-                    if (context->wlfw_setup.fw_ready) return 0;
+                    if (context->wlfw_setup.fw_ready) return context->wlan_pmic_mode ?
+                        redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
                 }
             } else if (!context->cap_sent) {
                 const uint8_t request[7] = {0, 1, 0, 0x24, 0, 0, 0};
@@ -799,6 +820,10 @@ static int fw_start_transport_run(fw_start_context *context)
             if (!context->wlfw_mode && context->cap_received) return context->cap.result ? EIO : 0;
         }
         if (fw_start_pause(context, 1000)) return EPERM;
+    }
+    if (context->wlan_pmic_mode && context->wlan_observed) {
+        error = redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy);
+        if (error) return error;
     }
     return ETIMEDOUT;
 }
@@ -971,6 +996,11 @@ static void fw_start_worker(void *, wait_result_t)
     fw_start.wlan_observe_mode = wlan_present && fw_start.wlfw_mode;
     uint32_t observe = 2;
     fw_start.wlan_power_mode = wlan_present && fw_property(wlan_node, "observe-only", &observe, sizeof(observe)) && !observe;
+    const void *pmic_property = NULL;
+    unsigned pmic_bytes = 0;
+    bool pmic_present = wlan_present && SecureDTGetProperty(wlan_node, "pmic-observe", &pmic_property, &pmic_bytes) == kSuccess;
+    uint32_t pmic_enabled = 0;
+    fw_start.wlan_pmic_mode = pmic_present && fw_property(wlan_node, "pmic-observe", &pmic_enabled, sizeof(pmic_enabled)) && pmic_enabled == 1;
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
         !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
@@ -978,7 +1008,8 @@ static void fw_start_worker(void *, wait_result_t)
         (mode >= 3 && !fw_start_glink_contract()) || (mode == 4 && !fw_start_assets_contract(&fw_start, true)) ||
         (rmtfs_present && (mode != 4 || !fw_start_rmtfs_contract(&fw_start, true))) ||
         (wlfw_present && (!fw_start.wlfw_mode || !fw_start_wlfw_contract())) ||
-        (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract()))) {
+        (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract())) ||
+        (pmic_present && !fw_start.wlan_pmic_mode)) {
         IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
         thread_terminate_self();
         __builtin_unreachable();

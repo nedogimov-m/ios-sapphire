@@ -740,7 +740,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,1014 @@
+@@ -0,0 +1,1045 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -764,6 +764,7 @@ new file mode 100644
 +extern "C" int redfin_wifi_power_audit(void);
 +extern "C" int redfin_wifi_wlan_resources_observe(void);
 +extern "C" int redfin_wifi_wlan_power_start(unsigned, uint32_t, void *, int (*)(void *));
++extern "C" int redfin_wifi_wlan_pmic_observe(unsigned, void *, int (*)(void *));
 +/* Built-in XNU worker exit; declaration is private to Mach compilation in
 + * this pinned kernel's kern/thread.h. This is not an external kext KPI. */
 +extern "C" void thread_terminate_self(void);
@@ -807,7 +808,7 @@ new file mode 100644
 +    void *rmtfs_shadow;
 +    rf_rmtfs rmtfs;
 +    rf_rm_ops rmtfs_ops;
-+    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed;
++    bool wlfw_mode, wlan_observe_mode, wlan_power_mode, wlan_observed, wlan_pmic_mode;
 +    rf_wlfw_setup wlfw_setup;
 +    rf_wlfw_ops wlfw_ops;
 +    unsigned dynamic_sent, dynamic_received;
@@ -940,6 +941,13 @@ new file mode 100644
 +        uint32_t actual_addresses[5] = {};
 +        valid = fw_property(node, "resource-addresses", actual_addresses, sizeof(actual_addresses)) &&
 +            !memcmp(actual_addresses, expected_addresses, sizeof(actual_addresses));
++    }
++    if (valid && fw_start.wlan_pmic_mode) {
++        const uint32_t expected_candidates[7] = {0x001, 0x401, 0x140, 0x14d, 0x541, 0x54a, 0x549};
++        uint32_t candidates[7] = {}, enabled = 0;
++        valid = fw_start.wlan_power_mode && fw_property(node, "pmic-observe", &enabled, sizeof(enabled)) && enabled == 1 &&
++            fw_property(node, "pmic-candidates", candidates, sizeof(candidates)) &&
++            !memcmp(candidates, expected_candidates, sizeof(candidates));
 +    }
 +    return valid;
 +}
@@ -1314,6 +1322,12 @@ new file mode 100644
 +        context->cap.chip == 0x4320 && context->cap.family == 0x4001 && context->cap.soc == 0x400b0000 &&
 +        context->cap.firmware == 0x33197fff && (!(context->cap.valid & 16u) || context->cap.chain <= 2) ? 0 : EPERM;
 +}
++static int fw_start_wlan_pmic_policy(void *opaque)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    return context == &fw_start && context->wlan_pmic_mode && !fw_start_wlan_power_policy(context) &&
++        !redfin_wifi_power_audit() ? 0 : EPERM;
++}
 +static void fw_start_host_event(void *opaque, unsigned kind, const char *name, uint32_t bytes)
 +{
 +    (void)opaque;
@@ -1511,9 +1525,15 @@ new file mode 100644
 +                    if (!context->wlan_observed) {
 +                        if (context->wlan_power_mode) {
 +                            if (fw_start_wlan_power_policy(context)) return EPERM;
++                            if (context->wlan_pmic_mode) {
++                                error = redfin_wifi_wlan_pmic_observe(0, context, fw_start_wlan_pmic_policy);
++                                if (error) return error;
++                            }
 +                            error = redfin_wifi_wlan_power_start((context->cap.valid & 16u) != 0, context->cap.chain,
 +                                context, fw_start_wlan_power_policy);
 +                            IOLog("REDFIN WIFI WLAN: native power sequence=%d; waiting for FW_READY\n", error);
++                            if (!error && context->wlan_pmic_mode)
++                                error = redfin_wifi_wlan_pmic_observe(1, context, fw_start_wlan_pmic_policy);
 +                        } else {
 +                            error = redfin_wifi_wlan_resources_observe();
 +                            IOLog("REDFIN WIFI WLAN: resource observer=%d; no WLAN power writes, waiting for FW_READY\n", error);
@@ -1529,7 +1549,8 @@ new file mode 100644
 +                        context->dynamic_sent = 1;
 +                        IOLog("REDFIN WIFI WLFW: queued native post-power dynamic feature mask1 transaction5\n");
 +                    }
-+                    if (context->wlfw_setup.fw_ready) return 0;
++                    if (context->wlfw_setup.fw_ready) return context->wlan_pmic_mode ?
++                        redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
 +                }
 +            } else if (!context->cap_sent) {
 +                const uint8_t request[7] = {0, 1, 0, 0x24, 0, 0, 0};
@@ -1542,6 +1563,10 @@ new file mode 100644
 +            if (!context->wlfw_mode && context->cap_received) return context->cap.result ? EIO : 0;
 +        }
 +        if (fw_start_pause(context, 1000)) return EPERM;
++    }
++    if (context->wlan_pmic_mode && context->wlan_observed) {
++        error = redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy);
++        if (error) return error;
 +    }
 +    return ETIMEDOUT;
 +}
@@ -1714,6 +1739,11 @@ new file mode 100644
 +    fw_start.wlan_observe_mode = wlan_present && fw_start.wlfw_mode;
 +    uint32_t observe = 2;
 +    fw_start.wlan_power_mode = wlan_present && fw_property(wlan_node, "observe-only", &observe, sizeof(observe)) && !observe;
++    const void *pmic_property = NULL;
++    unsigned pmic_bytes = 0;
++    bool pmic_present = wlan_present && SecureDTGetProperty(wlan_node, "pmic-observe", &pmic_property, &pmic_bytes) == kSuccess;
++    uint32_t pmic_enabled = 0;
++    fw_start.wlan_pmic_mode = pmic_present && fw_property(wlan_node, "pmic-observe", &pmic_enabled, sizeof(pmic_enabled)) && pmic_enabled == 1;
 +    if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
 +    if (!args || bytes == sizeof(fw_probe.args) ||
 +        !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
@@ -1721,7 +1751,8 @@ new file mode 100644
 +        (mode >= 3 && !fw_start_glink_contract()) || (mode == 4 && !fw_start_assets_contract(&fw_start, true)) ||
 +        (rmtfs_present && (mode != 4 || !fw_start_rmtfs_contract(&fw_start, true))) ||
 +        (wlfw_present && (!fw_start.wlfw_mode || !fw_start_wlfw_contract())) ||
-+        (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract()))) {
++        (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract())) ||
++        (pmic_present && !fw_start.wlan_pmic_mode)) {
 +        IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
 +        thread_terminate_self();
 +        __builtin_unreachable();
@@ -3132,3 +3163,159 @@ new file mode 100644
 +    *out = parsed; return 0;
 +}
 +#endif
+diff --git a/bsd/dev/redfin_wifi_pmic.inc b/bsd/dev/redfin_wifi_pmic.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_wifi_pmic.inc
+@@ -0,0 +1,151 @@
++/* SPDX-License-Identifier: MIT
++ * Included at the end of redfin_spmi.c, after the existing rail observer.
++ * Google msm500b3a2: spmi-pmic-arb.c v5, qpnp-revid.h PM8150/PM8150L.
++ * Qualcomm firmware20bb8ae: common LDO4000/stride100, pm_ldo_driver_init's
++ * type4/subtype>=30 unified layout and pm_pwr_alg VSET_VALID42/43.
++ * SID1 LDO ordering is already observed on Redfin. SID5 pages remain named
++ * candidates until independently attributed; no readiness policy uses them.
++ * Only the cached EE0 observer mapping is written, with EXT_READL commands.
++ * No PMIC write channel, new mapping, IRQ acknowledge or power command.
++ */
++static const unsigned redfin_wp_ppids[7] = {0x001, 0x401, 0x140, 0x14d, 0x541, 0x54a, 0x549};
++static struct {
++ unsigned busy, next_phase;
++ bool active, poisoned;
++ void *child;
++ int (*policy)(void *);
++ struct redfin_rail_target targets[7];
++} redfin_wp;
++struct redfin_wp_sample { uint16_t header, configured, valid, mode_enable, status; };
++
++static int
++redfin_wp_check(void)
++{
++ if (!redfin_wp.active || redfin_wp.poisoned || !redfin_wp.child || !redfin_wp.policy ||
++     !ml_get_interrupts_enabled() || __builtin_arm_rsr64("CurrentEL") != 4 ||
++     (__builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL) ||
++     !redfin_spmi_return_ready() || !redfin_spmi_proof.ready ||
++     !redfin_spmi_proof.core || !redfin_spmi_proof.observer || !redfin_spmi_proof.config ||
++     redfin_spmi_proof.version < 0x50000000 || redfin_spmi_proof.version >= 0x70000000 ||
++     redfin_rail_attempted || redfin_rail_snapshot_busy || redfin_rail_poisoned ||
++     redfin_wp.policy(redfin_wp.child)) {
++  redfin_wp.poisoned = true;
++  return EPERM;
++ }
++ return 0;
++}
++
++static int
++redfin_wp_read(const struct redfin_rail_target *t, unsigned offset, unsigned count, uint16_t *out)
++{
++ bool allowed = false;
++ if (t) for (unsigned i = 0; i < 7; ++i) if (t == &redfin_wp.targets[i] && t->ppid == redfin_wp_ppids[i]) {
++  allowed = i < 2 ? offset == 4 && count == 2 :
++      ((offset == 4 || offset == 0x40 || offset == 0x42 || offset == 0x45) && count == 2) ||
++      (offset == 8 && count == 1);
++ }
++ if (!out || !allowed || redfin_wp_check()) return EINVAL;
++ if (!redfin_rail_mapping(t)) { redfin_wp.poisoned = true; return EAGAIN; }
++ unsigned channel = t->apid * 0x80;
++ uint32_t command = (1u << 27) | (offset << 4) | (count - 1u);
++ __asm__ volatile("dmb oshst" ::: "memory");
++ *(volatile uint32_t *)(redfin_spmi_proof.observer + channel) = command;
++ __asm__ volatile("dsb osh" ::: "memory");
++ for (unsigned us = 0; us < 1000; ++us) {
++  if (redfin_wp_check() || !redfin_rail_mapping(t)) { redfin_wp.poisoned = true; return EAGAIN; }
++  uint32_t status = redfin_spmi_rd(redfin_spmi_proof.observer, channel + 8);
++  if (status & 1) {
++   if (status & 0x0e) { redfin_wp.poisoned = true; return EIO; }
++   uint32_t data = redfin_spmi_rd(redfin_spmi_proof.observer, channel + 0x18);
++   if (redfin_wp_check() || !redfin_rail_mapping(t)) { redfin_wp.poisoned = true; return EAGAIN; }
++   *out = (uint16_t)(data & (count == 1 ? 255u : 65535u));
++   return 0;
++  }
++  delay(1);
++ }
++ redfin_wp.poisoned = true;
++ return ETIMEDOUT; /* No channel reuse, cleanup or retry before full reset. */
++}
++
++static bool redfin_wp_unified(uint16_t header)
++{ return (header & 255u) == 4 && (header >> 8) >= 0x30; }
++
++static int
++redfin_wp_sample(const struct redfin_rail_target *t, struct redfin_wp_sample *out)
++{
++ int error = redfin_wp_read(t, 4, 2, &out->header);
++ if (error || !redfin_wp_unified(out->header)) return error;
++ error = redfin_wp_read(t, 0x40, 2, &out->configured);
++ if (!error) error = redfin_wp_read(t, 0x42, 2, &out->valid);
++ if (!error) error = redfin_wp_read(t, 0x45, 2, &out->mode_enable);
++ if (!error) error = redfin_wp_read(t, 8, 1, &out->status);
++ return error;
++}
++
++int redfin_wifi_wlan_pmic_observe(unsigned phase, void *child, int (*policy)(void *));
++int
++redfin_wifi_wlan_pmic_observe(unsigned phase, void *child, int (*policy)(void *))
++{
++ if (phase > 2 || !child || !policy || redfin_wp.poisoned || phase != redfin_wp.next_phase ||
++     (phase && (child != redfin_wp.child || policy != redfin_wp.policy))) return EINVAL;
++ if (__atomic_exchange_n(&redfin_wp.busy, 1, __ATOMIC_ACQUIRE)) return EBUSY;
++ redfin_wp.child = child; redfin_wp.policy = policy; redfin_wp.active = true;
++ int error = redfin_wp_check();
++ if (error || !redfin_rail_platform()) { if (!error) error = ENXIO; goto out; }
++ if (!phase) {
++  for (unsigned i = 0; i < 7; ++i)
++   redfin_wp.targets[i] = (struct redfin_rail_target){redfin_wp_ppids[i], 512, 0, 0};
++  for (unsigned apid = 0; apid < 512; ++apid) {
++   if (redfin_wp_check()) { error = EPERM; goto out; }
++   uint32_t mapping = redfin_spmi_rd(redfin_spmi_proof.core, 0x900 + 4 * apid);
++   unsigned ppid = (mapping >> 8) & 0xfff;
++   if (!mapping) continue;
++   for (unsigned i = 0; i < 7; ++i) if (ppid == redfin_wp_ppids[i]) {
++    unsigned owner = redfin_spmi_rd(redfin_spmi_proof.config, 0x700 + 4 * apid) & 7;
++    if (redfin_wp.targets[i].apid == 512 || owner == 0)
++     redfin_wp.targets[i] = (struct redfin_rail_target){ppid, apid, owner, mapping};
++   }
++  }
++  for (unsigned i = 0; i < 7; ++i) if (redfin_wp.targets[i].apid == 512) {
++   printf("REDFIN WIFI PMIC: candidate PPID=%#x has no APID; physical absence unproven\n", redfin_wp_ppids[i]);
++   error = ENXIO; goto out;
++  }
++ }
++ for (unsigned i = 0; i < 2; ++i) {
++  uint16_t model = 0;
++  error = redfin_wp_read(&redfin_wp.targets[i], 4, 2, &model);
++  printf("REDFIN WIFI PMIC: phase=%u SID%u REVID=%#x result=%d\n", phase, i * 4u, model, error);
++  if (error) goto out;
++  if (model != (i ? 0x1f51 : 0x1e51)) { error = ENOTSUP; goto out; }
++ }
++ for (unsigned i = 2; i < 7; ++i) {
++  const struct redfin_rail_target *t = &redfin_wp.targets[i];
++  struct redfin_wp_sample a = {0}, b = {0};
++  error = redfin_wp_sample(t, &a);
++  if (!error) {
++   if (redfin_wp_check()) { error = EPERM; goto out; }
++   delay(100);
++   error = redfin_wp_sample(t, &b);
++  }
++  if (error) goto out;
++  bool stable = a.header == b.header && a.configured == b.configured && a.valid == b.valid &&
++      a.mode_enable == b.mode_enable && a.status == b.status;
++  printf("REDFIN WIFI PMIC: phase=%u candidate PPID=%#x APID=%u owner=%u header=%#x unified=%u stable=%u configured_mV=%u valid_mV=%u MODE=%#x ENABLE=%#x STATUS=%#x ready=%u\n",
++      phase, t->ppid, t->apid, t->owner, a.header, redfin_wp_unified(a.header), stable,
++      a.configured, a.valid, a.mode_enable & 255u, a.mode_enable >> 8, a.status, !!(a.status & 0x80));
++  if (!stable) { error = EAGAIN; goto out; }
++ }
++ for (unsigned i = 0; i < 2; ++i) {
++  uint16_t model = 0;
++  error = redfin_wp_read(&redfin_wp.targets[i], 4, 2, &model);
++  if (error) goto out;
++  if (model != (i ? 0x1f51 : 0x1e51)) { error = EAGAIN; goto out; }
++ }
++ ++redfin_wp.next_phase;
++out:
++ printf("REDFIN WIFI PMIC: phase=%u observation=%d; no PMIC writes, no supply-readiness claim\n", phase, error);
++ if (error) redfin_wp.poisoned = true;
++ redfin_wp.active = false;
++ __atomic_store_n(&redfin_wp.busy, 0, __ATOMIC_RELEASE);
++ return error;
++}

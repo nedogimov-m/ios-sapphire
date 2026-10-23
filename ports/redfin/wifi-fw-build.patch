@@ -22,3 +22,12 @@ diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
  iokit/Kernel/arm/SweetEntitlements.cpp                           optional iokitcpp
  iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitcpp
  iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp
+diff --git a/bsd/dev/redfin_spmi.c b/bsd/dev/redfin_spmi.c
+--- a/bsd/dev/redfin_spmi.c
++++ b/bsd/dev/redfin_spmi.c
+@@ -831,4 +831,5 @@
+      a.mode == 7 && b.mode == 7 && a.enable == 0x80 && b.enable == 0x80 &&
+      a.status == b.status && (a.status & 0x80) && !(a.status & ~0x87u);
+ }
++#include "redfin_wifi_pmic.inc"
+ #endif

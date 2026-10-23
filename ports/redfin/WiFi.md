@@ -853,3 +853,15 @@ mask still succeed, but FW_READY and pin-result indications remain absent
 through the captured30-second timeout. Making this file available does not
 establish RF initialization. The next diagnostic checks native readiness
 prerequisites and physical supply/pin state; association/data remain pending.
+
+`--wifi-wlan-pmic-observe` requires `--wifi-wlan-power` and the live
+PM8150/PM8150L SIDs. It uses the existing EE0 SPMI observer mappings for
+three bounded snapshots: before the native WLAN votes, after their ACKs,
+and at FW_READY or the transport deadline. Two samples record each fixed
+candidate's header, configured/VALID mV, mode/enable and raw status. Both
+physical PMIC model reads must match. SID5 page attribution remains a
+candidate, and a configured or VALID field by itself is not a power proof.
+Unknown layouts stay header-only. Every command is EXT_READL; no PMIC write
+channel is used. Owner/mapping loss, a changed sample, error or timeout
+stops this diagnostic until full platform reset. The existing power-only
+profile remains available without these additional observations.

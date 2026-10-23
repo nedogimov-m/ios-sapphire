@@ -336,5 +336,28 @@ the separately successful CAP identity. Native rejuvenation indication0x39
 quarantines this bounded epoch until platform reset instead of claiming an
 unperformed recovery. Pin-result indications preserve their actual fields.
 
+## Physical WLAN PMIC observation review — 2026-10-24
+
+Rechecked Google's native ICNSS post-CAP order at
+`500b3a2059c1eec0fec08ec56add06320ea901a8`: supplies/optional clock, then
+dynamic feature mask. Those requests already succeed on Redfin; their ACKs
+do not establish physical regulator outputs. At the same pin,
+`spmi-pmic-arb.c` supplies v5 EE0 observer offsets, duplicate-APID selection
+and EXT_READL encoding; `qpnp-revid.h` identifies PM8150/PM8150L subtypes
+`1e/1f`. Rechecked `pm8150.dtsi`/`pm8150l.dtsi` at DT pin
+`afc98e2bb0716a57bf4f8d2b6191378dd7123ce4` against the saved live SIDs0/1/4/5.
+
+Re-reviewed Qualcomm firmware
+`20bb8ae36c93fc16bbadda0e0a83f930c0c8a271`:
+`pm_config_common.c`, `pm_ldo_driver.c` and `pm_pwr_alg.c`. Its explicit
+type-LDO/subtype>=30 branch establishes the unified raw register layout,
+including configured40/41 and VALID42/43 mV, mode45, enable46 and status08.
+The common4000/stride100 map and already observed SID1 ordering support the
+PM8150 candidates. SID5's WLAN supply pages remain candidate attribution;
+this firmware is not a Redfin target table or authorization for a regulator
+write. The new optional observer reuses the existing SPMI mappings and
+checks the live native MPSS child before every read command/poll. It adds
+no PMIC/GPIO/clock write, RSC vote, memory assignment or readiness policy.
+
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772
