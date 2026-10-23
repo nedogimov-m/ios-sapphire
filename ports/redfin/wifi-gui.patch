@@ -1,0 +1,19 @@
+diff --git a/bsd/dev/redfin_touch_start.c b/bsd/dev/redfin_touch_start.c
+--- a/bsd/dev/redfin_touch_start.c
++++ b/bsd/dev/redfin_touch_start.c
+@@ -16,6 +16,7 @@
+ extern int redfin_gui_cpu0(void);
+ extern int redfin_touch_setup(bool, bool);
+ extern int redfin_touch_events_start(void);
++extern void redfin_wifi_gui_start(void);
+ int redfin_touch_start_initial(void);
+ bool redfin_touch_boot_lease_valid(unsigned mode);
+ /* 0=unclaimed, 1=claimed/unpublished, 2=permanently published. */
+@@ -158,6 +159,7 @@
+  } else if (mode == REDFIN_TOUCH_UFS_EVENTS) {
+   error = redfin_touch_events_start();
+   printf("REDFIN TOUCH START: asynchronous HID worker result=%d\n", error);
++  if (!error) redfin_wifi_gui_start();
+  }
+  return error;
+ }

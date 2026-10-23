@@ -972,3 +972,18 @@ all414 CE reads with stable values. The firmware's CE2 source ring has64
 entries and source write index1; the host destination is unconfigured.
 No packet has been received yet. A separately owned context, shim-validated
 DMA32 memory and host CE2 destination are the next transport stage.
+
+The complete follow-on implementation is now available with
+`--wifi-snoc-start`, or `--wifi-gui` to compose it with GUI8/touch. It reuses
+the existing ath10k-compatible CE/HTC/WMI/HTT and station engine through
+native callbacks, with a dedicated WLAN context and guarded16MiB DMA32
+allocation. The preferred upstream supplies WPA2, serialized station
+requests, ifnet, Apple80211 and registry discovery. Association/password
+requests use the regular iOS Wi-Fi interface. These sources build; actual
+association, packets, DHCP and GUI behavior remain unverified until the
+combined device run. GPU/Metal stays after that goal.
+
+GUI2 starts WLAN only after touch finishes its RPMh setup, and binds its
+permanent firmware/packet worker to CPU0. It retains the proven eight-core,
+RW HFS, camera-fit display,60Hz CPU-copy and180s graceful-return profile.
+There is no new persistent firmware/calibration writer or partition change.

@@ -16,8 +16,10 @@
 #include <kern/thread.h>
 #include <sys/errno.h>
 #include "redfin_wifi_fw_boot.h"
+#include <sys/redfin_wifi_gui.h>
 
 extern "C" int redfin_spmi_return_ready(void);
+extern "C" int redfin_gui_bind_worker(void);
 extern "C" int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32]);
 static_assert(sizeof(boot_args) == RF_WIFI_FW_BOOT_ARGS_BYTES, "Redfin boot-args ABI");
 
@@ -49,6 +51,12 @@ static bool fw_identity(void)
 }
 static bool fw_profile(uint64_t *boot_id)
 {
+    if (redfin_wifi_gui_requested()) {
+        const char *args = PE_boot_args(); unsigned bytes = 0;
+        if (!args || !redfin_wifi_gui_ready() || !fw_identity()) return false;
+        while (bytes < 608 && args[bytes]) ++bytes;
+        return bytes < 608 && redfin_wifi_gui_profile(args, bytes + 1, boot_id);
+    }
     int cpus = 0, spmi = 0, returned = 0;
     char root[16] = {};
     if (!fw_identity() || !PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
@@ -113,7 +121,7 @@ static int fw_check(void *opaque, const rf_wifi_fw_blob *blob, const rf_wifi_fw_
         (void *)current_thread() == boot->owner && PE_state.bootArgs == boot->arguments &&
         !memcmp(PE_state.bootArgs, boot->boot_args, sizeof(boot->boot_args)) &&
         __builtin_arm_rsr64("CurrentEL") == 4 && !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
-        redfin_spmi_return_ready() == 1 && boot->policy.check &&
+        redfin_wifi_return_held() && boot->policy.check &&
         !boot->policy.check(boot->policy.context, blob->boot_id) &&
         fw_handoff(&fresh_blob, &fresh_layout) && !memcmp(blob, &boot->native_blob, sizeof(*blob)) &&
         !memcmp(layout, &boot->native_layout, sizeof(*layout)) &&
@@ -200,6 +208,7 @@ static uint32_t fw_probe_attempted;
 static bool fw_probe_args(const char *args, unsigned bytes, uint64_t *nonce_out, unsigned mode = 1)
 {
     if (mode < 1 || mode > 4) return false;
+    if (mode == 4 && redfin_wifi_gui_profile(args, bytes, nonce_out)) return true;
     const char *const required[] = {
         "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
         "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
@@ -282,7 +291,7 @@ static int fw_probe_check(void *opaque, uint64_t boot_id)
     const char *live = PE_boot_args();
     bool valid = context == &fw_probe && context->active && !context->poisoned &&
         live && context->bytes && boot_id == context->nonce &&
-        current_thread() == context->owner && redfin_spmi_return_ready() == 1 &&
+        current_thread() == context->owner && redfin_wifi_return_held() &&
         __builtin_arm_rsr64("CurrentEL") == 4 &&
         !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
         !memcmp(live, context->args, context->bytes) && fw_probe_properties(context, false);

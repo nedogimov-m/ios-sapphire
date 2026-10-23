@@ -4,6 +4,7 @@
  */
 #ifndef REDFIN_WIFI_NATIVE_PROBE_H
 #define REDFIN_WIFI_NATIVE_PROBE_H
+#include "gui-profile.h"
 #ifdef __cplusplus
 extern "C" {
 #endif

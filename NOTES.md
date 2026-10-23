@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete GUI8/WLAN packet/station implementation prepared — 2026-10-24
+
+Continues `a1f2abe`. User requests implementing the complete feature batch
+before the common test/fix pass. The new implementation connects native
+firmware/power ownership to the existing ath10k-compatible CE/HTC/WMI/HTT,
+scan, association and Ethernet engine, and adapts the preferred upstream's
+WPA2, station queue, ifnet, Apple80211 and IOKit registry layers. There is
+no legacy Topaz modem startup/address/pool use. WMI takes Redfin's actual
+service-ready RF-chain count. The interface unit/name is selected from
+free BSD names; join/key contents stay out of native join logs. ABI16.5
+layouts from upstream are retained as20H392 candidates pending device use.
+
+Fresh16MiB DMA32 RAM has16KiB guards and a separate shim-owned handoff.
+The actual Image/DTB, all native reservations, XNU and retained RMTFS are
+checked before initializing it. A permanent WLAN-only NS context lease
+preserves latent/foreign routes, uses CBA2R1 and the proven five-store
+sequence, and stops on uncertain writes or foreign changes. Ring callbacks
+admit only native host CE fields, owned addresses and three TX shadows.
+Periodic state/guard checks retain resources until reset on uncertainty.
+
+GUI2 retains GUI8's CPU/root/display/touch checks and cached shim return.
+Touch completes its RPMh setup before starting the bound CPU0 WLAN worker;
+other CPUs use station/frame queues. GLINK/RMTFS and radio polling continue
+throughout GUI use. The ordinary GUI1 and diagnostic profiles remain distinct.
+No persistent firmware/EFS writer, partition change or GPU/Metal work.
+
+All1262 full host tests PASS (3 optional private cases skipped); the legacy
+harnesses now supply the GUI helper boundary and the SMP comparison patch
+includes the new independent memory checks. All25 packaging tests also
+PASS (1 optional private case skipped) after the GUI payload adaptation.
+Actual SMMU-lease checks pass all five write failures and all five foreign
+route-change positions with no retry and preserved inherited contexts.
+Actual loader/live-FDT/GUI8-return and guarded DMA initialization preflight
+PASS. Local native `build-20261024-041155.log` PASS; no CI run. Full software
+integration is built; hardware association/data/DHCP/GUI behavior is pending.
+
+Kernel `25b41d8db8e2b99a992e82d6fdd994ba92c42ef3fc3733130eff135226d40cfd`;
+image `13220fbcc422136703a839a1194d40705c81cc53a76614b78bd85cdf7e3515b3`.
+Decompressed Image130216352 bytes is below the explicit128MiB cap.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x598fae4588b0b1b1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Next: one complete temporary GUI8/station run, then fix actual integrated
+results. Working Wi-Fi still means association and packets in the iOS GUI;
+firmware/HTC/WMI readiness alone is not that goal. GPU/Metal follows it.
+
 ## REDFIN actual WLAN_CFG/mission ACKs and CE register observation PASS — 2026-10-24
 
 Source `51c1c03`, local native build031516, authenticated mission-v1 capture

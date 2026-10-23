@@ -1,0 +1,314 @@
+diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
+--- a/iokit/Kernel/arm/TopazModem.cpp
++++ b/iokit/Kernel/arm/TopazModem.cpp
+@@ -23,6 +23,18 @@
+ #include <libkern/crc.h>
+ #include <sys/param.h>
+ #include <sys/errno.h>
++extern "C" {
++#include <sys/redfin_wifi_sta.h>
++#include <sys/redfin_wifi_wpa.h>
++#include <sys/redfin_wifi_radio.h>
++}
++static struct redfin_wifi_radio_ops rf_radio_bus;
++static volatile int rf_radio_error;
++static uint32_t rf_radio_chains;
++static volatile bool rf_radio_enabled;
++static IOSimpleLock *rf_radio_status_lock;
++static void rf_radio_station_eapol(const uint8_t *, size_t);
++static void rf_radio_wpa_reset(void);
+ 
+ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ 
+@@ -107,6 +119,8 @@
+ static void *
+ pool_alloc(uint64_t size, uint64_t *pa)
+ {
++	if (rf_radio_bus.context) return rf_radio_error || rf_radio_bus.check(rf_radio_bus.context) ? NULL :
++		rf_radio_bus.allocate(rf_radio_bus.context, size, pa);
+ 	size = (size + 0xfff) & ~0xfffull;
+ 	if (pool == NULL || pool_used + size > MODEM_POOL_SIZE) {
+ 		return NULL;
+@@ -5007,8 +5021,17 @@
+ static uint32_t ce_tx_slots(uint32_t c) { return MIN(ce[c].src_n, (uint32_t)TX_SLOTS_MAX); }
+ static uint32_t ce_tx_sz(uint32_t c) { return ce_attr[c].src_max; }
+ static uint32_t pow2(uint32_t n) { uint32_t p = 1; while (p < n) { p <<= 1; } return p; }
+-static uint32_t ce_rd(uint32_t c, uint32_t o) { return r32(ce_regs, c * 0x1000 + o); }
+-static void ce_wr(uint32_t c, uint32_t o, uint32_t v) { w32(ce_regs, c * 0x1000 + o, v); }
++static uint32_t ce_rd(uint32_t c, uint32_t o) {
++ if (!rf_radio_bus.context) return r32(ce_regs,c*0x1000+o);
++ uint32_t value=0;
++ int error=rf_radio_error ? rf_radio_error : rf_radio_bus.read(rf_radio_bus.context,c*0x1000+o,&value);
++ if(error)rf_radio_error=error;
++ return error ? UINT32_MAX : value;
++}
++static void ce_wr(uint32_t c, uint32_t o, uint32_t v) {
++ if (!rf_radio_bus.context) {w32(ce_regs,c*0x1000+o,v);return;}
++ if(!rf_radio_error)rf_radio_error=rf_radio_bus.write(rf_radio_bus.context,c*0x1000+o,v);
++}
+ 
+ static void
+ ce_post(uint32_t c)
+@@ -5028,8 +5051,10 @@
+ 	if (ce_up) {
+ 		return true;
+ 	}
+-	ce_regs = (volatile uint8_t *)ml_io_map(CE_PA, (CE_COUNT + 1) * 0x1000);
+-	ce_shadow = (volatile uint8_t *)ml_io_map(SHADOW_PA, 0x1000);
++	if (!rf_radio_bus.context) {
++		ce_regs = (volatile uint8_t *)ml_io_map(CE_PA, (CE_COUNT + 1) * 0x1000);
++		ce_shadow = (volatile uint8_t *)ml_io_map(SHADOW_PA, 0x1000);
++	}
+ 	for (uint32_t c = 0; c < CE_COUNT; c++) {
+ 		ce[c].src_n = ce_attr[c].src_n ? pow2(ce_attr[c].src_n) : 0;
+ 		ce[c].dst_n = ce_attr[c].dst_n ? pow2(ce_attr[c].dst_n) : 0;
+@@ -5039,7 +5064,7 @@
+ 		off += ce_host_tx(c) ? ce_tx_slots(c) * ce_tx_sz(c) : 0;
+ 	}
+ 	uint8_t *va = (uint8_t *)pool_alloc(off, &pa);
+-	if (ce_regs == NULL || ce_shadow == NULL || va == NULL) {
++	if ((!rf_radio_bus.context && (ce_regs == NULL || ce_shadow == NULL)) || va == NULL) {
+ 		LOG("ce: map/alloc failed (%llu bytes)", off);
+ 		return false;
+ 	}
+@@ -5071,8 +5096,12 @@
+ 		}
+ 	}
+ 	/* the CE writes its read indices to ce_rri[ce] (src [15:0], dst [31:16]) */
+-	w32(ce_regs, WRAP_RRI_LO, (uint32_t)ce_rri_pa);
+-	w32(ce_regs, WRAP_RRI_HI, (uint32_t)(ce_rri_pa >> 32) & ADDR_HI_MASK);
++	if (rf_radio_bus.context) {
++		ce_wr(12,4,(uint32_t)ce_rri_pa); ce_wr(12,8,(uint32_t)(ce_rri_pa>>32)&ADDR_HI_MASK);
++	} else {
++		w32(ce_regs, WRAP_RRI_LO, (uint32_t)ce_rri_pa);
++		w32(ce_regs, WRAP_RRI_HI, (uint32_t)(ce_rri_pa >> 32) & ADDR_HI_MASK);
++	}
+ 	for (uint32_t c = 0; c < CE_COUNT; c++) {
+ 		ce_wr(c, CTRL1, ce_rd(c, CTRL1) | CTRL1_RRI_UPD);
+ 	}
+@@ -5106,6 +5135,7 @@
+ 		mb();
+ 		ce_wr(c, DR_WR_IDX, ce[c].dst_wr);
+ 	}
++	if (rf_radio_error) return false;
+ 	ce_up = true;
+ 	LOG("t=%u ms: ce: %u rings programmed, rx posted", g_ms, CE_COUNT);
+ 	return true;
+@@ -5129,6 +5159,10 @@
+ 			uint32_t slot = s->dst_sw, n = s->dst[slot].nbytes;
+ 			if (n == 0) {
+ 				break;
++			}
++			if (n > RX_BUF_SIZE || (rf_radio_bus.context &&
++			    s->dst[slot].addr != s->rx_pa + (uint64_t)(slot % RX_POST) * RX_BUF_SIZE)) {
++				rf_radio_error = EOVERFLOW; return false;
+ 			}
+ 			mb();                               /* payload after the descriptor */
+ 			s->dst[slot].nbytes = 0;
+@@ -5166,7 +5200,10 @@
+ 	s->src_wr = (slot + 1) & mask;
+ 	s->tx++;
+ 	mb();
+-	*(volatile uint32_t *)(ce_shadow + 4 * c) = s->src_wr;
++	if (rf_radio_bus.context) {
++		if (!rf_radio_error) rf_radio_error = rf_radio_bus.shadow(rf_radio_bus.context,c,s->src_wr);
++		if (rf_radio_error) return false;
++	} else *(volatile uint32_t *)(ce_shadow + 4 * c) = s->src_wr;
+ 	mb();
+ 	return true;
+ }
+@@ -5279,7 +5316,11 @@
+ 	if (len < sizeof(*h)) {
+ 		return;
+ 	}
+-	uint32_t plen = MIN((uint32_t)h->len, len - (uint32_t)sizeof(*h));
++	if (h->len > len - sizeof(*h) || ((h->flags & HTC_FLAG_TRAILER) && h->trailer > h->len)) {
++		if (rf_radio_bus.context) rf_radio_error = EPROTO;
++		return;
++	}
++	uint32_t plen = h->len;
+ 	if ((h->flags & HTC_FLAG_TRAILER) != 0 && h->trailer <= plen) {
+ 		const uint8_t *t = p + plen - h->trailer;   /* records {id, len, data}; id 1 = credits */
+ 		for (uint32_t o = 0; o + 2 <= h->trailer && o + 2 + t[o + 1] <= h->trailer; o += 2 + t[o + 1]) {
+@@ -5445,11 +5486,12 @@
+ 			break;
+ 		}
+ 		const uint8_t *v = p + o + 4;
+-		if (tag == TAG_SERVICE_READY && l >= 16) {
++		if (tag == TAG_SERVICE_READY && l >= 40) {
+ 			uint32_t fw, a0, rf;
+ 			memcpy(&fw, v, 4);
+ 			memcpy(&a0, v + 4, 4);
+ 			memcpy(&rf, v + 4 + 24 + 8, 4);
++			if (rf_radio_bus.context) rf_radio_chains = rf;
+ 			LOG("wmi: fw %08x abi %08x rf_chains %u", fw, a0, rf);
+ 		} else if (tag == TAG_ARRAY_UINT32 && !wmi_seen_bmap) {
+ 			wmi_seen_bmap = true;
+@@ -5491,6 +5533,11 @@
+ 		} else if (wmi_req[i].num_unit_info & 1) {
+ 			units = NUM_VDEVS + 1;
+ 		}
++		if (wmi_req[i].unit_size > MAX_MEM_TOTAL || units > MAX_MEM_TOTAL ||
++		    (uint64_t)units * (((uint64_t)wmi_req[i].unit_size + 3u) & ~3ULL) > MAX_MEM_TOTAL - total) {
++			if (rf_radio_bus.context) rf_radio_error = EOVERFLOW;
++			return;
++		}
+ 		wmi_chunk_len[i] = units * ((wmi_req[i].unit_size + 3) & ~3u);
+ 		total += (wmi_chunk_len[i] + 0xfff) & ~0xfffu;
+ 	}
+@@ -5524,6 +5571,10 @@
+ 	rc[6] = 16;                                 /* ast skid limit */
+ 	rc[7] = 0x7;                                /* tx chain mask */
+ 	rc[8] = 0x7;                                /* rx chain mask */
++	if (rf_radio_bus.context) {
++		if (!rf_radio_chains || rf_radio_chains > 2) { rf_radio_error = EPROTO; return; }
++		rc[7] = rc[8] = (1u << rf_radio_chains) - 1u;
++	}
+ 	rc[9] = 0x64; rc[10] = 0x64; rc[11] = 0x64; rc[12] = 0x28;
+ 	rc[13] = 1;                                 /* rx decap: native wifi */
+ 	rc[14] = 4;                                 /* scan max pending */
+@@ -5568,7 +5619,7 @@
+ 	5745, 5765, 5785, 5805, 5825,
+ };
+ #define NFREQ ((uint32_t)(sizeof(scan_freqs) / sizeof(scan_freqs[0])))
+-static const uint8_t our_mac[6] = { 0x02, 0x54, 0x4F, 0x50, 0x41, 0x5A };   /* locally administered */
++static uint8_t our_mac[6] = { 0x02, 0x54, 0x4F, 0x50, 0x41, 0x5A };   /* locally administered */
+ struct bss {
+ 	uint8_t bssid[6]; char ssid[33]; uint8_t chan; int8_t rssi; uint16_t seen;
+ 	uint8_t raw_ssid[32], raw_ssid_len; uint16_t freq, bintval, capab, ie_len; uint32_t last_ms; uint8_t ie[768];
+@@ -6613,7 +6664,7 @@
+ }
+ 
+ static bool
+-w_install_key(bool group, uint32_t idx, uint32_t cipher, const uint8_t *key, uint32_t klen)
++w_install_key(bool group, uint32_t idx, uint32_t cipher, const uint8_t *key, uint32_t klen, const uint8_t *rsc = NULL)
+ {
+ 	uint8_t m[4 + 92 + 4 + 32] = {}, *p;
+ 	uint32_t kl = (klen + 3) & ~3u;
+@@ -6623,6 +6674,7 @@
+ 	p = w_p32(p, idx);
+ 	p = w_p32(p, group ? 1 : 0);
+ 	p = w_p32(p, cipher);
++	if (rsc) memcpy(p,rsc,8);
+ 	p += 3 * 8 + 16 + 16;
+ 	p = w_p32(p, klen);
+ 	p = w_p32(p, cipher == WMI_CIPHER_TKIP ? 8 : 0);
+@@ -6772,6 +6824,7 @@
+ static void
+ w_eapol_rx(const uint8_t *e, size_t elen)
+ {
++	if (rf_radio_bus.context) {rf_radio_station_eapol(e,elen);return;}
+ 	uint8_t frame[512];
+ 	const uint8_t *src = e + 6;
+ 	if (s_state != S_4WAY || elen < 14 + 4 + 95 || elen - 14 > sizeof(frame) || memcmp(src, s_bssid, 6) != 0) {
+@@ -6853,6 +6906,7 @@
+ static void
+ w_teardown(void)
+ {
++	if (rf_radio_bus.context) rf_radio_wpa_reset();
+ 	if (s_state >= S_START) {
+ 		if (s_state >= S_4WAY) {
+ 			w_vdev_simple(CMD_VDEV_DOWN, TAG_VDEV_DOWN);
+@@ -6877,12 +6931,12 @@
+ 		w_teardown();
+ 	} else {
+ 		s_state = S_UP;
+-		LOG("t=%u ms: *** joined %.*s ***", g_ms, (int)s_ssid_len, s_ssid);
++		LOG("t=%u ms: station joined (SSID bytes=%u)", g_ms, s_ssid_len);
+ 		w_link(true);
+ 	}
+ 	bzero(s_pmk, sizeof(s_pmk));
+ 	s_result = result;
+-	s_join_done++;
++	__atomic_add_fetch(&s_join_done,1,__ATOMIC_RELEASE);
+ }
+ 
+ static void
+@@ -6933,8 +6987,7 @@
+ 	}
+ 	s_msg1s = 0;
+ 	s_start_resp = false;
+-	LOG("t=%u ms: join: %.*s %02x:%02x:%02x:**:**:** %u MHz %s", g_ms, (int)s_ssid_len, s_ssid, s_bssid[0], s_bssid[1],
+-	    s_bssid[2], s_freq, s_rsn ? "WPA2" : "open");
++	LOG("t=%u ms: station join, SSID bytes=%u frequency=%u security=%s",g_ms,s_ssid_len,s_freq,s_rsn ? "WPA2" : "open");
+ 	w_ps_off();
+ 	if (!w_vdev_start(s_freq, bcn, dtim)) {
+ 		w_join_end(EIO);
+@@ -7026,7 +7079,7 @@
+ 		s_leave_asked = false;
+ 		w_teardown();
+ 	}
+-	if (s_join_asked && !scanning) {
++	if (__atomic_load_n(&s_join_asked,__ATOMIC_ACQUIRE) && !scanning) {
+ 		s_join_asked = false;
+ 		w_teardown();
+ 		w_join_begin();
+@@ -7124,7 +7177,8 @@
+ 	}
+ 	uint8_t pmk[32] = {};
+ 	if (pass_len != 0) {
+-		w_pbkdf2_pmk(pass, pass_len, ssid, ssid_len, pmk);
++		if (rf_radio_bus.context) redfin_wifi_wpa_pmk(pass,pass_len,ssid,ssid_len,pmk);
++		else w_pbkdf2_pmk(pass, pass_len, ssid, ssid_len, pmk);
+ 	}
+ 	int r = w_join_with(ssid, ssid_len, bssid, pass_len != 0 ? pmk : NULL);
+ 	bzero(pmk, sizeof(pmk));
+@@ -7159,12 +7213,12 @@
+ 	} else {
+ 		bzero(s_pmk, 32);
+ 	}
+-	uint32_t before = s_join_done;
+-	s_join_asked = true;
+-	for (int i = 0; i < 300 && s_join_done == before; i++) {   /* 30 s */
++	uint32_t before = __atomic_load_n(&s_join_done,__ATOMIC_ACQUIRE);
++	__atomic_store_n(&s_join_asked,true,__ATOMIC_RELEASE);
++	for (int i = 0; i < 300 && __atomic_load_n(&s_join_done,__ATOMIC_ACQUIRE) == before; i++) {   /* 30 s */
+ 		IOSleep(100);
+ 	}
+-	return s_join_done != before ? s_result : ETIMEDOUT;
++	return __atomic_load_n(&s_join_done,__ATOMIC_ACQUIRE) != before ? s_result : ETIMEDOUT;
+ }
+ 
+ int
+@@ -7244,6 +7298,7 @@
+ 	id &= 0xFFFFFF;
+ 	switch (id) {
+ 	case WMI_EV_SERVICE_AVAILABLE: {
++		if (len < 8) break;
+ 		uint16_t tag;
+ 		memcpy(&tag, d + 6, 2);
+ 		if (len >= 12 + sizeof(wmi_svc_ext) && tag == TAG_SERVICE_AVAILABLE) {
+@@ -7275,6 +7330,7 @@
+ 		LOG("t=%u ms: *** WMI READY (fw MAC %02x:%02x:%02x:%02x:%02x:%02x) ***", g_ms, wmi_mac[0], wmi_mac[1],
+ 		    wmi_mac[2], wmi_mac[3], wmi_mac[4], wmi_mac[5]);
+ 		if (wmi_ready) {
++			if (rf_radio_bus.context && !(wmi_mac[0]&1u) && (wmi_mac[0]|wmi_mac[1]|wmi_mac[2]|wmi_mac[3]|wmi_mac[4]|wmi_mac[5])) memcpy(our_mac,wmi_mac,6);
+ 			htt_start();                        /* the host rx ring first, then the scan */
+ 		}
+ 		break;
+@@ -7343,6 +7399,7 @@
+ 	}
+ 	(void)ce_poll();
+ 	htt_poll();
++	if (rf_radio_bus.context && !rf_radio_enabled) return;
+ 	if (scan_started && !api_ready) {
+ 		if (etxq_lock == NULL) {
+ 			etxq_lock = IOSimpleLockAlloc();
+@@ -7352,7 +7409,7 @@
+ 		if (topaz_wlan_ready_hook != NULL) {
+ 			topaz_wlan_ready_hook();
+ 		}
+-		w_bootarg_join_start();
++		if (!rf_radio_bus.context) w_bootarg_join_start();
+ 	}
+ 	if (api_ready) {
+ 		w_join_poll();
+@@ -7372,6 +7429,8 @@
+ 		LOG("t=%u ms: scan: passive scan %u %s", g_ms, scans + 1, scanning ? "requested" : "FAILED");
+ 	}
+ }
++
++#include "redfin_wifi_radio_backend.inc"
+ 
+ static void
+ svc_announce(void)

@@ -111,6 +111,8 @@ def main():
     p.add_argument('--wifi-wlan-bdf-download', action='store_true', help='with --wifi-wlan-power, send the reviewed Redfin BIN BDF and empty calibration report through a separate native DMON client')
     p.add_argument('--wifi-snoc-observe', action='store_true', help='after actual FW_READY in the BDF profile, observe WLAN APPS-SMMU routes/contexts without CE access or DMA')
     p.add_argument('--wifi-snoc-mission', action='store_true', help='with --wifi-snoc-observe, acknowledge native WLAN_CFG/mission and observe CE registers; no host DMA route or rings')
+    p.add_argument('--wifi-snoc-start', action='store_true', help='with --wifi-snoc-mission, lease a WLAN-only AArch64 context and fresh guarded DMA32 RAM for CE/HTC/WMI/HTT, station and iOS networking')
+    p.add_argument('--wifi-gui', action='store_true', help='compose native WLAN/station/iOS networking with the exact GUI8/touch profile; start WLAN after touch power setup')
     p.add_argument('--wifi-fw-bundle', type=Path, help='private verified native MPSS bundle for --wifi-fw-source-probe')
     p.add_argument('--wifi-fw-sha256', help='recorded private bundle SHA256; required with --wifi-fw-source-probe')
     p.add_argument('--shutdown-seconds', type=int, default=0,
@@ -127,6 +129,10 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.wifi_gui:
+        a.smp_gui = True
+        a.wifi_snoc_start = a.wifi_snoc_mission = a.wifi_snoc_observe = True
+        a.wifi_wlan_bdf_download = a.wifi_wlan_power = a.wifi_wlfw_setup = a.wifi_host_services = True
     if a.display_fit and not a.smp_gui:
         p.error('--display-fit requires the strict --smp-gui profile')
     if a.gpu_smmu_context_probe:
@@ -162,6 +168,8 @@ def main():
         p.error('--wifi-snoc-observe requires --wifi-wlan-bdf-download')
     if a.wifi_snoc_mission and not a.wifi_snoc_observe:
         p.error('--wifi-snoc-mission requires --wifi-snoc-observe')
+    if a.wifi_snoc_start and not a.wifi_snoc_mission:
+        p.error('--wifi-snoc-start requires --wifi-snoc-mission')
     if a.wifi_glink_start:
         a.wifi_fw_start = True
     if a.wifi_fw_start and a.wifi_fw_source_probe:
@@ -181,7 +189,7 @@ def main():
         if (any(getattr(a, name) for name in competing) or
                 any(value for name, value in vars(a).items() if name.endswith('_probe') and name != 'scm_probe')):
             p.error('--scm-probe requires its separate RAM-only profile')
-    if a.wifi_native_probe:
+    if a.wifi_native_probe and not a.wifi_gui:
         label = '--wifi-fw-start' if a.wifi_fw_start else '--wifi-fw-source-probe' if a.wifi_fw_source_probe else '--wifi-power-probe' if a.wifi_power_probe else '--wifi-native-probe'
         if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
             p.error(f'{label} requires kernel, live DTB, CPU0 and --return-bootloader')
@@ -212,7 +220,7 @@ def main():
             p.error('--smp-gui requires kernel/DTB/Apple ADT, display/splash/touch, RW UFS root and compiled shim return')
         if a.boot_mpidr or a.display_hz not in (10, 30, 60) or a.shutdown_seconds != 180:
             p.error('--smp-gui requires CPU0, --display-hz 10/30/60 and --shutdown-seconds 180')
-        if (any(value for name, value in vars(a).items() if name.endswith('_probe')) or
+        if (any(value for name, value in vars(a).items() if name.endswith('_probe') and not (a.wifi_gui and name == 'wifi_native_probe')) or
                 a.usb_aarch64_context or a.usb_live_log or a.userspace_stacks or
                 (a.capture_screen and a.display_fit != 'cutout') or a.trace_syscalls):
             p.error('--smp-gui excludes other probes and diagnostic writers')
@@ -344,7 +352,7 @@ def main():
         p.error('--seconds must be in [5, 300]')
     if not 10 <= a.watchdog_seconds <= 29:
         p.error('--watchdog-seconds must be in [10, 29] (20-bit hardware counter)')
-    diagnostic_prearm = a.gpu_power_probe or a.wifi_native_probe or a.scm_probe
+    diagnostic_prearm = a.gpu_power_probe or (a.wifi_native_probe and not a.wifi_gui) or a.scm_probe
     if diagnostic_prearm:
         a.shim_early_return = True
     with a.stock_boot.open('rb') as stock:
@@ -448,7 +456,7 @@ def main():
         if a.wifi_snoc_observe:
             from wifi_platform import add_snoc_observer_contract
             try:
-                add_snoc_observer_contract(tree, nodes, mission=a.wifi_snoc_mission)
+                add_snoc_observer_contract(tree, nodes, mission=a.wifi_snoc_mission, packets=a.wifi_snoc_start)
             except ValueError as error:
                 p.error(str(error))
         if a.scm_probe:
@@ -549,7 +557,7 @@ def main():
             command_line = command_line.replace('cpus=1', f'cpus={a.smp_cpus or 2}')
             command_line += ' redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0'
         if a.smp_gui:
-            command_line += ' redfingui=1'
+            command_line += ' redfingui=2' if a.wifi_gui else ' redfingui=1'
         if a.display_fit:
             command_line += f' redfinfit={1 if a.display_fit == "full" else 2}'
         if a.display:
@@ -566,7 +574,7 @@ def main():
         touch_mode = 2 if a.touch_id_probe or a.touch_events else int(a.touch_probe)
         for mode, name in ((touch_mode, 'redfintouch'), (usb_mode, 'redfinusb'),
                            (3 if a.scm_probe else 2 if a.gpu_power_probe else int(a.gpu_probe), 'redfingpu'),
-                           (2 if a.wifi_native_probe else int(a.wifi_probe), 'redfinwifi'),
+                           (0 if a.wifi_gui else 2 if a.wifi_native_probe else int(a.wifi_probe), 'redfinwifi'),
                            (int(a.rpmh_probe), 'redfinrpmh'), (int(a.touch_rail_probe), 'redfinrail')):
             if mode:
                 command_line += f' {name}={mode}'
@@ -578,11 +586,11 @@ def main():
             command_line += ' redfinsmmu=2' if a.gpu_smmu_context_probe else ' redfinsmmu=1'
         if a.scm_probe:
             command_line += ' redfinscm=1'
-        if a.wifi_native_probe:
+        if a.wifi_native_probe and not a.wifi_gui:
             command_line += ' redfinwifinative=1'
         if a.wifi_fw_source_probe:
             command_line += ' redfinwififw=1'
-        if a.wifi_fw_start:
+        if a.wifi_fw_start and not a.wifi_gui:
             command_line += ' redfinwififw=4' if a.wifi_host_services else ' redfinwififw=3' if a.wifi_glink_start else ' redfinwififw=2'
         if a.wifi_power_probe:
             command_line += ' redfinwifipower=1'
@@ -642,6 +650,7 @@ def main():
                 firmware = read_regular(a.wifi_fw_bundle, wifi_fw_blob.MAX_BUNDLE)
                 auxiliary = None
                 rmtfs = None
+                packet_dma = None
                 if a.wifi_host_services:
                     import wifi_assets
                     auxiliary = wifi_assets.pack(a.wifi_assets_inventory, modem_inventory=a.wifi_host_module_inventory,
@@ -652,9 +661,13 @@ def main():
                     import wifi_rmtfs
                     rmtfs = wifi_rmtfs.pack(a.wifi_rmtfs_inventory, a.dtb.read_bytes(), a.memory_base, a.memory_size)
                     (out / 'wifi-rmtfs.json').write_text(json.dumps(rmtfs[1], indent=2) + '\n')
+                if a.wifi_snoc_start:
+                    import wifi_dma
+                    packet_dma = wifi_dma.reserve_low(a.dtb.read_bytes(), a.memory_base, a.memory_size, rmtfs[1]['pool'])
+                    (out / 'wifi-dma.json').write_text(json.dumps(packet_dma, indent=2) + '\n')
                 payload, firmware_report = wifi_fw_blob.pack(payload, firmware, a.wifi_fw_sha256,
                     verified, 0x8000000, probe_exclusions=excluded, start=a.wifi_fw_start, transport=a.wifi_glink_start,
-                    auxiliary=auxiliary, rmtfs=rmtfs)
+                    auxiliary=auxiliary, rmtfs=rmtfs, packet_dma=packet_dma)
                 (out / 'payload.bin').write_bytes(payload)
                 at, size = struct.unpack_from('<QQ', payload, 32)
                 (out / 'redfin.adt').write_bytes(payload[at:at + size])
@@ -776,6 +789,10 @@ def main():
         manifest['wifi_snoc_observe'] = True
     if a.wifi_snoc_mission:
         manifest['wifi_snoc_mission'] = True
+    if a.wifi_snoc_start:
+        manifest['wifi_snoc_start'] = True
+    if a.wifi_gui:
+        manifest['wifi_gui'] = True
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

@@ -70,6 +70,11 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
   }
   unsigned n=pos-start;
   bool known=false;
+  if(redfin_gui_token(args+start,n,"redfingui=2")) {
+   uint64_t bit=1ULL<<(count-1);
+   if(seen&bit) return false;
+   seen|=bit;continue;
+  }
   for(unsigned i=0;i<count;i++) if(redfin_gui_token(args+start,n,required[i])) {
    if(seen&(1ULL<<i)) return false;
    seen|=1ULL<<i;known=true;break;
@@ -108,5 +113,17 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
  if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen || (screen_seen && fit_mode!=2)) return false;
  if(boot_id) *boot_id=nonce;
  return true;
+}
+/* Mode2 composes the proven GUI8 root/touch lease with native WLAN. It uses
+ * the same bounded command length; all ordinary GUI1 tokens remain exact. */
+static inline bool redfin_wifi_gui_profile(const char *args,unsigned bytes,uint64_t *boot_id)
+{
+ if(!redfin_gui_profile(args,bytes,boot_id)) return false;
+ for(unsigned at=0;at<bytes && args[at];) {
+  if(args[at]==' ') {at++;continue;}
+  unsigned first=at;while(at<bytes && args[at] && args[at]!=' ')at++;
+  if(redfin_gui_token(args+first,at-first,"redfingui=2")) return true;
+ }
+ return false;
 }
 #endif /* REDFIN_GUI_PROFILE_H */

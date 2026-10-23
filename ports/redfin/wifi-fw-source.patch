@@ -363,13 +363,14 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_boot.h b/iokit/Kernel/arm/redfin_wi
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_boot.h
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,45 @@
 +/* SPDX-License-Identifier: MIT
 + * Optional native boot-blob source. No startup hook or destination access.
 + */
 +#ifndef REDFIN_WIFI_FW_BOOT_H
 +#define REDFIN_WIFI_FW_BOOT_H
 +#include "../../../bsd/dev/redfin_wifi_fw_source.h"
++#include <arm64/redfin_gui_profile.h>
 +
 +struct rf_wifi_fw_boot_policy {
 +    void *context;
@@ -412,7 +413,7 @@ diff --git a/iokit/Kernel/arm/RedfinWiFiFWSource.cpp b/iokit/Kernel/arm/RedfinWi
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinWiFiFWSource.cpp
-@@ -0,0 +1,323 @@
+@@ -0,0 +1,332 @@
 +/* SPDX-License-Identifier: MIT
 + * The preferred HackiOS kernel 8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 + * redwood_image.c/redwood_wifi.c use firmware in a resident boot image. Redfin
@@ -431,8 +432,10 @@ new file mode 100644
 +#include <kern/thread.h>
 +#include <sys/errno.h>
 +#include "redfin_wifi_fw_boot.h"
++#include <sys/redfin_wifi_gui.h>
 +
 +extern "C" int redfin_spmi_return_ready(void);
++extern "C" int redfin_gui_bind_worker(void);
 +extern "C" int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32]);
 +static_assert(sizeof(boot_args) == RF_WIFI_FW_BOOT_ARGS_BYTES, "Redfin boot-args ABI");
 +
@@ -464,6 +467,12 @@ new file mode 100644
 +}
 +static bool fw_profile(uint64_t *boot_id)
 +{
++    if (redfin_wifi_gui_requested()) {
++        const char *args = PE_boot_args(); unsigned bytes = 0;
++        if (!args || !redfin_wifi_gui_ready() || !fw_identity()) return false;
++        while (bytes < 608 && args[bytes]) ++bytes;
++        return bytes < 608 && redfin_wifi_gui_profile(args, bytes + 1, boot_id);
++    }
 +    int cpus = 0, spmi = 0, returned = 0;
 +    char root[16] = {};
 +    if (!fw_identity() || !PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 1 ||
@@ -528,7 +537,7 @@ new file mode 100644
 +        (void *)current_thread() == boot->owner && PE_state.bootArgs == boot->arguments &&
 +        !memcmp(PE_state.bootArgs, boot->boot_args, sizeof(boot->boot_args)) &&
 +        __builtin_arm_rsr64("CurrentEL") == 4 && !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
-+        redfin_spmi_return_ready() == 1 && boot->policy.check &&
++        redfin_wifi_return_held() && boot->policy.check &&
 +        !boot->policy.check(boot->policy.context, blob->boot_id) &&
 +        fw_handoff(&fresh_blob, &fresh_layout) && !memcmp(blob, &boot->native_blob, sizeof(*blob)) &&
 +        !memcmp(layout, &boot->native_layout, sizeof(*layout)) &&
@@ -615,6 +624,7 @@ new file mode 100644
 +static bool fw_probe_args(const char *args, unsigned bytes, uint64_t *nonce_out, unsigned mode = 1)
 +{
 +    if (mode < 1 || mode > 4) return false;
++    if (mode == 4 && redfin_wifi_gui_profile(args, bytes, nonce_out)) return true;
 +    const char *const required[] = {
 +        "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
 +        "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
@@ -697,7 +707,7 @@ new file mode 100644
 +    const char *live = PE_boot_args();
 +    bool valid = context == &fw_probe && context->active && !context->poisoned &&
 +        live && context->bytes && boot_id == context->nonce &&
-+        current_thread() == context->owner && redfin_spmi_return_ready() == 1 &&
++        current_thread() == context->owner && redfin_wifi_return_held() &&
 +        __builtin_arm_rsr64("CurrentEL") == 4 &&
 +        !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
 +        !memcmp(live, context->args, context->bytes) && fw_probe_properties(context, false);
@@ -740,7 +750,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
-@@ -0,0 +1,1272 @@
+@@ -0,0 +1,1332 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin PIL coordinator, included once by RedfinWiFiFWSource.cpp.
 + * Google msm 500b3a2059c1eec0fec08ec56add06320ea901a8 peripheral-loader.c
@@ -762,6 +772,8 @@ new file mode 100644
 +#include "redfin_wifi_snoc.h"
 +#include "redfin_wifi_mission.h"
 +#include "redfin_wifi_ce.h"
++#include "redfin_wifi_snoc_lease.h"
++#include <sys/redfin_wifi_radio.h>
 +
 +extern "C" int redfin_wifi_power_start(void);
 +extern "C" int redfin_wifi_power_held(void);
@@ -829,6 +841,14 @@ new file mode 100644
 +    uint64_t mission_settle_ns;
 +    fw_start_map ce_map;
 +    rf_ce_snapshot ce;
++    bool packets_mode, packets_started;
++    fw_start_map packet_maps[5]; /* GR0/1 RW, CB RW, CE RW, shadow RW, DMA NC. */
++    uint64_t packet_pool[2], packet_buffer[2], packet_used, packet_epoch, packet_audit;
++    unsigned packet_stores;
++    rf_snoc_lease packet_lease;
++    rf_snoc_lease_ops packet_lease_ops;
++    uint32_t packet_expected[RF_CE_COUNT][RF_CE_OBSERVED_REGS];
++    uint32_t packet_rri[2];
 +};
 +static fw_start_context fw_start;
 +static const uint8_t fw_start_bdf_digest[32] = {
@@ -1007,7 +1027,32 @@ new file mode 100644
 +        valid = fw_property(node, "mission-enable", &enabled, sizeof(enabled)) && enabled == 1 &&
 +            fw_property(node, "mission-contract", mission, sizeof(mission)) && !memcmp(mission, expected_mission, sizeof(mission));
 +    }
++    if (valid && fw_start.packets_mode) {
++        uint32_t packets = 0, allocator = 0;
++        valid = fw_start.mission_mode && fw_property(node, "packets-enable", &packets, sizeof(packets)) && packets == 1 &&
++            fw_property(node, "ns-context-allocator", &allocator, sizeof(allocator)) && allocator == 1;
++    }
 +    return valid;
++}
++
++static bool fw_start_packet_contract(fw_start_context *context, bool capture)
++{
++    DTEntry node, memory;
++    const uint32_t expected[10] = {1, 0xc0, 1, 0x1000000, 0x4000, 12, 32, 2048, 1, 0};
++    uint32_t actual[10] = {}, owned = 0;
++    uint64_t pool[2] = {}, buffer[2] = {}, mapped[2] = {};
++    if (!context->packets_mode || !context->mission_mode ||
++        SecureDTLookupEntry(NULL, "/redfin-wifi-dma", &node) != kSuccess ||
++        !fw_property(node, "source-contract", actual, sizeof(actual)) || memcmp(actual, expected, sizeof(actual)) ||
++        !fw_property(node, "reg", pool, sizeof(pool)) || !fw_property(node, "buffer-reg", buffer, sizeof(buffer)) ||
++        !fw_property(node, "shim-owned", &owned, sizeof(owned)) || owned != 1 ||
++        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory) != kSuccess ||
++        !fw_property(memory, "RedfinWiFiDMA", mapped, sizeof(mapped)) || memcmp(mapped, pool, sizeof(pool)) ||
++        pool[0] < 0x80000000 || pool[0] > UINT64_C(0x100000000) - 0x1008000 || pool[1] != 0x1008000 ||
++        (pool[0] & 16383u) || buffer[0] != pool[0] + 16384u || buffer[1] != 0x1000000 ||
++        (pool[0] < context->rmtfs_pool[0] + context->rmtfs_pool[1] && context->rmtfs_pool[0] < pool[0] + pool[1])) return false;
++    if (capture) { memcpy(context->packet_pool, pool, sizeof(pool)); memcpy(context->packet_buffer, buffer, sizeof(buffer)); }
++    return !memcmp(context->packet_pool, pool, sizeof(pool)) && !memcmp(context->packet_buffer, buffer, sizeof(buffer));
 +}
 +
 +static int fw_start_check(void *opaque)
@@ -1022,7 +1067,8 @@ new file mode 100644
 +        (!context->wlfw_mode || (!context->wlfw_setup.poisoned && fw_start_wlfw_contract())) &&
 +        (!context->wlan_observe_mode || fw_start_wlan_contract()) &&
 +        (!context->snoc_mode || fw_start_snoc_contract()) &&
-+        (!context->mission_mode || !context->mission.poisoned);
++        (!context->mission_mode || !context->mission.poisoned) &&
++        (!context->packets_mode || (!context->packet_lease.poisoned && fw_start_packet_contract(context, false)));
 +    if (valid) for (unsigned i = 0; i < FW_START_MAPS; ++i) {
 +        const fw_start_map *entry = &context->mapping[i];
 +        if (!entry->map && !entry->memory && !entry->base) continue;
@@ -1478,6 +1524,7 @@ new file mode 100644
 +    IOLog("REDFIN WIFI HOST: event=%u file/service=%s bytes=%u; RAM only\n", kind, name, bytes);
 +}
 +#include "redfin_wifi_mission.inc"
++#include "redfin_wifi_packets.inc"
 +static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t length)
 +{
 +    fw_start_context *context = (fw_start_context *)opaque;
@@ -1636,7 +1683,7 @@ new file mode 100644
 +    uint64_t first = fw_start_ns(context), next_report = first;
 +    uint64_t timeout = context->wlan_observe_mode ? UINT64_C(30000000000) :
 +        context->host_mode ? UINT64_C(45000000000) : UINT64_C(10000000000);
-+    while (fw_start_ns(context) - first < timeout) {
++    while (redfin_wifi_gui_requested() || fw_start_ns(context) - first < timeout) {
 +        unsigned previous_ipa = context->smp2p.ipa_responses;
 +        int alive = context->host_mode ? rf_wifi_smp2p_ipa_respond(&context->smp2p, &context->smp_ops) :
 +            rf_wifi_smp2p_alive(&context->smp2p, &context->smp_ops);
@@ -1662,6 +1709,10 @@ new file mode 100644
 +            }
 +        }
 +        uint64_t now = fw_start_ns(context);
++        if (context->packets_started) {
++            error = fw_start_packets_poll(context, now);
++            if (error) return error;
++        }
 +        if (now >= next_report) {
 +            IOLog("REDFIN WIFI GLINK: version=%u channel=%u ack=%u open=%u RX=%#x heard=%u sent=%u packets=%u services=%u WLFW=%#x\n",
 +                context->glink.version, context->glink.channel, context->glink.acknowledged,
@@ -1748,7 +1799,12 @@ new file mode 100644
 +                        if (context->mission.stage == RF_MISSION_FAILED) return EIO;
 +                        if (context->mission.stage == RF_MISSION_COMPLETE) {
 +                            if (!context->mission_settle_ns) context->mission_settle_ns = now + UINT64_C(100000000);
-+                            if (now >= context->mission_settle_ns) return fw_start_ce_observe(context);
++                            if (now >= context->mission_settle_ns && !context->packets_started) {
++                                error = fw_start_ce_observe(context);
++                                if (error || !context->packets_mode) return error;
++                                error = fw_start_packets_start(context);
++                                if (error) return error;
++                            }
 +                        }
 +                    }
 +                }
@@ -1762,7 +1818,10 @@ new file mode 100644
 +            }
 +            if (!context->wlfw_mode && context->cap_received) return context->cap.result ? EIO : 0;
 +        }
-+        if (fw_start_pause(context, 1000)) return EPERM;
++        if (context->packets_started && redfin_wifi_gui_requested()) {
++            IOSleep(1);
++            if (fw_start_check(context)) return EPERM;
++        } else if (fw_start_pause(context, 1000)) return EPERM;
 +    }
 +    if (context->wlan_pmic_mode && context->wlan_observed) {
 +        error = redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy);
@@ -1930,7 +1989,12 @@ new file mode 100644
 +{
 +    const char *args = PE_boot_args(); unsigned bytes = 0;
 +    int mode = 0;
-+    bool mode_valid = PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) && mode >= 2 && mode <= 4;
++    bool gui = redfin_wifi_gui_requested();
++    if (gui && (!redfin_gui_bind_worker() || !redfin_wifi_gui_ready())) {
++        IOLog("REDFIN WIFI GUI: CPU0/touch handoff unavailable\n");
++        thread_terminate_self(); __builtin_unreachable();
++    }
++    bool mode_valid = gui ? ((mode = 4), true) : PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) && mode >= 2 && mode <= 4;
 +    DTEntry rmtfs_node;
 +    bool rmtfs_present = SecureDTLookupEntry(NULL, "/redfin-rmtfs", &rmtfs_node) == kSuccess;
 +    fw_start.transport_mode = mode >= 3; fw_start.host_mode = mode == 4;
@@ -1964,6 +2028,9 @@ new file mode 100644
 +    const void *mission_property = NULL; unsigned mission_bytes = 0; uint32_t mission_enabled = 0;
 +    bool mission_present = snoc_present && SecureDTGetProperty(snoc_node, "mission-enable", &mission_property, &mission_bytes) == kSuccess;
 +    fw_start.mission_mode = mission_present && fw_property(snoc_node, "mission-enable", &mission_enabled, sizeof(mission_enabled)) && mission_enabled == 1;
++    const void *packets_property = NULL; unsigned packets_bytes = 0; uint32_t packets_enabled = 0;
++    bool packets_present = snoc_present && SecureDTGetProperty(snoc_node, "packets-enable", &packets_property, &packets_bytes) == kSuccess;
++    fw_start.packets_mode = packets_present && fw_property(snoc_node, "packets-enable", &packets_enabled, sizeof(packets_enabled)) && packets_enabled == 1;
 +    if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
 +    if (!args || bytes == sizeof(fw_probe.args) ||
 +        !mode_valid || !fw_probe_args(args, bytes + 1, &fw_probe.nonce, (unsigned)mode) ||
@@ -1974,7 +2041,9 @@ new file mode 100644
 +        (wlan_present && (!fw_start.wlan_observe_mode || !fw_start_wlan_contract())) ||
 +        (pmic_present && !fw_start.wlan_pmic_mode) || (hang_present && !fw_start.wlan_hang_mode) ||
 +        (bdf_present && !fw_start.wlan_bdf_mode) || (snoc_present && !fw_start_snoc_contract()) ||
-+        (mission_present && !fw_start.mission_mode)) {
++        (mission_present && !fw_start.mission_mode) ||
++        (packets_present && (!fw_start.packets_mode || !fw_start_packet_contract(&fw_start, true))) ||
++        (gui && !fw_start.packets_mode)) {
 +        IOLog("REDFIN WIFI START: refused exact native firmware args/exclusions\n");
 +        thread_terminate_self();
 +        __builtin_unreachable();
@@ -1983,6 +2052,7 @@ new file mode 100644
 +    fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
 +    IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());
 +    int error = fw_start_run(&fw_start);
++    if (error && fw_start.packets_started) redfin_wifi_radio_abandon();
 +    IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x bdf=%u/%u/%u cal=%u bdf_ready=%u retained=1\n",
 +        error, fw_start.phase, fw_start.reset, fw_start.initialized, fw_start.setup,
 +        fw_start.authenticated, fw_start.smp2p.stage, fw_start.copies,
@@ -1990,9 +2060,9 @@ new file mode 100644
 +        (unsigned long long)fw_probe.boot.source.zeroed_bytes,
 +        fw_start.smp2p.wlan_found, fw_start.smp2p.wlan_state,
 +        fw_start.bdf.stage, fw_start.bdf.offset, fw_start.bdf.bdf_acks, fw_start.bdf.cal_reported, fw_start.bdf.fw_ready);
-+    if (fw_start.mission_mode) IOLog("REDFIN WIFI MISSION: final stage=%u requests=%u ACKs=%u result=%u error=%u CE=%u/%u; host DMA ungranted\n",
++    if (fw_start.mission_mode) IOLog("REDFIN WIFI MISSION: final stage=%u requests=%u ACKs=%u result=%u error=%u CE=%u/%u packet_transport=%u\n",
 +        fw_start.mission.stage, fw_start.mission.requests, fw_start.mission.responses, fw_start.mission.result,
-+        fw_start.mission.error, fw_start.ce.stage, fw_start.ce.stable);
++        fw_start.mission.error, fw_start.ce.stage, fw_start.ce.stable, fw_start.packets_started);
 +    /* This bounded diagnostic never frees remote-visible state or retries.
 +     * The shim/PMIC watchdog resets the complete platform back to fastboot. */
 +    if (error) fw_start.poisoned = true;
@@ -4114,7 +4184,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_mission.inc b/iokit/Kernel/arm/redfin_
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_mission.inc
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,74 @@
 +/* SPDX-License-Identifier: MIT
 + * Native worker's acknowledged mission entry and bounded CE register reads.
 + * No SMMU/CE writes, interrupt registration, ring memory or RX posting.
@@ -4124,6 +4194,8 @@ new file mode 100644
 +    fw_start_context *context = (fw_start_context *)opaque;
 +    if (context != &fw_start || !context->mission_mode || fw_start_glink_check(context) ||
 +        fw_start_snoc_check(context) || !context->snoc.stable) return EPERM;
++    if (context->packets_mode && context->packet_lease.leased)
++        return rf_snoc_lease_verify(&context->packet_lease, &context->packet_lease_ops);
 +    const rf_snoc_ops ops = {context, fw_start_snoc_check, fw_start_snoc_read};
 +    int error = rf_snoc_observe(&ops, &context->snoc_fresh);
 +    if (error) return error;
@@ -4263,3 +4335,347 @@ new file mode 100644
 +    s->error = (uint32_t)error; return error;
 +}
 +#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_snoc_lease.h b/iokit/Kernel/arm/redfin_wifi_snoc_lease.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_snoc_lease.h
+@@ -0,0 +1,125 @@
++/* SPDX-License-Identifier: MIT
++ * Sole-worker APPS SMMU lease for WLANc0/mask1, adapted from the native
++ * non-static NS allocator and the proven Redfin USB AArch64 bypass context.
++ * Include after wifi_snoc.h. No memory allocator or CE/DMA authority here.
++ */
++#ifndef REDFIN_WIFI_SNOC_LEASE_H
++#define REDFIN_WIFI_SNOC_LEASE_H
++#include <string.h>
++#define RF_SNOC_CONTEXT_FAULT 0xc00001feu
++#define RF_SNOC_LEASE_STORES 5u
++struct rf_snoc_lease_ops {
++    void *context;
++    int (*check)(void *);
++    int (*sample)(void *, struct rf_snoc_snapshot *);
++    int (*read)(void *, unsigned, uint32_t, uint32_t *);
++    int (*write)(void *, unsigned, uint32_t, uint32_t);
++    int (*delay)(void *, unsigned);
++};
++struct rf_snoc_lease {
++    unsigned attempted, leased, active, poisoned, stores, bank, slot, polls;
++    struct rf_snoc_snapshot expected, fresh;
++};
++static inline bool rf_snoc_raw_equal(const struct rf_snoc_snapshot *a, const struct rf_snoc_snapshot *b)
++{
++    return a && b && a->stable && b->stable && a->stage == 4 && b->stage == 4 && !a->error && !b->error &&
++        a->control == b->control && a->fault == b->fault &&
++        !memcmp(a->id, b->id, sizeof(a->id)) && !memcmp(a->syndrome, b->syndrome, sizeof(a->syndrome)) &&
++        !memcmp(a->smr, b->smr, sizeof(a->smr)) && !memcmp(a->s2cr, b->s2cr, sizeof(a->s2cr)) &&
++        !memcmp(a->bank, b->bank, sizeof(a->bank));
++}
++static inline int rf_snoc_lease_gate(struct rf_snoc_lease *s, const struct rf_snoc_lease_ops *o)
++{
++    if (!s) return EINVAL;
++    if (!o || !o->check || !o->sample || !o->read || !o->write || !o->delay || s->poisoned) {
++        s->poisoned = 1; s->active = 0; return EINVAL;
++    }
++    int error = o->check(o->context);
++    if (error) { s->poisoned = 1; s->active = 0; }
++    return error;
++}
++static inline int rf_snoc_lease_verify(struct rf_snoc_lease *s, const struct rf_snoc_lease_ops *o)
++{
++    int error = rf_snoc_lease_gate(s, o);
++    if (error) return error;
++    if (!s->attempted || !s->leased) return EPERM;
++    error = o->sample(o->context, &s->fresh);
++    if (!error && !rf_snoc_raw_equal(&s->expected, &s->fresh)) error = EAGAIN;
++    if (!error) error = rf_snoc_lease_gate(s, o);
++    if (error) { s->poisoned = 1; s->active = 0; }
++    return error;
++}
++/* A typed step is the only write address/value the adapter may accept. */
++static inline int rf_snoc_lease_step(const struct rf_snoc_lease *s, unsigned step,
++    unsigned *block, uint32_t *at, uint32_t *value)
++{
++    if (!s || !s->leased || !block || !at || !value || step >= RF_SNOC_LEASE_STORES ||
++        s->bank >= RF_SNOC_CONTEXTS || s->slot >= RF_SNOC_STREAMS) return EINVAL;
++    *block = 0;
++    switch (step) {
++    case 0: *block = 1; *at = 0x1000u*s->bank; *value = 0; break;
++    case 1: *at = 0x1800 + 4u*s->bank; *value = 1; break;
++    case 2: *at = 0x1000 + 4u*s->bank; *value = 0x10000; break;
++    case 3: *at = 0xc00 + 4u*s->slot; *value = 0x300u | s->bank; break;
++    default: *at = 0x800 + 4u*s->slot; *value = 0x800100c0; break;
++    }
++    return 0;
++}
++static inline int rf_snoc_lease_claim(struct rf_snoc_lease *s, const struct rf_snoc_lease_ops *o,
++    const struct rf_snoc_snapshot *initial)
++{
++    bool reserved[RF_SNOC_CONTEXTS] = {false};
++    int error = rf_snoc_lease_gate(s, o);
++    if (error) return error;
++    if (s->attempted) return EBUSY;
++    s->attempted = 1;
++    if (!initial || !initial->stable || initial->stage != 4 || initial->error || initial->fault ||
++        initial->malformed_routes || initial->wlan_matches[0] || initial->wlan_matches[1] ||
++        initial->id[0] != 0x4c017e51u || initial->id[1] != 0x6000003eu || initial->id[2] != 0x5111u ||
++        (initial->control & 9u) || !(initial->control & 0x400u)) { error = EPERM; goto failed; }
++    s->expected = *initial; s->bank = RF_SNOC_CONTEXTS; s->slot = RF_SNOC_STREAMS;
++    for (unsigned i = 0; i < RF_SNOC_STREAMS; ++i) {
++        uint32_t smr = initial->smr[i], type = (initial->s2cr[i] >> 16) & 3u, bank = initial->s2cr[i] & 255u;
++        if (type == 3 || (smr & 0x8000u) || (!type && bank >= RF_SNOC_CONTEXTS) ||
++            rf_snoc_stream_matches(smr, 0xc0) || rf_snoc_stream_matches(smr, 0xc1)) { error = EPERM; goto failed; }
++        if (!type) reserved[bank] = true;
++        if (!(smr & 0x80000000u) && s->slot == RF_SNOC_STREAMS) s->slot = i;
++    }
++    for (unsigned i = 0; i < RF_SNOC_CONTEXTS; ++i) {
++        const struct rf_snoc_bank *b = &initial->bank[i];
++        if (!reserved[i] && !(b->sctlr & 1u) && !b->cbar && !b->cba2r &&
++            !(b->fault & RF_SNOC_CONTEXT_FAULT)) { s->bank = i; break; }
++    }
++    if (s->bank == RF_SNOC_CONTEXTS || s->slot == RF_SNOC_STREAMS) { error = ENOSPC; goto failed; }
++    /* Permanently consumed software lease. Never release or retry, including
++     * failed readbacks. Every inherited foreign route/context stays exact. */
++    s->leased = 1;
++    for (unsigned step = 0; step < RF_SNOC_LEASE_STORES; ++step) {
++        unsigned block = 0; uint32_t at = 0, value = 0, observed = 0;
++        error = rf_snoc_lease_verify(s, o); if (error) goto failed;
++        error = rf_snoc_lease_step(s, step, &block, &at, &value); if (error) goto failed;
++        ++s->stores;
++        error = o->write(o->context, block, at, value); if (error) goto failed;
++        for (unsigned us = 0; us < 1000; ++us) {
++            error = rf_snoc_lease_gate(s, o); if (error) goto failed;
++            ++s->polls; error = o->read(o->context, block, at, &observed); if (error) goto failed;
++            if (observed == value) break;
++            error = o->delay(o->context, 1); if (error) goto failed;
++        }
++        if (observed != value) { error = EIO; goto failed; }
++        switch (step) {
++        case 0: s->expected.bank[s->bank].sctlr = value; break;
++        case 1: s->expected.bank[s->bank].cba2r = value; break;
++        case 2: s->expected.bank[s->bank].cbar = value; break;
++        case 3: s->expected.s2cr[s->slot] = value; break;
++        default: s->expected.smr[s->slot] = value; break;
++        }
++    }
++    error = rf_snoc_lease_verify(s, o); if (error) goto failed;
++    s->active = 1;
++    return 0;
++failed:
++    s->poisoned = 1; s->active = 0;
++    return error;
++}
++#endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_packets.inc b/iokit/Kernel/arm/redfin_wifi_packets.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_wifi_packets.inc
+@@ -0,0 +1,209 @@
++/* SPDX-License-Identifier: MIT
++ * Native Redfin hardware owner for the complete ath10k-compatible packet and
++ * station engine. One bound worker owns routes, MMIO and fresh DMA32 memory.
++ * The retained RMTFS allocation is never used by the packet engine.
++ */
++static uint64_t fw_start_packet_phys(const fw_start_context *context, unsigned i)
++{
++    const uint64_t physical[4] = {RF_SNOC_SMMU_BASE, RF_SNOC_SMMU_BASE + RF_SNOC_CONTEXT_OFFSET,
++        RF_CE_BASE, UINT64_C(0x18830000)};
++    return i < 4 ? physical[i] : context->packet_pool[0];
++}
++static uint64_t fw_start_packet_bytes(const fw_start_context *context, unsigned i)
++{
++    const uint64_t bytes[4] = {RF_SNOC_GLOBAL_BYTES, RF_SNOC_CONTEXT_BYTES, RF_CE_MAP_BYTES, 16384};
++    return i < 4 ? bytes[i] : context->packet_pool[1];
++}
++static int fw_start_packet_owner(void *opaque)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (context != &fw_start || !context->packets_mode || fw_start_glink_check(context) ||
++        fw_start_snoc_check(context) || context->mission.stage != RF_MISSION_COMPLETE || !context->ce.stable)
++        return EPERM;
++    for (unsigned i = 0; i < 5; ++i) {
++        const fw_start_map *m = &context->packet_maps[i];
++        if (!m->memory && !m->map && !m->base) continue;
++        if (!m->memory || !m->map || !m->base || m->map->getVirtualAddress() != m->base ||
++            m->map->getLength() != fw_start_packet_bytes(context, i)) return EPERM;
++    }
++    return 0;
++}
++static int fw_start_packet_sample(void *opaque, rf_snoc_snapshot *out)
++{
++    if (!out || fw_start_packet_owner(opaque)) return EPERM;
++    const rf_snoc_ops ops = {opaque, fw_start_snoc_check, fw_start_snoc_read};
++    return rf_snoc_observe(&ops, out);
++}
++static __attribute__((noinline)) void fw_start_packet_store(uintptr_t address, uint32_t value)
++{
++    /* Force a GPR even for zero: the reviewed Qualcomm global-register trap
++     * cannot decode stores using architectural register31. */
++    __asm__ volatile("dmb oshst\n\tstr %w0, [%1]\n\tdsb osh" : : "r"(value), "r"(address) : "memory");
++}
++static int fw_start_packet_route_write(void *opaque, unsigned block, uint32_t at, uint32_t value)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    unsigned expected_block = 0; uint32_t expected_at = 0, expected_value = 0;
++    if (fw_start_packet_owner(context) || !context->packet_lease.stores || block > 1 ||
++        rf_snoc_lease_step(&context->packet_lease, context->packet_lease.stores - 1u,
++            &expected_block, &expected_at, &expected_value) ||
++        block != expected_block || at != expected_at || value != expected_value || !context->packet_maps[block].base)
++        return EPERM;
++    ++context->packet_stores;
++    fw_start_packet_store(context->packet_maps[block].base + at, value);
++    return 0;
++}
++static int fw_start_packet_route_delay(void *opaque, unsigned us)
++{ return us == 1 ? fw_start_pause(opaque, 1) : EINVAL; }
++static int fw_start_packet_bus_check(void *opaque)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (fw_start_packet_owner(context) || !context->packet_lease.active || context->packet_lease.poisoned) return EPERM;
++    const rf_snoc_lease *lease = &context->packet_lease;
++    uint32_t value = 0;
++    const unsigned block[5] = {0, 0, 1, 0, 0};
++    const uint32_t at[5] = {0x800 + 4u*lease->slot, 0xc00 + 4u*lease->slot, 0x1000u*lease->bank,
++        0x1800 + 4u*lease->bank, 0x1000 + 4u*lease->bank};
++    const uint32_t expected[5] = {0x800100c0, 0x300u | lease->bank, 0, 1, 0x10000};
++    for (unsigned i = 0; i < 5; ++i)
++        if (fw_start_snoc_read(context, block[i], at[i], &value) || value != expected[i]) return EPERM;
++    return 0;
++}
++static void *fw_start_packet_allocate(void *opaque, uint64_t bytes, uint64_t *physical)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (!physical || !bytes || bytes > 0x1000000 || fw_start_packet_bus_check(context) ||
++        !context->packet_maps[4].base) return NULL;
++    bytes = (bytes + 4095u) & ~UINT64_C(4095);
++    if (context->packet_used > context->packet_buffer[1] || bytes > context->packet_buffer[1] - context->packet_used) return NULL;
++    *physical = context->packet_buffer[0] + context->packet_used;
++    uintptr_t base = context->packet_maps[4].base + 16384u + context->packet_used;
++    context->packet_used += bytes;
++    bzero((void *)base, (size_t)bytes);
++    __asm__ volatile("dsb sy" ::: "memory");
++    return (void *)base;
++}
++static int fw_start_packet_ce_read(void *opaque, uint32_t at, uint32_t *out)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (!out || !rf_ce_read_allowed(at) || fw_start_packet_bus_check(context) || !context->ce_map.base) return EPERM;
++    uintptr_t address = context->ce_map.base + at; uint32_t value;
++    __asm__ volatile("ldr %w0, [%1]\n\tdmb oshld" : "=r"(value) : "r"(address) : "memory");
++    *out = value;
++    return value == UINT32_MAX ? EIO : 0;
++}
++static const uint32_t fw_packet_source_entries[12] = {16, 0, 0, 32, 2048, 0, 0, 2, 0, 0, 0, 0};
++static const uint32_t fw_packet_dest_entries[12] = {0, 512, 64, 0, 0, 512, 0, 2, 128, 512, 512, 512};
++static bool fw_start_packet_address(const fw_start_context *context, uint32_t value)
++{
++    return value >= context->packet_buffer[0] && value < context->packet_buffer[0] + context->packet_used && !(value & 15u);
++}
++static int fw_start_packet_ce_write(void *opaque, uint32_t at, uint32_t value)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if (fw_start_packet_bus_check(context) || !context->packet_maps[2].base || (at & 3u)) return EPERM;
++    unsigned ce = at / 0x1000u, offset = at & 0xfffu, index = RF_CE_OBSERVED_REGS;
++    bool allowed = false;
++    if (ce == 12) {
++        allowed = (offset == 4 && fw_start_packet_address(context, value)) || (offset == 8 && !value);
++    } else if (ce < 12) {
++        for (unsigned i = 0; i < RF_CE_OBSERVED_REGS; ++i) if (rf_ce_observed_offsets[i] == offset) index = i;
++        if (offset == 0 && fw_packet_source_entries[ce]) allowed = fw_start_packet_address(context, value);
++        else if (offset == 4 && fw_packet_source_entries[ce]) allowed = !value;
++        else if (offset == 8 && fw_packet_source_entries[ce]) allowed = value == fw_packet_source_entries[ce];
++        else if (offset == 0x0c && fw_packet_dest_entries[ce]) allowed = fw_start_packet_address(context, value);
++        else if (offset == 0x10 && fw_packet_dest_entries[ce]) allowed = !((value ^ context->packet_expected[ce][4]) & ~0x1fu) && !(value & 0x1fu);
++        else if (offset == 0x14 && fw_packet_dest_entries[ce]) allowed = value == fw_packet_dest_entries[ce];
++        else if (offset == 0x18) allowed = !((value ^ context->packet_expected[ce][6]) & ~(0xffffu | (7u << 17)));
++        else if (offset == 0x4c && fw_packet_source_entries[ce]) allowed = value == fw_packet_source_entries[ce];
++        else if (offset == 0x50 && fw_packet_dest_entries[ce]) allowed = value == fw_packet_dest_entries[ce];
++        else if (offset == 0x40 && fw_packet_dest_entries[ce] && ce != 7) allowed = value < fw_packet_dest_entries[ce];
++    }
++    if (!allowed) return EPERM;
++    ++context->packet_stores;
++    fw_start_packet_store(context->packet_maps[2].base + at, value);
++    if (ce < 12 && index < RF_CE_OBSERVED_REGS) context->packet_expected[ce][index] = value;
++    if (ce == 12) context->packet_rri[offset == 4 ? 0 : 1] = value;
++    return 0;
++}
++static int fw_start_packet_shadow(void *opaque, unsigned ce, uint32_t value)
++{
++    fw_start_context *context = (fw_start_context *)opaque;
++    if ((ce != 0 && ce != 3 && ce != 4) || value >= fw_packet_source_entries[ce] ||
++        fw_start_packet_bus_check(context) || !context->packet_maps[3].base) return EPERM;
++    ++context->packet_stores;
++    fw_start_packet_store(context->packet_maps[3].base + 0x2000 + 4u*ce, value);
++    return 0;
++}
++static int fw_start_packet_guards(fw_start_context *context, bool initial)
++{
++    if (fw_start_packet_owner(context) || !context->packet_maps[4].base) return EPERM;
++    const volatile uint64_t *pool = (const volatile uint64_t *)context->packet_maps[4].base;
++    for (uint64_t i = 0; i < context->packet_pool[1] / 8u; ++i) {
++        bool guard = i < 2048u || i >= (16384u + context->packet_buffer[1]) / 8u;
++        if (guard) { if (pool[(size_t)i] != UINT64_C(0xd3d3d3d3d3d3d3d3)) return EIO; }
++        else if (initial) { if (pool[(size_t)i]) return EBUSY; }
++        else i = (16384u + context->packet_buffer[1]) / 8u - 1u;
++    }
++    return 0;
++}
++static int fw_start_packets_start(fw_start_context *context)
++{
++    if (fw_start_packet_owner(context) || context->packets_started || context->packet_lease.attempted ||
++        fw_start_mission_check(context) || redfin_wifi_power_audit()) return EPERM;
++    for (unsigned i = 0; i < 5; ++i) {
++        if (fw_start_packet_owner(context)) return EPERM;
++        fw_start_map *m = &context->packet_maps[i];
++        if (m->memory || m->map || m->base) return EBUSY;
++        uint64_t bytes = fw_start_packet_bytes(context, i);
++        m->memory = IOMemoryDescriptor::withPhysicalAddress(fw_start_packet_phys(context, i), bytes, kIODirectionInOut);
++        m->map = m->memory ? m->memory->map(i == 4 ? kIOMapWriteCombineCache : kIOMapInhibitCache) : NULL;
++        if (!m->map || !m->map->getVirtualAddress() || m->map->getLength() != bytes) return ENOMEM;
++        m->base = (uintptr_t)m->map->getVirtualAddress();
++    }
++    int error = fw_start_packet_guards(context, true);
++    if (error) return error;
++    context->packet_lease_ops = {context, fw_start_packet_owner, fw_start_packet_sample, fw_start_snoc_read,
++        fw_start_packet_route_write, fw_start_packet_route_delay};
++    error = rf_snoc_lease_claim(&context->packet_lease, &context->packet_lease_ops, &context->snoc);
++    IOLog("REDFIN WIFI PACKETS: context lease=%d bank=%u slot=%u stores=%u retained=1\n", error,
++        context->packet_lease.bank, context->packet_lease.slot, context->packet_lease.stores);
++    if (error) return error;
++    memcpy(context->packet_expected, context->ce.ce, sizeof(context->packet_expected));
++    const redfin_wifi_radio_ops ops = {context, fw_start_packet_bus_check, fw_start_packet_allocate,
++        fw_start_packet_ce_read, fw_start_packet_ce_write, fw_start_packet_shadow};
++    error = redfin_wifi_radio_start(&ops);
++    if (error) return error;
++    context->packets_started = true;
++    context->packet_epoch = fw_start_ns(context); context->packet_audit = context->packet_epoch + UINT64_C(1000000000);
++    IOLog("REDFIN WIFI PACKETS: native CE/HTC/WMI/HTT engine started, DMA bytes=%llu; station and iOS networking follow readiness\n",
++        (unsigned long long)context->packet_used);
++    return 0;
++}
++static int fw_start_packets_poll(fw_start_context *context, uint64_t now)
++{
++    if (fw_start_packet_bus_check(context)) return EPERM;
++    int error = redfin_wifi_radio_poll((uint32_t)((now - context->packet_epoch) / 1000000u));
++    if (error) return error;
++    if (now >= context->packet_audit) {
++        error = rf_snoc_lease_verify(&context->packet_lease, &context->packet_lease_ops);
++        if (!error) error = fw_start_packet_guards(context, false);
++        if (!error) error = redfin_wifi_power_audit();
++        for (unsigned ce = 0; !error && ce < RF_CE_COUNT; ++ce) {
++            for (unsigned i = 0; i < 7; ++i) {
++                uint32_t value = 0;
++                error = fw_start_packet_ce_read(context, 0x1000u*ce + rf_ce_observed_offsets[i], &value);
++                if (!error && value != context->packet_expected[ce][i]) error = EAGAIN;
++                if (error) break;
++            }
++        }
++        if (error) return error;
++        struct redfin_wifi_radio_state state = {};
++        redfin_wifi_radio_state(&state);
++        IOLog("REDFIN WIFI PACKETS: HTC=%u WMI=%u interface=%u scan=%u station=%u error=%u RX=%u TX=%u DMA=%llu stores=%u\n",
++            state.htc, state.wmi, state.ready, state.scanning, state.phase, state.last_error,
++            state.received, state.transmitted, (unsigned long long)context->packet_used, context->packet_stores);
++        context->packet_audit = now + UINT64_C(1000000000);
++    }
++    return 0;
++}

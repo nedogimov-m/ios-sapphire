@@ -27,6 +27,7 @@ HARNESS = r'''
 #include "redfin_rpmh.h"
 #include "wifi_bw.h"
 #include "wifi_wlan.h"
+#include "gui-profile.h"
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
 typedef uintptr_t DTEntry;
@@ -82,6 +83,8 @@ static int PE_parse_boot_argn(const char *key,void *out,int size) {
 extern "C" int redfin_spmi_return_ready(void) {
     ++proof_calls;return ready && (!lose_proof || proof_calls<lose_proof);
 }
+extern "C" bool redfin_wifi_gui_requested(void){return false;}
+extern "C" bool redfin_wifi_return_held(void){return redfin_spmi_return_ready()==1;}
 static int SecureDTLookupEntry(void *,const char *path,DTEntry *out) {
     if(!strcmp(path,"/")){*out=1;return 0;}
     if(!strcmp(path,"/chosen")){*out=2;return 0;}
@@ -359,7 +362,8 @@ class NativeWifiProbeTests(unittest.TestCase):
             section = patch.split('+++ b/iokit/Kernel/arm/' + destination + '\n', 1)[1]
             section = section.split('diff --git ', 1)[0]
             actual = ''.join(line[1:] for line in section.splitlines(keepends=True) if line.startswith('+'))
-            self.assertEqual(actual, (HERE / source).read_text())
+            expected = (HERE / source).read_text().replace('"gui-profile.h"', '<arm64/redfin_gui_profile.h>')
+            self.assertEqual(actual, expected)
 
 
 if __name__ == '__main__':

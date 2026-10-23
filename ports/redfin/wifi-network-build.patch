@@ -1,0 +1,38 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -122,6 +122,12 @@
+ bsd/dev/redfin_gpu_power.c			standard
+ bsd/dev/redfin_gmu_probe.c			standard
+ bsd/dev/redfin_wifi_aop.c			standard
++bsd/dev/redfin_wifi_net.c			standard
++bsd/dev/redfin_wifi_sta.c			standard
++bsd/dev/redfin_wifi_apple80211.c		standard
++bsd/dev/redfin_wifi_wpa.c			standard
++bsd/dev/redfin_wifi_bridge.c		standard
++bsd/dev/redfin_wifi_gui.c			standard
+ bsd/dev/redfin_wifi_fw_source.c		standard
+ bsd/dev/redfin_wifi_smp2p.c		standard
+ bsd/dev/redfin_rpmh_touch.c			standard
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -15,6 +15,7 @@
+ iokit/Kernel/arm/SapphireGpu.cpp                                 optional iokitcpp
+ iokit/Kernel/arm/RedfinWiFiProbe.cpp                              optional iokitcpp
+ iokit/Kernel/arm/RedfinWiFiFirmware.cpp                           optional iokitcpp
++iokit/Kernel/arm/RedfinWLAN.cpp				optional iokitcpp
+ iokit/Kernel/arm/RedfinWiFiFWSource.cpp                           optional iokitcpp
+ iokit/Kernel/arm/SweetEntitlements.cpp                           optional iokitcpp
+ iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitcpp
+diff --git a/bsd/sys/Makefile b/bsd/sys/Makefile
+--- a/bsd/sys/Makefile
++++ b/bsd/sys/Makefile
+@@ -172,6 +172,7 @@
+ # Installs header file for Apple internal use for kernel extensions -
+ #	  $(DSTROOT)/System/Library/Frameworks/Kernel.framework/PrivateHeaders
+ PRIVATE_KERNELFILES = \
++	redfin_wifi_net.h redfin_wifi_sta.h redfin_wifi_wpa.h redfin_wifi_radio.h redfin_wifi_gui.h \
+ 	acct.h \
+ 	codesign.h \
+ 	cprotect.h \

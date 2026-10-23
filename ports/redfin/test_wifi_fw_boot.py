@@ -87,6 +87,9 @@ static vm_offset_t ml_static_vtop(vm_offset_t address) {
  return address>=args.virtBase && address-args.virtBase<args.memSize ? args.physBase+address-args.virtBase : 0;
 }
 extern "C" int redfin_spmi_return_ready(void){++return_calls;return ready==1 && (!lose_return || return_calls<lose_return);}
+extern "C" bool redfin_wifi_gui_requested(void){return false;}
+extern "C" bool redfin_wifi_gui_ready(void){return false;}
+extern "C" bool redfin_wifi_return_held(void){return redfin_spmi_return_ready()==1;}
 extern "C" int redfin_mpss_kernel_sha256(void *,const uint8_t *data,size_t bytes,uint8_t out[32]){return fixture_hash(data,bytes,out);}
 static int PE_parse_boot_argn(const char *key,void *output,int bytes) {
  if(!strcmp(key,"redfinbootid")){if(bytes!=8)return 0;memcpy(output,&nonce,8);return 1;}

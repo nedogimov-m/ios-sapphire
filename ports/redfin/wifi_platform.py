@@ -433,14 +433,14 @@ def add_wlan_observer_contract(tree, nodes, power=False, pmic=False, hang=False,
         ('bdf-sha256', bytes.fromhex('7b0add4f469df39c0b26167513da8931419e917a4d9058252c05e0f5cffe7b90'))] if bdf else [])))
 
 
-def add_snoc_observer_contract(tree, nodes, mission=False):
+def add_snoc_observer_contract(tree, nodes, mission=False, packets=False):
     """Bind actual WLAN/SMMU routes before an opt-in read-only snapshot.
 
     Native ICNSS maps the host's CE buffers through c0/mask1. Its separate
     smmu_iova_ipa aperture is not the WLAN stream and is not spare CE RAM.
     """
-    if type(mission) is not bool:
-        raise ValueError('native SNOC mission selector must be boolean')
+    if type(mission) is not bool or type(packets) is not bool or (packets and not mission):
+        raise ValueError('native SNOC selectors must be boolean; packets require mission')
     words = lambda *values: struct.pack('>' + 'I' * len(values), *values)
     wlan_path = '/soc/qcom,icnss@18800000'
     smmu_path = '/soc/apps-smmu@15000000'
@@ -484,7 +484,8 @@ def add_snoc_observer_contract(tree, nodes, mission=False):
         ('ce-intids', mkadt.u32(*(spi + 32 for spi in irq))),
         ('observe-only', mkadt.u32(1))] + ([
         ('mission-enable', mkadt.u32(1)),
-        ('mission-contract', mkadt.u32(1, 0x23, 0x22, 6, 12, 21, 12, 0, 0x240000, 0x1000))] if mission else [])))
+        ('mission-contract', mkadt.u32(1, 0x23, 0x22, 6, 12, 21, 12, 0, 0x240000, 0x1000))] if mission else []) + ([
+        ('packets-enable', mkadt.u32(1)), ('ns-context-allocator', mkadt.u32(1))] if packets else [])))
 
 
 def main():

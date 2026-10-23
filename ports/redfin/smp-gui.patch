@@ -379,7 +379,7 @@ diff --git a/osfmk/arm64/redfin_gui_profile.h b/osfmk/arm64/redfin_gui_profile.h
 new file mode 100644
 --- /dev/null
 +++ b/osfmk/arm64/redfin_gui_profile.h
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,129 @@
 +/* Exact bounded GUI8 profile shared by the relocatable shim and XNU.
 + * Display/touch geometry and the fenced HFS root are checked by their drivers.
 + * No allocation, libc, device access or absolute pointer tables here. */
@@ -452,6 +452,11 @@ new file mode 100644
 +  }
 +  unsigned n=pos-start;
 +  bool known=false;
++  if(redfin_gui_token(args+start,n,"redfingui=2")) {
++   uint64_t bit=1ULL<<(count-1);
++   if(seen&bit) return false;
++   seen|=bit;continue;
++  }
 +  for(unsigned i=0;i<count;i++) if(redfin_gui_token(args+start,n,required[i])) {
 +   if(seen&(1ULL<<i)) return false;
 +   seen|=1ULL<<i;known=true;break;
@@ -490,6 +495,18 @@ new file mode 100644
 + if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen || (screen_seen && fit_mode!=2)) return false;
 + if(boot_id) *boot_id=nonce;
 + return true;
++}
++/* Mode2 composes the proven GUI8 root/touch lease with native WLAN. It uses
++ * the same bounded command length; all ordinary GUI1 tokens remain exact. */
++static inline bool redfin_wifi_gui_profile(const char *args,unsigned bytes,uint64_t *boot_id)
++{
++ if(!redfin_gui_profile(args,bytes,boot_id)) return false;
++ for(unsigned at=0;at<bytes && args[at];) {
++  if(args[at]==' ') {at++;continue;}
++  unsigned first=at;while(at<bytes && args[at] && args[at]!=' ')at++;
++  if(redfin_gui_token(args+first,at-first,"redfingui=2")) return true;
++ }
++ return false;
 +}
 +#endif /* REDFIN_GUI_PROFILE_H */
 diff --git a/osfmk/arm64/redfin_gui_runtime.h b/osfmk/arm64/redfin_gui_runtime.h

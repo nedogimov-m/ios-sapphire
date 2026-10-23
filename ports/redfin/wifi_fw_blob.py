@@ -39,7 +39,7 @@ def aligned(value, alignment):
     return (value + alignment - 1) & -alignment
 
 
-def payload_info(data):
+def payload_info(data, *, gui_packets=False):
     require(HEADER <= len(data) <= MAX_PAYLOAD, 'payload outside implementation bound')
     magic, version, count = struct.unpack_from('<8sII', data)
     require(magic == b'SWEETXNU' and version == 1 and 1 <= count < 64, 'unsupported payload ABI or no segment slot')
@@ -63,7 +63,12 @@ def payload_info(data):
             pairs[key] = value
     required = {'cpus': '1', 'rd': 'md0', 'modem': '0', 'wifi': '0', 'gpu': '0', 'sweetusb': '0',
                 'redfinspmi': '1', 'redfinreturn': '1'}
-    require(all(pairs.get(key) == value for key, value in required.items()), 'payload is not the native CPU0/md0/return profile')
+    gui = False
+    if gui_packets and pairs.get('redfingui') == '2':
+        from gui_profile import wifi as wifi_gui_profile
+        gui = wifi_gui_profile(decoded)
+    require(gui or all(pairs.get(key) == value for key, value in required.items()),
+            'payload is not the native diagnostic or composed GUI packet profile')
     nonce = pairs.get('redfinbootid', '')
     require(re.fullmatch(r'0x[0-9a-f]{16}', nonce) and int(nonce, 16), 'payload requires one nonzero fresh boot ID')
     table = HEADER + 32 * count
@@ -114,7 +119,7 @@ def verify_bundle(verifier, path, digest, excluded):
 
 
 def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_exclusions=None, start=False, transport=False,
-         auxiliary=None, rmtfs=None):
+         auxiliary=None, rmtfs=None, packet_dma=None):
     require(type(max_payload_bytes) is int and 0 < max_payload_bytes <= MAX_PAYLOAD, 'explicit payload cap outside implementation bound')
     require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'expected bundle SHA256 must be lowercase hex')
     require(64 <= len(firmware) <= MAX_BUNDLE and hashlib.sha256(firmware).hexdigest() == digest,
@@ -124,7 +129,7 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
             0 < native_report.get('memory_bytes', 0) <= 0x11800000 and
             native_report.get('hardware_started') is False and native_report.get('signature_authenticated') is False,
             'missing native planner/source verification')
-    info = payload_info(payload)
+    info = payload_info(payload, gui_packets=packet_dma is not None)
     require(type(start) is bool and (not start or probe_exclusions is not None),
             'native startup requires its live source exclusions')
     require(type(transport) is bool and (not transport or start), 'GLINK requires native firmware startup')
@@ -143,8 +148,13 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
                 (0xA0000000, 0x2300000) in map(tuple, probe_exclusions),
                 'source probe lacks native kernel/display exclusions')
         command = payload[72:HEADER].split(b'\0', 1)[0].decode('ascii').split()
-        require(command.count('redfinwififw=4' if auxiliary is not None else 'redfinwififw=3' if transport else 'redfinwififw=2' if start else 'redfinwififw=1') == 1 and
-                'redfinwifi=2' in command and 'redfinwifinative=1' in command,
+        from gui_profile import wifi as wifi_gui_profile
+        gui = False
+        if 'redfingui=2' in command:
+            gui = wifi_gui_profile(' '.join(command))
+        require((gui and start and transport and auxiliary is not None and packet_dma is not None) or
+                (command.count('redfinwififw=4' if auxiliary is not None else 'redfinwififw=3' if transport else 'redfinwififw=2' if start else 'redfinwififw=1') == 1 and
+                 'redfinwifi=2' in command and 'redfinwifinative=1' in command),
                 'source-probe payload has no exact native selector')
         probe = [('probe-contract', mkadt.u32(1, 4, 64, 0)),
                  ('probe-exclusions', mkadt.u64(*(value for pair in probe_exclusions for value in pair)))]
@@ -181,6 +191,11 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
             ('pool-reg', mkadt.u64(*pool)), ('shared-reg', mkadt.u64(*shared)),
             ('bundle-bytes', mkadt.u64(len(rmtfs_data))), ('bundle-sha256', bytes.fromhex(rmtfs_report['sha256'])),
             ('shim-owned', mkadt.u32(0))]))
+    if packet_dma is not None:
+        require(start and transport and auxiliary is not None and rmtfs is not None,
+                'packet DMA requires the complete native host/RMTFS profile')
+        from wifi_dma import add_contract
+        add_contract(info['root'], info['memory_map'], packet_dma, rmtfs_report['pool'])
     auxiliary_bytes = 0
     if auxiliary is not None:
         require(start and transport and type(auxiliary) is tuple and len(auxiliary) == 2,

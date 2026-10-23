@@ -18,6 +18,7 @@
 #include "../../bsddev/redfin_wifi_smem.h"
 #include "redfin_wifi_bw.h"
 #include "redfin_wifi_wlan.h"
+#include <sys/redfin_wifi_gui.h>
 
 extern "C" int redfin_spmi_return_ready(void);
 extern "C" void redfin_wifi_fw_source_probe(void);
@@ -182,6 +183,7 @@ static wf_power_context wf_power;
 
 static bool wf_power_args(const char *args, unsigned bytes, unsigned firmware = 0)
 {
+    if (firmware == 4 && redfin_wifi_gui_profile(args, bytes, NULL)) return true;
     const char *const required[] = {
         "debug=0xc", "serial=3", "cpus=1", "keepsyms=1", "-noprogress", "rd=md0",
         "sweettouch=0", "sweetkeys=0", "sweetusb=0", "sweetcpufreq=0", "sweetbattery=0",
@@ -268,7 +270,7 @@ static int wf_power_check(void *opaque)
         !memcmp(args, context->args, context->arg_bytes) &&
         __builtin_arm_rsr64("CurrentEL") == 4 &&
         !(__builtin_arm_rsr64("MPIDR_EL1") & UINT64_C(0xff00ffffff)) &&
-        redfin_spmi_return_ready() == 1 && (!context->firmware || wf_start_platform());
+        redfin_wifi_return_held() && (!context->firmware || wf_start_platform());
     if (valid) for (unsigned i = 0; i < WFP_MAPS; ++i) {
         if (!context->maps[i].mapping || !context->base[i] ||
             context->maps[i].mapping->getVirtualAddress() != context->base[i] ||
@@ -607,7 +609,8 @@ static int wf_power_acquire(bool firmware)
     unsigned bytes = 0;
     if (args) while (bytes < sizeof(context->args) && args[bytes]) ++bytes;
     int mode = 0;
-    if (firmware && (!PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) || mode < 2 || mode > 4)) return EPERM;
+    if (firmware && redfin_wifi_gui_requested()) mode = 4;
+    else if (firmware && (!PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) || mode < 2 || mode > 4)) return EPERM;
     if (context->arg_bytes || !args || bytes == sizeof(context->args) ||
         !wf_power_args(args, bytes + 1u, firmware ? (unsigned)mode : 0) || !wf_power_platform() || (firmware && !wf_start_platform())) {
         IOLog("REDFIN WIFI POWER: refused exact args/live-FDT/RAM contract before mapping\n"); return EPERM;

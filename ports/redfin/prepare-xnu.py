@@ -188,6 +188,7 @@ def main(argv=None):
          'display-fit.patch', 'wifi-aop.patch', 'wifi-native-probe.patch',
          'wifi-native-start.patch', 'gmu-probe.patch', 'gmu-start.patch', 'scm-query.patch',
          'wifi-firmware.patch', 'wifi-fw-source.patch', 'wifi-smp2p.patch', 'wifi-fw-build.patch',
+         'wifi-radio.patch', 'wifi-network.patch', 'wifi-network-build.patch', 'wifi-gui.patch',
          'preinit-progress.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)

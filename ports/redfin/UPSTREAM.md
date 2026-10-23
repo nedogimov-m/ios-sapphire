@@ -482,3 +482,45 @@ station separation remains the software reference for the packet stage.
 
 [kernel]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [userland]: https://github.com/oosexgang/hackios-xnu-userland/tree/906425b75e02b4f99eb5d7bb1ef7c9583472d772
+
+## Complete native packet/station/GUI composition — 2026-10-24
+
+Reused the preferred kernel's pinned `bsd/dev/redwood_{net,sta,apple80211}.c`,
+`bsd/sys/redwood_{net,sta}.h`, `iokit/Kernel/RedwoodWLAN.cpp` and
+`wifi/lx/src/lx_wpa.{c,h}`. The adapted Redfin sources retain the serialized
+station requests, BSD Ethernet boundary, Apple80211 events/ioctls and
+SystemConfiguration registry discovery. Interface units/names are selected
+from free BSD names instead of assuming en0. The IOCTL layouts originate
+from upstream's iOS16.5 review; their actual20H392 behavior is still a device
+validation item. No Apple binary or daemon from another release is copied.
+
+The inherited `TopazModem.cpp` already contains ath10k-compatible
+CE/HTC/WMI/HTT, scan, management, association and Ethernet code from
+patches0122/0123/0129/0130. A narrow native callback boundary reuses those
+software layers while Redfin owns PAS4, GLINK, power, MMIO and memory.
+The legacy modem startup, fixed E0000000 pool, SM6225 SMMU/WLAN addresses
+and filesystem firmware/EFS paths remain disabled by modem0/wifi0.
+Redfin WMI uses the actual service-ready RF-chain count (at most two).
+The preferred WPA2 engine adds its checked lengths, MIC/nonce/replay/key
+unwrap and group-key path; duplicate message3 retransmits message4 without
+reinstalling keys. Join names/keys are not printed by the native join path.
+
+The WLAN-only context adapts the reviewed native non-static allocator and
+the proven USB AArch64 bypass sequence: retain all latent references,
+claim one disabled unreferenced NS bank and one invalid stream slot, then
+disable SCTLR, set CBA2R1/CBAR10000, publish TRANS and finally SIDc0/mask1.
+Each uncertain write or foreign-state change stops without retry/release.
+The separate16MiB DMA32 buffer has two16KiB guards; its complete proposed
+range is checked against the actual Image/DTB, XNU, all live reservations
+and retained RMTFS before the shim initializes it. RMTFS is never spare CE
+RAM. Native callbacks admit only the host CE fields, owned ring addresses
+and three reviewed TX shadows; firmware-side ring geometry stays intact.
+
+GUI2 composes these resources with the existing GUI8 root/display/touch
+profile. It uses the same bounded boot-argument length, frozen CPU/root
+checks and cached shim return. Touch completes its DRV2 power setup first;
+then a permanently bound CPU0 WLAN worker imports that stable handoff,
+retains the established votes and services GLINK/RMTFS and packet rings
+throughout the GUI run. Other CPUs submit queued station/frame requests.
+The existing ordinary GUI1 and diagnostic profiles keep their own gates.
+No GPU/Metal work is moved ahead of working GUI Wi-Fi.

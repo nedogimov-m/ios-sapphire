@@ -7,6 +7,8 @@ static int fw_start_mission_check(void *opaque)
     fw_start_context *context = (fw_start_context *)opaque;
     if (context != &fw_start || !context->mission_mode || fw_start_glink_check(context) ||
         fw_start_snoc_check(context) || !context->snoc.stable) return EPERM;
+    if (context->packets_mode && context->packet_lease.leased)
+        return rf_snoc_lease_verify(&context->packet_lease, &context->packet_lease_ops);
     const rf_snoc_ops ops = {context, fw_start_snoc_check, fw_start_snoc_read};
     int error = rf_snoc_observe(&ops, &context->snoc_fresh);
     if (error) return error;

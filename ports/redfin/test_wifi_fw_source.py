@@ -385,6 +385,7 @@ class WifiFirmwareSourceTests(unittest.TestCase):
         for source, target in entries:
             expected = (HERE / source).read_text()
             expected = expected.replace('"wifi_firmware.h"', '"../../iokit/Kernel/arm/redfin_wifi_firmware.h"')
+            expected = expected.replace('"gui-profile.h"', '<arm64/redfin_gui_profile.h>')
             expected = expected.replace('"wifi_fw_source.h"', '"redfin_wifi_fw_source.h"' if source.endswith('.c')
                                         else '"../../../bsd/dev/redfin_wifi_fw_source.h"')
             section = patch.split('+++ b/' + target + '\n', 1)[1].split('diff --git ', 1)[0]

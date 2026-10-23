@@ -24,7 +24,7 @@ struct boot_args {
     char command[608];
     uint64_t flags, actual_memory;
 };
-struct plan { uint64_t adt, args, top, entry, rmtfs_pool, rmtfs_owned, wlfw_verified; };
+struct plan { uint64_t adt, args, top, entry, rmtfs_pool, rmtfs_owned, wlfw_verified, wifi_dma_pool, wifi_dma_owned; };
 _Static_assert(offsetof(struct payload, segments) == 680, "payload ABI");
 _Static_assert(sizeof(struct boot_args) == 736, "boot args ABI");
 
@@ -221,7 +221,7 @@ parsed:
             }
         }
     }
-    if (command_seen != 2047) return 0;
+    if (command_seen != 2047 && !redfin_wifi_gui_profile(p->command, sizeof(p->command), NULL)) return 0;
     unsigned bank = 0, source = 0, arguments = 0;
     for (unsigned i = 0; i < hw->banks; ++i) if (pool[0] >= hw->memory[i].base &&
         pool[0] + pool[1] <= hw->memory[i].base + hw->memory[i].size) bank = 1;
@@ -257,6 +257,98 @@ parsed:
     return 1;
 }
 
+/* Separate fresh DMA32 allocation; RMTFS memory is never recycled for CE.
+ * The exact current ABL Image/DTB and inherited fixed reservations take
+ * precedence over the producer's proposed address. All checks precede writes. */
+static int wifi_dma_plan(const struct payload *p, const struct hardware *hw,
+    uint64_t image, uint64_t image_bytes, uint64_t dtb, uint64_t dtb_bytes, struct plan *q)
+{
+    const volatile unsigned char *b = (const volatile unsigned char *)p + p->adt_offset;
+    uint32_t pending[32], kinds[32];
+    uint64_t pool[2] = {0}, buffer[2] = {0}, map[2] = {0}, off = 0, owned = 0;
+    unsigned depth = 0, nodes = 0, maps = 0, snoc_nodes = 0, rx_seen = 0;
+    q->wifi_dma_pool = q->wifi_dma_owned = 0;
+    pending[0] = 1; kinds[0] = 0;
+    for (;;) {
+        while (!pending[depth]) { if (!depth) goto parsed; --depth; }
+        --pending[depth];
+        if (depth == 31 || off > p->adt_size || p->adt_size - off < 8) return 0;
+        uint32_t props = word(b + off, 0), children = word(b + off + 4, 0), kind = 0, seen = 0;
+        off += 8;
+        if (!props || props > 1024 || children > 1024) return 0;
+        for (unsigned i = 0; i < props; ++i) {
+            if (p->adt_size - off < 36) return 0;
+            const volatile unsigned char *key = b + off;
+            uint32_t length = word(key + 32, 0); off += 36;
+            uint64_t padded = ((uint64_t)length + 3) & ~3ULL;
+            if ((length & 0x80000000u) || padded > p->adt_size - off) return 0;
+            const volatile unsigned char *value = b + off;
+            if (!i) {
+                if (!same(key, 32, "name")) return 0;
+                if (depth == 1 && same(value, length, "redfin-wifi-dma")) {
+                    if (++nodes != 1 || props != 5 || children) return 0;
+                    kind = 1;
+                } else if (depth == 1 && same(value, length, "redfin-wifi-snoc")) {
+                    if (++snoc_nodes != 1 || children) return 0;
+                    kind = 4;
+                } else if (depth == 1 && same(value, length, "chosen")) kind = 2;
+                else if (depth == 2 && kinds[depth] == 2 && same(value, length, "memory-map")) kind = 3;
+            } else if (kind == 1) {
+                unsigned bit = 0;
+                if (same(key, 32, "reg") || same(key, 32, "buffer-reg")) {
+                    uint64_t *region = same(key, 32, "reg") ? pool : buffer;
+                    bit = region == pool ? 1u : 2u;
+                    if (length != 16) return 0;
+                    region[0] = quad(value); region[1] = quad(value + 8);
+                } else if (same(key, 32, "source-contract")) {
+                    const uint32_t expected[10] = {1, 0xc0, 1, 0x1000000, 0x4000, 12, 32, 2048, 1, 0};
+                    bit = 4; if (length != sizeof(expected)) return 0;
+                    for (unsigned j = 0; j < 10; ++j) if (word(value + 4u*j, 0) != expected[j]) return 0;
+                } else if (same(key, 32, "shim-owned")) {
+                    bit = 8; if (length != 4 || word(value, 0)) return 0; owned = off;
+                } else return 0;
+                if (seen & bit) return 0;
+                seen |= bit;
+            } else if (kind == 3 && same(key, 32, "RedfinWiFiDMA")) {
+                if (++maps != 1 || length != 16) return 0;
+                map[0] = quad(value); map[1] = quad(value + 8);
+            } else if (kind == 4) {
+                unsigned bit = same(key, 32, "packets-enable") ? 1u :
+                    same(key, 32, "ns-context-allocator") ? 2u : same(key, 32, "mission-enable") ? 4u : 0;
+                if (bit) {
+                    if ((rx_seen & bit) || length != 4 || word(value, 0) != 1) return 0;
+                    rx_seen |= bit;
+                }
+            }
+            off += padded;
+        }
+        if (kind == 1 && seen != 15) return 0;
+        ++depth; pending[depth] = children; kinds[depth] = kind;
+    }
+parsed:
+    if (off != p->adt_size) return 0;
+    if (!nodes && !maps) return !(rx_seen & 3u);
+    if (nodes != 1 || maps != 1 || snoc_nodes != 1 || rx_seen != 7 || !owned ||
+        !q->rmtfs_pool || !q->wlfw_verified || pool[0] != map[0] || pool[1] != map[1] ||
+        pool[0] < 0x80000000ULL || pool[0] > 0x100000000ULL - 0x1008000 || pool[1] != 0x1008000 ||
+        (pool[0] & (PAGE - 1)) || buffer[0] != pool[0] + PAGE || buffer[1] != 0x1000000 ||
+        overlap(pool[0], pool[1], p->phys, p->memory) || overlap(pool[0], pool[1], image, image_bytes) ||
+        overlap(pool[0], pool[1], dtb, dtb_bytes) || overlap(pool[0], pool[1], q->rmtfs_pool, 0x288000)) return 0;
+    unsigned bank = 0;
+    for (unsigned i = 0; i < hw->banks; ++i)
+        if (pool[0] >= hw->memory[i].base && pool[0] + pool[1] <= hw->memory[i].base + hw->memory[i].size) bank = 1;
+    if (!bank) return 0;
+    for (unsigned i = 0; i < hw->reservations; ++i)
+        if (overlap(pool[0], pool[1], hw->reserved[i].base, hw->reserved[i].size)) return 0;
+    q->wifi_dma_pool = pool[0]; q->wifi_dma_owned = owned;
+    return 1;
+}
+
+static void wifi_dma_initialize(volatile uint64_t *pool)
+{
+    for (uint64_t i = 0; i < 0x1008000 / 8; ++i)
+        pool[i] = i < PAGE / 8 || i >= (PAGE + 0x1000000) / 8 ? 0xd3d3d3d3d3d3d3d3ULL : 0;
+}
 
 /* SMP is a separate frozen md0 experiment. Merely asking cpus=2 cannot
  * bypass either compiled shim ownership or the unchanged UP validator. */
@@ -440,7 +532,10 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
     static const char root_names[][24] = {
         "chosen", "cpus", "arm-io", "defaults", "product", "redfin-spmi",
         "redfin-return", "redfin-log", "redfin-watchdog", "pram",
-        "redfin-touch", "redfin-ufs", "sweet-fbcon"
+        "redfin-touch", "redfin-ufs", "sweet-fbcon",
+        "redfin-wifi", "redfin-wifi-native", "redfin-wifi-power", "redfin-wifi-start",
+        "redfin-wifi-glink", "redfin-wifi-wlfw", "redfin-wifi-wlan", "redfin-wifi-snoc",
+        "redfin-rmtfs", "redfin-wifi-dma", "redfin-wifi-assets", "redfin-wifi-fw"
     };
     static const char cpu_u32[][24] = {
         "reg", "cpu-id", "cluster-id", "cluster-type", "die-cluster-id",
@@ -459,7 +554,7 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
                 for (unsigned i = 0; i < REDFIN_SMP_CPUS; i++)
                     for (unsigned j = 0; j < i; j++) if (handles[i] == handles[j]) return 0;
                 return off == size && cpus == REDFIN_SMP_CPUS && (root_seen & 15) == 15 &&
-                    (!gui || root_seen == (1U << 13) - 1) &&
+                    (!gui || root_seen == (1U << (gui == 2 ? 25 : 13)) - 1) &&
                     arm_seen == (gui ? 3U : 1U) &&
                     (chosen_children & 1) && chosen_children <= 3;
             }
@@ -486,13 +581,13 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
                     kind = ROOT;
                 } else if (depth == 1 && kinds[depth] == ROOT) {
                     unsigned n = 0;
-                    unsigned count = gui ? 13 : 10;
+                    unsigned count = gui == 2 ? 25 : gui ? 13 : 10;
                     for (; n < count; n++)
                         if (smp_string(value, len, root_names[n])) break;
                     if (n == count || (root_seen & (1U << n))) return 0;
                     root_seen |= 1U << n;
                     kind = n == 0 ? CHOSEN : n == 1 ? CPUS : n == 2 ? ARMIO : LEAF;
-                    if (gui && n >= 10) kind = n == 10 ? RF_GUI_TOUCH : n == 11 ? RF_GUI_UFS : RF_GUI_FBCON;
+                    if (gui && n >= 10 && n < 13) kind = n == 10 ? RF_GUI_TOUCH : n == 11 ? RF_GUI_UFS : RF_GUI_FBCON;
                 } else if (depth == 2 && kinds[depth] == CPUS) {
                     char name[5] = {'c', 'p', 'u', (char)('0' + cpus), 0};
                     if (cpus >= REDFIN_SMP_CPUS || !smp_string(value, len, name)) return 0;
@@ -633,9 +728,11 @@ static const char *validate(const void *data, uint64_t size, uint64_t image,
     q->entry = p->phys + (p->entry - p->virt);
     const volatile unsigned char *tree = (const volatile unsigned char *)data + p->adt_offset;
     int gui = REDFIN_GUI_BUILD_READY && redfin_gui_profile(p->command, sizeof(p->command), NULL);
-    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, 1) : adt_valid_smp(tree, p->adt_size)) :
+    int wifi_gui = gui && redfin_wifi_gui_profile(p->command, sizeof(p->command), NULL);
+    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, wifi_gui ? 2 : 1) : adt_valid_smp(tree, p->adt_size)) :
         adt_valid_up(tree, p->adt_size, mpidr, p->phys, p->memory))) return "ADT CPU or RAM mismatch";
     if (!rmtfs_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "RMTFS RAM ownership";
+    if (!wifi_dma_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "WLAN DMA RAM ownership";
     return NULL;
 }
 
@@ -643,6 +740,7 @@ static const char *validate(const void *data, uint64_t size, uint64_t image,
 const char *redfin_validate(const void *data, uint64_t size, uint64_t image,
     uint64_t image_end, uint64_t dtb, const struct hardware *hw, uint64_t mpidr)
 { struct plan q; return validate(data, size, image, image_end, dtb, hw, mpidr, &q); }
+void redfin_wifi_dma_initialize(void *pool) { wifi_dma_initialize((volatile uint64_t *)pool); }
 #else
 extern unsigned char _head[], _end[];
 #define MRS(reg) ({ uint64_t v; __asm__ volatile("mrs %0, " #reg : "=r"(v)); v; })
@@ -664,6 +762,7 @@ const char *redfin_boot(uint64_t dtb, const struct hardware *hw)
         for (uint64_t i = 0; i < 0x288000 / 8; ++i)
             pool[i] = i < PAGE / 8 || i >= (PAGE + 0x280000) / 8 ? 0xa7a7a7a7a7a7a7a7ULL : 0;
     }
+    if (q.wifi_dma_pool) wifi_dma_initialize((volatile uint64_t *)(uintptr_t)q.wifi_dma_pool);
     for (unsigned i = 0; i < p->count; i++) {
         const struct segment *s = &p->segments[i];
         volatile unsigned char *dst = (void *)(uintptr_t)(p->phys + (s->va - p->virt));
@@ -681,6 +780,7 @@ const char *redfin_boot(uint64_t dtb, const struct hardware *hw)
         *(volatile uint32_t *)(tree + i) = *(const volatile uint32_t *)(adt + i);
     if (q.rmtfs_pool) *(volatile uint32_t *)(tree + q.rmtfs_owned) = 1;
     if (q.wlfw_verified) *(volatile uint32_t *)(tree + q.wlfw_verified) = 1;
+    if (q.wifi_dma_pool) *(volatile uint32_t *)(tree + q.wifi_dma_owned) = 1;
     volatile struct boot_args *args = (void *)(uintptr_t)q.args;
     for (unsigned i = 0; i < sizeof(*args); i += 8)
         *(volatile uint64_t *)((volatile unsigned char *)args + i) = 0;

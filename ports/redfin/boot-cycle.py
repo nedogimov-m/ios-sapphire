@@ -137,6 +137,12 @@ def diagnostic_return_profile(image, manifest, tokens):
 def smp_gui_return_profile(image, manifest, arguments, checksum):
     """Require the separately compiled, bounded GUI8 contract and provenance."""
     boot_id = gui_profile.validate(arguments)
+    if manifest.get('wifi_gui', False) is not gui_profile.wifi(arguments):
+        raise ValueError('GUI WLAN handoff manifest does not match its exact profile')
+    if gui_profile.wifi(arguments) and any(manifest.get(name) is not True for name in
+            ('wifi_fw_start', 'wifi_host_services', 'wifi_wlfw_setup', 'wifi_wlan_power',
+             'wifi_wlan_bdf_download', 'wifi_snoc_observe', 'wifi_snoc_mission', 'wifi_snoc_start')):
+        raise ValueError('GUI WLAN profile lacks its complete native packet/station contract')
     fit_tokens = [token for token in arguments.split() if token.startswith('redfinfit=')]
     fit = {'redfinfit=1': 'full', 'redfinfit=2': 'cutout'}.get(fit_tokens[0]) if fit_tokens else None
     if manifest.get('display_fit') != fit:

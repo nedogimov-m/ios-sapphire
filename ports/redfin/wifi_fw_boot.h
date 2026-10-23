@@ -4,6 +4,7 @@
 #ifndef REDFIN_WIFI_FW_BOOT_H
 #define REDFIN_WIFI_FW_BOOT_H
 #include "wifi_fw_source.h"
+#include "gui-profile.h"
 
 struct rf_wifi_fw_boot_policy {
     void *context;

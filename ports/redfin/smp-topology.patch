@@ -53,28 +53,10 @@ diff --git a/ports/redfin/mkadt.py b/ports/redfin/mkadt.py
 diff --git a/ports/redfin/loader.c b/ports/redfin/loader.c
 --- a/ports/redfin/loader.c
 +++ b/ports/redfin/loader.c
-@@ -3,6 +3,7 @@
- #include "config.h"
- #include "watchdog.h"
- #include <stddef.h>
-+#include "gui-profile.h"
- 
- #if XNU_PAYLOAD_SIZE
- #define PAGE 0x4000ULL
-@@ -50,7 +51,7 @@
- { return n && m && a < b + m && b < a + n; }
- 
- /* Parse a bounded ADT, including its shape, boot CPU and RAM properties. */
--static int adt_valid(const volatile unsigned char *b, uint64_t size,
-+static int adt_valid_up(const volatile unsigned char *b, uint64_t size,
-     uint64_t mpidr, uint64_t base, uint64_t memory)
- {
-     uint32_t pending[32], kinds[32];
-@@ -99,6 +100,318 @@
-     }
+@@ -350,6 +350,320 @@
+         pool[i] = i < PAGE / 8 || i >= (PAGE + 0x1000000) / 8 ? 0xd3d3d3d3d3d3d3d3ULL : 0;
  }
  
-+
 +/* SMP is a separate frozen md0 experiment. Merely asking cpus=2 cannot
 + * bypass either compiled shim ownership or the unchanged UP validator. */
 +#if defined(SHIM_EARLY_RETURN) && SHIM_EARLY_RETURN == 1 && \
@@ -257,7 +239,10 @@ diff --git a/ports/redfin/loader.c b/ports/redfin/loader.c
 +    static const char root_names[][24] = {
 +        "chosen", "cpus", "arm-io", "defaults", "product", "redfin-spmi",
 +        "redfin-return", "redfin-log", "redfin-watchdog", "pram",
-+        "redfin-touch", "redfin-ufs", "sweet-fbcon"
++        "redfin-touch", "redfin-ufs", "sweet-fbcon",
++        "redfin-wifi", "redfin-wifi-native", "redfin-wifi-power", "redfin-wifi-start",
++        "redfin-wifi-glink", "redfin-wifi-wlfw", "redfin-wifi-wlan", "redfin-wifi-snoc",
++        "redfin-rmtfs", "redfin-wifi-dma", "redfin-wifi-assets", "redfin-wifi-fw"
 +    };
 +    static const char cpu_u32[][24] = {
 +        "reg", "cpu-id", "cluster-id", "cluster-type", "die-cluster-id",
@@ -276,7 +261,7 @@ diff --git a/ports/redfin/loader.c b/ports/redfin/loader.c
 +                for (unsigned i = 0; i < REDFIN_SMP_CPUS; i++)
 +                    for (unsigned j = 0; j < i; j++) if (handles[i] == handles[j]) return 0;
 +                return off == size && cpus == REDFIN_SMP_CPUS && (root_seen & 15) == 15 &&
-+                    (!gui || root_seen == (1U << 13) - 1) &&
++                    (!gui || root_seen == (1U << (gui == 2 ? 25 : 13)) - 1) &&
 +                    arm_seen == (gui ? 3U : 1U) &&
 +                    (chosen_children & 1) && chosen_children <= 3;
 +            }
@@ -303,13 +288,13 @@ diff --git a/ports/redfin/loader.c b/ports/redfin/loader.c
 +                    kind = ROOT;
 +                } else if (depth == 1 && kinds[depth] == ROOT) {
 +                    unsigned n = 0;
-+                    unsigned count = gui ? 13 : 10;
++                    unsigned count = gui == 2 ? 25 : gui ? 13 : 10;
 +                    for (; n < count; n++)
 +                        if (smp_string(value, len, root_names[n])) break;
 +                    if (n == count || (root_seen & (1U << n))) return 0;
 +                    root_seen |= 1U << n;
 +                    kind = n == 0 ? CHOSEN : n == 1 ? CPUS : n == 2 ? ARMIO : LEAF;
-+                    if (gui && n >= 10) kind = n == 10 ? RF_GUI_TOUCH : n == 11 ? RF_GUI_UFS : RF_GUI_FBCON;
++                    if (gui && n >= 10 && n < 13) kind = n == 10 ? RF_GUI_TOUCH : n == 11 ? RF_GUI_UFS : RF_GUI_FBCON;
 +                } else if (depth == 2 && kinds[depth] == CPUS) {
 +                    char name[5] = {'c', 'p', 'u', (char)('0' + cpus), 0};
 +                    if (cpus >= REDFIN_SMP_CPUS || !smp_string(value, len, name)) return 0;
@@ -389,7 +374,7 @@ diff --git a/ports/redfin/loader.c b/ports/redfin/loader.c
  static const char *validate(const void *data, uint64_t size, uint64_t image,
      uint64_t image_end, uint64_t dtb, const struct hardware *hw, uint64_t mpidr, struct plan *q)
  {
-@@ -132,6 +445,9 @@
+@@ -383,6 +697,9 @@
      unsigned nul = 0, entry = 0;
      for (unsigned i = 0; i < sizeof(p->command); i++) if (!p->command[i]) nul = 1;
      if (!nul || mpidr > 0x700 || (mpidr & 0xff)) return "command or CPU affinity";
@@ -399,16 +384,16 @@ diff --git a/ports/redfin/loader.c b/ports/redfin/loader.c
      if ((p->adt_offset & 15) || (p->adt_size & 3) || p->adt_size < 8 || p->adt_size > UINT32_MAX ||
          p->adt_offset < table || p->adt_offset > size || p->adt_size > size - p->adt_offset) return "ADT bounds";
      uint64_t last = p->virt;
-@@ -158,8 +474,11 @@
+@@ -409,7 +726,11 @@
      q->top = (q->args + sizeof(struct boot_args) + PAGE - 1) & ~(PAGE - 1);
      if (q->top > p->phys + p->memory) return "boot args outside RAM";
      q->entry = p->phys + (p->entry - p->virt);
--    if (!adt_valid((const volatile unsigned char *)data + p->adt_offset, p->adt_size, mpidr, p->phys, p->memory)) return "ADT CPU or RAM mismatch";
+-    if (!adt_valid_up((const volatile unsigned char *)data + p->adt_offset, p->adt_size, mpidr, p->phys, p->memory)) return "ADT CPU or RAM mismatch";
 +    const volatile unsigned char *tree = (const volatile unsigned char *)data + p->adt_offset;
 +    int gui = REDFIN_GUI_BUILD_READY && redfin_gui_profile(p->command, sizeof(p->command), NULL);
-+    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, 1) : adt_valid_smp(tree, p->adt_size)) :
++    int wifi_gui = gui && redfin_wifi_gui_profile(p->command, sizeof(p->command), NULL);
++    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, wifi_gui ? 2 : 1) : adt_valid_smp(tree, p->adt_size)) :
 +        adt_valid_up(tree, p->adt_size, mpidr, p->phys, p->memory))) return "ADT CPU or RAM mismatch";
      if (!rmtfs_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "RMTFS RAM ownership";
+     if (!wifi_dma_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "WLAN DMA RAM ownership";
      return NULL;
- }
- 
