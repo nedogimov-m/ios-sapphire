@@ -28,11 +28,16 @@ static inline int rf_wifi_pas_run(const struct rf_sq_ops *ops, unsigned conventi
     report->function = request.x[0]; report->argument = 4;
     if (!ops->valid(ops->context)) return ECANCELED;
     uint64_t first = ops->time_ns(ops->context);
+    /* AUTH validates the complete modem image. Hardware exceeds the short
+     * query/metadata continuation budget; native Linux resumes until done.
+     * Retain an explicit call/time bound for this longer operation. */
+    const unsigned max_resumes = command == 5 ? 1024u : 16u;
+    const uint64_t timeout_ns = command == 5 ? UINT64_C(10000000000) : UINT64_C(2000000000);
     live = request;
     for (;;) {
         if (!ops->valid(ops->context)) return ECANCELED;
         uint64_t now = ops->time_ns(ops->context);
-        if (now < first || now - first > UINT64_C(2000000000)) return ETIMEDOUT;
+        if (now < first || now - first > timeout_ns) return ETIMEDOUT;
         if (live.x[0] != request.x[0] && live.x[0] != 1) return EINVAL;
         live.x[7] = 0;
         int error = ops->invoke(ops->context, &live);
@@ -40,13 +45,13 @@ static inline int rf_wifi_pas_run(const struct rf_sq_ops *ops, unsigned conventi
         if (error) return error;
         if (!ops->valid(ops->context)) return ECANCELED;
         now = ops->time_ns(ops->context);
-        if (now < first || now - first > UINT64_C(2000000000)) return ETIMEDOUT;
+        if (now < first || now - first > timeout_ns) return ETIMEDOUT;
         report->elapsed_ns = now - first;
         report->status = convention == 32 ? (int64_t)(int32_t)(uint32_t)live.x[0] : (int64_t)live.x[0];
         for (unsigned i = 0; i < 3; ++i)
             report->value[i] = convention == 32 ? (uint32_t)live.x[i + 1] : live.x[i + 1];
         if (report->status == 1) {
-            if (++report->resumes > 16) return ETIMEDOUT;
+            if (++report->resumes > max_resumes) return ETIMEDOUT;
             continue;
         }
         if (report->status == -12) {

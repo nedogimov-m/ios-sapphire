@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN entire MPSS copy/readback hardware PASS; AUTH continuation bound — 2026-10-23
+
+Source5b2bf74 / native build154749. Fresh authenticated/image/nonce-matched
+`wifi-fw-start-v4-20261023-154912`, bootid921aa40b67cb0805, repeats native
+ARC/BCM/AOP, successful PAS4 INIT/MEM_SETUP and SMP2P preparation. All4478
+metadata/copy/zero chunks complete. Actual counters confirm99,384,626payload
+bytes and191,553,563BSS bytes written and read back; the source stage advances
+to segments and SMP2P auth_begin succeeds. SMC AUTH_AND_RESET is entered,
+but returns interrupted status1 repeatedly. The original short helper bound
+stops after17calls/17resumes withETIMEDOUT60; no final PAS response or ready
+is observed. State remains retained. PID1 stays alive, authenticated recovery
+observes unchanged clean HFSX/write_count462335 and verifies fastboot return.
+
+V4 kernel6e12470409beaabb7e81c96789bedb2e5ca6364ae81303c6a6aeec480c09bcf2;
+imageb20269c9c01504cfecea27f5070d1ef5369f9f229a8446d91df304b8d23b77a6.
+Exact v4 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=2 redfinspmi=1 redfinreturn=1 redfinbootid=0x921aa40b67cb0805`.
+
+AUTH validates the full image and needs a separate budget from short metadata
+and query calls. Current v5 preserves native returned x1..x6/cookie and permits
+at most1024AUTH continuations within10seconds. Other PAS calls retain16 and
+2seconds; busy retries stay bounded at3. An observed-symptom regression covers
+40valid AUTH continuations, unchanged short-call refusal and exhausted1024
+budget. All10BCM/PAS checksPASS in0.675s. Local native build`build-20261023-155300.log`PASS,
+actual full Image/live-FDT/return preflightPASS; no new CI run.
+Kernel`c88c3b62bd960a55a2a247694b05f96a05bfc0bb98badd0dadd469920ef1c053`; image`a83307f37412206f70cea14ce4907704f88431ab797bcb382de3dad30fe2c391`.
+Exact v5 args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfinwifi=2 redfinwifinative=1 redfinwififw=2 redfinspmi=1 redfinreturn=1 redfinbootid=0x9a1be342d624d81a`.
+Next: fresh v5hardware run through completed AUTH and new SMP2P ready.
+
 ## REDFIN PAS4 INIT/MEM_SETUP and SMP2P hardware PASS; copy pacing — 2026-10-23
 
 Sourcecc94617 / native build154143. Fresh authenticated/image/nonce-matched

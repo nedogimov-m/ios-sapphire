@@ -32,13 +32,13 @@ static int invoke(void *p,struct rf_sq_regs *r) {
  if(p!=&report || !owner)return -91;
  ++calls;
  if(calls==1)first=*r;
- else if(mode==4 || mode==6) {
+ else if(mode==4 || mode==6 || mode==9) {
   if(r->x[0]!=1 || r->x[1]!=41 || r->x[2]!=42 || r->x[6]!=46){++unsafe;return -92;}
  } else if(memcmp(r,&first,sizeof(first))){++unsafe;return -93;}
  if(mode==7)owner=false;
  if(mode==8)clock_ns+=3000000000ULL;
  if((mode==3 && calls==1) || mode==5){r->x[0]=(uint64_t)-12;return 0;}
- if((mode==4 && calls==1) || mode==6){r->x[0]=1;for(unsigned i=1;i<7;++i)r->x[i]=40+i;return 0;}
+ if((mode==4 && calls==1) || mode==6 || (mode==9 && calls<=40)){r->x[0]=1;for(unsigned i=1;i<7;++i)r->x[i]=40+i;return 0;}
  r->x[0]=mode==2 ? (uint64_t)-5 : 0;r->x[1]=mode==1 ? 7 : 0;return 0;
 }
 uint8_t *database(void){return db;}
@@ -163,6 +163,14 @@ class NativeWifiStartTests(unittest.TestCase):
         for mode, resumes, busy in ((3, 0, 1), (4, 1, 0)):
             self.assertEqual(self.library.pas(mode, 64, 6, 0, 0), 0)
             self.assertEqual([self.library.metric(i) for i in range(4)], [2, 0, resumes, busy])
+
+    def test_large_authentication_can_resume_beyond_the_short_metadata_query_budget(self):
+        self.assertEqual(self.library.pas(9, 64, 5, 0, 0), 0)
+        self.assertEqual([self.library.metric(i) for i in range(4)], [41, 0, 40, 0])
+        self.assertNotEqual(self.library.pas(9, 64, 1, 0x8c000000, 0), 0)
+        self.assertEqual(self.library.metric(0), 17)
+        self.assertNotEqual(self.library.pas(6, 64, 5, 0, 0), 0)
+        self.assertEqual(self.library.metric(0), 1025)
 
     def test_separate_pas_failure_transport_failure_timeouts_and_lease_loss_stop(self):
         for mode in (1, 2, 5, 6, 7, 8):

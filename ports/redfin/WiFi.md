@@ -683,3 +683,12 @@ CPU/thread/profile/mappings and the idle owned ACTIVE slot remain checked
 for every child operation; full CMD-DB/inherited-state audits run before PAS
 and every256chunks. Votes remain retained, with the sole RSC writer sealed.
 The next hardware run must prove complete copy/readback and AUTH separately.
+
+V4 hardware completes every source-backed destination copy/readback:
+99,384,626payload bytes and191,553,563BSS bytes across4478metadata/copy/zero
+chunks. SMP2P auth_begin succeeds. AUTH enters TrustZone and returns native
+interrupted continuations, reaching the old short-call limit after17calls.
+Current v5 gives AUTH a bounded1024continuations/10seconds, preserving all
+returned arguments/cookie; other PAS calls retain16continuations/2seconds.
+Busy retries, ownership guards and retained uncertain state remain unchanged.
+There is still no final successful AUTH or remote-ready observation.
