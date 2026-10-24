@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN manual GUI/Wi-Fi session launched at user request — 2026-10-24
+
+User requests launching the system for a physical test. Reused the exact
+validated station-v9 image, SHA2564aa7fdee1758666f9eaaf81544f3307622140f43978214ad0c37460eac2f99d7; native local build060104,
+kernel390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e.
+No rebuild or repeated host suite. Image hash checked and one fastboot
+transport present before temporary fastboot boot; send and boot both OKAY,
+7.064s total. This proves bootloader acceptance only; GUI, physical touch,
+association/data/DHCP results remain pending.
+
+The existing180s GUI cap and automatic authenticated recovery collector
+remain enabled. Collector is running for wifi-gui8-station-v9-manual-v1;
+private orchestration output is research/redfin-gui-fixes/device-v9-manual-v1.txt.
+No concurrent device action should interrupt that collector. Next: user
+swipe and Settings/Wi-Fi connection, then inspect this capture. No partition
+flashed or persistent firmware/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x58f44527d96348f3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN station-v9 sustained native GUI8 radio/scan PASS; manual GUI connection pending — 2026-10-24
 
 Source `190b466`, native local `build-20261024-060104.log` (no CI run).
