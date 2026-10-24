@@ -1,5 +1,32 @@
 # HackiOS upstream review — 2026-10-22
 
+## A620 persistent GUI3 / Mesa / IOSurface bridge — 2026-10-24
+
+Reviewed kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab again, now
+`iokit/Kernel/RedwoodGPU.cpp`, the retained-buffer/IB/fence/parameter methods
+in `redwood_adreno.c`, and the native msm1.7 ABI. New service uses that
+userspace interface with Redfin's proven native CB0/SID0/ASID0 owner.
+Its first implementation serializes submissions and waits for the actual
+GPU-written cache-flush fence. Mapping or completion loss pins backing
+descriptors until reset. It omits the upstream optional reset/recovery path.
+The kernel-side adaptation retains APSL2.0 attribution.
+
+Reviewed paired graphics userland906425b75e02b4f99eb5d7bb1ef7c9583472d772:
+`tools/mk-mesa.sh`, `tools/mesa/freedreno-darwin.patch`, the ES profile and
+three IR3 fixes, `redwood-drm`, and `userland/src/gl_osmesa.c`. Mesa25.0.7
+source archive is SHA256592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6.
+Build targets arm64/iOS16 and keeps all binaries under ignored research.
+The newer a79ff077 userland review remains the general source pin; the
+paired906425b graphics source is explicitly selected for this interface.
+
+20H392's SweetSurface keeps state and pixels in separate descriptors, unlike
+the preferred MiniIOSurface's page prefix. Import adapts that difference and
+holds the original surface reference. A standalone iOS ES shader diagnostic
+imports an actual IOSurface, draws twice with boot-bound colors and validates
+both GL readback and the surface's CPU view; software rendering is refused.
+The system's original OpenGLES/Metal libraries are not replaced by this batch.
+Host checks and native builds pass; GUI3/rendering hardware evidence is pending.
+
 ## Complete A620 GPU command-chain adaptation — 2026-10-24
 
 Re-reviewed preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`,

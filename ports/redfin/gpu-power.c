@@ -8,9 +8,11 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
 #include <machine/machine_routines.h>
+#include <arm64/redfin_gui_profile.h>
 #include "redfin_gpu_power.h"
 #include "redfin_gmu_probe.h"
 extern int redfin_spmi_return_ready(void);
+extern int redfin_gui_cpu0(void);
 extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
 extern vm_offset_t ml_io_map_wcomb(vm_offset_t,vm_size_t);
 int redfin_gpu_power_probe(void);
@@ -18,7 +20,7 @@ static bool gp_attempted;
 struct gp_context {vm_offset_t base[4],db;char args[608];unsigned bytes;};
 static struct gp_context gp;
 static struct rf_gp_report gp_report;
-static bool gp_gmu_mode;
+static bool gp_gmu_mode,gp_gui_mode;
 static bool gp_word(const char *p,unsigned n,const char *s)
 {return strlen(s)==n && !memcmp(p,s,n);}
 static bool gp_flags(const char *args,unsigned bytes)
@@ -55,7 +57,7 @@ static bool gp_valid(void *context)
  struct gp_context *c=context;const char *args=PE_boot_args();
  return c==&gp && c->bytes && args && !memcmp(args,c->args,c->bytes) &&
   __builtin_arm_rsr64("CurrentEL")==4 && !(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) &&
-  redfin_spmi_return_ready()==1;
+  (gp_gui_mode?redfin_gui_cpu0():redfin_spmi_return_ready()==1);
 }
 static bool gp_held_valid(void *context)
 {
@@ -96,7 +98,8 @@ int redfin_gpu_power_probe(void)
  if(!args)return EINVAL;
  while(bytes<sizeof(gp.args) && args[bytes])bytes++;
  if(bytes==sizeof(gp.args))return ENOTSUP;
- gp_gmu_mode=redfin_gmu_args_valid(args,bytes+1);
+ gp_gui_mode=redfin_gpu_gui_profile(args,bytes+1,NULL);
+ gp_gmu_mode=redfin_gmu_boot_args_mode(args,bytes+1,NULL);
  if(!gp_gmu_mode && !gp_flags(args,bytes+1))return ENOTSUP;
  memcpy(gp.args,args,bytes+1);gp.bytes=bytes+1;
  /* Validate the complete child mode before the parent's first ARC/GDSC write. */

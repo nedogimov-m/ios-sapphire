@@ -94,6 +94,7 @@ def main():
     p.add_argument('--gpu-smmu-memory-probe', action='store_true', help='reset-held GMU firmware/owned RAM and native context/route readback; ATS only when supported; isolated md0 only')
     p.add_argument('--gmu-firmware-start', action='store_true', help='native A620 PDC/RSC/CM3 start and fresh HFI version ACK after complete owned memory preparation; isolated md0 only')
     p.add_argument('--gpu-command-start', action='store_true', help='complete A620 GMU/power/SMMU/SQE/signed PAS13 and fresh GPU memory-write commands; isolated md0 only')
+    p.add_argument('--gpu-gui', action='store_true', help='complete A620 command proof and persistent Mesa/IOSurface service in the bounded GUI8/WLAN profile')
     p.add_argument('--gpu-assets-inventory', type=Path, help='private captured native firmware inventory binding a650 SQE and signed a620 zap for --gpu-command-start')
     p.add_argument('--gmu-fw-file', type=Path, help='private native A620 GMU firmware for the memory profile')
     p.add_argument('--gmu-fw-sha256', help='recorded SHA256 of that firmware')
@@ -136,6 +137,13 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.gpu_gui:
+        a.wifi_gui = True
+        if not (a.gpu_assets_inventory and a.gmu_fw_file and a.gmu_fw_sha256):
+            p.error('--gpu-gui requires private GPU/GMU assets and recorded GMU SHA256')
+        if any((a.gpu_command_start,a.gmu_firmware_start,a.gpu_power_probe,a.gmu_tcm_probe,
+                a.gpu_smmu_probe,a.gpu_smmu_context_probe,a.gpu_smmu_memory_probe)):
+            p.error('--gpu-gui selects its full runtime; standalone GPU diagnostic selectors cannot be combined')
     if a.userspace_waits and (not a.wifi_gui or a.capture_screen):
         p.error('--userspace-waits requires --wifi-gui and excludes screen log payloads')
     if a.wifi_gui:
@@ -148,7 +156,7 @@ def main():
         a.gmu_firmware_start = True
         if not a.gpu_assets_inventory:
             p.error('--gpu-command-start requires --gpu-assets-inventory')
-    elif a.gpu_assets_inventory:
+    elif a.gpu_assets_inventory and not a.gpu_gui:
         p.error('--gpu-assets-inventory requires --gpu-command-start')
     if a.gmu_firmware_start:
         a.gpu_smmu_memory_probe = True
@@ -156,7 +164,7 @@ def main():
         a.gpu_smmu_context_probe = True
         if not a.gmu_fw_file or not a.gmu_fw_sha256:
             p.error('--gpu-smmu-memory-probe requires its private firmware file and recorded SHA256')
-    elif a.gmu_fw_file or a.gmu_fw_sha256:
+    elif (a.gmu_fw_file or a.gmu_fw_sha256) and not a.gpu_gui:
         p.error('--gmu-fw-file/--gmu-fw-sha256 require --gpu-smmu-memory-probe')
     if a.gpu_smmu_context_probe:
         a.gpu_smmu_probe = True
@@ -422,35 +430,38 @@ def main():
         from peripherals import add_observers
         try:
             add_observers(tree, nodes, touch=a.touch_probe or a.touch_id_probe or a.touch_events, usb=a.usb_probe,
-                          gpu=a.gpu_probe or a.gpu_power_probe, wifi=a.wifi_probe or a.wifi_native_probe,
+                          gpu=a.gpu_probe or a.gpu_power_probe or a.gpu_gui, wifi=a.wifi_probe or a.wifi_native_probe,
                           usb_route=a.usb_route_probe or a.usb_owned_probe or a.usb_context_probe or a.usb_bypass_probe,
                           usb_bypass=a.usb_bypass_probe, rpmh=a.rpmh_probe)
         except ValueError as error:
             p.error(str(error))
-        if a.gpu_power_probe:
+        if a.gpu_power_probe or a.gpu_gui:
             from gpu_power import add_contract
             try:
                 add_contract(tree, nodes)
             except ValueError as error:
                 p.error(str(error))
-        if a.gmu_tcm_probe:
+        if a.gmu_tcm_probe or a.gpu_gui:
             from gmu_probe import add_contract
             try:
                 firmware = firmware_hash = None
-                if a.gpu_smmu_memory_probe:
+                if a.gpu_smmu_memory_probe or a.gpu_gui:
                     from wifi_firmware import read_regular
                     firmware = read_regular(a.gmu_fw_file, 0x40000)
                     firmware_hash = bytes.fromhex(a.gmu_fw_sha256)
                     verifier = out / 'gmu-fw-check'
                     run([shutil.which('cc') or 'cc', '-std=c11', '-O2', HERE / 'gmu-fw-check.c', '-o', verifier])
                     run([verifier, a.gmu_fw_file])
-                add_contract(tree, nodes, smmu=a.gpu_smmu_probe, context=a.gpu_smmu_context_probe,
-                             memory=a.gpu_smmu_memory_probe, start=a.gmu_firmware_start,
+                add_contract(tree, nodes, smmu=a.gpu_smmu_probe or a.gpu_gui, context=a.gpu_smmu_context_probe or a.gpu_gui,
+                             memory=a.gpu_smmu_memory_probe or a.gpu_gui, start=a.gmu_firmware_start or a.gpu_gui,
                              firmware=firmware, firmware_sha256=firmware_hash)
-                if a.gpu_command_start:
+                if a.gpu_command_start or a.gpu_gui:
                     from gpu_command import add_contract as add_gpu_command_contract, load_assets
                     gpu_assets = load_assets(a.gpu_assets_inventory)
                     add_gpu_command_contract(tree, nodes, gpu_assets)
+                    if a.gpu_gui:
+                        from gpu_command import add_runtime_contract
+                        add_runtime_contract(tree)
             except ValueError as error:
                 p.error(str(error))
         if a.wifi_native_probe:
@@ -597,7 +608,7 @@ def main():
             command_line = command_line.replace('cpus=1', f'cpus={a.smp_cpus or 2}')
             command_line += ' redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0'
         if a.smp_gui:
-            command_line += ' redfingui=2' if a.wifi_gui else ' redfingui=1'
+            command_line += ' redfingui=3' if a.gpu_gui else ' redfingui=2' if a.wifi_gui else ' redfingui=1'
         if a.display_fit:
             command_line += f' redfinfit={1 if a.display_fit == "full" else 2}'
         if a.display:
@@ -794,6 +805,8 @@ def main():
         manifest['sha256']['config.h'] = hashlib.sha256((out / 'config.h').read_bytes()).hexdigest()
     if a.gpu_power_probe:
         manifest['gpu_power_probe'] = True
+    if a.gpu_gui:
+        manifest['gpu_gui'] = True
     if a.gmu_tcm_probe:
         manifest['gmu_tcm_probe'] = True
     if a.gpu_smmu_probe:

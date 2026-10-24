@@ -32,6 +32,9 @@ typedef uintptr_t DTEntry;
 #include "redfin_gpu_power.h"
 #undef rf_gp_run
 #include "redfin_gmu_probe.h"
+#include "gui-profile.h"
+int redfin_gui_cpu0(void){return 0;}
+bool redfin_gmu_boot_args_mode(const char *a,unsigned n,unsigned *mode){return redfin_gmu_args_mode(a,n,mode);}
 static char arguments[608];
 static unsigned fault, maps, contracts, leaves, children, bad;
 static uint32_t gcc[0x1f0000/4], other[0x20000/4];
@@ -113,6 +116,7 @@ class GPUPowerStartTests(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         directory = Path(cls.temp.name)
         for name, source in (('redfin_gpu_power.h', (HERE / 'gpu-power.h').read_text()),
+                             ('gui-profile.h', (HERE / 'gui-profile.h').read_text()),
                              ('redfin_gmu_probe.h', (HERE / 'gmu-probe.h').read_text()),
                              ('redfin_rpmh.h', patched_source('bsd/dev/redfin_rpmh.h'))):
             (directory / name).write_text(source)

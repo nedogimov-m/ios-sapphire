@@ -2,7 +2,7 @@ diff --git a/bsd/dev/redfin_gmu_probe.c b/bsd/dev/redfin_gmu_probe.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_probe.c
-@@ -0,0 +1,561 @@
+@@ -0,0 +1,592 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Exact md0/UP adapter for the separately proved, held-CX GMU TCM leaf. */
 +#include <pexpert/arm64/board_config.h>
@@ -11,6 +11,11 @@ new file mode 100644
 +#include <sys/systm.h>
 +#include <sys/errno.h>
 +#include <kern/clock.h>
++#include <kern/thread.h>
++#include <kern/sched_prim.h>
++#include <kern/processor.h>
++#include <kern/cpu_number.h>
++#include <arm64/redfin_gui_profile.h>
 +#include <pexpert/pexpert.h>
 +#include <pexpert/device_tree.h>
 +#include <machine/machine_routines.h>
@@ -25,8 +30,12 @@ new file mode 100644
 +#include "redfin_gmu_start.h"
 +#include "redfin_rpmh.h"
 +#include "redfin_gpu_command.h"
++#include "redfin_gpu_runtime.h"
++#include "redfin_gpu_service.h"
 +
 +extern int redfin_spmi_return_ready(void);
++extern int redfin_gui_cpu0(void);
++extern int redfin_gpu_power_probe(void);
 +extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 +extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
 +static bool gm_attempted;
@@ -51,6 +60,13 @@ new file mode 100644
 +static int gm_start_run(struct gm_context *);
 +static bool gx_contract(struct gm_context *);
 +static int gx_run(struct gm_context *);
++static int gr_adopt(struct gm_context *);
++
++bool redfin_gmu_boot_args_mode(const char *args,unsigned bytes,unsigned *mode)
++{
++    if(redfin_gpu_gui_profile(args,bytes,NULL)) {if(mode)*mode=6;return true;}
++    return redfin_gmu_args_mode(args,bytes,mode);
++}
 +
 +static const uint64_t gm_reg[] = {
 +    0x00100000, 0x1f0000, 0x03d90000, 0x9000,
@@ -122,7 +138,8 @@ new file mode 100644
 +            gm_cb_policy, sizeof(gm_cb_policy))) &&
 +        (mode < 3 || gm_memory_contract(context)) &&
 +        (mode < 4 || gm_start_contract(context)) &&
-+        (mode != 5 || gx_contract(context));
++        (mode < 5 || gx_contract(context)) &&
++        (mode != 6 || gm_property(context,"/redfin-gpu-command","runtime-policy",rf_gr_policy,sizeof(rf_gr_policy)));
 +}
 +
 +int
@@ -130,7 +147,7 @@ new file mode 100644
 +{
 +    const char *live = PE_boot_args();
 +    unsigned mode = 0;
-+    if (!redfin_gmu_args_mode(frozen_args, args_bytes, &mode) || !live ||
++    if (!redfin_gmu_boot_args_mode(frozen_args, args_bytes, &mode) || !live ||
 +        memcmp(live, frozen_args, args_bytes))
 +        return ENOTSUP;
 +    return gm_contract(NULL, mode) ? 0 : ENXIO;
@@ -163,7 +180,8 @@ new file mode 100644
 +        memcmp(context->parent_args, context->args, context->args_bytes) ||
 +        __builtin_arm_rsr64("CurrentEL") != 4 ||
 +        (__builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL) ||
-+        redfin_spmi_return_ready() != 1 || !context->parent_valid(context->parent_context))
++        (context->smmu_mode==6 ? !redfin_gui_cpu0() : redfin_spmi_return_ready()!=1) ||
++        !context->parent_valid(context->parent_context))
 +        return false;
 +    for (unsigned i = 0; i < context->binding_count; i++) {
 +        const struct gm_binding *binding = &context->bindings[i];
@@ -413,6 +431,7 @@ new file mode 100644
 +#include "redfin_gmu_memory.inc"
 +#include "redfin_gmu_start.inc"
 +#include "redfin_gpu_command.inc"
++#include "redfin_gpu_runtime.inc"
 +
 +static int
 +gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
@@ -443,7 +462,7 @@ new file mode 100644
 +    }
 +    if (!result && context->smmu_mode >= 3) result = gm_memory_run(context, global, &snapshot);
 +    if (!result && context->smmu_mode >= 4) result = gm_start_run(context);
-+    if (!result && context->smmu_mode == 5) result = gx_run(context);
++    if (!result && context->smmu_mode >= 5) result = gx_run(context);
 +    return result;
 +}
 +
@@ -513,7 +532,7 @@ new file mode 100644
 +    context.parent_valid = held_cx_valid;
 +    context.args_bytes = args_bytes;
 +    memcpy(context.args, frozen_args, args_bytes);
-+    if (!redfin_gmu_args_mode(frozen_args, args_bytes, &context.smmu_mode))
++    if (!redfin_gmu_boot_args_mode(frozen_args, args_bytes, &context.smmu_mode))
 +        return ENOTSUP;
 +    context.smmu_requested = context.smmu_mode != 0;
 +    context.active = true;
@@ -560,15 +579,27 @@ new file mode 100644
 +        report.restored[0], report.restored[1]);
 +    if (context.smmu_requested && !result)
 +        result = gm_smmu_run(&context, &report);
-+    context.active = false;
++    context.active = !result && context.smmu_mode==6 && redfin_gpu_ready();
 +    return result;
++}
++
++void redfin_gpu_gui_start(void)
++{
++    const char *args=PE_boot_args();unsigned bytes=0;
++    if(!args)return;
++    while(bytes<608 && args[bytes])bytes++;
++    if(bytes==608 || !redfin_gpu_gui_profile(args,bytes+1,NULL))return;
++    if(!redfin_gui_cpu0()) {printf("REDFIN GPU GUI: CPU0/root proof unavailable\n");return;}
++    int error=redfin_gpu_power_probe();
++    printf("REDFIN GPU GUI: complete startup result=%d runtime=%u\n",error,redfin_gpu_ready());
++    if(!error && redfin_gpu_ready())RedfinGPUStart();
 +}
 +#endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/redfin_gmu_probe.h b/bsd/dev/redfin_gmu_probe.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_probe.h
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,156 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Synchronous Redfin reset-held GMU probe; no standalone power authority. */
 +#ifndef REDFIN_GMU_PROBE_H
@@ -579,6 +610,10 @@ new file mode 100644
 +#include <stddef.h>
 +
 +typedef bool (*redfin_gmu_parent_valid_fn)(void *);
++
++/* Kernel entry additionally admits the exact GUI3 contract as internal mode6;
++ * the standalone diagnostic parser below retains its original allowlist. */
++bool redfin_gmu_boot_args_mode(const char *,unsigned,unsigned *);
 +
 +/*
 + * bytes includes the NUL; every word and the nonzero boot nonce is unique.
@@ -2711,7 +2746,7 @@ new file mode 100644
 +    stage = 3; error = gm_memory_transfer(context, false); if (error) goto done;
 +    stage = 4;
 +    printf("REDFIN GMU MEMORY STEP: owned RAM/HFI initialized; publish CB1 and stream5\n");
-+    if (context->smmu_mode == 5) {
++    if (context->smmu_mode >= 5) {
 +        /* Preferred native ordering reserves SMR0 for the GPU user group;
 +         * standalone GMU modes retain their already proven first-free slot. */
 +        if (global->smr[0] & 0x80000000u) { error = EBUSY; goto done; }
@@ -2803,12 +2838,12 @@ new file mode 100644
 +{
 +    struct gm_context *c=argument;
 +    if(!c || c!=gm_start.context || !gm_start.bound || !gm_memory.ready ||
-+        !gm_memory.retained || c->smmu_mode<4 || c->smmu_mode>5 || !c->smmu_ready ||
++        !gm_memory.retained || c->smmu_mode<4 || c->smmu_mode>6 || !c->smmu_ready ||
 +        !gm_memory.lease.active || gm_memory.lease.poisoned || !gm_valid(c))return false;
 +    if((gm_scalar_read(c->base[RF_GT_GPUCC]+0x1098)&0x80000001u)!=1 ||
-+        (!(c->smmu_mode==5 && c->gx_requested) &&
++        (!(c->smmu_mode>=5 && c->gx_requested) &&
 +         (gm_scalar_read(c->base[RF_GT_GPUCC]+0x100c)&0x80000001u)!=1) ||
-+        (!(c->smmu_mode==5 && c->gx_requested) &&
++        (!(c->smmu_mode>=5 && c->gx_requested) &&
 +         (gm_scalar_read(c->base[RF_GT_GPUCC]+0x1064)&0x80000001u)!=0x80000000u))return false;
 +    return true;
 +}
@@ -2908,7 +2943,7 @@ new file mode 100644
 +    struct rf_gt_report clock={0};
 +    const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
 +    error=rf_gt_source_live_power(&source,&clock,true,
-+        c->smmu_mode==5 && c->gx_requested);if(error)return error;
++        c->smmu_mode>=5 && c->gx_requested);if(error)return error;
 +    for(unsigned i=0;i<sizeof(gm_smmu_clocks)/sizeof(gm_smmu_clocks[0]);++i) {
 +        const uint32_t *w=gm_smmu_clocks[i];
 +        if((gm_scalar_read(c->base[w[0]]+w[1])&w[2])!=w[3])return EAGAIN;
@@ -3949,7 +3984,7 @@ diff --git a/bsd/dev/redfin_gpu_command.inc b/bsd/dev/redfin_gpu_command.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_command.inc
-@@ -0,0 +1,572 @@
+@@ -0,0 +1,573 @@
 +/* SPDX-License-Identifier: MIT */
 +/* One complete mode5 run. Every allocation, vote and partially started engine
 + * is held until the already armed platform reset; no unsafe rollback/retry. */
@@ -4006,10 +4041,10 @@ new file mode 100644
 +static int gx_check(void *argument)
 +{
 +    struct gm_context *c=argument;
-+    if(!c || c!=gx.context || !gx.bound || !gx.entered || gx.poisoned || c->smmu_mode!=5 ||
++    if(!c || c!=gx.context || !gx.bound || !gx.entered || gx.poisoned || c->smmu_mode<5 || c->smmu_mode>6 ||
 +        !gm_start.report.ack || gm_start.report.error || gm_start.report.stage!=6 ||
 +        gm_start_guard(c,RF_GB_HFI_LIVE))return ECANCELED;
-+    if(gm_time_ns(c)-gx.started>UINT64_C(25000000000))return ETIMEDOUT;
++    if(gm_time_ns(c)-gx.started>(c->smmu_mode==6?UINT64_C(300000000000):UINT64_C(25000000000)))return ETIMEDOUT;
 +    if((gm_scalar_read(c->gic+0x128)|gm_scalar_read(c->gic+0x328))&(1u<<12))return EBUSY;
 +    if(gm_scalar_read(c->smmu+0x48) || (gm_scalar_read(c->cb+0x58)&RF_GC_FAULT_BITS))return EFAULT;
 +    if(c->gx_granted && ((gm_scalar_read(c->base[RF_GT_GMU]+0x14340)&0xc0u) ||
@@ -4460,7 +4495,7 @@ new file mode 100644
 +}
 +static int gx_run(struct gm_context *c)
 +{
-+    if(!gx.bound || gx.entered || gx.context!=c || c->smmu_mode!=5)return EPERM;
++    if(!gx.bound || gx.entered || gx.context!=c || c->smmu_mode<5 || c->smmu_mode>6)return EPERM;
 +    gx.entered=true;gx.started=gm_time_ns(c);int error=gx_check(c);
 +    if(error)goto done;
 +    gx.stage=1;error=gm_start_audit(c,RF_GB_HFI_LIVE);if(error)goto done;
@@ -4511,6 +4546,7 @@ new file mode 100644
 +    if(!gx.scratch){error=ENOMEM;goto done;}
 +    gx.stage=5;error=gx_core(c);if(error)goto done;
 +    gx.stage=6;
++    if(c->smmu_mode==6){error=gr_adopt(c);if(error)goto done;}
 +done:
 +    gx_diagnostic(c);
 +    printf("REDFIN GPU COMMAND RESULT: result=%d stage=%u mapped=%u GX-request=%u GX-grant=%u PAS=%u submissions=%u registers=%u\n",
@@ -4521,4 +4557,295 @@ new file mode 100644
 +        gx.submissions>=4 && gx.values[2]==gx.wanted[2] && gx.values[3]==gx.wanted[3],
 +        (unsigned long long)gx.allocated,(unsigned long long)(gm_time_ns(c)-gx.started));
 +    return error;
++}
+diff --git a/bsd/dev/redfin_gpu_runtime.h b/bsd/dev/redfin_gpu_runtime.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gpu_runtime.h
+@@ -0,0 +1,92 @@
++/* SPDX-License-Identifier: MIT */
++/* A620 runtime protocol, adapted from preferred HackiOS msm-1.7 bridge.
++ * All GPU addresses belong to this allocator; the bootstrap region is absent.
++ * One 64KiB guard follows each object. Callers serialize the complete operation.
++ */
++#ifndef REDFIN_GPU_RUNTIME_H
++#define REDFIN_GPU_RUNTIME_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#define RF_GR_BASE UINT64_C(0x10000000)
++#define RF_GR_BYTES UINT64_C(0x20000000)
++#define RF_GR_GRANULE UINT64_C(0x10000)
++#define RF_GR_TABLE_BYTES 0x100000u
++#define RF_GR_TABLES 256u
++#define RF_GR_OBJECTS 1024u
++#define RF_GR_BUFFER_MAX (128u<<20)
++#define RF_GR_MEMORY_MAX (512u<<20)
++#define RF_GR_COMMANDS 128u
++#define RF_GR_FENCE_AT 0x200u
++#define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+16u)
++static const uint32_t rf_gr_policy[]={1,0x06020001,512,128,1024,128,500,0x10000,0x100000,1};
++
++struct rf_gr_object {uint64_t address,size,span;};
++struct rf_gr_arena {struct rf_gr_object objects[RF_GR_OBJECTS];uint64_t bytes;};
++static inline bool rf_gr_span(uint64_t size,uint64_t *span)
++{
++    if(!size || size>RF_GR_BUFFER_MAX)return false;
++    *span=((size+RF_GR_GRANULE-1)&~(RF_GR_GRANULE-1))+RF_GR_GRANULE;
++    return true;
++}
++/* First fit without an allocatable free-list that could lose a returned hole. */
++static inline uint64_t rf_gr_allocate(struct rf_gr_arena *a,uint64_t size)
++{
++    uint64_t span,at=RF_GR_BASE;unsigned free_slot=RF_GR_OBJECTS;
++    if(!a || !rf_gr_span(size,&span) || a->bytes>RF_GR_MEMORY_MAX-size)return 0;
++    for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(!a->objects[i].address){free_slot=i;break;}
++    if(free_slot==RF_GR_OBJECTS)return 0;
++    for(unsigned pass=0;pass<=RF_GR_OBJECTS;pass++) {
++        if(at>RF_GR_BASE+RF_GR_BYTES-span)return 0;
++        uint64_t next=at;
++        for(unsigned i=0;i<RF_GR_OBJECTS;i++) {
++            const struct rf_gr_object *o=&a->objects[i];
++            if(o->address && at<o->address+o->span && o->address<at+span && next<o->address+o->span)
++                next=o->address+o->span;
++        }
++        if(next==at){a->objects[free_slot]=(struct rf_gr_object){at,size,span};a->bytes+=size;return at;}
++        at=next;
++    }
++    return 0;
++}
++static inline const struct rf_gr_object *rf_gr_find(const struct rf_gr_arena *a,uint64_t at,uint64_t bytes)
++{
++    if(!a || !bytes || at>UINT64_MAX-bytes)return NULL;
++    for(unsigned i=0;i<RF_GR_OBJECTS;i++) {
++        const struct rf_gr_object *o=&a->objects[i];
++        if(o->address && at>=o->address && at-o->address<=o->size && bytes<=o->size-(at-o->address))return o;
++    }
++    return NULL;
++}
++static inline bool rf_gr_release(struct rf_gr_arena *a,uint64_t at,uint64_t size)
++{
++    if(!a)return false;
++    for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(a->objects[i].address==at && a->objects[i].size==size) {
++        a->bytes-=size;a->objects[i]=(struct rf_gr_object){0};return true;
++    }
++    return false;
++}
++/* Native TYPE7 parity, CP_INDIRECT_BUFFER followed by a real cache-flush fence. */
++static inline uint32_t rf_gr_parity(uint32_t v)
++{v^=v>>16;v^=v>>8;v^=v>>4;v^=v>>2;v^=v>>1;return (~v)&1u;}
++static inline uint32_t rf_gr_type7(unsigned op,unsigned words)
++{return 0x70000000u|(op<<16)|(rf_gr_parity(op)<<23)|words|(rf_gr_parity(words)<<15);}
++static inline unsigned rf_gr_submit_words(const struct rf_gr_arena *a,const uint64_t *addresses,
++    const uint32_t *words,unsigned count,uint32_t fence,uint32_t *out,unsigned room)
++{
++    if(!a || !addresses || !words || !count || count>RF_GR_COMMANDS || !fence || !out || room<4*count+10)return 0;
++    for(unsigned i=0;i<count;i++)if((addresses[i]&3u) || !words[i] || words[i]>0xfffffu ||
++        !rf_gr_find(a,addresses[i],(uint64_t)words[i]*4))return 0;
++    unsigned n=0;
++    out[n++]=rf_gr_type7(0x46,1);out[n++]=0x18; /* Invalidate depth/color state, native a6xx_submit. */
++    out[n++]=rf_gr_type7(0x46,1);out[n++]=0x19;
++    for(unsigned i=0;i<count;i++) {
++        out[n++]=rf_gr_type7(0x3f,3);out[n++]=(uint32_t)addresses[i];
++        out[n++]=(uint32_t)(addresses[i]>>32);out[n++]=words[i];
++    }
++    out[n++]=rf_gr_type7(0x26,0);
++    out[n++]=rf_gr_type7(0x46,4);out[n++]=4;
++    out[n++]=0x01200000u+RF_GR_FENCE_AT;out[n++]=0;out[n++]=fence;
++    return n;
++}
++#endif
+diff --git a/bsd/dev/redfin_gpu_service.h b/bsd/dev/redfin_gpu_service.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gpu_service.h
+@@ -0,0 +1,30 @@
++/* SPDX-License-Identifier: MIT */
++/* Private kernel boundary. The caller holds the GPU lock and binds CPU0. */
++#ifndef REDFIN_GPU_SERVICE_H
++#define REDFIN_GPU_SERVICE_H
++#include <stdbool.h>
++#include <stdint.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++bool redfin_gpu_ready(void);
++void *redfin_gpu_bind(void);
++void redfin_gpu_unbind(void *previous);
++int redfin_gpu_audit(void);
++uint64_t redfin_gpu_address(uint64_t size);
++int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
++int redfin_gpu_mapped(void);
++int redfin_gpu_release(uint64_t address,uint64_t size);
++int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence);
++bool redfin_gpu_done(uint32_t fence);
++uint32_t redfin_gpu_last(void);
++void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);
++void redfin_gpu_poison(const char *reason);
++void redfin_gpu_stop(void);
++void redfin_gpu_gui_start(void);
++void RedfinGPUStart(void);
++void RedfinGPUStop(void);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/bsd/dev/redfin_gpu_runtime.inc b/bsd/dev/redfin_gpu_runtime.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gpu_runtime.inc
+@@ -0,0 +1,154 @@
++/* SPDX-License-Identifier: MIT */
++/* Persistent GUI3 owner. The existing startup proof remains mandatory;
++ * all objects are retained if DMA completion or TLB synchronization is lost.
++ * Called under the IOKit service lock, on the already verified CPU0.
++ */
++#include "redfin_gpu_runtime.h"
++#include "redfin_gpu_service.h"
++extern void *redfin_gui_worker_enter(void);
++extern void redfin_gui_worker_leave(void *);
++static struct {
++    struct rf_gr_arena arena;
++    struct rf_gm_memory pool;
++    uint64_t *l2,*leaves;
++    uint32_t state,fence,completed;
++    bool dirty;
++} gr;
++
++bool redfin_gpu_ready(void)
++{return __atomic_load_n(&gr.state,__ATOMIC_ACQUIRE)==1;}
++void *redfin_gpu_bind(void)
++{return redfin_gui_worker_enter();}
++void redfin_gpu_unbind(void *previous)
++{redfin_gui_worker_leave(previous);}
++void redfin_gpu_poison(const char *reason)
++{
++    if(__atomic_exchange_n(&gr.state,2,__ATOMIC_ACQ_REL)!=2)
++        printf("REDFIN GPU RUNTIME STOP: %s; all DMA memory retained until reset\n",reason);
++}
++void redfin_gpu_stop(void)
++{
++    if(__atomic_exchange_n(&gr.state,3,__ATOMIC_ACQ_REL)==1)
++        printf("REDFIN GPU RUNTIME: orderly stop; all GPU allocations held until reset\n");
++}
++void redfin_gpu_sync(void *address,uint64_t size,bool invalidate)
++{
++    uintptr_t at=(uintptr_t)address;
++    if(size && (!at || size>RF_GR_BUFFER_MAX || at>UINTPTR_MAX-size))return;
++    for(uintptr_t p=at&~(uintptr_t)63;p<at+size;p+=64) {
++        if(invalidate)__asm__ volatile("dc civac, %0"::"r"(p):"memory");
++        else __asm__ volatile("dc cvac, %0"::"r"(p):"memory");
++    }
++    __asm__ volatile("dsb sy":::"memory");
++}
++static int gr_live(void)
++{
++    if(!redfin_gpu_ready() || !gx.context || gx.context->smmu_mode!=6 || !redfin_gui_cpu0())return ENXIO;
++    int error=gx_check(gx.context);
++    if(error)redfin_gpu_poison("power/context ownership changed");
++    return error;
++}
++int redfin_gpu_audit(void)
++{
++    int error=gr_live();if(!error)error=gx_audit(gx.context);
++    if(error)redfin_gpu_poison("complete SMMU/foreign-state audit failed");
++    return error;
++}
++static int gr_tlb(void)
++{
++    if(gr_live())return ENXIO;
++    gm_memory_store(gx.context->cb+0x610,0); /* Owned ASID0 only. */
++    gm_memory_store(gx.context->cb+0x7f0,1);
++    for(unsigned i=0;i<1000;i++) {
++        if(gr_live())return ECANCELED;
++        if(!(gm_scalar_read(gx.context->cb+0x7f4)&1u)){gr.dirty=false;return 0;}
++        delay(1);
++    }
++    redfin_gpu_poison("owned TLB synchronization timeout");return ETIMEDOUT;
++}
++int redfin_gpu_mapped(void)
++{return gr.dirty?gr_tlb():gr_live();}
++uint64_t redfin_gpu_address(uint64_t size)
++{return gr_live() || (size&0xfffu)?0:rf_gr_allocate(&gr.arena,size);}
++static uint64_t *gr_leaf(uint64_t address)
++{return gr.leaves+((address-RF_GR_BASE)>>12);}
++int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only)
++{
++    if(gr_live() || (address&0xfffu) || (physical&0xfffu) ||
++        !rf_gr_find(&gr.arena,address,4096) || physical<RF_GM_PT_RAM_BASE ||
++        physical>RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-4096)return EINVAL;
++    uint64_t *entry=gr_leaf(address);if(*entry)return EEXIST;
++    *entry=physical|(read_only?0xec3u:0xe43u);
++    redfin_gpu_sync(entry,8,false);gr.dirty=true;return 0;
++}
++int redfin_gpu_release(uint64_t address,uint64_t size)
++{
++    const struct rf_gr_object *object=rf_gr_find(&gr.arena,address,size);
++    if(gr_live() || !object || object->address!=address || object->size!=size ||
++        gr.completed!=gr.fence)return EBUSY;
++    for(uint64_t at=address;at<address+size;at+=4096)*gr_leaf(at)=0;
++    redfin_gpu_sync(gr_leaf(address),size/512,false);gr.dirty=true;
++    int error=gr_tlb();if(error)return error;
++    return rf_gr_release(&gr.arena,address,size)?0:EINVAL;
++}
++bool redfin_gpu_done(uint32_t fence)
++{return !fence || (redfin_gpu_ready() && (int32_t)(gr.completed-fence)>=0);}
++uint32_t redfin_gpu_last(void){return gr.fence;}
++int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence)
++{
++    if(!fence || gr.fence==UINT32_MAX)return EINVAL;
++    int error=redfin_gpu_audit();if(error)return error;
++    error=redfin_gpu_mapped();if(error)return error;
++    uint32_t packets[RF_GR_PACKET_WORDS],next=gr.fence+1;
++    unsigned n=rf_gr_submit_words(&gr.arena,addresses,words,count,next,packets,RF_GR_PACKET_WORDS);
++    if(!n)return EINVAL;
++    uint32_t rptr=gm_scalar_read(gx.gpu+4*0x806),ring_words=RF_A6_RING_BYTES/4;
++    if(rptr!=gx.wptr || n>=ring_words){redfin_gpu_poison("ring was not idle");return EBUSY;}
++    uint32_t *ring=gx.data[0].host;
++    for(unsigned i=0;i<n;i++)ring[(gx.wptr+i)%ring_words]=packets[i];
++    gm_memory_clean(&gx.data[0]);gr.fence=next;gx.wptr=(gx.wptr+n)%ring_words;
++    gm_memory_store(gx.gpu+4*0x807,gx.wptr);
++    uint64_t first=gm_time_ns(gx.context);
++    for(unsigned i=0;i<5000 && gm_time_ns(gx.context)-first<RF_A6_WAIT_NS;i++) {
++        if((error=gr_live()))break;
++        uint32_t fault=gm_scalar_read(gx.gpu+4*0x821),irq=gm_scalar_read(gx.gpu+4*0x823);
++        if(fault || (irq&0xf7u)){error=EIO;break;}
++        uint32_t done=gm_scalar_read(gx.scratch+RF_GR_FENCE_AT);
++        if(done==next && gm_scalar_read(gx.gpu+4*0x806)==gx.wptr &&
++            !(gm_scalar_read(gx.gpu+4*0x210)&~1u)) {
++            error=redfin_gpu_audit();if(error)break;
++            gr.completed=next;*fence=next;
++            if(next<=8 || !(next%256))printf("REDFIN GPU RUNTIME SUBMIT: fence=%u IBs=%u done=%u rptr=%u\n",
++                next,count,done,gx.wptr);
++            return 0;
++        }
++        delay(100);
++    }
++    gx_diagnostic(gx.context);redfin_gpu_poison("submission did not complete");
++    return error?error:ETIMEDOUT;
++}
++static int gr_adopt(struct gm_context *c)
++{
++    if(c->smmu_mode!=6 || gr.state || gx.stage!=6 || gx.submissions!=4 ||
++        gx.pas_completed!=3 || !gx.mapping.state.active || gx_audit(c))return EPERM;
++    /* The mode5 root/L2/leaf pages are immutable except the previously empty
++     * L2 slots128..383 reserved for this separate 512MiB runtime arena. */
++    vm_offset_t host=0;
++    if(kmem_alloc_contig(kernel_map,&host,RF_GR_TABLE_BYTES,PAGE_MASK,
++        (ppnum_t)((RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-1)>>PAGE_SHIFT),0,
++        KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
++    gr.pool=(struct rf_gm_memory){(void *)host,kvtophys(host),RF_GR_TABLE_BYTES,0x230,0};
++    if(!rf_gm_memory_valid(&gr.pool))return ERANGE;
++    for(unsigned i=0;i<RF_GR_TABLE_BYTES;i+=4096)
++        if(kvtophys(host+i)!=gr.pool.physical+i)return ERANGE;
++    gr.l2=(uint64_t *)((uint8_t *)gx.pool.host+4096);gr.leaves=(uint64_t *)host;
++    for(unsigned i=0;i<RF_GR_TABLES;i++)if(gr.l2[(RF_GR_BASE>>21)+i])return EBUSY;
++    gm_memory_clean(&gr.pool);
++    for(unsigned i=0;i<RF_GR_TABLES;i++)gr.l2[(RF_GR_BASE>>21)+i]=(gr.pool.physical+4096*i)|3u;
++    gm_memory_clean(&gx.pool);
++    __atomic_store_n(&gr.state,1,__ATOMIC_RELEASE);gr.dirty=true;
++    int error=gr_tlb();if(error)return error;
++    printf("REDFIN GPU RUNTIME: adopted=1 tables=%u arena=%#llx+%#llx chip=0x06020001 MHz=275\n",
++        RF_GR_TABLES,RF_GR_BASE,RF_GR_BYTES);
++    return redfin_gpu_audit();
 +}

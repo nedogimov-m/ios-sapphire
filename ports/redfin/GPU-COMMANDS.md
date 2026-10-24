@@ -119,3 +119,25 @@ register/ring/SQE-address setup. The initial extra HALT3 request stalled this
 A620 at its store barrier, after RBBM read/write succeeded; it is removed.
 The adapter rejects HALT3, duplicate starts and starts before owned mapping.
 Real ME_INIT completion proves engine startup instead of command-bit echo.
+
+## Persistent iOS service
+
+`--gpu-gui` composes the complete startup proof with the strict GUI8/WLAN
+profile as `redfingui=3`. It adds no boot arguments to the nearly full608-byte
+field; all additional GPU ADT nodes and a separate runtime policy are mandatory.
+The original standalone parser/profiles retain their exact contracts.
+
+Only after the four real bootstrap results does the owner publish RedwoodGPU,
+the preferred Mesa bridge's msm1.7 service. Caller transactions save/restore
+CPU affinity and hold one lock on proved CPU0. The runtime reserves a private
+1MiB leaf-table pool for a512MiB address arena, outside firmware/ring/scratch.
+Buffers keep fixed addresses and64KiB unmapped guards until returned. Owned
+ASID0 TLB invalidation must finish before a released address can be reused.
+
+The initial queue is synchronous: native indirect buffers, pipeline idle and
+GPU cache-flush fence must all finish within500ms before success. No invented
+fence, GPU reset retry or uncertain descriptor release is provided. IOSurface
+imports preserve the current port's separate state/pixel layout and cache
+publication, with real surface references. The shader test runs from iOS's
+launchd; original GUI1/2 profiles skip it. Kernel/interface/build success is
+not yet a rendering result. Full EAGL/system acceleration and Metal follow.

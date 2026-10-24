@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.redfin.gpu-render</string>
+<key>ProgramArguments</key><array><string>/redfin/bin/gpu-render</string></array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><false/>
+<key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>/dev/console</string>
+<key>StandardErrorPath</key><string>/dev/console</string>
+<key>EnvironmentVariables</key><dict>
+<key>OSMESA_SOFTWARE</key><string>0</string>
+<key>FD_MESA_DEBUG</key><string>sysmem</string>
+<key>MESA_DEBUG</key><string>context</string>
+</dict>
+</dict></plist>

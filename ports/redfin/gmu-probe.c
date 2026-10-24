@@ -6,6 +6,11 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <kern/clock.h>
+#include <kern/thread.h>
+#include <kern/sched_prim.h>
+#include <kern/processor.h>
+#include <kern/cpu_number.h>
+#include <arm64/redfin_gui_profile.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
 #include <machine/machine_routines.h>
@@ -20,8 +25,12 @@
 #include "redfin_gmu_start.h"
 #include "redfin_rpmh.h"
 #include "redfin_gpu_command.h"
+#include "redfin_gpu_runtime.h"
+#include "redfin_gpu_service.h"
 
 extern int redfin_spmi_return_ready(void);
+extern int redfin_gui_cpu0(void);
+extern int redfin_gpu_power_probe(void);
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
 static bool gm_attempted;
@@ -46,6 +55,13 @@ static bool gm_start_contract(struct gm_context *);
 static int gm_start_run(struct gm_context *);
 static bool gx_contract(struct gm_context *);
 static int gx_run(struct gm_context *);
+static int gr_adopt(struct gm_context *);
+
+bool redfin_gmu_boot_args_mode(const char *args,unsigned bytes,unsigned *mode)
+{
+    if(redfin_gpu_gui_profile(args,bytes,NULL)) {if(mode)*mode=6;return true;}
+    return redfin_gmu_args_mode(args,bytes,mode);
+}
 
 static const uint64_t gm_reg[] = {
     0x00100000, 0x1f0000, 0x03d90000, 0x9000,
@@ -117,7 +133,8 @@ gm_contract(struct gm_context *context, unsigned mode)
             gm_cb_policy, sizeof(gm_cb_policy))) &&
         (mode < 3 || gm_memory_contract(context)) &&
         (mode < 4 || gm_start_contract(context)) &&
-        (mode != 5 || gx_contract(context));
+        (mode < 5 || gx_contract(context)) &&
+        (mode != 6 || gm_property(context,"/redfin-gpu-command","runtime-policy",rf_gr_policy,sizeof(rf_gr_policy)));
 }
 
 int
@@ -125,7 +142,7 @@ redfin_gmu_probe_contract(const char *frozen_args, unsigned args_bytes)
 {
     const char *live = PE_boot_args();
     unsigned mode = 0;
-    if (!redfin_gmu_args_mode(frozen_args, args_bytes, &mode) || !live ||
+    if (!redfin_gmu_boot_args_mode(frozen_args, args_bytes, &mode) || !live ||
         memcmp(live, frozen_args, args_bytes))
         return ENOTSUP;
     return gm_contract(NULL, mode) ? 0 : ENXIO;
@@ -158,7 +175,8 @@ gm_valid(void *argument)
         memcmp(context->parent_args, context->args, context->args_bytes) ||
         __builtin_arm_rsr64("CurrentEL") != 4 ||
         (__builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL) ||
-        redfin_spmi_return_ready() != 1 || !context->parent_valid(context->parent_context))
+        (context->smmu_mode==6 ? !redfin_gui_cpu0() : redfin_spmi_return_ready()!=1) ||
+        !context->parent_valid(context->parent_context))
         return false;
     for (unsigned i = 0; i < context->binding_count; i++) {
         const struct gm_binding *binding = &context->bindings[i];
@@ -408,6 +426,7 @@ gm_cb_read(void *argument, unsigned bank, uint32_t at, uint32_t *value)
 #include "redfin_gmu_memory.inc"
 #include "redfin_gmu_start.inc"
 #include "redfin_gpu_command.inc"
+#include "redfin_gpu_runtime.inc"
 
 static int
 gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
@@ -438,7 +457,7 @@ gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
     }
     if (!result && context->smmu_mode >= 3) result = gm_memory_run(context, global, &snapshot);
     if (!result && context->smmu_mode >= 4) result = gm_start_run(context);
-    if (!result && context->smmu_mode == 5) result = gx_run(context);
+    if (!result && context->smmu_mode >= 5) result = gx_run(context);
     return result;
 }
 
@@ -508,7 +527,7 @@ redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
     context.parent_valid = held_cx_valid;
     context.args_bytes = args_bytes;
     memcpy(context.args, frozen_args, args_bytes);
-    if (!redfin_gmu_args_mode(frozen_args, args_bytes, &context.smmu_mode))
+    if (!redfin_gmu_boot_args_mode(frozen_args, args_bytes, &context.smmu_mode))
         return ENOTSUP;
     context.smmu_requested = context.smmu_mode != 0;
     context.active = true;
@@ -555,7 +574,19 @@ redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
         report.restored[0], report.restored[1]);
     if (context.smmu_requested && !result)
         result = gm_smmu_run(&context, &report);
-    context.active = false;
+    context.active = !result && context.smmu_mode==6 && redfin_gpu_ready();
     return result;
+}
+
+void redfin_gpu_gui_start(void)
+{
+    const char *args=PE_boot_args();unsigned bytes=0;
+    if(!args)return;
+    while(bytes<608 && args[bytes])bytes++;
+    if(bytes==608 || !redfin_gpu_gui_profile(args,bytes+1,NULL))return;
+    if(!redfin_gui_cpu0()) {printf("REDFIN GPU GUI: CPU0/root proof unavailable\n");return;}
+    int error=redfin_gpu_power_probe();
+    printf("REDFIN GPU GUI: complete startup result=%d runtime=%u\n",error,redfin_gpu_ready());
+    if(!error && redfin_gpu_ready())RedfinGPUStart();
 }
 #endif /* ARM64_BOARD_CONFIG_SWEET */

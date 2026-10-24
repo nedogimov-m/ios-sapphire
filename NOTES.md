@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete persistent service / Mesa / iOS shader batch built — 2026-10-24
+
+Source based on9083f3a; the user explicitly requested continuing after the ETA
+reply, so work remains active. Whole next chain is implemented together:
+strict GUI3 composition with GUI8/WLAN, retained native GPU owner, private
+512MiB VA/1MiB table pool, guarded buffer lifetime/TLB reuse, msm1.7 IOKit
+service, synchronous real cache-flush fences, current20H392 IOSurface import,
+preferred Mesa25.0.7/IR3 bridge and an iOS ES shader program. The program
+draws twice into a real surface with fresh boot-bound colors and checks GL
+and CPU readbacks; GUI1/2 skip it. Existing Apple graphics libraries remain.
+
+Selected124GPU/GMU/SMP/policy/allocator/adapter casesPASS32.797s; additional
+13startup-cache/SMP/actual-Darwin-MMIO checksPASS4.249s. Local native kernel
+build20261024-233330PASS, no CI run; frozen research/redfin-gpu/kernel-service-v1
+SHA25637793116da0c8ce11d0290be480cd4e20e3a2274396441e0baace3801d75f5ee.
+Earlier2330/2328 builds failed only compilation and are superseded.
+Preferred graphics source906425b75e02b4f99eb5d7bb1ef7c9583472d772,
+local userspace build20261024-233451PASS, targetarm64/iOS16.0.
+Private bundle Mesa SHA256c2511d8d47343efabdb4f755b666756f42962eb53b93cbbc6d4ed0dd1f3b3f8e;
+shader-program SHA256acacdf0063c1d778e50c979c942f3d7769f9e8e50826152120f1fa33cac4bf70.
+No new hardware boot/root update has run yet. GUI3 image/preflight and reversible
+new-file/startup-cache staging are next, then one complete integrated capture.
+No render/system acceleration/Metal PASS is claimed from these builds.
+Standalone checkpoint5eb33bd/build174539/imagev8, boot7d243f35bf238124 and
+all exact args above remain the last observed hardware result; HFSXclean,
+write_count623088 and verified fastboot were its final state.
+
 ## REDFIN complete native GPU command chain HARDWARE PASS — 2026-10-24
 
 Source5eb33bd/local native build20261024-174539 (no CI run), authenticated

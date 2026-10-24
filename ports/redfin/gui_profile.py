@@ -17,7 +17,7 @@ def validate(arguments):
     ids = [token for token in tokens if token.startswith('redfinbootid=')]
     match = re.fullmatch(r'redfinbootid=0x([0-9a-f]{16})', ids[0]) if len(ids) == 1 else None
     flags = [token for token in tokens if token not in ids and token != '-enable_kprintf_spam']
-    flags = ['redfingui=1' if token == 'redfingui=2' else token for token in flags]
+    flags = ['redfingui=1' if token in ('redfingui=2', 'redfingui=3') else token for token in flags]
     fits = [token for token in flags if token.startswith('redfinfit')]
     if len(fits) > 1 or any(token not in ('redfinfit=1', 'redfinfit=2') for token in fits):
         raise ValueError('GUI8 fit must be full-canvas mode1 or camera-exclusion mode2')
@@ -43,4 +43,9 @@ def cadence(arguments):
 
 def wifi(arguments):
     validate(arguments)
-    return 'redfingui=2' in arguments.split()
+    return bool({'redfingui=2', 'redfingui=3'} & set(arguments.split()))
+
+
+def gpu(arguments):
+    validate(arguments)
+    return 'redfingui=3' in arguments.split()

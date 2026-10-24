@@ -33,12 +33,12 @@ static bool gm_start_base_valid(void *argument)
 {
     struct gm_context *c=argument;
     if(!c || c!=gm_start.context || !gm_start.bound || !gm_memory.ready ||
-        !gm_memory.retained || c->smmu_mode<4 || c->smmu_mode>5 || !c->smmu_ready ||
+        !gm_memory.retained || c->smmu_mode<4 || c->smmu_mode>6 || !c->smmu_ready ||
         !gm_memory.lease.active || gm_memory.lease.poisoned || !gm_valid(c))return false;
     if((gm_scalar_read(c->base[RF_GT_GPUCC]+0x1098)&0x80000001u)!=1 ||
-        (!(c->smmu_mode==5 && c->gx_requested) &&
+        (!(c->smmu_mode>=5 && c->gx_requested) &&
          (gm_scalar_read(c->base[RF_GT_GPUCC]+0x100c)&0x80000001u)!=1) ||
-        (!(c->smmu_mode==5 && c->gx_requested) &&
+        (!(c->smmu_mode>=5 && c->gx_requested) &&
          (gm_scalar_read(c->base[RF_GT_GPUCC]+0x1064)&0x80000001u)!=0x80000000u))return false;
     return true;
 }
@@ -138,7 +138,7 @@ static int gm_start_audit(void *argument,unsigned phase)
     struct rf_gt_report clock={0};
     const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
     error=rf_gt_source_live_power(&source,&clock,true,
-        c->smmu_mode==5 && c->gx_requested);if(error)return error;
+        c->smmu_mode>=5 && c->gx_requested);if(error)return error;
     for(unsigned i=0;i<sizeof(gm_smmu_clocks)/sizeof(gm_smmu_clocks[0]);++i) {
         const uint32_t *w=gm_smmu_clocks[i];
         if((gm_scalar_read(c->base[w[0]]+w[1])&w[2])!=w[3])return EAGAIN;

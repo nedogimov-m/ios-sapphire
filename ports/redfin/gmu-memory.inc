@@ -266,7 +266,7 @@ static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot
     stage = 3; error = gm_memory_transfer(context, false); if (error) goto done;
     stage = 4;
     printf("REDFIN GMU MEMORY STEP: owned RAM/HFI initialized; publish CB1 and stream5\n");
-    if (context->smmu_mode == 5) {
+    if (context->smmu_mode >= 5) {
         /* Preferred native ordering reserves SMR0 for the GPU user group;
          * standalone GMU modes retain their already proven first-free slot. */
         if (global->smr[0] & 0x80000000u) { error = EBUSY; goto done; }

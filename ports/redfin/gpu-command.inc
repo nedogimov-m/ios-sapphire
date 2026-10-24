@@ -54,10 +54,10 @@ static bool gx_contract(struct gm_context *c)
 static int gx_check(void *argument)
 {
     struct gm_context *c=argument;
-    if(!c || c!=gx.context || !gx.bound || !gx.entered || gx.poisoned || c->smmu_mode!=5 ||
+    if(!c || c!=gx.context || !gx.bound || !gx.entered || gx.poisoned || c->smmu_mode<5 || c->smmu_mode>6 ||
         !gm_start.report.ack || gm_start.report.error || gm_start.report.stage!=6 ||
         gm_start_guard(c,RF_GB_HFI_LIVE))return ECANCELED;
-    if(gm_time_ns(c)-gx.started>UINT64_C(25000000000))return ETIMEDOUT;
+    if(gm_time_ns(c)-gx.started>(c->smmu_mode==6?UINT64_C(300000000000):UINT64_C(25000000000)))return ETIMEDOUT;
     if((gm_scalar_read(c->gic+0x128)|gm_scalar_read(c->gic+0x328))&(1u<<12))return EBUSY;
     if(gm_scalar_read(c->smmu+0x48) || (gm_scalar_read(c->cb+0x58)&RF_GC_FAULT_BITS))return EFAULT;
     if(c->gx_granted && ((gm_scalar_read(c->base[RF_GT_GMU]+0x14340)&0xc0u) ||
@@ -508,7 +508,7 @@ static void gx_diagnostic(struct gm_context *c)
 }
 static int gx_run(struct gm_context *c)
 {
-    if(!gx.bound || gx.entered || gx.context!=c || c->smmu_mode!=5)return EPERM;
+    if(!gx.bound || gx.entered || gx.context!=c || c->smmu_mode<5 || c->smmu_mode>6)return EPERM;
     gx.entered=true;gx.started=gm_time_ns(c);int error=gx_check(c);
     if(error)goto done;
     gx.stage=1;error=gm_start_audit(c,RF_GB_HFI_LIVE);if(error)goto done;
@@ -559,6 +559,7 @@ static int gx_run(struct gm_context *c)
     if(!gx.scratch){error=ENOMEM;goto done;}
     gx.stage=5;error=gx_core(c);if(error)goto done;
     gx.stage=6;
+    if(c->smmu_mode==6){error=gr_adopt(c);if(error)goto done;}
 done:
     gx_diagnostic(c);
     printf("REDFIN GPU COMMAND RESULT: result=%d stage=%u mapped=%u GX-request=%u GX-grant=%u PAS=%u submissions=%u registers=%u\n",

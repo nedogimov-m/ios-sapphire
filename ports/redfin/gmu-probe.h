@@ -9,6 +9,10 @@
 
 typedef bool (*redfin_gmu_parent_valid_fn)(void *);
 
+/* Kernel entry additionally admits the exact GUI3 contract as internal mode6;
+ * the standalone diagnostic parser below retains its original allowlist. */
+bool redfin_gmu_boot_args_mode(const char *,unsigned,unsigned *);
+
 /*
  * bytes includes the NUL; every word and the nonzero boot nonce is unique.
  * Optional redfinsmmu=1 reads globals; =2 reads CB0/1; =3 prepares the

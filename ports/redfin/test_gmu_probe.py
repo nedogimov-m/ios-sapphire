@@ -126,6 +126,9 @@ class RedfinGMUContractTests(unittest.TestCase):
                 'bsd/dev/redfin_gpu_mapping.h': HERE/'include/redfin_gpu_mapping.h',
                 'bsd/dev/redfin_gpu_registers.h': HERE/'include/redfin_gpu_registers.h',
                 'bsd/dev/redfin_gpu_command.inc': HERE/'gpu-command.inc',
+                'bsd/dev/redfin_gpu_runtime.h': HERE/'include/redfin_gpu_runtime.h',
+                'bsd/dev/redfin_gpu_service.h': HERE/'gpu-service.h',
+                'bsd/dev/redfin_gpu_runtime.inc': HERE/'gpu-runtime.inc',
             }
             actual = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
             self.assertEqual(actual, set(wanted))
@@ -326,6 +329,7 @@ class RedfinGMUContractTests(unittest.TestCase):
 
 def adapter_source():
     code = (HERE/'gmu-probe.c').read_text()
+    code = code.replace('static int gr_adopt(struct gm_context *);', '')
     code = code.replace('#include "redfin_gmu_start.inc"', '''
 static bool gm_start_contract(struct gm_context *c) {(void)c; return false;}
 static int gm_start_run(struct gm_context *c) {(void)c; return ENOTSUP;}
@@ -369,8 +373,14 @@ HARNESS = r'''
 #include "redfin_gmu_tcm.h"
 #include "redfin_gpu_smmu.h"
 #include "redfin_gpu_context.h"
+#include "redfin_gpu_runtime.h"
+#include "redfin_gui_profile.h"
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
+int redfin_gui_cpu0(void){return 0;}
+int redfin_gpu_power_probe(void){return ENOTSUP;}
+bool redfin_gpu_ready(void){return false;}
+void RedfinGPUStart(void){}
 typedef uintptr_t vm_offset_t;
 typedef uintptr_t vm_size_t;
 typedef void *DTEntry;
@@ -644,6 +654,7 @@ class RedfinGMUAdapterTests(unittest.TestCase):
         cls.directory = tempfile.TemporaryDirectory()
         root = Path(cls.directory.name)
         (root/'redfin_gmu_probe.h').write_text((HERE/'gmu-probe.h').read_text())
+        (root/'redfin_gui_profile.h').write_text((HERE/'gui-profile.h').read_text())
         source = root/'adapter.c'
         source.write_text(HARNESS.replace('ACTUAL_SOURCE', adapter_source()))
         subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra',

@@ -140,6 +140,8 @@ def diagnostic_return_profile(image, manifest, tokens):
 def smp_gui_return_profile(image, manifest, arguments, checksum):
     """Require the separately compiled, bounded GUI8 contract and provenance."""
     boot_id = gui_profile.validate(arguments)
+    if manifest.get('gpu_gui', False) is not gui_profile.gpu(arguments):
+        raise ValueError('GPU GUI selector must match the exact compiled GUI3 profile')
     if manifest.get('wifi_gui', False) is not gui_profile.wifi(arguments):
         raise ValueError('GUI WLAN handoff manifest does not match its exact profile')
     if gui_profile.wifi(arguments) and any(manifest.get(name) is not True for name in

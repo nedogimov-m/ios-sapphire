@@ -1,0 +1,659 @@
+diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
+--- a/bsd/dev/redfin_gpu_power.c
++++ b/bsd/dev/redfin_gpu_power.c
+@@ -8,9 +8,11 @@
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
+ #include <machine/machine_routines.h>
++#include <arm64/redfin_gui_profile.h>
+ #include "redfin_gpu_power.h"
+ #include "redfin_gmu_probe.h"
+ extern int redfin_spmi_return_ready(void);
++extern int redfin_gui_cpu0(void);
+ extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
+ extern vm_offset_t ml_io_map_wcomb(vm_offset_t,vm_size_t);
+ int redfin_gpu_power_probe(void);
+@@ -18,7 +20,7 @@
+ struct gp_context {vm_offset_t base[4],db;char args[608];unsigned bytes;};
+ static struct gp_context gp;
+ static struct rf_gp_report gp_report;
+-static bool gp_gmu_mode;
++static bool gp_gmu_mode,gp_gui_mode;
+ static bool gp_word(const char *p,unsigned n,const char *s)
+ {return strlen(s)==n && !memcmp(p,s,n);}
+ static bool gp_flags(const char *args,unsigned bytes)
+@@ -55,7 +57,7 @@
+  struct gp_context *c=context;const char *args=PE_boot_args();
+  return c==&gp && c->bytes && args && !memcmp(args,c->args,c->bytes) &&
+   __builtin_arm_rsr64("CurrentEL")==4 && !(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) &&
+-  redfin_spmi_return_ready()==1;
++  (gp_gui_mode?redfin_gui_cpu0():redfin_spmi_return_ready()==1);
+ }
+ static bool gp_held_valid(void *context)
+ {
+@@ -96,7 +98,8 @@
+  if(!args)return EINVAL;
+  while(bytes<sizeof(gp.args) && args[bytes])bytes++;
+  if(bytes==sizeof(gp.args))return ENOTSUP;
+- gp_gmu_mode=redfin_gmu_args_valid(args,bytes+1);
++ gp_gui_mode=redfin_gpu_gui_profile(args,bytes+1,NULL);
++ gp_gmu_mode=redfin_gmu_boot_args_mode(args,bytes+1,NULL);
+  if(!gp_gmu_mode && !gp_flags(args,bytes+1))return ENOTSUP;
+  memcpy(gp.args,args,bytes+1);gp.bytes=bytes+1;
+  /* Validate the complete child mode before the parent's first ARC/GDSC write. */
+diff --git a/osfmk/arm64/redfin_gui_profile.h b/osfmk/arm64/redfin_gui_profile.h
+--- a/osfmk/arm64/redfin_gui_profile.h
++++ b/osfmk/arm64/redfin_gui_profile.h
+@@ -70,7 +70,7 @@
+   }
+   unsigned n=pos-start;
+   bool known=false;
+-  if(redfin_gui_token(args+start,n,"redfingui=2")) {
++  if(redfin_gui_token(args+start,n,"redfingui=2") || redfin_gui_token(args+start,n,"redfingui=3")) {
+    uint64_t bit=1ULL<<(count-1);
+    if(seen&bit) return false;
+    seen|=bit;continue;
+@@ -122,7 +122,20 @@
+  for(unsigned at=0;at<bytes && args[at];) {
+   if(args[at]==' ') {at++;continue;}
+   unsigned first=at;while(at<bytes && args[at] && args[at]!=' ')at++;
+-  if(redfin_gui_token(args+first,at-first,"redfingui=2")) return true;
++  if(redfin_gui_token(args+first,at-first,"redfingui=2") ||
++     redfin_gui_token(args+first,at-first,"redfingui=3")) return true;
++ }
++ return false;
++}
++/* GUI3 retains the complete GUI2/WLAN contract and explicitly selects the
++ * separately bound A620 runtime. It adds no tokens to the 608-byte field. */
++static inline bool redfin_gpu_gui_profile(const char *args,unsigned bytes,uint64_t *boot_id)
++{
++ if(!redfin_gui_profile(args,bytes,boot_id)) return false;
++ for(unsigned at=0;at<bytes && args[at];) {
++  if(args[at]==' ') {at++;continue;}
++  unsigned first=at;while(at<bytes && args[at] && args[at]!=' ')at++;
++  if(redfin_gui_token(args+first,at-first,"redfingui=3")) return true;
+  }
+  return false;
+ }
+diff --git a/bsd/dev/redfin_touch_start.c b/bsd/dev/redfin_touch_start.c
+--- a/bsd/dev/redfin_touch_start.c
++++ b/bsd/dev/redfin_touch_start.c
+@@ -17,6 +17,7 @@
+ extern int redfin_touch_setup(bool, bool);
+ extern int redfin_touch_events_start(void);
+ extern void redfin_wifi_gui_start(void);
++extern void redfin_gpu_gui_start(void);
+ int redfin_touch_start_initial(void);
+ bool redfin_touch_boot_lease_valid(unsigned mode);
+ bool redfin_touch_boot_lease_held(unsigned mode);
+@@ -169,6 +170,7 @@
+  } else if (mode == REDFIN_TOUCH_UFS_EVENTS) {
+   error = redfin_touch_events_start();
+   printf("REDFIN TOUCH START: asynchronous HID worker result=%d\n", error);
++  if (!error) redfin_gpu_gui_start();
+   if (!error) redfin_wifi_gui_start();
+  }
+  return error;
+diff --git a/bsd/kern/kern_shutdown.c b/bsd/kern/kern_shutdown.c
+--- a/bsd/kern/kern_shutdown.c
++++ b/bsd/kern/kern_shutdown.c
+@@ -178,6 +178,8 @@
+ {
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ 	extern void redfin_wifi_gui_stop(void);
++	extern void RedfinGPUStop(void);
++	RedfinGPUStop();
+ 	redfin_wifi_gui_stop();
+ #endif
+ 	int hostboot_option = 0;
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -16,6 +16,7 @@
+ iokit/Kernel/arm/RedfinWiFiProbe.cpp                              optional iokitcpp
+ iokit/Kernel/arm/RedfinWiFiFirmware.cpp                           optional iokitcpp
+ iokit/Kernel/arm/RedfinWLAN.cpp				optional iokitcpp
++iokit/Kernel/arm/RedfinGPU.cpp                                   optional iokitcpp
+ iokit/Kernel/arm/RedfinWiFiFWSource.cpp                           optional iokitcpp
+ iokit/Kernel/arm/SweetEntitlements.cpp                           optional iokitcpp
+ iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitcpp
+diff --git a/osfmk/arm64/redfin_gui_runtime.h b/osfmk/arm64/redfin_gui_runtime.h
+--- a/osfmk/arm64/redfin_gui_runtime.h
++++ b/osfmk/arm64/redfin_gui_runtime.h
+@@ -9,6 +9,8 @@
+ int redfin_gui_ready(void);
+ int redfin_gui_cpu0(void);
+ int redfin_gui_bind_worker(void);
++void *redfin_gui_worker_enter(void);
++void redfin_gui_worker_leave(void *);
+ void redfin_smp_publish(void);
+ void *redfin_gui_root_enter(void);
+ void redfin_gui_root_leave(void *);
+@@ -70,4 +72,17 @@
+  thread_block(THREAD_CONTINUE_NULL);
+  return redfin_gui_cpu0();
+ }
++/* Save and restore the caller's affinity for synchronous IOKit transactions.
++ * Scheduler-private declarations stay in osfmk, rather than the BSD adapter. */
++void *redfin_gui_worker_enter(void)
++{
++ processor_t previous=thread_bind(cpu_to_processor(0));
++ thread_block(THREAD_CONTINUE_NULL);
++ return (void *)previous;
++}
++void redfin_gui_worker_leave(void *previous)
++{
++ thread_bind((processor_t)previous);
++ thread_block(THREAD_CONTINUE_NULL);
++}
+ #endif /* REDFIN_GUI_RUNTIME_H */
+diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -0,0 +1,373 @@
++/*
++ * A620 adaptation of the preferred HackiOS RedwoodGPU / msm DRM 1.7 bridge:
++ * oosexgang/hackios-xnu-kernel 8e611870, iokit/Kernel/RedwoodGPU.cpp.
++ * Changed 2026-10-24 for Redfin's owned native backend and iOS20H392 surfaces.
++ *
++ * There is one serialized, synchronous GPU queue. Each submission must finish
++ * its actual GPU cache-flush fence before the kernel returns success. This
++ * also establishes when surfaces can be read by the existing CPU display path.
++ * A failed queue/TLB retains every mapped descriptor until the platform reset.
++ * No recovery, false completion, foreign fault clearing or Metal claim.
++ *
++ * This file contains Modifications of Original Code subject to the Apple
++ * Public Source License Version2.0 (https://opensource.apple.com/apsl/).
++ * The code is provided AS IS, WITHOUT WARRANTY OF ANY KIND; see the License.
++ */
++#include "SweetSurface.h"
++#if defined(SWEET)
++#include <IOKit/IOService.h>
++#include <IOKit/IOUserClient.h>
++#include <IOKit/IOKitKeys.h>
++#include <IOKit/IOPlatformExpert.h>
++#include <IOKit/IOLib.h>
++#include <IOKit/IOLocks.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <mach/mach_time.h>
++#include "RedfinGPUService.h"
++#include "RedfinGPURuntime.h"
++
++enum {
++    GemClose=0x09,GetParam=0x40,SetParam=0x41,GemNew=0x42,GemInfo=0x43,
++    CpuPrep=0x44,CpuFini=0x45,Submit=0x46,WaitFence=0x47,Madvise=0x48,
++    QueueNew=0x4a,QueueClose=0x4b,QueueQuery=0x4c,Surface=0x7e,Show=0x7f
++};
++struct msm_timespec {int64_t seconds,nanoseconds;};
++struct msm_param {uint32_t pipe,param;uint64_t value;uint32_t len,pad;};
++struct msm_gem_new {uint64_t size;uint32_t flags,handle;};
++struct msm_gem_info {uint32_t handle,info;uint64_t value;uint32_t len,pad;};
++struct msm_cpu_prep {uint32_t handle,op;struct msm_timespec timeout;};
++struct msm_cmd {uint32_t type,index,offset,size,pad,relocs;uint64_t relocations;};
++struct msm_bo {uint32_t flags,handle;uint64_t presumed;};
++struct msm_submit {
++    uint32_t flags,fence,nr_bos,nr_cmds;uint64_t bos,cmds;int32_t fence_fd;uint32_t queue;
++    uint64_t in_syncobjs,out_syncobjs;uint32_t nr_in,nr_out,stride,pad;
++};
++struct msm_wait {uint32_t fence,flags;struct msm_timespec timeout;uint32_t queue;};
++struct msm_madvise {uint32_t handle,madv,retained;};
++struct msm_queue {uint32_t flags,prio,id;};
++struct msm_query {uint64_t data;uint32_t id,param,len,pad;};
++struct drm_close {uint32_t handle,pad;};
++struct redwood_surface {
++    uint32_t surface,handle;uint64_t size;uint32_t offset,rowBytes,width,height,pixelFormat,planes;
++};
++struct redwood_show {uint64_t pixels;uint32_t width,height,rowBytes,pad;};
++static_assert(sizeof(msm_submit)==72,"msm DRM 1.7 submission ABI");
++static_assert(sizeof(msm_cmd)==32,"msm command ABI");
++static_assert(sizeof(redwood_surface)==40,"preferred IOSurface import ABI");
++static IOLock *gLock;
++static uint32_t gStarts;
++class GPUTransaction {
++    void *previous;
++public:
++    GPUTransaction():previous(redfin_gpu_bind()){IOLockLock(gLock);}
++    ~GPUTransaction(){IOLockUnlock(gLock);redfin_gpu_unbind(previous);}
++};
++static IOReturn gpuError(int error)
++{
++    switch(error) {
++    case 0:return kIOReturnSuccess;
++    case ENOMEM:case ENOSPC:return kIOReturnNoMemory;
++    case EINVAL:case ERANGE:return kIOReturnBadArgument;
++    case EBUSY:return kIOReturnBusy;
++    case ETIMEDOUT:return kIOReturnTimeout;
++    case ENXIO:case ECANCELED:return kIOReturnNotReady;
++    default:return kIOReturnIOError;
++    }
++}
++class RedwoodGPU:public IOService {
++    OSDeclareDefaultStructors(RedwoodGPU);
++public:
++    bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++};
++OSDefineMetaClassAndStructors(RedwoodGPU,IOService);
++bool RedwoodGPU::start(IOService *provider)
++{
++    if(!redfin_gpu_ready() || !IOService::start(provider))return false;
++    setName("RedwoodGPU");setProperty(kIOUserClientClassKey,"RedwoodGPUUserClient");
++    setProperty("chip-id",0x06020001,32);setProperty("RedfinRuntimeABI",1,32);
++    registerService();return true;
++}
++void RedfinGPUStart(void)
++{
++    if(__atomic_exchange_n(&gStarts,1,__ATOMIC_ACQ_REL) || !redfin_gpu_ready())return;
++    gLock=IOLockAlloc();IOService *provider=IOService::getPlatform();
++    RedwoodGPU *gpu=OSTypeAlloc(RedwoodGPU);
++    if(!gLock || !provider || !gpu || !gpu->init() || !gpu->attach(provider)) {
++        OSSafeReleaseNULL(gpu);IOLog("REDFIN GPU SERVICE: creation failed\n");return;
++    }
++    if(!gpu->start(provider)){gpu->detach(provider);IOLog("REDFIN GPU SERVICE: publication failed\n");}
++    else IOLog("REDFIN GPU SERVICE: RedwoodGPU msm1.7 ready, native A620; synchronous actual fences\n");
++    gpu->release();
++}
++void RedfinGPUStop(void)
++{
++    if(!gLock)return;
++    GPUTransaction transaction;redfin_gpu_stop();
++}
++struct gpu_buffer {
++    IOMemoryDescriptor *memory;
++    SweetSurface *surface;
++    uint8_t *kernel;
++    uint64_t address,size;
++    uint32_t flags,fence;
++};
++class RedwoodGPUUserClient:public IOUserClient {
++    OSDeclareDefaultStructors(RedwoodGPUUserClient);
++    gpu_buffer *buffers;
++    uint32_t nextHandle,nextQueue;
++    bool closed;
++    gpu_buffer *buffer(uint32_t handle);
++    IOReturn create(msm_gem_new *request);
++    IOReturn importSurface(redwood_surface *request);
++    IOReturn info(msm_gem_info *request);
++    IOReturn submit(msm_submit *request);
++    IOReturn drop(uint32_t handle);
++    IOReturn mapDescriptor(IOMemoryDescriptor *,uint8_t *,SweetSurface *,uint64_t,uint32_t,uint32_t *);
++public:
++    bool initWithTask(task_t,void *,UInt32,OSDictionary *) APPLE_KEXT_OVERRIDE;
++    bool start(IOService *) APPLE_KEXT_OVERRIDE;
++    IOReturn clientClose(void) APPLE_KEXT_OVERRIDE;
++    void free(void) APPLE_KEXT_OVERRIDE;
++    IOReturn clientMemoryForType(UInt32,IOOptionBits *,IOMemoryDescriptor **) APPLE_KEXT_OVERRIDE;
++    IOReturn externalMethod(uint32_t,IOExternalMethodArguments *,IOExternalMethodDispatch *,OSObject *,void *) APPLE_KEXT_OVERRIDE;
++};
++OSDefineMetaClassAndStructors(RedwoodGPUUserClient,IOUserClient);
++bool RedwoodGPUUserClient::initWithTask(task_t task,void *security,UInt32 type,OSDictionary *properties)
++{return type==0 && IOUserClient::initWithTask(task,security,type,properties);}
++bool RedwoodGPUUserClient::start(IOService *provider)
++{
++    if(!redfin_gpu_ready() || !IOUserClient::start(provider))return false;
++    buffers=IONewZero(gpu_buffer,RF_GR_OBJECTS);return buffers!=NULL;
++}
++gpu_buffer *RedwoodGPUUserClient::buffer(uint32_t handle)
++{return handle && handle<=RF_GR_OBJECTS && buffers && buffers[handle-1].memory?&buffers[handle-1]:NULL;}
++/* On success takes descriptor/surface references; on failure the caller keeps
++ * them, except a new permanent retain when DMA ownership is uncertain. */
++IOReturn RedwoodGPUUserClient::mapDescriptor(IOMemoryDescriptor *memory,uint8_t *kernel,SweetSurface *surface,
++    uint64_t size,uint32_t flags,uint32_t *handle)
++{
++    if(!redfin_gpu_ready() || !memory || !kernel || !size || size>RF_GR_BUFFER_MAX ||
++        (size&PAGE_MASK) || memory->getLength()<size)return kIOReturnBadArgument;
++    unsigned slot=RF_GR_OBJECTS;
++    for(unsigned i=0;i<RF_GR_OBJECTS;i++) {
++        unsigned at=(nextHandle+i)%RF_GR_OBJECTS;
++        if(!buffers[at].memory){slot=at;break;}
++    }
++    if(slot==RF_GR_OBJECTS)return kIOReturnNoResources;
++    uint64_t address=redfin_gpu_address(size);if(!address)return kIOReturnNoMemory;
++    int error=0;
++    for(uint64_t offset=0;offset<size;offset+=4096) {
++        IOByteCount bytes=0;
++        addr64_t physical=memory->getPhysicalSegment(offset,&bytes,kIOMemoryMapperNone);
++        if(!physical || bytes<4096){error=EINVAL;break;}
++        error=redfin_gpu_map(address+offset,physical,(flags&2u)!=0);if(error)break;
++    }
++    if(!error)error=redfin_gpu_mapped();
++    if(error) {
++        if(redfin_gpu_release(address,size)) {
++            memory->retain();if(surface)surface->retain();
++            IOLog("REDFIN GPU SERVICE: failed map retains %llu bytes until reset\n",size);
++        }
++        return gpuError(error);
++    }
++    gpu_buffer *b=&buffers[slot];*b=(gpu_buffer){memory,surface,kernel,address,size,flags,0};
++    nextHandle=slot+1;*handle=slot+1;return kIOReturnSuccess;
++}
++IOReturn RedwoodGPUUserClient::create(msm_gem_new *r)
++{
++    if(!r->size || r->size>RF_GR_BUFFER_MAX || (r->flags&~0x000f0003u))return kIOReturnBadArgument;
++    uint64_t size=(r->size+PAGE_MASK)&~(uint64_t)PAGE_MASK;
++    IOBufferMemoryDescriptor *memory=IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
++        kIODirectionInOut|kIOMemoryKernelUserShared|kIOMapWriteCombineCache,(vm_size_t)size,PAGE_SIZE);
++    if(!memory)return kIOReturnNoMemory;
++    IOReturn result=mapDescriptor(memory,(uint8_t *)memory->getBytesNoCopy(),NULL,size,r->flags,&r->handle);
++    if(result!=kIOReturnSuccess)memory->release();return result;
++}
++IOReturn RedwoodGPUUserClient::importSurface(redwood_surface *r)
++{
++    SweetSurface *s=sweet_surface_copy(r->surface);if(!s)return kIOReturnNotFound;
++    uint64_t size=((uint64_t)s->allocSize+PAGE_MASK)&~(uint64_t)PAGE_MASK;
++    /* This port keeps state and pixels in separate descriptors. There is no
++     * upstream PAGE_SIZE prefix to skip. Wrapped client ranges are deferred. */
++    if(s->wrapped || !s->memory || s->planeCount>1 || !size || size>RF_GR_BUFFER_MAX ||
++        s->memory->getLength()<size || !s->kernelAddress()) {s->release();return kIOReturnUnsupported;}
++    r->size=size;r->offset=s->offset;r->rowBytes=s->bytesPerRow;r->width=s->width;
++    r->height=s->height;r->pixelFormat=s->pixelFormat;r->planes=s->planeCount;
++    if(r->handle==UINT32_MAX){r->handle=0;s->release();return kIOReturnSuccess;}
++    for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(buffers[i].memory && buffers[i].surface==s) {
++        r->handle=i+1;s->release();return kIOReturnSuccess;
++    }
++    s->memory->retain();
++    IOReturn result=mapDescriptor(s->memory,(uint8_t *)s->kernelAddress(),s,size,0,&r->handle);
++    if(result!=kIOReturnSuccess){s->memory->release();s->release();}return result;
++}
++IOReturn RedwoodGPUUserClient::drop(uint32_t handle)
++{
++    gpu_buffer *b=buffer(handle);if(!b)return kIOReturnBadArgument;
++    int error=redfin_gpu_release(b->address,b->size);
++    if(error) {
++        /* These references remain deliberately live; after a failed fence,
++         * releasing backing pages would let DMA reach another owner's RAM. */
++        IOLog("REDFIN GPU SERVICE: retained handle=%u bytes=%llu error=%d until reset\n",handle,b->size,error);
++    } else {
++        b->memory->release();if(b->surface)b->surface->release();
++    }
++    *b=(gpu_buffer){};return error?gpuError(error):kIOReturnSuccess;
++}
++IOReturn RedwoodGPUUserClient::clientClose(void)
++{
++    if(!closed && buffers) {
++        GPUTransaction transaction;
++        for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(buffers[i].memory)(void)drop(i+1);
++        closed=true;
++    }
++    if(!isInactive())terminate();return kIOReturnSuccess;
++}
++void RedwoodGPUUserClient::free(void)
++{
++    if(buffers){
++        if(!closed){GPUTransaction transaction;for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(buffers[i].memory)(void)drop(i+1);}
++        IODelete(buffers,gpu_buffer,RF_GR_OBJECTS);buffers=NULL;
++    }
++    IOUserClient::free();
++}
++IOReturn RedwoodGPUUserClient::info(msm_gem_info *r)
++{
++    gpu_buffer *b=buffer(r->handle);if(!b)return kIOReturnBadArgument;
++    switch(r->info) {
++    case 0:r->value=(uint64_t)r->handle<<32;return kIOReturnSuccess;
++    case 1:r->value=b->address;return kIOReturnSuccess;
++    case 2:return kIOReturnSuccess; /* debugger-only name */
++    case 5:r->value=b->flags;return kIOReturnSuccess;
++    default:return kIOReturnUnsupported;
++    }
++}
++IOReturn RedwoodGPUUserClient::clientMemoryForType(UInt32 type,IOOptionBits *options,IOMemoryDescriptor **memory)
++{
++    if(!options || !memory || !gLock)return kIOReturnBadArgument;
++    GPUTransaction transaction;gpu_buffer *b=buffer(type);
++    if(!b || !redfin_gpu_ready())return kIOReturnNotFound;
++    *memory=b->memory;(*memory)->retain();
++    *options=b->surface?b->surface->mapCache:kIOMapWriteCombineCache;return kIOReturnSuccess;
++}
++IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
++{
++    if(!r->nr_cmds || r->nr_cmds>RF_GR_COMMANDS || !r->nr_bos || r->nr_bos>RF_GR_OBJECTS ||
++        (r->flags&~0x80000010u) || (r->flags&0xffu)!=0x10u || r->nr_in || r->nr_out || r->in_syncobjs || r->out_syncobjs ||
++        r->pad || r->queue>nextQueue)return kIOReturnBadArgument;
++    msm_bo *bos=IONew(msm_bo,r->nr_bos);msm_cmd *commands=IONew(msm_cmd,r->nr_cmds);
++    uint64_t addresses[RF_GR_COMMANDS];uint32_t words[RF_GR_COMMANDS],count=0;
++    IOReturn result=kIOReturnBadArgument;
++    if(!bos || !commands){result=kIOReturnNoMemory;goto done;}
++    if(copyin((user_addr_t)r->bos,bos,r->nr_bos*sizeof(*bos)) ||
++        copyin((user_addr_t)r->cmds,commands,r->nr_cmds*sizeof(*commands))){result=kIOReturnVMError;goto done;}
++    for(unsigned i=0;i<r->nr_bos;i++) {
++        gpu_buffer *b=buffer(bos[i].handle);
++        if(!b || (bos[i].flags&~0xfu) || (bos[i].presumed && bos[i].presumed!=b->address))goto done;
++    }
++    for(unsigned i=0;i<r->nr_cmds;i++) {
++        const msm_cmd *cmd=&commands[i];
++        if(cmd->type!=1) {if(cmd->type==2 || cmd->type==3)continue;goto done;}
++        gpu_buffer *b=cmd->index<r->nr_bos?buffer(bos[cmd->index].handle):NULL;
++        if(!b || cmd->relocs || cmd->pad || !cmd->size || (cmd->offset&3u) ||
++            (cmd->size&3u) || (uint64_t)cmd->offset+cmd->size>b->size)goto done;
++        addresses[count]=b->address+cmd->offset;words[count++]=cmd->size/4;
++    }
++    if(!count)goto done;
++    for(unsigned i=0;i<r->nr_bos;i++) {
++        gpu_buffer *b=buffer(bos[i].handle);
++        if(b->surface)redfin_gpu_sync(b->kernel,b->size,true);
++    }
++    redfin_gpu_sync(NULL,0,false);
++    result=gpuError(redfin_gpu_submit(addresses,words,count,&r->fence));
++    if(result==kIOReturnSuccess)for(unsigned i=0;i<r->nr_bos;i++) {
++        gpu_buffer *b=buffer(bos[i].handle);b->fence=r->fence;
++        if(b->surface)redfin_gpu_sync(b->kernel,b->size,true);
++    }
++done:
++    if(bos)IODelete(bos,msm_bo,r->nr_bos);
++    if(commands)IODelete(commands,msm_cmd,r->nr_cmds);
++    return result;
++}
++static bool parameter(uint32_t param,uint64_t *value)
++{
++    switch(param) {
++    case 1:case 6:case 8:case 9:case 0x0a:case 0x11:*value=0;return true;
++    case 2:*value=512*1024;return true;
++    case 3:*value=0x06020001;return true;
++    case 4:*value=275000000;return true;
++    case 5:*value=mach_absolute_time();return true;
++    case 7:*value=1;return true;
++    case 0x10:*value=14;return true;
++    /* A620 uses native UBWC3. Do not advertise A642L UBWC4 parameters. */
++    default:return false;
++    }
++}
++IOReturn RedwoodGPUUserClient::externalMethod(uint32_t selector,IOExternalMethodArguments *args,
++    IOExternalMethodDispatch *,OSObject *,void *)
++{
++    union Request {
++        msm_param param;msm_gem_new create;msm_gem_info info;msm_cpu_prep prep;msm_submit submit;
++        msm_wait wait;msm_madvise madvise;msm_queue queue;msm_query query;drm_close close;
++        redwood_surface surface;redwood_show show;
++    } r;
++    if(!args || !buffers || closed || !args->structureInput || args->scalarInputCount ||
++        args->scalarOutputCount)return kIOReturnBadArgument;
++    size_t expected=0;
++    switch(selector) {
++    case GetParam:case SetParam:expected=sizeof(msm_param);break;
++    case GemNew:expected=sizeof(msm_gem_new);break;
++    case GemInfo:expected=sizeof(msm_gem_info);break;
++    case CpuPrep:expected=sizeof(msm_cpu_prep);break;
++    case CpuFini:expected=4;break;
++    case Submit:expected=sizeof(msm_submit);break;
++    case WaitFence:expected=sizeof(msm_wait);break;
++    case Madvise:expected=sizeof(msm_madvise);break;
++    case QueueNew:expected=sizeof(msm_queue);break;
++    case QueueClose:expected=4;break;
++    case QueueQuery:expected=sizeof(msm_query);break;
++    case GemClose:expected=sizeof(drm_close);break;
++    case Surface:expected=sizeof(redwood_surface);break;
++    case Show:expected=sizeof(redwood_show);break;
++    default:return kIOReturnUnsupported;
++    }
++    if(args->structureInputSize!=expected ||
++        (args->structureOutputSize && (!args->structureOutput || args->structureOutputSize<expected)))return kIOReturnBadArgument;
++    bzero(&r,sizeof(r));memcpy(&r,args->structureInput,expected);
++    GPUTransaction transaction;
++    if(!redfin_gpu_ready())return kIOReturnNotReady;
++    IOReturn result=kIOReturnSuccess;
++    switch(selector) {
++    case GetParam:if(r.param.pipe!=0x10 || !parameter(r.param.param,&r.param.value))result=kIOReturnBadArgument;break;
++    case SetParam:break;
++    case GemNew:result=create(&r.create);break;
++    case GemInfo:result=info(&r.info);break;
++    case CpuPrep:
++        if(!buffer(r.prep.handle))result=kIOReturnBadArgument;
++        else if(!redfin_gpu_done(buffer(r.prep.handle)->fence))result=kIOReturnBusy;
++        break;
++    case CpuFini:if(!buffer(*(uint32_t *)&r))result=kIOReturnBadArgument;break;
++    case Submit:result=submit(&r.submit);break;
++    case WaitFence:
++        if(!r.wait.fence || r.wait.fence>redfin_gpu_last() || !redfin_gpu_done(r.wait.fence))result=kIOReturnTimeout;
++        break;
++    case Madvise:if(!buffer(r.madvise.handle))result=kIOReturnBadArgument;else r.madvise.retained=1;break;
++    case QueueNew:if(r.queue.flags || r.queue.prio || nextQueue==UINT32_MAX)result=kIOReturnBadArgument;else r.queue.id=++nextQueue;break;
++    case QueueClose:if(!*(uint32_t *)&r || *(uint32_t *)&r>nextQueue)result=kIOReturnBadArgument;break;
++    case QueueQuery:
++        if(!r.query.id || r.query.id>nextQueue || r.query.param || r.query.len<8 || !r.query.data)result=kIOReturnBadArgument;
++        else {uint64_t faults=0;if(copyout(&faults,(user_addr_t)r.query.data,8))result=kIOReturnVMError;}
++        break;
++    case GemClose:result=drop(r.close.handle);break;
++    case Surface:result=importSurface(&r.surface);break;
++    case Show:result=kIOReturnUnsupported;break; /* Use IOMobileFramebuffer/IOSurface for display. */
++    default:result=kIOReturnUnsupported;break;
++    }
++    if(result==kIOReturnSuccess && args->structureOutputSize) {
++        memcpy(args->structureOutput,&r,expected);args->structureOutputSize=(uint32_t)expected;
++    }
++    return result;
++}
++#endif /* SWEET */
+diff --git a/iokit/Kernel/arm/RedfinGPUService.h b/iokit/Kernel/arm/RedfinGPUService.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPUService.h
+@@ -0,0 +1,30 @@
++/* SPDX-License-Identifier: MIT */
++/* Private kernel boundary. The caller holds the GPU lock and binds CPU0. */
++#ifndef REDFIN_GPU_SERVICE_H
++#define REDFIN_GPU_SERVICE_H
++#include <stdbool.h>
++#include <stdint.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++bool redfin_gpu_ready(void);
++void *redfin_gpu_bind(void);
++void redfin_gpu_unbind(void *previous);
++int redfin_gpu_audit(void);
++uint64_t redfin_gpu_address(uint64_t size);
++int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
++int redfin_gpu_mapped(void);
++int redfin_gpu_release(uint64_t address,uint64_t size);
++int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence);
++bool redfin_gpu_done(uint32_t fence);
++uint32_t redfin_gpu_last(void);
++void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);
++void redfin_gpu_poison(const char *reason);
++void redfin_gpu_stop(void);
++void redfin_gpu_gui_start(void);
++void RedfinGPUStart(void);
++void RedfinGPUStop(void);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/iokit/Kernel/arm/RedfinGPURuntime.h b/iokit/Kernel/arm/RedfinGPURuntime.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPURuntime.h
+@@ -0,0 +1,92 @@
++/* SPDX-License-Identifier: MIT */
++/* A620 runtime protocol, adapted from preferred HackiOS msm-1.7 bridge.
++ * All GPU addresses belong to this allocator; the bootstrap region is absent.
++ * One 64KiB guard follows each object. Callers serialize the complete operation.
++ */
++#ifndef REDFIN_GPU_RUNTIME_H
++#define REDFIN_GPU_RUNTIME_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#define RF_GR_BASE UINT64_C(0x10000000)
++#define RF_GR_BYTES UINT64_C(0x20000000)
++#define RF_GR_GRANULE UINT64_C(0x10000)
++#define RF_GR_TABLE_BYTES 0x100000u
++#define RF_GR_TABLES 256u
++#define RF_GR_OBJECTS 1024u
++#define RF_GR_BUFFER_MAX (128u<<20)
++#define RF_GR_MEMORY_MAX (512u<<20)
++#define RF_GR_COMMANDS 128u
++#define RF_GR_FENCE_AT 0x200u
++#define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+16u)
++static const uint32_t rf_gr_policy[]={1,0x06020001,512,128,1024,128,500,0x10000,0x100000,1};
++
++struct rf_gr_object {uint64_t address,size,span;};
++struct rf_gr_arena {struct rf_gr_object objects[RF_GR_OBJECTS];uint64_t bytes;};
++static inline bool rf_gr_span(uint64_t size,uint64_t *span)
++{
++    if(!size || size>RF_GR_BUFFER_MAX)return false;
++    *span=((size+RF_GR_GRANULE-1)&~(RF_GR_GRANULE-1))+RF_GR_GRANULE;
++    return true;
++}
++/* First fit without an allocatable free-list that could lose a returned hole. */
++static inline uint64_t rf_gr_allocate(struct rf_gr_arena *a,uint64_t size)
++{
++    uint64_t span,at=RF_GR_BASE;unsigned free_slot=RF_GR_OBJECTS;
++    if(!a || !rf_gr_span(size,&span) || a->bytes>RF_GR_MEMORY_MAX-size)return 0;
++    for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(!a->objects[i].address){free_slot=i;break;}
++    if(free_slot==RF_GR_OBJECTS)return 0;
++    for(unsigned pass=0;pass<=RF_GR_OBJECTS;pass++) {
++        if(at>RF_GR_BASE+RF_GR_BYTES-span)return 0;
++        uint64_t next=at;
++        for(unsigned i=0;i<RF_GR_OBJECTS;i++) {
++            const struct rf_gr_object *o=&a->objects[i];
++            if(o->address && at<o->address+o->span && o->address<at+span && next<o->address+o->span)
++                next=o->address+o->span;
++        }
++        if(next==at){a->objects[free_slot]=(struct rf_gr_object){at,size,span};a->bytes+=size;return at;}
++        at=next;
++    }
++    return 0;
++}
++static inline const struct rf_gr_object *rf_gr_find(const struct rf_gr_arena *a,uint64_t at,uint64_t bytes)
++{
++    if(!a || !bytes || at>UINT64_MAX-bytes)return NULL;
++    for(unsigned i=0;i<RF_GR_OBJECTS;i++) {
++        const struct rf_gr_object *o=&a->objects[i];
++        if(o->address && at>=o->address && at-o->address<=o->size && bytes<=o->size-(at-o->address))return o;
++    }
++    return NULL;
++}
++static inline bool rf_gr_release(struct rf_gr_arena *a,uint64_t at,uint64_t size)
++{
++    if(!a)return false;
++    for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(a->objects[i].address==at && a->objects[i].size==size) {
++        a->bytes-=size;a->objects[i]=(struct rf_gr_object){0};return true;
++    }
++    return false;
++}
++/* Native TYPE7 parity, CP_INDIRECT_BUFFER followed by a real cache-flush fence. */
++static inline uint32_t rf_gr_parity(uint32_t v)
++{v^=v>>16;v^=v>>8;v^=v>>4;v^=v>>2;v^=v>>1;return (~v)&1u;}
++static inline uint32_t rf_gr_type7(unsigned op,unsigned words)
++{return 0x70000000u|(op<<16)|(rf_gr_parity(op)<<23)|words|(rf_gr_parity(words)<<15);}
++static inline unsigned rf_gr_submit_words(const struct rf_gr_arena *a,const uint64_t *addresses,
++    const uint32_t *words,unsigned count,uint32_t fence,uint32_t *out,unsigned room)
++{
++    if(!a || !addresses || !words || !count || count>RF_GR_COMMANDS || !fence || !out || room<4*count+10)return 0;
++    for(unsigned i=0;i<count;i++)if((addresses[i]&3u) || !words[i] || words[i]>0xfffffu ||
++        !rf_gr_find(a,addresses[i],(uint64_t)words[i]*4))return 0;
++    unsigned n=0;
++    out[n++]=rf_gr_type7(0x46,1);out[n++]=0x18; /* Invalidate depth/color state, native a6xx_submit. */
++    out[n++]=rf_gr_type7(0x46,1);out[n++]=0x19;
++    for(unsigned i=0;i<count;i++) {
++        out[n++]=rf_gr_type7(0x3f,3);out[n++]=(uint32_t)addresses[i];
++        out[n++]=(uint32_t)(addresses[i]>>32);out[n++]=words[i];
++    }
++    out[n++]=rf_gr_type7(0x26,0);
++    out[n++]=rf_gr_type7(0x46,4);out[n++]=4;
++    out[n++]=0x01200000u+RF_GR_FENCE_AT;out[n++]=0;out[n++]=fence;
++    return n;
++}
++#endif

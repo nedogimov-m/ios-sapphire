@@ -9,6 +9,8 @@ int redfin_smp_verified(void);
 int redfin_gui_ready(void);
 int redfin_gui_cpu0(void);
 int redfin_gui_bind_worker(void);
+void *redfin_gui_worker_enter(void);
+void redfin_gui_worker_leave(void *);
 void redfin_smp_publish(void);
 void *redfin_gui_root_enter(void);
 void redfin_gui_root_leave(void *);
@@ -69,5 +71,18 @@ int redfin_gui_bind_worker(void)
  thread_bind(cpu_to_processor(0));
  thread_block(THREAD_CONTINUE_NULL);
  return redfin_gui_cpu0();
+}
+/* Save and restore the caller's affinity for synchronous IOKit transactions.
+ * Scheduler-private declarations stay in osfmk, rather than the BSD adapter. */
+void *redfin_gui_worker_enter(void)
+{
+ processor_t previous=thread_bind(cpu_to_processor(0));
+ thread_block(THREAD_CONTINUE_NULL);
+ return (void *)previous;
+}
+void redfin_gui_worker_leave(void *previous)
+{
+ thread_bind((processor_t)previous);
+ thread_block(THREAD_CONTINUE_NULL);
 }
 #endif /* REDFIN_GUI_RUNTIME_H */

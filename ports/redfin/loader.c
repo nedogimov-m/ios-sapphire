@@ -535,7 +535,8 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
         "redfin-touch", "redfin-ufs", "sweet-fbcon",
         "redfin-wifi", "redfin-wifi-native", "redfin-wifi-power", "redfin-wifi-start",
         "redfin-wifi-glink", "redfin-wifi-wlfw", "redfin-wifi-wlan", "redfin-wifi-snoc",
-        "redfin-rmtfs", "redfin-wifi-dma", "redfin-wifi-assets", "redfin-wifi-fw"
+        "redfin-rmtfs", "redfin-wifi-dma", "redfin-wifi-assets", "redfin-wifi-fw",
+        "redfin-gpu", "redfin-gpu-power", "redfin-gmu", "redfin-gpu-smmu", "redfin-gpu-command"
     };
     static const char cpu_u32[][24] = {
         "reg", "cpu-id", "cluster-id", "cluster-type", "die-cluster-id",
@@ -554,7 +555,7 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
                 for (unsigned i = 0; i < REDFIN_SMP_CPUS; i++)
                     for (unsigned j = 0; j < i; j++) if (handles[i] == handles[j]) return 0;
                 return off == size && cpus == REDFIN_SMP_CPUS && (root_seen & 15) == 15 &&
-                    (!gui || root_seen == (1U << (gui == 2 ? 25 : 13)) - 1) &&
+                    (!gui || root_seen == (1U << (gui == 3 ? 30 : gui == 2 ? 25 : 13)) - 1) &&
                     arm_seen == (gui ? 3U : 1U) &&
                     (chosen_children & 1) && chosen_children <= 3;
             }
@@ -581,7 +582,7 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
                     kind = ROOT;
                 } else if (depth == 1 && kinds[depth] == ROOT) {
                     unsigned n = 0;
-                    unsigned count = gui == 2 ? 25 : gui ? 13 : 10;
+                    unsigned count = gui == 3 ? 30 : gui == 2 ? 25 : gui ? 13 : 10;
                     for (; n < count; n++)
                         if (smp_string(value, len, root_names[n])) break;
                     if (n == count || (root_seen & (1U << n))) return 0;
@@ -729,7 +730,8 @@ static const char *validate(const void *data, uint64_t size, uint64_t image,
     const volatile unsigned char *tree = (const volatile unsigned char *)data + p->adt_offset;
     int gui = REDFIN_GUI_BUILD_READY && redfin_gui_profile(p->command, sizeof(p->command), NULL);
     int wifi_gui = gui && redfin_wifi_gui_profile(p->command, sizeof(p->command), NULL);
-    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, wifi_gui ? 2 : 1) : adt_valid_smp(tree, p->adt_size)) :
+    int gpu_gui = gui && redfin_gpu_gui_profile(p->command, sizeof(p->command), NULL);
+    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, gpu_gui ? 3 : wifi_gui ? 2 : 1) : adt_valid_smp(tree, p->adt_size)) :
         adt_valid_up(tree, p->adt_size, mpidr, p->phys, p->memory))) return "ADT CPU or RAM mismatch";
     if (!rmtfs_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "RMTFS RAM ownership";
     if (!wifi_dma_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "WLAN DMA RAM ownership";

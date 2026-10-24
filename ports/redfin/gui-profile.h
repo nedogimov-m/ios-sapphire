@@ -70,7 +70,7 @@ static inline bool redfin_gui_profile(const char *args,unsigned bytes,uint64_t *
   }
   unsigned n=pos-start;
   bool known=false;
-  if(redfin_gui_token(args+start,n,"redfingui=2")) {
+  if(redfin_gui_token(args+start,n,"redfingui=2") || redfin_gui_token(args+start,n,"redfingui=3")) {
    uint64_t bit=1ULL<<(count-1);
    if(seen&bit) return false;
    seen|=bit;continue;
@@ -122,7 +122,20 @@ static inline bool redfin_wifi_gui_profile(const char *args,unsigned bytes,uint6
  for(unsigned at=0;at<bytes && args[at];) {
   if(args[at]==' ') {at++;continue;}
   unsigned first=at;while(at<bytes && args[at] && args[at]!=' ')at++;
-  if(redfin_gui_token(args+first,at-first,"redfingui=2")) return true;
+  if(redfin_gui_token(args+first,at-first,"redfingui=2") ||
+     redfin_gui_token(args+first,at-first,"redfingui=3")) return true;
+ }
+ return false;
+}
+/* GUI3 retains the complete GUI2/WLAN contract and explicitly selects the
+ * separately bound A620 runtime. It adds no tokens to the 608-byte field. */
+static inline bool redfin_gpu_gui_profile(const char *args,unsigned bytes,uint64_t *boot_id)
+{
+ if(!redfin_gui_profile(args,bytes,boot_id)) return false;
+ for(unsigned at=0;at<bytes && args[at];) {
+  if(args[at]==' ') {at++;continue;}
+  unsigned first=at;while(at<bytes && args[at] && args[at]!=' ')at++;
+  if(redfin_gui_token(args+first,at-first,"redfingui=3")) return true;
  }
  return false;
 }
