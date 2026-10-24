@@ -39,8 +39,10 @@ keeps the binary cache's exact length with offset-table padding. The fresh
 Redfin root builder applies it after the generic root tweaks. No invented
 Apple DT node or legacy `wifi=1`/modem path is introduced. The existing-root
 update was backed up, bounded to its freshly resolved file allocation and
-verified by full readback; daemon startup and GUI networking still require
-the subsequent device capture.
+verified by full readback. The subsequent authenticated capture confirms
+wifid executes once, discovers en0 and issues Apple80211 capability, power
+and channel queries before the GUI cap. Manual Settings connection and
+actual network data remain unverified.
 
 Reviewed 2026-10-24: pinned Google SEC source
 `0701b191882dc408104ad8af9e2f5eb2bf34c297`, `sec_ts.c:330..430`, retries

@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN wifid starts and discovers native WLAN after userland fix — 2026-10-24
+
+Userland fix3d2d76a validated by authenticated/boot-ID-matched capture
+logs/redfin/wifi-gui8-station-v9-wifid-v1. exec wifid appears once. Before
+the180s cap, wifid opens the RedfinWLAN service twice and makes10 Apple80211
+queries: capabilities, power, HW_SUPPORTED_CHANNELS and CHANNELS_INFO are
+answered; optional96/97/RSSI_BOUNDS are refused. addNetworkInterface also
+executes. This establishes daemon startup and actual iOS driver discovery,
+without proving a working Settings switch, DHCP service or association.
+
+The native radio again passes all124 periodic audits through three passive
+scans and25 BSSs. The planned cap revokes its lease at180055ms; no earlier
+ownership/parser/radio failure appears. This run has zero SEC batches/
+contacts/releases and no Preferences execution: the requested manual
+connection test was not observed, and the asynchronous user reply remains
+pending. No join, WPA2 exchange, Ethernet RX/TX or DHCP lease is observed.
+Post-cancellation current-network queries return ENXIO; this does not
+establish a failed join attempt. Do not fill optional ioctl replies with
+invented data or repeat an unattended boot for the missing manual test.
+
+The collector completed successfully despite a longer return wait than the
+previous run: Apple userspace alive, no panic, HFSX header clean/journaled,
+inconsistent false, write_count568410, public metadata re-primed and verified
+fastboot restored. No collector/device action remains running. Next: a
+manual Settings connection while the user is present; GPU/Metal follows
+working GUI Wi-Fi. Existing private cache/allocation backup is retained.
+
+No new kernel build or CI run: source190b466, local build20261024-060104,
+kernel390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e,
+image4aa7fdee1758666f9eaaf81544f3307622140f43978214ad0c37460eac2f99d7.
+No partition flash, root reinstall, modem/persist/EFS or backup change.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x58f44527d96348f3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN touch confirmed; upstream wifid job-gate fix applied, GUI validation running — 2026-10-24
 
 Manual-v2 completed with authenticated/boot-ID-matched logs. Preferences
