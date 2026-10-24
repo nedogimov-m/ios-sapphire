@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V6 integrated boot stopped by native launchd platform check — 2026-10-25
+
+Source9fc592e / preflight record42e0776 / local build20261025-042244/noCI.
+Authenticated boot46a64490da6d616a/image
+c3f05dfdf1d2f1ed4e17a7317c66cd77a9b988c355c515acd437cc5bcd33e1ae.
+Kernel startup and real A620 bootstrap command/readback PASS, and private
+serial publication reports published=1/valid=1. Launchd starts backboardd
+and the new photos-init job, then itself panics: "unexpected exec of
+non-platform binary: /redfin/bin/photos-init: com.redfin.photos-init [55]".
+The user reports no GUI. No runtime frame/audit measurement, native library
+result, MobileGestalt serial answer or manual account test was obtained.
+
+Actual20H392 launchd disassembly checks CS_OPS_STATUS bit26 after its exec
+event and calls the userspace panic path when that platform bit is absent.
+The reason this executable lacks it is not yet observed; the existing root
+signature hook is not instrumented for the new identity. Add native loading/
+signature diagnostics and reject this one bootstrap before an invalid exec
+event can panic launchd; do not weaken the check or invent a validated hash.
+
+Collector recovered authenticated logs and returned to verified Fastboot.
+HFSX write_count746577 is journaled/not-inconsistent but not clean after the
+panic. File-log capture correctly skipped it; no offline root modification
+or reuse of v7 is allowed. Native journal replay is needed at the next mount.
+CPU panel scaling/copy and direct GPU presentation are still unfinished;
+GPU smoothness/Photos/Metal/activation are not established by this run.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x46a64490da6d616a redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V6 image preflight and bounded native photo-bootstrap installation complete — 2026-10-25
 
 Source9fc592e, local native build20261025-042244/noCI. Frozen kernel
