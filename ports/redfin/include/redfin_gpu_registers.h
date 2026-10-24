@@ -1,0 +1,101 @@
+/* SPDX-License-Identifier: MIT */
+/* Native A620 initialization, msm500b3a20 adreno_a6xx.c/adreno-gpulist.h.
+ * Offsets are BYTES. Performance/HWCG/preemption/IFPC remain disabled in
+ * this bounded polling profile. Native values are written without requiring
+ * undocumented/RAZ bits to echo; only architectural address/control fields
+ * have readback masks. No A642L/LPAC-only workaround is copied.
+ */
+#ifndef REDFIN_GPU_REGISTERS_H
+#define REDFIN_GPU_REGISTERS_H
+static const struct rf_a6_register rf_a6_registers[] = {
+    {0x000e0,0x00000000,0xffffffff}, /* A6XX_RBBM_INT_0_MASK */
+    {0x000e8,0x00000000,0xffffffff}, /* A6XX_RBBM_INT_2_MASK */
+    {0x002b8,0x00000000,0x00000000}, /* A6XX_RBBM_CLOCK_CNTL */
+    {0x00058,0x00000000,0x00000001}, /* A6XX_RBBM_GBIF_HALT */
+    {0x3e00c,0x00000000,0x00000000}, /* A6XX_RBBM_SECVID_TSB_CNTL */
+    {0x3e000,0x00000000,0x00000000}, /* A6XX_RBBM_SECVID_TSB_TRUSTED_BASE_LO */
+    {0x3e004,0x00000000,0x00000000}, /* A6XX_RBBM_SECVID_TSB_TRUSTED_BASE_HI */
+    {0x3e008,0x00000000,0x00000000}, /* A6XX_RBBM_SECVID_TSB_TRUSTED_SIZE */
+    {0x02108,0x00000001,0x00000001}, /* A6XX_CP_ADDR_MODE_CNTL */
+    {0x03004,0x00000001,0x00000001}, /* A6XX_VSC_ADDR_MODE_CNTL */
+    {0x21804,0x00000001,0x00000001}, /* A6XX_GRAS_ADDR_MODE_CNTL */
+    {0x23814,0x00000001,0x00000001}, /* A6XX_RB_ADDR_MODE_CNTL */
+    {0x27804,0x00000001,0x00000001}, /* A6XX_PC_ADDR_MODE_CNTL */
+    {0x2f814,0x00000001,0x00000001}, /* A6XX_HLSQ_ADDR_MODE_CNTL */
+    {0x29804,0x00000001,0x00000001}, /* A6XX_VFD_ADDR_MODE_CNTL */
+    {0x25804,0x00000001,0x00000001}, /* A6XX_VPC_ADDR_MODE_CNTL */
+    {0x03800,0x00000001,0x00000001}, /* A6XX_UCHE_ADDR_MODE_CNTL */
+    {0x2b804,0x00000001,0x00000001}, /* A6XX_SP_ADDR_MODE_CNTL */
+    {0x2d804,0x00000001,0x00000001}, /* A6XX_TPL1_ADDR_MODE_CNTL */
+    {0x3e040,0x00000001,0x00000001}, /* A6XX_RBBM_SECVID_TSB_ADDR_MODE_CNTL */
+    {0x0f00c,0x00071620,0x00000000}, /* A6XX_GBIF_QSB_SIDE0 */
+    {0x0f010,0x00071620,0x00000000}, /* A6XX_GBIF_QSB_SIDE1 */
+    {0x0f014,0x00071620,0x00000000}, /* A6XX_GBIF_QSB_SIDE2 */
+    {0x0f018,0x00071620,0x00000000}, /* A6XX_GBIF_QSB_SIDE3 */
+    {0x00044,0x00000003,0x00000000}, /* A6XX_RBBM_GBIF_CLIENT_QOS_CNTL */
+    {0x0142c,0xffffffff,0x00000000}, /* A6XX_RBBM_PERFCTR_GPU_BUSY_MASKED */
+    {0x03814,0xffffffc0,0x00000000}, /* A6XX_UCHE_WRITE_RANGE_MAX_LO */
+    {0x03818,0x0001ffff,0x00000000}, /* A6XX_UCHE_WRITE_RANGE_MAX_HI */
+    {0x03824,0xfffff000,0x00000000}, /* A6XX_UCHE_TRAP_BASE_LO */
+    {0x03828,0x0001ffff,0x00000000}, /* A6XX_UCHE_TRAP_BASE_HI */
+    {0x0381c,0xfffff000,0x00000000}, /* A6XX_UCHE_WRITE_THRU_BASE_LO */
+    {0x03820,0x0001ffff,0x00000000}, /* A6XX_UCHE_WRITE_THRU_BASE_HI */
+    {0x03860,0x00000804,0x00000000}, /* A6XX_UCHE_FILTER_CNTL */
+    {0x0385c,0x00000004,0x00000000}, /* A6XX_UCHE_CACHE_WAYS */
+    {0x02308,0x02000140,0x00000000}, /* A6XX_CP_ROQ_THRESHOLDS_2 */
+    {0x02304,0x8040362c,0x00000000}, /* A6XX_CP_ROQ_THRESHOLDS_1 */
+    {0x0230c,0x00000080,0x00000000}, /* A6XX_CP_MEM_POOL_SIZE */
+    {0x27800,0x00010200,0x00000000}, /* A6XX_PC_DBG_ECO_CNTL */
+    {0x02634,0x00000001,0x00000000}, /* A6XX_CP_AHB_CNTL */
+    {0x01400,0x00000001,0x00000000}, /* A6XX_RBBM_PERFCTR_CNTL */
+    {0x23820,0x00000012,0x00000000}, /* A6XX_RB_NC_MODE_CNTL */
+    {0x2d810,0x00000002,0x00000000}, /* A6XX_TPL1_NC_MODE_CNTL */
+    {0x2b808,0x00000022,0x00000000}, /* A6XX_SP_NC_MODE_CNTL */
+    {0x03804,0x00200000,0x00000000}, /* A6XX_UCHE_MODE_CNTL */
+    {0x0007c,0x4003ffff,0x00000000}, /* A6XX_RBBM_INTERFACE_HANG_INT_CNTL */
+    {0x03864,0x00000001,0x00000000}, /* A6XX_UCHE_CLIENT_PF */
+    {0x0213c,0x0000000b,0x00000000}, /* A6XX_CP_PROTECT_CNTL */
+    {0x02140,0x13fc0000,0x00000000}, /* A620 protected span 0 */
+    {0x02144,0x00140501,0x00000000}, /* A620 protected span 1 */
+    {0x02148,0x0bd0050b,0x00000000}, /* A620 protected span 2 */
+    {0x0214c,0x8000050e,0x00000000}, /* A620 protected span 3 */
+    {0x02150,0x80000510,0x00000000}, /* A620 protected span 4 */
+    {0x02154,0x80000534,0x00000000}, /* A620 protected span 5 */
+    {0x02158,0x82080800,0x00000000}, /* A620 protected span 6 */
+    {0x0215c,0x802008a0,0x00000000}, /* A620 protected span 7 */
+    {0x02160,0x809008ab,0x00000000}, /* A620 protected span 8 */
+    {0x02164,0x02f008d0,0x00000000}, /* A620 protected span 9 */
+    {0x02168,0x81340900,0x00000000}, /* A620 protected span 10 */
+    {0x0216c,0x89c8098d,0x00000000}, /* A620 protected span 11 */
+    {0x02170,0x80040e00,0x00000000}, /* A620 protected span 12 */
+    {0x02174,0x80300e03,0x00000000}, /* A620 protected span 13 */
+    {0x02178,0x830c3c00,0x00000000}, /* A620 protected span 14 */
+    {0x0217c,0x7ffc3cc4,0x00000000}, /* A620 protected span 15 */
+    {0x02180,0x873c8630,0x00000000}, /* A620 protected span 16 */
+    {0x02184,0x80008e00,0x00000000}, /* A620 protected span 17 */
+    {0x02188,0x80008e08,0x00000000}, /* A620 protected span 18 */
+    {0x0218c,0x807c8e50,0x00000000}, /* A620 protected span 19 */
+    {0x02190,0x89fc8e80,0x00000000}, /* A620 protected span 20 */
+    {0x02194,0x876c9624,0x00000000}, /* A620 protected span 21 */
+    {0x02198,0x80449e60,0x00000000}, /* A620 protected span 22 */
+    {0x0219c,0x861c9e78,0x00000000}, /* A620 protected span 23 */
+    {0x021a0,0x873ca630,0x00000000}, /* A620 protected span 24 */
+    {0x021a4,0x8000ae02,0x00000000}, /* A620 protected span 25 */
+    {0x021a8,0x8cbcae50,0x00000000}, /* A620 protected span 26 */
+    {0x021ac,0x8000b604,0x00000000}, /* A620 protected span 27 */
+    {0x021b0,0x801cb608,0x00000000}, /* A620 protected span 28 */
+    {0x021b4,0x8004be02,0x00000000}, /* A620 protected span 29 */
+    {0x021b8,0xdf7cbe20,0x00000000}, /* A620 protected span 30 */
+    {0x021bc,0xaffcf000,0x00000000}, /* A620 protected span 31 */
+    {0x021c0,0x7ffcfc00,0x00000000}, /* A620 protected span 32 */
+    {0x021fc,0x80011c00,0x00000000}, /* A620 protected span 47 */
+    {0x02010,0x01200000,0xffffffff}, /* A6XX_CP_RB_RPTR_ADDR_LO */
+    {0x02014,0x00000000,0xffffffff}, /* A6XX_CP_RB_RPTR_ADDR_HI */
+    {0x02008,0x0000020c,0x00001f1f}, /* A6XX_CP_RB_CNTL */
+    {0x02000,0x01000000,0xffffffff}, /* A6XX_CP_RB_BASE */
+    {0x02004,0x00000000,0xffffffff}, /* A6XX_CP_RB_BASE_HI */
+    {0x02110,0x0000006e,0x0000006e}, /* A6XX_CP_APRIV_CNTL */
+    {0x020c0,0x01100000,0xffffffff}, /* A6XX_CP_SQE_INSTR_BASE_LO */
+    {0x020c4,0x00000000,0xffffffff}, /* A6XX_CP_SQE_INSTR_BASE_HI */
+};
+#endif

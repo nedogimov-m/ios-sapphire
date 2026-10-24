@@ -49,6 +49,17 @@ class BuildFlagTests(unittest.TestCase):
             with self.subTest(option=option):
                 self.refused([*base, option], '--wifi-native-probe requires its separate RAM-only profile')
 
+    def test_complete_gpu_commands_require_private_assets_and_isolated_ram_profile(self):
+        self.refused(['--gpu-command-start'], '--gpu-command-start requires --gpu-assets-inventory')
+        self.refused(['--gpu-assets-inventory', '/private/inventory'],
+                     '--gpu-assets-inventory requires --gpu-command-start')
+        selected = ['--gpu-command-start', '--gpu-assets-inventory', '/private/inventory',
+                    '--gmu-fw-file', '/private/gmu', '--gmu-fw-sha256', '0' * 64]
+        self.refused(selected, '--gpu-command-start requires kernel, live DTB, CPU0 and --return-bootloader')
+        base = [*selected, '--kernel', '/missing-kernel', '--dtb', '/missing-dtb', '--return-bootloader']
+        for extra in ('--ufs-root', '--touch-events', '--smp-probe', '--usb-probe', '--gpu-probe'):
+            self.refused([*base, extra], '--gpu-command-start requires its separate RAM-only profile')
+
     def test_gmu_tcm_requires_held_parent_profile_without_competing_writers(self):
         self.refused(['--gmu-tcm-probe'],
                      '--gmu-tcm-probe requires kernel, live DTB, CPU0 and --return-bootloader')

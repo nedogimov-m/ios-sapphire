@@ -19,6 +19,7 @@
 #include "redfin_gmu_mapping.h"
 #include "redfin_gmu_start.h"
 #include "redfin_rpmh.h"
+#include "redfin_gpu_command.h"
 
 extern int redfin_spmi_return_ready(void);
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
@@ -33,16 +34,18 @@ struct gm_context {
     redfin_gmu_parent_valid_fn parent_valid;
     unsigned args_bytes;
     char args[608];
-    struct gm_binding bindings[24];
+    struct gm_binding bindings[40];
     uint64_t breadcrumbs;
     unsigned binding_count, dtcm_writes, smmu_reads, smmu_guard, smmu_breadcrumbs;
     unsigned smmu_mode, cb_reads, cb_breadcrumbs;
-    bool active, smmu_requested, smmu_ready;
+    bool active, smmu_requested, smmu_ready, gx_requested, gx_granted;
 };
 static bool gm_memory_contract(struct gm_context *);
 static int gm_memory_run(struct gm_context *, const struct rf_gs_snapshot *, const struct rf_gc_snapshot *);
 static bool gm_start_contract(struct gm_context *);
 static int gm_start_run(struct gm_context *);
+static bool gx_contract(struct gm_context *);
+static int gx_run(struct gm_context *);
 
 static const uint64_t gm_reg[] = {
     0x00100000, 0x1f0000, 0x03d90000, 0x9000,
@@ -110,7 +113,8 @@ gm_contract(struct gm_context *context, unsigned mode)
         (mode < 2 || gm_property(context, "/redfin-gpu-smmu", "context-policy",
             gm_cb_policy, sizeof(gm_cb_policy))) &&
         (mode < 3 || gm_memory_contract(context)) &&
-        (mode != 4 || gm_start_contract(context));
+        (mode < 4 || gm_start_contract(context)) &&
+        (mode != 5 || gx_contract(context));
 }
 
 int
@@ -386,6 +390,7 @@ gm_cb_read(void *argument, unsigned bank, uint32_t at, uint32_t *value)
 
 #include "redfin_gmu_memory.inc"
 #include "redfin_gmu_start.inc"
+#include "redfin_gpu_command.inc"
 
 static int
 gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
@@ -415,7 +420,8 @@ gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
             bank, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11]);
     }
     if (!result && context->smmu_mode >= 3) result = gm_memory_run(context, global, &snapshot);
-    if (!result && context->smmu_mode == 4) result = gm_start_run(context);
+    if (!result && context->smmu_mode >= 4) result = gm_start_run(context);
+    if (!result && context->smmu_mode == 5) result = gx_run(context);
     return result;
 }
 

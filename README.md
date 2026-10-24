@@ -58,7 +58,10 @@ The known working image is `ports/redfin/out/wifi-gui8-network-stack-v1/redfin-x
 GPU/Metal acceleration is the next priority. The isolated A620 memory-v6
 capture now proves owned wired RAM, native CB1/stream5 readback and all
 seven GMU firmware payloads loaded and verified, with CM3 still reset-held.
-Firmware execution, real DMA/HFI and GPU commands remain unfinished.
+The subsequent capture observes fresh GMU firmware completion and HFI-ready;
+a host lifecycle check stopped before the version request. The complete
+native GPU command chain is now implemented for integrated validation;
+fresh HFI DMA/GPU commands and iOS graphics/Metal remain unproved.
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

@@ -165,7 +165,8 @@ rf_gt_pll_identity(uint32_t mode, uint32_t l, uint32_t user, uint32_t alpha)
 }
 
 static inline int
-rf_gt_source_live(const struct rf_gt_ops *ops, struct rf_gt_report *r, bool running)
+rf_gt_source_live_power(const struct rf_gt_ops *ops, struct rf_gt_report *r,
+    bool running, bool gx_requested)
 {
     uint32_t v[16];
     static const struct { unsigned unit; uint32_t at; } registers[16] = {
@@ -187,8 +188,8 @@ rf_gt_source_live(const struct rf_gt_ops *ops, struct rf_gt_report *r, bool runn
     if ((v[0] & 0x80000001u) != 1 || (v[1] & 3u) || !(v[14] & 0x80000000u) ||
         !rf_gt_pll_identity(v[2], v[3], v[4], v[5]) ||
         !(v[6] & 1) || !(v[7] & 0x10000u) || (v[11] & 0x80000001u) != 1 ||
-        (v[12] & 0x80000001u) != 1 ||
-        (v[13] & 0x80000001u) != 0x80000000u || (v[15] & 3u) != 3u)
+        (!gx_requested && (v[12] & 0x80000001u) != 1) ||
+        (!gx_requested && (v[13] & 0x80000001u) != 0x80000000u) || (v[15] & 3u) != 3u)
         return EAGAIN;
     if (!running && (v[10] & 0x80000001u) != 0x80000000u)
         return EBUSY;
@@ -196,6 +197,12 @@ rf_gt_source_live(const struct rf_gt_ops *ops, struct rf_gt_report *r, bool runn
             (v[9] & 0x80000001u) != 0 || (v[10] & 0x80000001u) != 1))
         return EAGAIN;
     return 0;
+}
+
+static inline int
+rf_gt_source_live(const struct rf_gt_ops *ops, struct rf_gt_report *r, bool running)
+{
+    return rf_gt_source_live_power(ops, r, running, false);
 }
 
 /* CSR access with fresh power/source proof; data access also verifies reset. */

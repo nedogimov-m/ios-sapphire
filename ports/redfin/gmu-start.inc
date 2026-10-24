@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
-/* Explicit mode4 only. Reset-held preparation and ownership must pass first.
- * Local GMU interrupts are masked; response queues are polled. No IRQ enable,
- * foreign route, GX request, PAS call, GPU submission or power release.
+/* Explicit mode4/5 only. Reset-held preparation and ownership must pass first.
+ * Local interrupts stay masked; response queues are polled. Mode5's separate
+ * GPU owner can subsequently request GX, PAS13 and bounded GPU commands.
  */
 static const uint64_t gm_start_ranges[] = {
     0x03de0000,0x1000,0x0b290000,0x10000,0x0b490000,0x10000,
@@ -33,11 +33,13 @@ static bool gm_start_base_valid(void *argument)
 {
     struct gm_context *c=argument;
     if(!c || c!=gm_start.context || !gm_start.bound || !gm_memory.ready ||
-        !gm_memory.retained || c->smmu_mode!=4 || !c->smmu_ready ||
+        !gm_memory.retained || c->smmu_mode<4 || c->smmu_mode>5 || !c->smmu_ready ||
         !gm_memory.lease.active || gm_memory.lease.poisoned || !gm_valid(c))return false;
     if((gm_scalar_read(c->base[RF_GT_GPUCC]+0x1098)&0x80000001u)!=1 ||
-        (gm_scalar_read(c->base[RF_GT_GPUCC]+0x100c)&0x80000001u)!=1 ||
-        (gm_scalar_read(c->base[RF_GT_GPUCC]+0x1064)&0x80000001u)!=0x80000000u)return false;
+        (!(c->smmu_mode==5 && c->gx_requested) &&
+         (gm_scalar_read(c->base[RF_GT_GPUCC]+0x100c)&0x80000001u)!=1) ||
+        (!(c->smmu_mode==5 && c->gx_requested) &&
+         (gm_scalar_read(c->base[RF_GT_GPUCC]+0x1064)&0x80000001u)!=0x80000000u))return false;
     return true;
 }
 static int gm_start_guard(void *argument,unsigned phase)
@@ -52,7 +54,8 @@ static int gm_start_guard(void *argument,unsigned phase)
     if(phase==RF_GB_HELD && (init || hfi))return EAGAIN;
     if(phase!=RF_GB_HELD && gm_start.config.core_version>0x20010004u && (init&0xe00u))return EIO;
     if(phase>=RF_GB_FW_LIVE && !redfin_gmu_started(gm_start.config.core_version,init))return EIO;
-    if(phase<RF_GB_HFI_WAIT && (hfi&1u))return EAGAIN;
+    /* A650 firmware enables HFI before the host CTRL_INIT write. Require
+     * zero only while reset-held; fresh INIT and an echoed ACK prove life. */
     if(phase==RF_GB_HFI_LIVE && !(hfi&1u))return EIO;
     if(phase!=RF_GB_HELD) {
         if(gm_scalar_read(c->base[RF_GT_GMU]+0x24c14)&0x29u)return EIO;
@@ -133,7 +136,8 @@ static int gm_start_audit(void *argument,unsigned phase)
     if(error)return error;
     struct rf_gt_report clock={0};
     const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
-    error=rf_gt_source_live(&source,&clock,true);if(error)return error;
+    error=rf_gt_source_live_power(&source,&clock,true,
+        c->smmu_mode==5 && c->gx_requested);if(error)return error;
     for(unsigned i=0;i<sizeof(gm_smmu_clocks)/sizeof(gm_smmu_clocks[0]);++i) {
         const uint32_t *w=gm_smmu_clocks[i];
         if((gm_scalar_read(c->base[w[0]]+w[1])&w[2])!=w[3])return EAGAIN;
@@ -177,7 +181,8 @@ static int gm_start_hfi_shape(void *argument)
     }
     return gm_start_guard(argument,RF_GB_HFI_LIVE);
 }
-static int gm_start_receive(void *argument,unsigned q,uint32_t request,uint32_t *version)
+static int gm_start_receive(void *argument,unsigned q,uint32_t request,
+    uint32_t *reply,unsigned *reply_count)
 {
     if(q!=1 && q!=2)return EINVAL;
     int error=gm_start_hfi_shape(argument);if(error)return error;
@@ -186,7 +191,7 @@ static int gm_start_receive(void *argument,unsigned q,uint32_t request,uint32_t 
     uint32_t at=0xe0+4096*q;
     uint32_t first=gm_start_hfi_word(at+4*read),count=(first>>8)&255u;
     uint32_t available=(write+1024-read)%1024,padded=(count+3u)&~3u;
-    if(!count || padded>available || padded>=1024 || gm_start.messages>=16)return EPROTO;
+    if(!count || padded>available || padded>=1024 || gm_start.messages>=128)return EPROTO;
     uint32_t words[255];
     for(unsigned i=0;i<count;++i)words[i]=gm_start_hfi_word(at+4*((read+i)%1024));
     ++gm_start.messages;
@@ -196,21 +201,26 @@ static int gm_start_receive(void *argument,unsigned q,uint32_t request,uint32_t 
     error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
     gm_start_hfi_store(base+40,(read+padded)%1024);
     if(q==1 && ((words[0]>>16)&15u)==1) {
-        error=rf_gb_version_ack(words,count,request,0x20000000,version);
-        if(!error)++gm_start.received;
-        return error;
+        if(count<3 || words[1]!=request || !reply || !reply_count)return EPROTO;
+        if(words[2]==UINT32_MAX)return EIO;
+        memcpy(reply,words,count*sizeof(*words));*reply_count=count;
+        ++gm_start.received;return 0;
     }
     return ENOMSG;
 }
-static int gm_start_exchange(void *argument,uint32_t *version)
+static int gm_start_command(void *argument,unsigned id,uint32_t *command,unsigned count,
+    uint32_t reply[255],unsigned *reply_count)
 {
+    if(!command || !reply || !reply_count || !count || count>255 ||
+        gm_start.sent>=64 || id>255)return EINVAL;
     int error=gm_start_hfi_shape(argument);if(error)return error;
-    if(gm_start.sent || gm_start_hfi_word(64) || gm_start_hfi_word(68))return EBUSY;
+    uint32_t read=gm_start_hfi_word(64),write=gm_start_hfi_word(68);
+    if(read!=write)return EBUSY;
+    *reply_count=0;
     for(unsigned i=0;i<16;++i) {
         bool pending=false;
         for(unsigned q=1;q<=2;++q) {
-            uint32_t unused=0;
-            error=gm_start_receive(argument,q,UINT32_MAX,&unused);
+            error=gm_start_receive(argument,q,UINT32_MAX,NULL,NULL);
             if(error==ENOMSG){pending=true;continue;}
             if(error!=ENOENT)return error;
         }
@@ -218,33 +228,44 @@ static int gm_start_exchange(void *argument,uint32_t *version)
         if(i==15)return EPROTO;
     }
     uint32_t request;
-    error=redfin_gmu_hfi_command_header(1,2,1,&request);if(error)return error;
-    uint32_t command[]={request,0x20000000,0xfafafafa,0xfafafafa};
-    for(unsigned i=0;i<4;++i) {
+    error=redfin_gmu_hfi_command_header(id,count,gm_start.sent+1,&request);if(error)return error;
+    command[0]=request;
+    uint32_t padded=(count+3u)&~3u,end=(write+padded)%1024;
+    if(padded>=1024)return EINVAL;
+    for(unsigned i=0;i<padded;++i) {
         error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
-        gm_start_hfi_store(0xe0+4*i,command[i]);
+        gm_start_hfi_store(0xe0+4*((write+i)%1024),i<count?command[i]:0xfafafafa);
     }
     error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
-    gm_start_hfi_store(68,4);
+    gm_start_hfi_store(68,end);
     ++gm_start.sent;
     error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
     gm_memory_store(gm_start.base[RF_GB_GMU]+0x14650,1);
-    printf("REDFIN GMU HFI SENT: request=%#x supported=0x20000000 sequence=1\n",request);
+    printf("REDFIN GMU HFI SENT: request=%#x id=%u count=%u sequence=%u end=%u\n",
+        request,id,count,gm_start.sent,end);
     uint64_t first=gm_time_ns(argument);
     for(unsigned i=0;i<5000 && gm_time_ns(argument)-first<RF_GB_WAIT_NS;++i) {
-        error=gm_start_receive(argument,1,request,version);
+        error=gm_start_receive(argument,1,request,reply,reply_count);
         if(!error) {
-            if(gm_start_hfi_word(64)!=4)return EPROTO;
+            if(gm_start_hfi_word(64)!=end)return EPROTO;
             error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
             gm_memory_store(gm_start.base[RF_GB_GMU]+0x14644,1);
             return 0;
         }
         if(error!=ENOENT && error!=ENOMSG)return error;
-        error=gm_start_receive(argument,2,request,version);
+        error=gm_start_receive(argument,2,request,reply,reply_count);
         if(error!=ENOENT && error!=ENOMSG)return error;
         error=gm_start_delay(argument,100);if(error)return error;
     }
     return ETIMEDOUT;
+}
+
+static int gm_start_exchange(void *argument,uint32_t *version)
+{
+    if(gm_start.sent || gm_start_hfi_word(64) || gm_start_hfi_word(68))return EBUSY;
+    uint32_t command[]={0,0x20000000},reply[255];unsigned count=0;
+    int error=gm_start_command(argument,1,command,2,reply,&count);
+    return error?error:rf_gb_version_ack(reply,count,command[0],0x20000000,version);
 }
 
 static int gm_start_resources(struct gm_context *context)

@@ -1,5 +1,33 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete A620 GPU command-chain adaptation — 2026-10-24
+
+Re-reviewed preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`,
+`redwood_adreno.c` steps17–21, allocations/streams/ring/SQE/zap/commands.
+The complete opt-in mode5 adapts those interfaces to A620 with native msm
+`500b3a2059c1eec0fec08ec56add06320ea901a8`. Newly reviewed native references
+include `msm_bus_arb_rpmh.c`, `msm_bus_fabric_rpmh.c`, `msm_kgsl.h`, and
+the PIL relocation/allocation/authentication path. Captured FDT is checked
+against DT pin `afc98e2bb0716a57bf4f8d2b6191378dd7123ce4`.
+
+A620 uses275MHz/64, native DDR case5 and all13bandwidth rows, UBWC3,
+FIFO10000/TSE-skip disable and hang3ffff. It has the native user SID0/mask401
+route, represented by disjoint SID0/1 mask400. CB0 is allocated independently
+of the proven GMU CB1; foreign/secure state is audited. The native generic
+PAS13 node has no memory-region, so its relocatable ELF receives an owned
+1MiB-aligned allocation/4KiB span. This replaces the unsafe assumption that
+the unaligned bootloader reservation is a writable zap destination. Both
+SCM transport and PAS result must succeed; the upstream inherited-zap fallback
+is deliberately not used. Native crypto BCM proxy floors are retained.
+
+Actual source now includes the complete HFI/performance/bandwidth/GX/SQE/
+signed-zap/ME_INIT/unsecure/memory-write chain before its integrated tests.
+An early HFI-ready bit is accepted after reset release, matching the already
+observed A650 firmware behavior. Current preferred userland pins remain
+`a79ff0772a3454fd1ef127e181e5b3bce6c9ce18` and paired graphics-ABI reference
+`906425b75e02b4f99eb5d7bb1ef7c9583472d772`; this batch installs no graphics
+userland and makes no Metal-capability claim. Details: [GPU-COMMANDS.md](GPU-COMMANDS.md).
+
 ## A620 CM3/PDC/RSC/HFI start adaptation — 2026-10-24
 
 Re-reviewed preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`,

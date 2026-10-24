@@ -75,7 +75,7 @@ def xnu_return_proof(image):
 def diagnostic_return_profile(image, manifest, tokens):
     """Bind new UP diagnostics to the proven pre-kernel shim return leaf."""
     flags = ('gpu_power_probe', 'gmu_tcm_probe', 'gpu_smmu_probe', 'gpu_smmu_context_probe', 'wifi_native_probe',
-             'wifi_power_probe', 'wifi_fw_source_probe', 'wifi_fw_start', 'wifi_glink_start', 'wifi_host_services', 'scm_probe', 'gpu_smmu_memory_probe', 'gmu_firmware_start')
+             'wifi_power_probe', 'wifi_fw_source_probe', 'wifi_fw_start', 'wifi_glink_start', 'wifi_host_services', 'scm_probe', 'gpu_smmu_memory_probe', 'gmu_firmware_start', 'gpu_command_start')
     if any(type(manifest.get(name, False)) is not bool for name in flags):
         raise ValueError('UP diagnostic selectors must be boolean')
     primary = [name for name in ('gpu_power_probe', 'wifi_native_probe', 'scm_probe')
@@ -91,6 +91,7 @@ def diagnostic_return_profile(image, manifest, tokens):
             (manifest.get('gpu_smmu_context_probe') is True and manifest.get('gpu_smmu_probe') is not True) or
             (manifest.get('gpu_smmu_memory_probe') is True and manifest.get('gpu_smmu_context_probe') is not True) or
             (manifest.get('gmu_firmware_start') is True and manifest.get('gpu_smmu_memory_probe') is not True) or
+            (manifest.get('gpu_command_start') is True and manifest.get('gmu_firmware_start') is not True) or
             (manifest.get('wifi_power_probe') is True and primary != ['wifi_native_probe']) or
             (manifest.get('wifi_fw_source_probe') is True and primary != ['wifi_native_probe']) or
             (manifest.get('wifi_fw_start') is True and (primary != ['wifi_native_probe'] or
@@ -106,7 +107,7 @@ def diagnostic_return_profile(image, manifest, tokens):
         if manifest.get('gmu_tcm_probe') is True:
             required.add('redfingmu=1')
         if manifest.get('gpu_smmu_probe') is True:
-            required.add('redfinsmmu=4' if manifest.get('gmu_firmware_start') is True else 'redfinsmmu=3' if manifest.get('gpu_smmu_memory_probe') is True else 'redfinsmmu=2' if manifest.get('gpu_smmu_context_probe') is True else 'redfinsmmu=1')
+            required.add('redfinsmmu=5' if manifest.get('gpu_command_start') is True else 'redfinsmmu=4' if manifest.get('gmu_firmware_start') is True else 'redfinsmmu=3' if manifest.get('gpu_smmu_memory_probe') is True else 'redfinsmmu=2' if manifest.get('gpu_smmu_context_probe') is True else 'redfinsmmu=1')
     elif primary == ['wifi_native_probe']:
         required.update(('redfinwifi=2', 'redfinwifinative=1'))
         if manifest.get('wifi_power_probe') is True:

@@ -1,5 +1,67 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full GPU command v1 built; integrated hardware run ready — 2026-10-24
+
+Complete implementation above/below now validated as one batch.102selected
+GPU tables/packets/owned SMMU/PAS13/HFI/build flags/return/capture checksPASS
+16.488s, followed by3actual HFI/lifecycle casesPASS (including early-ready,
+reset/stale/fault/mask refusals). Existing selected GMU memory/TCM/adapter
+checks also pass. The first batch found test-fixture SID-width/ctypes issues
+and the native compile found unavailable strstr; corrected to native bounded
+strnstr before any device run. No intermediate hardware tests were performed.
+
+Local native build20261024-162801PASS, no CI run. Actual object SMC/store
+instruction checksPASS; no Darwin semicolon-asm omission. Kernel
+research/redfin-gpu/kernel-command-v1 SHA256
+6065346536587c9ec5eff305a39a38a4588ea12db0cfb49492fcddc58f1dbef7.
+Image ports/redfin/out/gpu-command-v1/redfin-xnu.img SHA256
+512a5b9d6dfef27fca7b61d77995eec8a473ae1ab454862d0e7fce1f3c94c8a0.
+Actual native FDT/signed inventory/GPU policy plus loader/payload/ADT/Image
+window and compiled-shim CPU0 return preflightPASS. All3bound GPU blobs
+and GMU firmware hashes agree with the captured inventory. Saved build
+identity in image directory. Hardware results pending; no GPU/Metal claim.
+Next one integrated temporary boot/capture. Working Wi-Fi/root/checkpoints
+intact. No flash/root/modem/persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0x65ba28d38becbc81`.
+
+## REDFIN complete GPU command batch implemented before integrated validation — 2026-10-24
+
+User explicitly requests implementing the whole chain before testing. No new
+device run or per-step test was made during implementation. Source follows
+aa7dfaf; complete changes not yet validated/built. Mode5 now contains the
+native HFI variable queues/perf/BW/CORE_FW_START/low275MHz/GX OOB, independently
+owned GPU CB0/SID0+1, ring/read-only A650 SQE/scratch, native A620 registers,
+ME_INIT, signed PAS13 zap, unsecure transition and four boot-ID-bound GPU
+memory writes over two submissions. Adds native crypto BCM proxy floors,
+strict firmware inventory identities and actual FDT OPP/bus/PIL bindings.
+Native PIL has no memory-region and allocates relocatable zap at1MiB
+alignment/4KiB span; the unaligned8bc15400 reservation remains untouched.
+Reviewed pins are recorded in ports/redfin/UPSTREAM.md; implementation and
+limits in ports/redfin/GPU-COMMANDS.md. No graphics/Metal service is advertised.
+Next: one integrated host/native-build/image-preflight batch, then one
+temporary hardware capture of the full chain. Existing working GUI/Wi-Fi,
+root and earlier checkpoints preserved. No flash/root reinstall or modem/
+persist/EFS/backup change. Device is in verified fastboot after v3 below.
+
+## REDFIN start-v3 proves executing GMU firmware and early HFI readiness — 2026-10-24
+
+Already completed capture logs/redfin/gmu-start-v3, sourceaa7dfaf, native local
+build20261024-155222, no CI run. Image/kernel identities and exact args are
+in the previous start-v3 build entry. Authenticated boot matches
+fb14546f1d4e8222. Memory/TCM preparation again passes, then CM3 reset0,
+fresh FW_INIT_RESULT100, HFI_CTRL_STATUS1, HFI_VERSION_INFO20000001,
+DTCM breadcrumb0b0c0d10 and log write pointer5. AO/GMU interrupt status0,
+AHB fence0, SMMU GFSR0 and FSR400FORMAT (no fault). Startup stops
+EAGAIN35/stage4/phase2 after75stores/3polls, firmware1/HFI0/sent0/received0,
+elapsed180133177ns, audits2. Observation: firmware is executing. It has
+not yet exchanged a host HFI command. Cause in host code: guard incorrectly
+required HFI0 before HFI_WAIT, while this firmware sets ready on its own.
+The full GPU batch removes only that extra requirement; reset-held HFI0,
+fresh INIT, explicit CTRL_INIT and matched new ACK remain mandatory.
+No speculative SMMU-audit relaxation. Collector authenticated/public-prime/
+verified-fastboot complete; HFSX clean/inconsistentfalse/write_count623088
+unchanged. No device operation remains active.
+
 ## REDFIN native fixed-length PDC semantics built as start-v3 — 2026-10-24
 
 Followsae6c889 and authenticated v2 below. All8protocol cases pass0.651s
