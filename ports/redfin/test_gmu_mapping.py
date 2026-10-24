@@ -80,12 +80,15 @@ int run(unsigned mode,unsigned failure){
  plan.root_physical=plan.tables.physical;plan.table_count=4;plan.table_bytes=0x4000;plan.extent_count=1;
  plan.extents[0].memory=(struct rf_gm_memory){data_memory,0x180900000ULL,0x4000,1,0x4000};plan.extents[0].mapped_bytes=0x4000;
  if(issue==5)plan.root_physical+=8;
+ if(issue==20)regs[0x804/4]=0x84000002;
  regs[(0x9000+0x10)/4]=0x30061; /* Captured native reserved bits6:5. */
  struct rf_gs_snapshot g;struct rf_gc_snapshot b;
  int e=sample(&lease,&g,&b);if(e)return e;
  const struct rf_gm_memory_owner owner={&lease,valid,owns};
- return rf_gmm_claim(&lease,&ops,&g,&b,&plan,&owner);
+ return issue>=19?rf_gmm_claim_at(&lease,&ops,&g,&b,&plan,&owner,1):
+  rf_gmm_claim(&lease,&ops,&g,&b,&plan,&owner);
 }
+unsigned route_slot(void){return lease.slot;}
 unsigned stat(unsigned i){const unsigned v[]={writes,publishes,violations,lease.active,lease.poisoned,lease.polls,lease.owned};return i<7?v[i]:999;}
 int retry(void){struct rf_gs_snapshot g;struct rf_gc_snapshot b;memset(&g,0,sizeof(g));memset(&b,0,sizeof(b));
  const struct rf_gm_memory_owner owner={&lease,valid,owns};return rf_gmm_claim(&lease,&ops,&g,&b,&plan,&owner);}
@@ -117,6 +120,14 @@ class GMUMappingTests(unittest.TestCase):
         self.assertEqual(self.lib.fault_format(), 0)
         self.assertEqual(self.lib.retry(), errno.EBUSY)
         self.assertEqual(self.lib.stat(0), 16)
+
+    def test_full_gpu_profile_can_reserve_slot0_and_requires_its_preferred_gmu_slot_free(self):
+        self.assertEqual(self.lib.run(19, 0), 0)
+        self.assertEqual(self.lib.route_slot(), 1)
+        self.assertEqual([self.lib.stat(i) for i in (0, 2, 3)], [16, 0, 1])
+        self.assertEqual(self.lib.run(20, 0), errno.EBUSY)
+        self.assertEqual(self.lib.stat(0), 0)
+        self.assertEqual(self.lib.stat(1), 0)
 
     def test_latent_foreign_context_live_stream_faults_and_invalid_root_never_write(self):
         for mode in range(1, 7):

@@ -18,14 +18,15 @@
 #define RF_A6_ZAP_BYTES 1676u
 #define RF_A6_ZAP_ALLOC 0x100000u
 #define RF_A6_ZAP_SPAN 0x1000u
+#define RF_A6_GMU_SLOT 1u
 #define RF_A6_WAIT_NS UINT64_C(500000000)
 
 /* Byte offsets, matching the Redfin ADT contract. The low OPP is common to
  * every live speed bin; its native DDR use case is 5 (2188000 KB/s). */
 static const uint32_t rf_a6_policy[] = {
-    2,0x06020001,275000000,64,5,14,32,3,0,0x400,1,0x400,13,
+    3,0x06020001,275000000,64,5,14,32,3,0,0x401,UINT32_MAX,0,13,
     RF_A6_ZAP_ALLOC,RF_A6_ZAP_SPAN,RF_A6_RING,RF_A6_RING_BYTES,
-    RF_A6_SQE,RF_A6_SCRATCH,500,0 /* Explicit GPU ASID0, GMU uses ASID1. */
+    RF_A6_SQE,RF_A6_SCRATCH,500,0,RF_A6_GMU_SLOT /* GPU ASID0, GMU ASID1/slot1. */
 };
 static const uint32_t rf_a6_ddr_kbps[] = {
     0,400000,800000,1200000,1804800,2188000,2724000,3072000,

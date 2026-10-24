@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
-/* Owned A620 CB0, with native SID0/mask401 expressed as two disjoint
- * SID0/1 mask400 routes. CB1/GMU and secure SID2/mask400 are preserved. */
+/* Owned A620 CB0 and the native SID0/mask401 group. Redfin HYP rejected
+ * the A642L split-mask400 variant. CB1/GMU and secure SID2 are preserved. */
 #ifndef REDFIN_GPU_MAPPING_H
 #define REDFIN_GPU_MAPPING_H
 #include "redfin_gpu_command.h"
@@ -64,7 +64,7 @@ struct rf_a6_mapping {
     struct rf_gmm_lease state;
     unsigned slots[2],step,ttbr1_valid;
 };
-#define RF_A6_MAP_STEPS 18u
+#define RF_A6_MAP_STEPS 16u
 static inline int rf_a6_map_step(const struct rf_a6_mapping *s,const struct rf_gm_pt_plan *p,
     unsigned step,unsigned *block,uint32_t *at,uint32_t *value)
 {
@@ -86,9 +86,7 @@ static inline int rf_a6_map_step(const struct rf_a6_mapping *s,const struct rf_g
     case 12:*at=0x7f0;*value=1;break;
     case 13:*value=RF_GMM_SCTLR|0x100;break; /* Native HUPCF, no stall/IRQ. */
     case 14:*block=0;*at=0xc00+4*s->slots[0];break;
-    case 15:*block=0;*at=0x800+4*s->slots[0];*value=0x84000000;break;
-    case 16:*block=0;*at=0xc00+4*s->slots[1];break;
-    default:*block=0;*at=0x800+4*s->slots[1];*value=0x84000001;break;
+    default:*block=0;*at=0x800+4*s->slots[0];*value=0x84010000;break;
     }
     return 0;
 }
@@ -122,13 +120,13 @@ static inline int rf_a6_map_claim(struct rf_a6_mapping *m,const struct rf_gmm_op
         p->root_physical!=p->tables.physical || p->granule!=4096 || p->virtual_bits!=39 ||
         p->physical_bits!=36 || p->mair0!=0xf404ff44 || p->extent_count!=3 ||
         p->table_count!=4 || p->table_bytes!=16384 || p->tables.owned_bytes<p->table_bytes)return EPERM;
-    unsigned found=0;
+    unsigned found=0;m->slots[1]=UINT32_MAX; /* One exact native group. */
     for(unsigned i=0;i<g->streams;++i) {
         if(rf_gs_stream_matches(g->smr[i],0) || rf_gs_stream_matches(g->smr[i],1) ||
             rf_gs_stream_matches(g->smr[i],0x400) || rf_gs_stream_matches(g->smr[i],0x401))return EBUSY;
-        if(!(g->smr[i]&0x80000000u) && found<2)m->slots[found++]=i;
+        if(!(g->smr[i]&0x80000000u) && found<1)m->slots[found++]=i;
     }
-    if(found!=2)return ENOSPC;
+    if(found!=1)return ENOSPC;
     s->expected=*g;s->banks=*b;
     int error=rf_a6_map_verify(m,o);if(error)return error;
     error=o->publish(o->context,p);if(error)return error;
@@ -152,7 +150,7 @@ static inline int rf_a6_map_claim(struct rf_a6_mapping *m,const struct rf_gmm_op
         error=o->check(o->context);if(error)goto failed;
         error=o->read(o->context,block,at,&got);if(error)goto failed;s->observed=got;
         uint32_t mask=step==2?0x30000u:step==3?0x38017u:step==4?0x00c0ffbfu:
-            step==13?0x001001f1u:(step==14 || step==16)?0x000300ffu:UINT32_MAX;
+            step==13?0x001001f1u:step==14?0x000300ffu:UINT32_MAX;
         /* As preferred space_on(), require translation type and CB index.
          * HYP may retain/force PRIVCFG; our only mapped pages are owned and
          * allow both privilege levels. Keep the whole observed word in every
@@ -162,8 +160,8 @@ static inline int rf_a6_map_claim(struct rf_a6_mapping *m,const struct rf_gmm_op
         if(!block) {
             if(step==1){s->expected.cba2r[0]=got;s->banks.words[0][8]=(s->banks.words[0][8]&~0x600u)|0x400u;}
             else if(step==2)s->expected.cbar[0]=got;
-            else if(step==14 || step==16)s->expected.s2cr[m->slots[(step-14)/2]]=got;
-            else s->expected.smr[m->slots[(step-15)/2]]=got;
+            else if(step==14)s->expected.s2cr[m->slots[0]]=got;
+            else s->expected.smr[m->slots[0]]=got;
         } else for(unsigned i=0;i<RF_GC_WORDS;++i)if(rf_gc_offsets[i]==at)s->banks.words[0][i]=got;
     }
     error=rf_a6_map_verify(m,o);if(error)goto failed;

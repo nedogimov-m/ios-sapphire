@@ -12,13 +12,21 @@ against DT pin `afc98e2bb0716a57bf4f8d2b6191378dd7123ce4`.
 
 A620 uses275MHz/64, native DDR case5 and all13bandwidth rows, UBWC3,
 FIFO10000/TSE-skip disable and hang3ffff. It has the native user SID0/mask401
-route, represented by disjoint SID0/1 mask400. CB0 is allocated independently
+route. The initial A642L split-mask400 adaptation is superseded after Redfin
+HYP rejects it: schema3 uses the exact native single SID0/mask401 group.
+CB0 is allocated independently
 of the proven GMU CB1; foreign/secure state is audited. The native generic
 PAS13 node has no memory-region, so its relocatable ELF receives an owned
 1MiB-aligned allocation/4KiB span. This replaces the unsafe assumption that
 the unaligned bootloader reservation is a writable zap destination. Both
 SCM transport and PAS result must succeed; the upstream inherited-zap fallback
 is deliberately not used. Native crypto BCM proxy floors are retained.
+
+The same review now follows preferred native ordering as a complete profile:
+reserve SMR0 for GPU, select SMR1 for GMU, obtain GX/OOB, explicitly hold SQE
+and mask local GPU interrupts, then bind the GPU group before CP start.
+Standalone GMU modes keep their proven first-free choice. Runtime audits
+use the unchanged GMU lease before GPU mapping, then the joint exact lease.
 
 Reviewed again for the first CB0 run: preferred `space_on()` verifies S2CR
 type/context with mask300ff and preserves HYP control of other fields.

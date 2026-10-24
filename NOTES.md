@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete command v6 native grouping/allocation/power order built — 2026-10-24
+
+All83selected GPU/GMU ownership/native-start/adapter/HFI/native-opcode
+checksPASS18.853s. Native group matches0/1/400/401 and excludes secure2/3
+and GMU4/5; unused slot is untouched. Explicit GMU slot1 selection is tested
+alongside occupied-slot refusal before writes and original first-free modes.
+Local native build20261024-171417PASS (170852superseded), no CI run.
+Kernel research/redfin-gpu/kernel-command-v6 SHA256
+3830cab667a809e812a2e3ab1632f46273c81632517948d5121184b2c4746d09;
+image ports/redfin/out/gpu-command-v6/redfin-xnu.img SHA256
+8f4471c48f066e864021b1e3feab14351350f9fc5f8bc9d1dc48358f90f378f8.
+Actual loader/payload/liveFDT/Image/schema3/firmware/compiled-shim return
+preflightPASS18094640bytes. Whole chain includes native group401, GMUslot1/
+GPUslot0 allocation order, GX/OOB before GPU routing with SQE held, then
+complete signed-zap/CP sequence. Acceptance is pending a single integrated
+capture. Working GUI/Wi-Fi/HFI checkpoints preserved; no persistent change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0x3f8384e7f532599a`.
+
+## REDFIN exact CB0 rejection identified; native Redfin stream group selected — 2026-10-24
+
+Source12924fe/localbuild170129, authenticated gpu-command-v5 matches
+13a5916816cb97ad. GMU/HFI fresh ACK repeatsPASS. GPU allocation/preparation
+repeatsPASS, then CB0 steps0..14 pass: CBA2R1,CBAR1f300,TCR238071,
+TCR802019,owned TTBR083a34000/1(ASID0),MAIR0f404ff44,zeroTTBR1,
+TLBIASID0/sync and SCTLR127(HUPCF1,no stall/IRQ). Failure is precisely
+step15: slot1SMR writes84000000(SID0/mask400) and reads0. EIO5,16stores,
+poisoned1; no GX/PAS/CP request. No real SMMU fault, GFSR0. This proves the
+context/HUPCF/ASID setup works and localizes refusal to route publication.
+
+Native Redfin FDT uses one SID0/mask401 group. The preferred A642L port
+instead splits mask400 because that other HYP rejected401. Redfin's refusal
+of split400 means that adaptation is not established here. Schema3 now uses
+the exact native single SID0/mask401 group (0/1/400/401), leaving the second
+slot untouched. It remains disjoint from secure SID2 and GMU4/5. Full context,
+foreign/readback checks and complete remaining GPU chain stay enabled.
+Native401 acceptance is PENDING; no readback or security bypass is added.
+The complete review also follows preferred native allocation/start order:
+GMU SMR1 reserves SMR0 for GPU in mode5 only; standalone modes keep first-free.
+GX/OOB is established before user-stream binding (preferred steps17/18),
+with local IRQs masked and SQE explicitly held before mapping. Until mapping
+begins the complete original GMU lease audits the untouched CB0; joint raw
+audits take over during/after installation. This is a source-backed complete
+ordering correction, not an assertion about which difference caused refusal.
+Collector authenticated/public-prime/verified-fastboot; HFSXclean,
+inconsistentfalse/write_count623088 unchanged. Next integrated schema3 run.
+
 ## REDFIN complete command v5 with preferred CB0 semantics built — 2026-10-24
 
 All73selected native-start/real-adapter/HFI/GPU casesPASS19.445s,

@@ -266,7 +266,13 @@ static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot
     stage = 3; error = gm_memory_transfer(context, false); if (error) goto done;
     stage = 4;
     printf("REDFIN GMU MEMORY STEP: owned RAM/HFI initialized; publish CB1 and stream5\n");
-    error = rf_gmm_claim(&gm_memory.lease, &ops, global, banks, &gm_memory.tables, &owner); if (error) goto done;
+    if (context->smmu_mode == 5) {
+        /* Preferred native ordering reserves SMR0 for the GPU user group;
+         * standalone GMU modes retain their already proven first-free slot. */
+        if (global->smr[0] & 0x80000000u) { error = EBUSY; goto done; }
+        error = rf_gmm_claim_at(&gm_memory.lease,&ops,global,banks,&gm_memory.tables,&owner,RF_A6_GMU_SLOT);
+    } else error = rf_gmm_claim(&gm_memory.lease, &ops, global, banks, &gm_memory.tables, &owner);
+    if (error) goto done;
     gm_memory.retained = true; stage = 5;
     gm_memory.atos_supported = rf_gmm_atos_supported(global);
     if (!gm_memory.atos_supported)

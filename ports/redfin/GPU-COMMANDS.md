@@ -48,12 +48,20 @@ mode5 phase admits it; core access additionally requires a fresh OOB grant,
 SPTPRAC accessible status and live GX GDSCR. There is no direct GX GDSC/PLL
 override. The OOB request and all resources remain held until platform reset.
 
+The complete profile follows preferred allocation/start order: GMU uses
+SMR1, leaving SMR0 free for the native GPU group. Standalone GMU modes keep
+their proven first-free selection. Obtain GX/OOB before binding the user
+stream, as preferred steps17/18; mask local GPU IRQs and hold SQE before
+route publication. Until CB0 installation begins, complete GMU lease audits
+also retain the untouched GPU context. No CP start precedes mapping proof.
+
 Private contiguous wired ring/SQE/scratch/table objects have proven host/PA
 ownership in XNU's validated RAM window. A separate CB0 is claimed only if
 disabled and unreferenced, with fresh exact global/CB0/CB1 audits before each
-store. Two unused slots encode SID0 and SID1 with mask400, equivalent to
-native SID0/mask401; this also avoids upstream's observed combined-mask HYP
-behavior. CB1/GMU, SID2 secure routing and every foreign raw word stay audited.
+store. One unused slot encodes the exact native SID0/mask401 group, covering
+0/1/400/401. Redfin HYP rejected the A642L split-mask400 variant (SMR read0),
+so the native group replaces that initial adaptation. CB1/GMU, SID2 secure
+routing and every foreign raw word stay audited.
 S2CR requires the native translation type/context mask300ff, as the preferred
 upstream; any implementation-controlled privilege bits are retained in full
 for subsequent exact audits. All mapped pages allow both privilege levels.

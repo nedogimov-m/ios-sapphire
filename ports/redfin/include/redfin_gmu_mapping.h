@@ -98,9 +98,10 @@ static inline int rf_gmm_step(const struct rf_gmm_lease *s, const struct rf_gm_p
     return 0;
 }
 
-static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *o,
+static inline int rf_gmm_claim_at(struct rf_gmm_lease *s, const struct rf_gmm_ops *o,
     const struct rf_gs_snapshot *initial, const struct rf_gc_snapshot *banks,
-    const struct rf_gm_pt_plan *plan, const struct rf_gm_memory_owner *owner)
+    const struct rf_gm_pt_plan *plan, const struct rf_gm_memory_owner *owner,
+    unsigned preferred_slot)
 {
     int error = EINVAL;
     if (!s || !o || !o->check || !o->sample || !o->read || !o->write || !o->publish ||
@@ -119,7 +120,11 @@ static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *
         plan->table_bytes != (uint64_t)plan->table_count * 4096 || plan->table_bytes > plan->tables.owned_bytes ||
         !plan->extent_count || plan->extent_count > RF_GM_PT_MAX_EXTENTS) { error = EPERM; goto failed; }
     s->slot = initial->streams;
-    for (unsigned i = 0; i < initial->streams; ++i)
+    if (preferred_slot != UINT32_MAX) {
+        if (preferred_slot >= initial->streams || (initial->smr[preferred_slot] & 0x80000000u))
+            { error = EBUSY; goto failed; }
+        s->slot = preferred_slot;
+    } else for (unsigned i = 0; i < initial->streams; ++i)
         if (!(initial->smr[i] & 0x80000000u)) { s->slot = i; break; }
     if (s->slot == initial->streams) { error = ENOSPC; goto failed; }
     if (!owner->valid(owner->context) || !owner->owns(owner->context, &plan->tables, RF_GM_PT_TABLE_POOL))
@@ -183,5 +188,11 @@ static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *
 failed:
     s->poisoned = 1; s->active = 0;
     return error;
+}
+static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *o,
+    const struct rf_gs_snapshot *initial, const struct rf_gc_snapshot *banks,
+    const struct rf_gm_pt_plan *plan, const struct rf_gm_memory_owner *owner)
+{
+    return rf_gmm_claim_at(s,o,initial,banks,plan,owner,UINT32_MAX);
 }
 #endif

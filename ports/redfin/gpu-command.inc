@@ -152,6 +152,10 @@ static const struct rf_gmm_ops gx_mapping_ops={NULL,gx_check,gx_sample,gx_map_re
 static int gx_audit(struct gm_context *c)
 {
     int error=gx_check(c);if(error)return error;
+    /* Power GX before binding its user stream, as preferred steps17/18.
+     * Before CB0 installation starts the complete GMU lease still owns
+     * every SMMU word, including the untouched disabled GPU context. */
+    if(!gx.mapping.state.attempted)return gm_start_audit(c,RF_GB_HFI_LIVE);
     struct rf_gt_report clock={0};const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
     error=rf_gt_source_live_power(&source,&clock,true,c->gx_requested);if(error)return error;
     for(unsigned i=0;i<sizeof(gm_smmu_clocks)/sizeof(gm_smmu_clocks[0]);++i) {
@@ -412,7 +416,7 @@ static int gx_ring_submit(struct gm_context *c,const uint32_t *words,unsigned co
 static int gx_core(struct gm_context *c)
 {
     int error=gx_audit(c);if(error)return error;
-    gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu)return ENOMEM;
+    if(!gx.gpu)gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu)return ENOMEM;
     printf("REDFIN GPU CORE: first powered access status=%#x ring=%#x fault=%#x\n",
         gm_scalar_read(gx.gpu+4*0x210),gm_scalar_read(gx.gpu+4*0x806),gm_scalar_read(gx.gpu+4*0x821));
     /* Hold the SQE before replacing its address/ring. No running inherited
@@ -506,7 +510,14 @@ static int gx_run(struct gm_context *c)
     printf("REDFIN GPU MEMORY: owned=%llu allocations=%u tables=%u pages=%u SQE-words=%u\n",
         (unsigned long long)gx.allocated,gx.allocations,gx.tables.table_count,gx.tables.mapped_pages,
         (unsigned)(sizeof(gx.sqe)-4)/4);
-    gx.stage=3;struct rf_gmm_ops o=gx_mapping_ops;o.context=c;
+    /* Power/OOB precedes the native GPU stream binding. Local GPU IRQs
+     * stay masked and SQE is explicitly halted before publishing a route. */
+    gx.stage=3;error=gx_power(c);if(error)goto done;
+    gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu){error=ENOMEM;goto done;}
+    error=gx_register_write(c,4*0x38,0,UINT32_MAX);if(error)goto done;
+    error=gx_register_write(c,4*0x3a,0,UINT32_MAX);if(error)goto done;
+    error=gx_register_write(c,4*0x808,3,2);if(error)goto done;
+    gx.stage=4;struct rf_gmm_ops o=gx_mapping_ops;o.context=c;
     error=rf_a6_map_claim(&gx.mapping,&o,&gm_memory.lease,&gx.tables);if(error)goto done;
     /* Uncached host view before GPU DMA; never read its cached scratch alias
      * after this point, including in an ownership/publication callback. */
@@ -515,7 +526,6 @@ static int gx_run(struct gm_context *c)
     __asm__ volatile("dsb osh":::"memory");
     gx.scratch=ml_io_map_wcomb(gx.data[2].physical,gx.data[2].owned_bytes);
     if(!gx.scratch){error=ENOMEM;goto done;}
-    gx.stage=4;error=gx_power(c);if(error)goto done;
     gx.stage=5;error=gx_core(c);if(error)goto done;
     gx.stage=6;
 done:

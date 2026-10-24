@@ -105,6 +105,7 @@ uint64_t descriptor(unsigned page,unsigned slot){
  const uint8_t *p=mem[3]+4096*page+8*slot;uint64_t v=0;for(unsigned i=0;i<8;i++)v|=(uint64_t)p[i]<<(i*8);return v;
 }
 uint32_t route(unsigned slot,unsigned kind){return kind?global.s2cr[slot]:global.smr[slot];}
+int matches(unsigned slot,unsigned sid){return rf_gs_stream_matches(global.smr[slot],sid);}
 uint32_t context_word(unsigned index){return index<RF_GC_WORDS?banks.words[0][index]:UINT32_MAX;}
 int packets(unsigned kind,uint32_t *out){return kind==0?(int)rf_a6_me_init(out):kind==1?(int)rf_a6_unsecure(out):(int)rf_a6_mem_write(out,kind-2,0x1234abcd);}
 uint32_t reg_value(unsigned at){for(unsigned i=0;i<sizeof(rf_a6_registers)/sizeof(rf_a6_registers[0]);i++)
@@ -169,23 +170,28 @@ class GPUCommandTests(unittest.TestCase):
         cls.lib = ctypes.CDLL(str(library))
         cls.lib.descriptor.restype = ctypes.c_uint64
         cls.lib.route.restype = cls.lib.reg_value.restype = ctypes.c_uint32
+        cls.lib.stat.restype = ctypes.c_uint32
         cls.lib.performance_word.restype = cls.lib.bandwidth_word.restype = ctypes.c_uint32
         cls.lib.pas.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_uint64]
 
     def test_full_owned_gpu_mapping_preserves_gmu_and_secure_routes_and_maps_readonly_sqe(self):
         self.assertEqual(self.lib.run(0, 0, 0), 0)
-        self.assertEqual([self.lib.stat(i) for i in (0, 2, 3, 4, 5, 6)], [18, 0, 1, 1, 1, 2])
+        self.assertEqual([self.lib.stat(i) for i in (0, 2, 3, 4, 5, 6)], [16, 0, 1, 1, 1, 0xFFFFFFFF])
         self.assertEqual([self.lib.route(i, 0) for i in (0, 1, 2, 4)],
-                         [0x84000005, 0x84000000, 0x84000001, 0x84000002])
-        self.assertEqual([self.lib.route(i, 1) for i in (0, 1, 2, 4)], [1, 0, 0, 2])
+                         [0x84000005, 0x84010000, 0, 0x84000002])
+        self.assertEqual([self.lib.route(i, 1) for i in (0, 1, 2, 4)], [1, 0, 0x10000, 2])
         self.assertEqual(self.lib.descriptor(2, 0) & 0xFFF, 0xE43)
         self.assertEqual(self.lib.descriptor(2, 256) & 0xFFF, 0xEC3)
         self.assertEqual(self.lib.descriptor(3, 0) & 0xFFF, 0xE43)
         self.assertEqual(self.lib.descriptor(3, 1), 0)
         self.assertEqual(self.lib.context_word(3), 1)  # PA high word, ASID0.
+        for sid in (0, 1, 0x400, 0x401):
+            self.assertEqual(self.lib.matches(1, sid), 1)
+        for sid in (2, 3, 4, 5, 0x402, 0x403, 0x404, 0x405):
+            self.assertEqual(self.lib.matches(1, sid), 0)
 
     def test_every_context_write_and_audit_failure_stops_without_rollback(self):
-        for write in range(1, 19):
+        for write in range(1, 17):
             self.assertEqual(self.lib.run(0, write, 0), errno.EIO)
             self.assertEqual(self.lib.stat(0), write)
             self.assertEqual(self.lib.stat(4), 0)
@@ -205,7 +211,7 @@ class GPUCommandTests(unittest.TestCase):
     def test_native_translation_route_check_retains_hyp_privilege_readback_for_later_audits(self):
         self.assertEqual(self.lib.run(6, 0, 0), 0)
         self.assertEqual(self.lib.route(1, 1), 0x1000000)
-        self.assertEqual(self.lib.route(2, 1), 0x1000000)
+        self.assertEqual(self.lib.route(2, 1), 0x10000)
         self.assertEqual(self.lib.stat(4), 1)
         self.assertEqual(self.lib.stat(2), 0)
 

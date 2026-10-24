@@ -1464,7 +1464,7 @@ diff --git a/bsd/dev/redfin_gmu_mapping.h b/bsd/dev/redfin_gmu_mapping.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_mapping.h
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,198 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Native A620 GMU kernel-stream context, while CM3/GX remain reset-held.
 + * Sources: preferred redwood_adreno.c space_on(); native arm-smmu.c and
@@ -1565,9 +1565,10 @@ new file mode 100644
 +    return 0;
 +}
 +
-+static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *o,
++static inline int rf_gmm_claim_at(struct rf_gmm_lease *s, const struct rf_gmm_ops *o,
 +    const struct rf_gs_snapshot *initial, const struct rf_gc_snapshot *banks,
-+    const struct rf_gm_pt_plan *plan, const struct rf_gm_memory_owner *owner)
++    const struct rf_gm_pt_plan *plan, const struct rf_gm_memory_owner *owner,
++    unsigned preferred_slot)
 +{
 +    int error = EINVAL;
 +    if (!s || !o || !o->check || !o->sample || !o->read || !o->write || !o->publish ||
@@ -1586,7 +1587,11 @@ new file mode 100644
 +        plan->table_bytes != (uint64_t)plan->table_count * 4096 || plan->table_bytes > plan->tables.owned_bytes ||
 +        !plan->extent_count || plan->extent_count > RF_GM_PT_MAX_EXTENTS) { error = EPERM; goto failed; }
 +    s->slot = initial->streams;
-+    for (unsigned i = 0; i < initial->streams; ++i)
++    if (preferred_slot != UINT32_MAX) {
++        if (preferred_slot >= initial->streams || (initial->smr[preferred_slot] & 0x80000000u))
++            { error = EBUSY; goto failed; }
++        s->slot = preferred_slot;
++    } else for (unsigned i = 0; i < initial->streams; ++i)
 +        if (!(initial->smr[i] & 0x80000000u)) { s->slot = i; break; }
 +    if (s->slot == initial->streams) { error = ENOSPC; goto failed; }
 +    if (!owner->valid(owner->context) || !owner->owns(owner->context, &plan->tables, RF_GM_PT_TABLE_POOL))
@@ -1650,6 +1655,12 @@ new file mode 100644
 +failed:
 +    s->poisoned = 1; s->active = 0;
 +    return error;
++}
++static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *o,
++    const struct rf_gs_snapshot *initial, const struct rf_gc_snapshot *banks,
++    const struct rf_gm_pt_plan *plan, const struct rf_gm_memory_owner *owner)
++{
++    return rf_gmm_claim_at(s,o,initial,banks,plan,owner,UINT32_MAX);
 +}
 +#endif
 diff --git a/bsd/dev/redfin_gmu_pagetables.h b/bsd/dev/redfin_gmu_pagetables.h
@@ -2431,7 +2442,7 @@ diff --git a/bsd/dev/redfin_gmu_memory.inc b/bsd/dev/redfin_gmu_memory.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_memory.inc
-@@ -0,0 +1,314 @@
+@@ -0,0 +1,320 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Reset-held A620 firmware, owned RAM and GMU kernel-stream translation.
 + * All allocations and installed state are retained until platform reset.
@@ -2700,7 +2711,13 @@ new file mode 100644
 +    stage = 3; error = gm_memory_transfer(context, false); if (error) goto done;
 +    stage = 4;
 +    printf("REDFIN GMU MEMORY STEP: owned RAM/HFI initialized; publish CB1 and stream5\n");
-+    error = rf_gmm_claim(&gm_memory.lease, &ops, global, banks, &gm_memory.tables, &owner); if (error) goto done;
++    if (context->smmu_mode == 5) {
++        /* Preferred native ordering reserves SMR0 for the GPU user group;
++         * standalone GMU modes retain their already proven first-free slot. */
++        if (global->smr[0] & 0x80000000u) { error = EBUSY; goto done; }
++        error = rf_gmm_claim_at(&gm_memory.lease,&ops,global,banks,&gm_memory.tables,&owner,RF_A6_GMU_SLOT);
++    } else error = rf_gmm_claim(&gm_memory.lease, &ops, global, banks, &gm_memory.tables, &owner);
++    if (error) goto done;
 +    gm_memory.retained = true; stage = 5;
 +    gm_memory.atos_supported = rf_gmm_atos_supported(global);
 +    if (!gm_memory.atos_supported)
@@ -3384,7 +3401,7 @@ diff --git a/bsd/dev/redfin_gpu_command.h b/bsd/dev/redfin_gpu_command.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_command.h
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,250 @@
 +/* SPDX-License-Identifier: MIT */
 +/* A620 command backend protocol. Register/packet facts: native Google msm
 + * 500b3a2059c1eec0fec08ec56add06320ea901a8 and preferred HackiOS
@@ -3405,14 +3422,15 @@ new file mode 100644
 +#define RF_A6_ZAP_BYTES 1676u
 +#define RF_A6_ZAP_ALLOC 0x100000u
 +#define RF_A6_ZAP_SPAN 0x1000u
++#define RF_A6_GMU_SLOT 1u
 +#define RF_A6_WAIT_NS UINT64_C(500000000)
 +
 +/* Byte offsets, matching the Redfin ADT contract. The low OPP is common to
 + * every live speed bin; its native DDR use case is 5 (2188000 KB/s). */
 +static const uint32_t rf_a6_policy[] = {
-+    2,0x06020001,275000000,64,5,14,32,3,0,0x400,1,0x400,13,
++    3,0x06020001,275000000,64,5,14,32,3,0,0x401,UINT32_MAX,0,13,
 +    RF_A6_ZAP_ALLOC,RF_A6_ZAP_SPAN,RF_A6_RING,RF_A6_RING_BYTES,
-+    RF_A6_SQE,RF_A6_SCRATCH,500,0 /* Explicit GPU ASID0, GMU uses ASID1. */
++    RF_A6_SQE,RF_A6_SCRATCH,500,0,RF_A6_GMU_SLOT /* GPU ASID0, GMU ASID1/slot1. */
 +};
 +static const uint32_t rf_a6_ddr_kbps[] = {
 +    0,400000,800000,1200000,1804800,2188000,2724000,3072000,
@@ -3638,10 +3656,10 @@ diff --git a/bsd/dev/redfin_gpu_mapping.h b/bsd/dev/redfin_gpu_mapping.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_mapping.h
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,172 @@
 +/* SPDX-License-Identifier: MIT */
-+/* Owned A620 CB0, with native SID0/mask401 expressed as two disjoint
-+ * SID0/1 mask400 routes. CB1/GMU and secure SID2/mask400 are preserved. */
++/* Owned A620 CB0 and the native SID0/mask401 group. Redfin HYP rejected
++ * the A642L split-mask400 variant. CB1/GMU and secure SID2 are preserved. */
 +#ifndef REDFIN_GPU_MAPPING_H
 +#define REDFIN_GPU_MAPPING_H
 +#include "redfin_gpu_command.h"
@@ -3705,7 +3723,7 @@ new file mode 100644
 +    struct rf_gmm_lease state;
 +    unsigned slots[2],step,ttbr1_valid;
 +};
-+#define RF_A6_MAP_STEPS 18u
++#define RF_A6_MAP_STEPS 16u
 +static inline int rf_a6_map_step(const struct rf_a6_mapping *s,const struct rf_gm_pt_plan *p,
 +    unsigned step,unsigned *block,uint32_t *at,uint32_t *value)
 +{
@@ -3727,9 +3745,7 @@ new file mode 100644
 +    case 12:*at=0x7f0;*value=1;break;
 +    case 13:*value=RF_GMM_SCTLR|0x100;break; /* Native HUPCF, no stall/IRQ. */
 +    case 14:*block=0;*at=0xc00+4*s->slots[0];break;
-+    case 15:*block=0;*at=0x800+4*s->slots[0];*value=0x84000000;break;
-+    case 16:*block=0;*at=0xc00+4*s->slots[1];break;
-+    default:*block=0;*at=0x800+4*s->slots[1];*value=0x84000001;break;
++    default:*block=0;*at=0x800+4*s->slots[0];*value=0x84010000;break;
 +    }
 +    return 0;
 +}
@@ -3763,13 +3779,13 @@ new file mode 100644
 +        p->root_physical!=p->tables.physical || p->granule!=4096 || p->virtual_bits!=39 ||
 +        p->physical_bits!=36 || p->mair0!=0xf404ff44 || p->extent_count!=3 ||
 +        p->table_count!=4 || p->table_bytes!=16384 || p->tables.owned_bytes<p->table_bytes)return EPERM;
-+    unsigned found=0;
++    unsigned found=0;m->slots[1]=UINT32_MAX; /* One exact native group. */
 +    for(unsigned i=0;i<g->streams;++i) {
 +        if(rf_gs_stream_matches(g->smr[i],0) || rf_gs_stream_matches(g->smr[i],1) ||
 +            rf_gs_stream_matches(g->smr[i],0x400) || rf_gs_stream_matches(g->smr[i],0x401))return EBUSY;
-+        if(!(g->smr[i]&0x80000000u) && found<2)m->slots[found++]=i;
++        if(!(g->smr[i]&0x80000000u) && found<1)m->slots[found++]=i;
 +    }
-+    if(found!=2)return ENOSPC;
++    if(found!=1)return ENOSPC;
 +    s->expected=*g;s->banks=*b;
 +    int error=rf_a6_map_verify(m,o);if(error)return error;
 +    error=o->publish(o->context,p);if(error)return error;
@@ -3793,7 +3809,7 @@ new file mode 100644
 +        error=o->check(o->context);if(error)goto failed;
 +        error=o->read(o->context,block,at,&got);if(error)goto failed;s->observed=got;
 +        uint32_t mask=step==2?0x30000u:step==3?0x38017u:step==4?0x00c0ffbfu:
-+            step==13?0x001001f1u:(step==14 || step==16)?0x000300ffu:UINT32_MAX;
++            step==13?0x001001f1u:step==14?0x000300ffu:UINT32_MAX;
 +        /* As preferred space_on(), require translation type and CB index.
 +         * HYP may retain/force PRIVCFG; our only mapped pages are owned and
 +         * allow both privilege levels. Keep the whole observed word in every
@@ -3803,8 +3819,8 @@ new file mode 100644
 +        if(!block) {
 +            if(step==1){s->expected.cba2r[0]=got;s->banks.words[0][8]=(s->banks.words[0][8]&~0x600u)|0x400u;}
 +            else if(step==2)s->expected.cbar[0]=got;
-+            else if(step==14 || step==16)s->expected.s2cr[m->slots[(step-14)/2]]=got;
-+            else s->expected.smr[m->slots[(step-15)/2]]=got;
++            else if(step==14)s->expected.s2cr[m->slots[0]]=got;
++            else s->expected.smr[m->slots[0]]=got;
 +        } else for(unsigned i=0;i<RF_GC_WORDS;++i)if(rf_gc_offsets[i]==at)s->banks.words[0][i]=got;
 +    }
 +    error=rf_a6_map_verify(m,o);if(error)goto failed;
@@ -3923,7 +3939,7 @@ diff --git a/bsd/dev/redfin_gpu_command.inc b/bsd/dev/redfin_gpu_command.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_command.inc
-@@ -0,0 +1,531 @@
+@@ -0,0 +1,541 @@
 +/* SPDX-License-Identifier: MIT */
 +/* One complete mode5 run. Every allocation, vote and partially started engine
 + * is held until the already armed platform reset; no unsafe rollback/retry. */
@@ -4078,6 +4094,10 @@ new file mode 100644
 +static int gx_audit(struct gm_context *c)
 +{
 +    int error=gx_check(c);if(error)return error;
++    /* Power GX before binding its user stream, as preferred steps17/18.
++     * Before CB0 installation starts the complete GMU lease still owns
++     * every SMMU word, including the untouched disabled GPU context. */
++    if(!gx.mapping.state.attempted)return gm_start_audit(c,RF_GB_HFI_LIVE);
 +    struct rf_gt_report clock={0};const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
 +    error=rf_gt_source_live_power(&source,&clock,true,c->gx_requested);if(error)return error;
 +    for(unsigned i=0;i<sizeof(gm_smmu_clocks)/sizeof(gm_smmu_clocks[0]);++i) {
@@ -4338,7 +4358,7 @@ new file mode 100644
 +static int gx_core(struct gm_context *c)
 +{
 +    int error=gx_audit(c);if(error)return error;
-+    gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu)return ENOMEM;
++    if(!gx.gpu)gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu)return ENOMEM;
 +    printf("REDFIN GPU CORE: first powered access status=%#x ring=%#x fault=%#x\n",
 +        gm_scalar_read(gx.gpu+4*0x210),gm_scalar_read(gx.gpu+4*0x806),gm_scalar_read(gx.gpu+4*0x821));
 +    /* Hold the SQE before replacing its address/ring. No running inherited
@@ -4432,7 +4452,14 @@ new file mode 100644
 +    printf("REDFIN GPU MEMORY: owned=%llu allocations=%u tables=%u pages=%u SQE-words=%u\n",
 +        (unsigned long long)gx.allocated,gx.allocations,gx.tables.table_count,gx.tables.mapped_pages,
 +        (unsigned)(sizeof(gx.sqe)-4)/4);
-+    gx.stage=3;struct rf_gmm_ops o=gx_mapping_ops;o.context=c;
++    /* Power/OOB precedes the native GPU stream binding. Local GPU IRQs
++     * stay masked and SQE is explicitly halted before publishing a route. */
++    gx.stage=3;error=gx_power(c);if(error)goto done;
++    gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu){error=ENOMEM;goto done;}
++    error=gx_register_write(c,4*0x38,0,UINT32_MAX);if(error)goto done;
++    error=gx_register_write(c,4*0x3a,0,UINT32_MAX);if(error)goto done;
++    error=gx_register_write(c,4*0x808,3,2);if(error)goto done;
++    gx.stage=4;struct rf_gmm_ops o=gx_mapping_ops;o.context=c;
 +    error=rf_a6_map_claim(&gx.mapping,&o,&gm_memory.lease,&gx.tables);if(error)goto done;
 +    /* Uncached host view before GPU DMA; never read its cached scratch alias
 +     * after this point, including in an ownership/publication callback. */
@@ -4441,7 +4468,6 @@ new file mode 100644
 +    __asm__ volatile("dsb osh":::"memory");
 +    gx.scratch=ml_io_map_wcomb(gx.data[2].physical,gx.data[2].owned_bytes);
 +    if(!gx.scratch){error=ENOMEM;goto done;}
-+    gx.stage=4;error=gx_power(c);if(error)goto done;
 +    gx.stage=5;error=gx_core(c);if(error)goto done;
 +    gx.stage=6;
 +done:
