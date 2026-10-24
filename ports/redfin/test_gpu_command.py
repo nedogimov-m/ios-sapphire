@@ -2,6 +2,7 @@
 import ctypes
 import errno
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -256,6 +257,72 @@ class GPUCommandTests(unittest.TestCase):
             changed = bytearray(mdt)
             changed[at] ^= 1
             self.assertNotEqual(self.lib.zap_plan(ctypes.create_string_buffer(bytes(changed)), 6860, 1676), 0)
+
+
+class GPUAllocationTests(unittest.TestCase):
+    def test_actual_adapter_requests_physical_alignment_and_retains_uncertain_allocations(self):
+        raw = (HERE / 'gpu-command.inc').read_text()
+        body = re.search(r'^static int gx_allocate\([^\n]+\)\n\{.*?^\}', raw, re.M | re.S)[0]
+        prefix = r'''
+#include <stdint.h>
+#include <string.h>
+#include "redfin_rpmh.h"
+#include "include/redfin_gpu_command.h"
+typedef uintptr_t vm_offset_t,vm_size_t;
+typedef uint64_t ppnum_t;
+#define PAGE_SHIFT 14
+#define PAGE_MASK 0x3fff
+#define KMA_KOBJECT 1
+#define KMA_ZERO 2
+#define KMA_DATA 4
+#define VM_KERN_MEMORY_IOKIT 5
+#define KERN_SUCCESS 0
+static uint8_t arena[RF_A6_ZAP_ALLOC];
+static void *kernel_map=(void *)1;
+static struct {void *context;uint64_t allocated;unsigned allocations;} gx;
+static unsigned problem,calls;
+static uint64_t va_mask,pa_mask,physical;
+static int gx_check(void *p){return p==gx.context && problem!=4?0:ECANCELED;}
+static int host_printf(const char *f,...){(void)f;return 0;}
+#define printf host_printf
+static uint64_t kvtophys(vm_offset_t p){if(p!=(vm_offset_t)arena)return 0;return physical;}
+static int kmem_alloc_contig(void *map,vm_offset_t *out,vm_size_t bytes,vm_size_t mask,
+ ppnum_t max_pnum,ppnum_t pnum_mask,unsigned flags,unsigned tag){
+ calls++;va_mask=mask;pa_mask=pnum_mask;
+ if(map!=kernel_map || bytes>sizeof(arena) || max_pnum!=0x7ffff || flags!=7 || tag!=5)return 2;
+ if(problem==3)return 1;*out=(vm_offset_t)arena;return KERN_SUCCESS;
+}
+'''
+        suffix = r'''
+int run(unsigned secure,unsigned issue){
+ struct rf_gm_memory m;problem=issue;calls=0;va_mask=pa_mask=0;
+ gx.context=&gx;gx.allocated=issue==5?0x180000:0;gx.allocations=0;
+ physical=secure && issue!=2?0x184000000ULL:0x184004000ULL;
+ if(issue==6)physical=0x80000000;
+ return gx_allocate(&m,secure?0:RF_A6_RING,secure?RF_A6_ZAP_ALLOC:0x8000,123,secure);
+}
+uint64_t stat(unsigned i){uint64_t s[]={calls,va_mask,pa_mask,gx.allocations,gx.allocated};return i<5?s[i]:999;}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'redfin_rpmh.h').write_text(rpmh_header())
+            source, library = root / 'allocate.c', root / 'allocate.so'
+            source.write_text(prefix + body + suffix)
+            subprocess.run([shutil.which('cc') or 'cc', '-std=c11', '-O2', '-shared', '-fPIC',
+                '-Wall', '-Wextra', '-Werror', '-Wno-misleading-indentation', '-I', str(root),
+                '-I', str(HERE), str(source), '-o', str(library)], check=True, capture_output=True)
+            lib = ctypes.CDLL(str(library))
+            lib.stat.restype = ctypes.c_uint64
+            self.assertEqual(lib.run(1, 0), 0)
+            self.assertEqual([lib.stat(i) for i in range(5)], [1, 0xFFFFF, 0x3F, 1, 0x100000])
+            self.assertEqual(lib.run(0, 0), 0)
+            self.assertEqual([lib.stat(i) for i in range(5)], [1, 0x3FFF, 0, 1, 0x8000])
+            for issue, result, allocated in ((2, errno.ERANGE, 1), (3, errno.ENOMEM, 0),
+                                             (4, errno.ECANCELED, 0), (5, errno.EFBIG, 0),
+                                             (6, errno.ERANGE, 1)):
+                self.assertEqual(lib.run(1, issue), result)
+                self.assertEqual(lib.stat(3), allocated)
+                self.assertEqual(lib.stat(0), 0 if issue in (4, 5) else 1)
 
 
 if __name__ == '__main__':

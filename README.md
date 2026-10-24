@@ -59,9 +59,10 @@ GPU/Metal acceleration is the next priority. The isolated A620 memory-v6
 capture now proves owned wired RAM, native CB1/stream5 readback and all
 seven GMU firmware payloads loaded and verified, with CM3 still reset-held.
 The subsequent capture observes fresh GMU firmware completion and HFI-ready;
-a host lifecycle check stopped before the version request. The complete
-native GPU command chain is now implemented for integrated validation;
-fresh HFI DMA/GPU commands and iOS graphics/Metal remain unproved.
+a fresh version request now receives its matching HFI ACK with actual queue
+consumer progress, proving GMU DMA. The complete native GPU command chain
+is implemented for integrated validation; its latest run reaches GPU memory
+allocation. GPU commands and iOS graphics/Metal remain unproved.
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

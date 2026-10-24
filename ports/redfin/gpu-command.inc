@@ -71,11 +71,17 @@ static int gx_allocate(struct rf_gm_memory *out,uint32_t address,uint32_t bytes,
     vm_offset_t host=0;vm_size_t size=(bytes+PAGE_MASK)&~PAGE_MASK;
     if(!size || gx.allocated+size>0x180000)return EFBIG;
     vm_size_t alignment=secure?RF_A6_ZAP_ALLOC-1u:PAGE_MASK;
+    /* XNU's fourth argument aligns the virtual mapping. Physical page
+     * alignment is independent and belongs in the ppnum mask. */
+    ppnum_t physical_alignment=secure?(ppnum_t)(alignment>>PAGE_SHIFT):0;
     if(kmem_alloc_contig(kernel_map,&host,size,alignment,
-        (ppnum_t)((RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-1)>>PAGE_SHIFT),0,
+        (ppnum_t)((RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-1)>>PAGE_SHIFT),physical_alignment,
         KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
     ++gx.allocations;gx.allocated+=size;
     *out=(struct rf_gm_memory){(void *)host,kvtophys(host),size,token,address};
+    printf("REDFIN GPU ALLOCATION: token=%u bytes=%llu PA=%#llx physical-mask=%#llx secure=%u\n",
+        token,(unsigned long long)size,(unsigned long long)out->physical,
+        (unsigned long long)physical_alignment,secure);
     if(!rf_gm_memory_valid(out) || (secure && (out->physical&(RF_A6_ZAP_ALLOC-1u))))return ERANGE;
     return 0;
 }

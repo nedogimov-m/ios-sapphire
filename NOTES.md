@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete command v4 with physically aligned zap allocation built — 2026-10-24
+
+The actual gx_allocate callback is now compiled in a host allocator fixture;
+virtualmaskfffff and physical ppnum-mask3f are verified separately. It also
+refuses a violated physical alignment/RAM range, retains uncertain allocations,
+and stops before allocation on lost ownership/budget. All8GPU/PAS/mapping/
+allocation casesPASS1.051s; other selected adapter/HFI/native-opcode checks
+pass. Local native build20261024-165045PASS, no CI run. Kernel
+research/redfin-gpu/kernel-command-v4 SHA256
+01d9024d155f8869d44a82594f0b44c99f762c4e5d0004703cc4a7cbcab83ae4;
+image ports/redfin/out/gpu-command-v4/redfin-xnu.img SHA256
+4d4f8c2ddb92eb045476f728b6d312fcad657ef98419a0b118ba4eec6baa3128.
+Actual loader/payload/liveFDT/Image/GPU+GMU firmware/compiled-shim return
+preflightPASS18094592bytes. Whole command chain selected for one integrated
+capture. Actual successful HFI checkpoint saved privately in
+research/redfin-gpu/working-hfi.json; GUI/Wi-Fi checkpoint/root preserved.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0xb9f190023f6ad8ea`.
+
+## REDFIN actual GMU/HFI DMA hardware PASS; GPU allocation alignment corrected — 2026-10-24
+
+Source0937220/localbuild164420, authenticated gpu-command-v3 capture matches
+d0bb1ceda1ff26b7. Entire GMU startup succeeds: result0/stage6/phase4,
+76stores/11polls, released1/firmware1/HFI1/sent1/received1/ACK1,
+version20010008, elapsed51404271ns. Fresh request100201 is consumed to4;
+real response10401 echoes100201, status0, version20010008. Full pre/post
+firmware/HFI SMMU and foreign-state audits pass. This is actual GMU/HFI DMA,
+not a generic ATS inference. Previous kernel/image/log checkpoints preserved.
+
+New GPU batch validates native CMD-DB resources: SH0=50004/unit4170000/
+width32/VCD1; MC0=50000/unit2050000/width16/VCD0; ACV=5007c/unit1/width0/
+VCD11; CN0=50074/unit30000/width4/VCD5; CE0=5006c/unit6802/width8/VCD6;
+SN6=50048/unit530000/width16/VCD3; SN0=50028/same/VCD3. Runtime addresses
+differ from upstream assumptions, as expected; no hard-coded substitution.
+GPU resultERANGE34/stage2 after5allocations/1146880bytes, before CB0/GX/
+PAS/CP. Source review of XNU vm_kern.h/vm_resident.c proves kmem_alloc_contig
+argument4 is virtual alignment, argument6 is physical ppnum-mask. The first
+implementation passed0 for physical alignment. Corrected secure allocation
+to mask3f at16KiB (1MiB physical boundary), retaining the physical-address
+check and adding allocation diagnostics. Original v3 output does not print
+the rejected PA; alignment diagnosis follows the API and stopped stage.
+
+Collector authenticates/public-primes/leaves verified fastboot; existing
+HFSXclean/inconsistentfalse/write_count623088 unchanged. No flash/root/
+modem/persist/EFS/backup change. Full GPU chain remains selected for next
+integrated validation; GPU commands/Metal are still unfinished.
+
 ## REDFIN full command v3 native HFI command completion built — 2026-10-24
 
 Continued after user interruption without repeating completed work. All71
