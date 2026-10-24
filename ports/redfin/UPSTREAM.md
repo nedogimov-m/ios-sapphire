@@ -107,6 +107,21 @@ Wi-Fi identity wait; upstream provides no demonstrated additional fix or
 LS database seed for that problem. Its job tools are useful as read-only
 Mach-service/provider and OS/App-cryptex availability audits.
 
+Reviewed 2026-10-24 against the actual 20H392 userland: MobileGestalt's
+Bluetooth address data helper at `0x19c56883c` reads
+`IODeviceTree:/chosen/mac-address-bluetooth0` through the CFData-checked
+property helper `0x19c55b368`. Without it, it tries the IOService name
+`bluetooth` and the factory `BMac` path, then repeats while neither exists.
+The IOServiceMatching/IOServiceNameMatching/GetMatchingService calls were
+resolved against the same cache's IOKit exports. The user's newly reported
+About/Wi-Fi pane freezes are consistent with that missing identity; an
+actual blocked Settings stack has not yet been captured. The existing
+Wi-Fi chosen-property policy is extended with a separate stable six-byte
+local-unicast Bluetooth identity, without importing Apple hardware nodes or
+publishing a BT driver. The preferred upstream snapshots remain the source
+reference, but no matching 20H392 identity-wait fix was found there. This
+is a local ABI adaptation, not proof of functional Bluetooth or GUI Wi-Fi.
+
 ## Five porting targets
 
 Kernel source references below are relative to `xnu/files/`; userland C

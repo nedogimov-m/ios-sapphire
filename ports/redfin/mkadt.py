@@ -86,6 +86,10 @@ def apple_userspace_identity(root, blob):
         # MG reads this before waiting for an absent IONetworkController.
         # Stable synthetic local-unicast identity; no Wi-Fi hardware is bound.
         ('mac-address-wifi0', bytes.fromhex('025245444649')),
+        # 20H392 MG's BluetoothAddress reads this CFData before its absent
+        # "bluetooth" service/factory-data fallback (also used by About).
+        # Separate development identity; this does not publish a BT driver.
+        ('mac-address-bluetooth0', bytes.fromhex('025245444642')),
         ('certificate-production-status', u32(0)), ('effective-production-status-ap', u32(0)),
         ('certificate-security-mode', u32(1)), ('effective-security-mode-sep', u32(1))])
     chosen.children.append(node('asmb', [

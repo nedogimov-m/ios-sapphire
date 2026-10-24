@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN Settings freeze clarified; 20H392 Bluetooth identity wait corrected — 2026-10-24
+
+User clarifies Settings hangs on entering the section, as it also does in
+About; a merely disabled Wi-Fi switch was an incomplete symptom model.
+Diagnostic wifid-log-v1 completed authenticated/boot-ID-matched, Apple
+userspace alive, HFSX clean/write_count589901, verified fastboot restored.
+It has three Preferences executions and1295 SEC batches/83 contacts/83
+releases/error0. Native radio passes all124 audits; the same10 initial
+Apple80211 queries remain. The targeted os_log/console policy produced no
+extra wifid console lines, so it did not identify the later wait. Current
+diagnostic cache logging stays enabled; private original backups remain.
+
+Read-only inspection of ACTUAL20H392 dyld-cache MobileGestalt confirms
+Bluetooth address helper0x19c56883c reads chosen/mac-address-bluetooth0
+through0x19c55b368, which accepts CFData. The actual CFString points to that
+22-character property; chosen is IODeviceTree:/chosen. On absence it asks
+for IOService name bluetooth via0x19c57c070, then factory BMac and retries
+when neither exists. IOKit symbol resolution independently identifies
+IOServiceMatching, IOServiceNameMatching, IOServiceGetMatchingService,
+IORegistryEntryFromPath and IORegistryEntryCreateCFProperty. This is a
+source-demonstrated unbounded identity fallback; its presence in the live
+blocked Settings/wifid stack remains unproved. Same-cache IO80211 power
+getter confirms the existing radio state1 is ON, so it is not flipped.
+
+Added only chosen/mac-address-bluetooth0, distinct stable local-unicast
+six-byte synthetic development identity, alongside the already-validated
+wifi0 identity. No bluetooth hardware node/driver or imported Apple private
+identifier. All8 ADT tests pass, including serialized CFData bytes,
+distinct local-unicast identity and untouched CPU/hardware nodes. Repacked
+the SAME kernel; no kernel build or CI run. Kernel source190b466, local
+build20261024-060104, SHA256390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e.
+
+New image ports/redfin/out/wifi-gui8-bt-identity-v1/redfin-xnu.img,
+SHA256e35a343969929d3c4fa76b2ad96f3fe489b9f1de93c3d1179d0fe35461cbe8e0;
+matching manifest/GUI8 shim-return proof PASS. Collector running for
+logs/redfin/wifi-gui8-bt-identity-v1, session41576, private output
+research/redfin-wifi-userland/device-bt-identity-v1.txt. Do not interrupt it
+with another device operation. Next: check whether wifid advances to
+scan/power operations and whether Settings/About respond. Association/
+WPA2/data/DHCP and GPU/Metal remain unfinished. No partition flash, root
+reinstall or modem/persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x1b369904c33e6b4a redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN manual Wi-Fi still gray; targeted wifid diagnostic running — 2026-10-24
 
 User reports the same nonworking Wi-Fi after manual launch ecb3a65.

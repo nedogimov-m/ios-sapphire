@@ -49,6 +49,12 @@ class RedfinADTTests(unittest.TestCase):
         self.assertEqual(len(mac), 6)
         self.assertEqual(mac, bytes.fromhex('025245444649'))
         self.assertEqual(mac[0] & 3, 2)  # locally administered, unicast
+        bluetooth = child(serialized, 'chosen').prop('mac-address-bluetooth0')
+        self.assertEqual(bluetooth, bytes.fromhex('025245444642'))
+        self.assertEqual(len(bluetooth), 6)
+        self.assertEqual(bluetooth[0] & 3, 2)
+        self.assertNotEqual(bluetooth, mac)
+        self.assertFalse(any(node.name == 'bluetooth' for node in serialized.children))
         self.assertEqual(end, len(mkadt.adt.serialize(root)))
         for name, expected in original_hardware.items():
             self.assertEqual(mkadt.adt.serialize(child(serialized, name)), expected)
