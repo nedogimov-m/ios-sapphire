@@ -20,6 +20,15 @@ the unaligned bootloader reservation is a writable zap destination. Both
 SCM transport and PAS result must succeed; the upstream inherited-zap fallback
 is deliberately not used. Native crypto BCM proxy floors are retained.
 
+Reviewed again for the first CB0 run: preferred `space_on()` verifies S2CR
+type/context with mask300ff and preserves HYP control of other fields.
+The GPU mapping now follows that readback mask and keeps the full observed
+word in later audits. Native `arm_smmu_context_asid()` uses CB+1 while the
+preferred standalone owner uses CB. The completed mapping review aligns our
+standalone CB0 to preferred ASID0, distinct from proven GMU ASID1; schema2
+binds it explicitly. This source alignment is not evidence of the earlier
+unidentified readback failure's cause. Typed-map diagnostics record the step.
+
 Actual source now includes the complete HFI/performance/bandwidth/GX/SQE/
 signed-zap/ME_INIT/unsecure/memory-write chain before its integrated tests.
 An early HFI-ready bit is accepted after reset release, matching the already

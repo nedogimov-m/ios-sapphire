@@ -77,12 +77,12 @@ static inline int rf_a6_map_step(const struct rf_a6_mapping *s,const struct rf_g
     case 3:*at=0x10;*value=RF_GMM_TCR2;break;
     case 4:*at=0x30;*value=RF_GMM_TCR;break;
     case 5:*at=0x20;*value=(uint32_t)p->root_physical;break;
-    case 6:*at=0x24;*value=(uint32_t)(p->root_physical>>32)|0x20000;break;
+    case 6:*at=0x24;*value=(uint32_t)(p->root_physical>>32);break; /* Preferred CB0/ASID0. */
     case 7:*at=0x28;break;
     case 8:*at=0x2c;break;
     case 9:*at=0x38;*value=p->mair0;break;
     case 10:*at=0x3c;break;
-    case 11:*at=0x610;*value=2;break;
+    case 11:*at=0x610;break; /* ASID0, distinct from the owned GMU's ASID1. */
     case 12:*at=0x7f0;*value=1;break;
     case 13:*value=RF_GMM_SCTLR|0x100;break; /* Native HUPCF, no stall/IRQ. */
     case 14:*block=0;*at=0xc00+4*s->slots[0];break;
@@ -152,7 +152,11 @@ static inline int rf_a6_map_claim(struct rf_a6_mapping *m,const struct rf_gmm_op
         error=o->check(o->context);if(error)goto failed;
         error=o->read(o->context,block,at,&got);if(error)goto failed;s->observed=got;
         uint32_t mask=step==2?0x30000u:step==3?0x38017u:step==4?0x00c0ffbfu:
-            step==13?0x001001f1u:(step==14 || step==16)?0x030300ffu:UINT32_MAX;
+            step==13?0x001001f1u:(step==14 || step==16)?0x000300ffu:UINT32_MAX;
+        /* As preferred space_on(), require translation type and CB index.
+         * HYP may retain/force PRIVCFG; our only mapped pages are owned and
+         * allow both privilege levels. Keep the whole observed word in every
+         * later exact audit, including those implementation-controlled bits. */
         if((got&mask)!=(value&mask)){error=EIO;goto failed;}
         if(step==7 || step==8)m->ttbr1_valid|=1u<<(step-7);
         if(!block) {

@@ -3410,9 +3410,9 @@ new file mode 100644
 +/* Byte offsets, matching the Redfin ADT contract. The low OPP is common to
 + * every live speed bin; its native DDR use case is 5 (2188000 KB/s). */
 +static const uint32_t rf_a6_policy[] = {
-+    1,0x06020001,275000000,64,5,14,32,3,0,0x400,1,0x400,13,
++    2,0x06020001,275000000,64,5,14,32,3,0,0x400,1,0x400,13,
 +    RF_A6_ZAP_ALLOC,RF_A6_ZAP_SPAN,RF_A6_RING,RF_A6_RING_BYTES,
-+    RF_A6_SQE,RF_A6_SCRATCH,500
++    RF_A6_SQE,RF_A6_SCRATCH,500,0 /* Explicit GPU ASID0, GMU uses ASID1. */
 +};
 +static const uint32_t rf_a6_ddr_kbps[] = {
 +    0,400000,800000,1200000,1804800,2188000,2724000,3072000,
@@ -3638,7 +3638,7 @@ diff --git a/bsd/dev/redfin_gpu_mapping.h b/bsd/dev/redfin_gpu_mapping.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_mapping.h
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,174 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Owned A620 CB0, with native SID0/mask401 expressed as two disjoint
 + * SID0/1 mask400 routes. CB1/GMU and secure SID2/mask400 are preserved. */
@@ -3718,12 +3718,12 @@ new file mode 100644
 +    case 3:*at=0x10;*value=RF_GMM_TCR2;break;
 +    case 4:*at=0x30;*value=RF_GMM_TCR;break;
 +    case 5:*at=0x20;*value=(uint32_t)p->root_physical;break;
-+    case 6:*at=0x24;*value=(uint32_t)(p->root_physical>>32)|0x20000;break;
++    case 6:*at=0x24;*value=(uint32_t)(p->root_physical>>32);break; /* Preferred CB0/ASID0. */
 +    case 7:*at=0x28;break;
 +    case 8:*at=0x2c;break;
 +    case 9:*at=0x38;*value=p->mair0;break;
 +    case 10:*at=0x3c;break;
-+    case 11:*at=0x610;*value=2;break;
++    case 11:*at=0x610;break; /* ASID0, distinct from the owned GMU's ASID1. */
 +    case 12:*at=0x7f0;*value=1;break;
 +    case 13:*value=RF_GMM_SCTLR|0x100;break; /* Native HUPCF, no stall/IRQ. */
 +    case 14:*block=0;*at=0xc00+4*s->slots[0];break;
@@ -3793,7 +3793,11 @@ new file mode 100644
 +        error=o->check(o->context);if(error)goto failed;
 +        error=o->read(o->context,block,at,&got);if(error)goto failed;s->observed=got;
 +        uint32_t mask=step==2?0x30000u:step==3?0x38017u:step==4?0x00c0ffbfu:
-+            step==13?0x001001f1u:(step==14 || step==16)?0x030300ffu:UINT32_MAX;
++            step==13?0x001001f1u:(step==14 || step==16)?0x000300ffu:UINT32_MAX;
++        /* As preferred space_on(), require translation type and CB index.
++         * HYP may retain/force PRIVCFG; our only mapped pages are owned and
++         * allow both privilege levels. Keep the whole observed word in every
++         * later exact audit, including those implementation-controlled bits. */
 +        if((got&mask)!=(value&mask)){error=EIO;goto failed;}
 +        if(step==7 || step==8)m->ttbr1_valid|=1u<<(step-7);
 +        if(!block) {
@@ -3919,7 +3923,7 @@ diff --git a/bsd/dev/redfin_gpu_command.inc b/bsd/dev/redfin_gpu_command.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_command.inc
-@@ -0,0 +1,521 @@
+@@ -0,0 +1,531 @@
 +/* SPDX-License-Identifier: MIT */
 +/* One complete mode5 run. Every allocation, vote and partially started engine
 + * is held until the already armed platform reset; no unsafe rollback/retry. */
@@ -4051,6 +4055,8 @@ new file mode 100644
 +    struct gm_context *c=argument;unsigned wanted_block;uint32_t wanted_at,wanted;
 +    if(gx_check(c) || rf_a6_map_step(&gx.mapping,&gx.tables,gx.mapping.step,
 +        &wanted_block,&wanted_at,&wanted) || block!=wanted_block || at!=wanted_at || value!=wanted)return EPERM;
++    printf("REDFIN GPU MAP WRITE: step=%u block=%u offset=%#x value=%#x\n",
++        gx.mapping.step,block,at,value);
 +    gm_memory_store((block?c->cb:c->smmu)+at,value);return 0;
 +}
 +static int gx_publish(void *argument,const struct rf_gm_pt_plan *p)
@@ -4383,6 +4389,14 @@ new file mode 100644
 +static void gx_diagnostic(struct gm_context *c)
 +{
 +    if(!gm_valid(c))return;
++    const struct rf_gmm_lease *lease=&gx.mapping.state;
++    printf("REDFIN GPU MAP LAST: step=%u stores=%u block=%u offset=%#x wanted=%#x observed=%#x poisoned=%u slots=%u/%u\n",
++        lease->step,lease->stores,lease->block,lease->offset,lease->requested,lease->observed,
++        lease->poisoned,gx.mapping.slots[0],gx.mapping.slots[1]);
++    printf("REDFIN GPU MAP CONTEXT: SCTLR=%#x TCR2=%#x TCR=%#x TTBR0=%#x/%#x MAIR0=%#x CBAR=%#x CBA2R=%#x\n",
++        gm_scalar_read(c->cb),gm_scalar_read(c->cb+0x10),gm_scalar_read(c->cb+0x30),
++        gm_scalar_read(c->cb+0x20),gm_scalar_read(c->cb+0x24),gm_scalar_read(c->cb+0x38),
++        gm_scalar_read(c->smmu+0x1000),gm_scalar_read(c->smmu+0x1800));
 +    printf("REDFIN GPU SMMU STATE: FSR=%#x FAR=%#x/%#x FSYNR=%#x GFSR=%#x\n",
 +        gm_scalar_read(c->cb+0x58),gm_scalar_read(c->cb+0x60),gm_scalar_read(c->cb+0x64),
 +        gm_scalar_read(c->cb+0x68),gm_scalar_read(c->smmu+0x48));

@@ -30,7 +30,7 @@ static struct rf_gmm_lease gmu;
 static struct rf_a6_mapping mapping;
 static struct rf_gs_snapshot global;
 static struct rf_gc_snapshot banks;
-static unsigned live,denied,writes,fail_write,samples,fail_sample,bad,published;
+static unsigned live,denied,writes,fail_write,samples,fail_sample,bad,published,problem;
 static uint64_t now;
 static bool valid(void *p){return p==&mapping && live;}
 static bool owns(void *p,const struct rf_gm_memory *m,unsigned use){
@@ -63,7 +63,7 @@ static int write_word(void *p,unsigned block,uint32_t at,uint32_t v){
   if(at==0x1800){global.cba2r[0]=v;banks.words[0][8]=0x400;}
   else if(at==0x1000)global.cbar[0]=v;
   else if(at>=0x800&&at<0x814)global.smr[(at-0x800)/4]=v;
-  else if(at>=0xc00&&at<0xc14)global.s2cr[(at-0xc00)/4]=v;
+  else if(at>=0xc00&&at<0xc14)global.s2cr[(at-0xc00)/4]=v|(problem==6?0x1000000u:0);
   else bad++;
  }else for(unsigned i=0;i<RF_GC_WORDS;i++)if(rf_gc_offsets[i]==at)
   banks.words[0][i]=at==0x10?v|0x60u:at==0?v&~0x1000u:v;
@@ -88,10 +88,10 @@ static void reset(void){
  gmu.active=1;gmu.expected=global;gmu.banks=banks;
  for(unsigned i=0;i<3;i++)data[i]=(struct rf_gm_memory){mem[i],0x184000000ULL+i*0x10000,0x8000,i+1,0x1000000+i*0x100000};
  pool=(struct rf_gm_memory){mem[3],0x184100000ULL,0x8000,99,0};
- live=1;denied=writes=fail_write=samples=fail_sample=bad=published=0;now=0;
+ live=1;denied=writes=fail_write=samples=fail_sample=bad=published=problem=0;now=0;
 }
-int run(unsigned problem,unsigned failure,unsigned audit_failure){
- reset();fail_write=failure;fail_sample=audit_failure;
+int run(unsigned issue,unsigned failure,unsigned audit_failure){
+ reset();problem=issue;fail_write=failure;fail_sample=audit_failure;
  if(problem==1)denied=1;
  if(problem==2)data[1].physical=data[0].physical;
  if(problem==3)gmu.expected.smr[3]=0x84000001;
@@ -105,6 +105,7 @@ uint64_t descriptor(unsigned page,unsigned slot){
  const uint8_t *p=mem[3]+4096*page+8*slot;uint64_t v=0;for(unsigned i=0;i<8;i++)v|=(uint64_t)p[i]<<(i*8);return v;
 }
 uint32_t route(unsigned slot,unsigned kind){return kind?global.s2cr[slot]:global.smr[slot];}
+uint32_t context_word(unsigned index){return index<RF_GC_WORDS?banks.words[0][index]:UINT32_MAX;}
 int packets(unsigned kind,uint32_t *out){return kind==0?(int)rf_a6_me_init(out):kind==1?(int)rf_a6_unsecure(out):(int)rf_a6_mem_write(out,kind-2,0x1234abcd);}
 uint32_t reg_value(unsigned at){for(unsigned i=0;i<sizeof(rf_a6_registers)/sizeof(rf_a6_registers[0]);i++)
  if(rf_a6_registers[i].at==at)return rf_a6_registers[i].value;return UINT32_MAX;}
@@ -181,6 +182,7 @@ class GPUCommandTests(unittest.TestCase):
         self.assertEqual(self.lib.descriptor(2, 256) & 0xFFF, 0xEC3)
         self.assertEqual(self.lib.descriptor(3, 0) & 0xFFF, 0xE43)
         self.assertEqual(self.lib.descriptor(3, 1), 0)
+        self.assertEqual(self.lib.context_word(3), 1)  # PA high word, ASID0.
 
     def test_every_context_write_and_audit_failure_stops_without_rollback(self):
         for write in range(1, 19):
@@ -199,6 +201,13 @@ class GPUCommandTests(unittest.TestCase):
         for problem in range(1, 6):
             self.assertNotEqual(self.lib.run(problem, 0, 0), 0, problem)
             self.assertEqual(self.lib.stat(0), 0)
+
+    def test_native_translation_route_check_retains_hyp_privilege_readback_for_later_audits(self):
+        self.assertEqual(self.lib.run(6, 0, 0), 0)
+        self.assertEqual(self.lib.route(1, 1), 0x1000000)
+        self.assertEqual(self.lib.route(2, 1), 0x1000000)
+        self.assertEqual(self.lib.stat(4), 1)
+        self.assertEqual(self.lib.stat(2), 0)
 
     def test_packets_have_native_parity_ordinals_and_no_unmapped_reglist(self):
         words = (ctypes.c_uint32 * 16)()

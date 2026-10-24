@@ -54,7 +54,10 @@ disabled and unreferenced, with fresh exact global/CB0/CB1 audits before each
 store. Two unused slots encode SID0 and SID1 with mask400, equivalent to
 native SID0/mask401; this also avoids upstream's observed combined-mask HYP
 behavior. CB1/GMU, SID2 secure routing and every foreign raw word stay audited.
-CB0 uses39-bit/4KiB/36-bit LPAE, ASID2, native HUPCF, with no stall/IRQ.
+S2CR requires the native translation type/context mask300ff, as the preferred
+upstream; any implementation-controlled privilege bits are retained in full
+for subsequent exact audits. All mapped pages allow both privilege levels.
+CB0 uses39-bit/4KiB/36-bit LPAE, preferred ASID0, native HUPCF, with no stall/IRQ.
 Ring at01000000 is32KiB; SQE at01100000 is read-only and skips the firmware's
 first header word. Scratch at01200000 has an uncached CPU view before DMA.
 Only the required pages are mapped; adjacent scratch pages stay unmapped.

@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete command v5 with preferred CB0 semantics built — 2026-10-24
+
+All73selected native-start/real-adapter/HFI/GPU casesPASS19.445s,
+including forced S2CR privilege readback retained in full audits. The final
+package aligns standalone CB0 to preferred ASID0 (schema2), keeps HUPCF and
+all remaining active-field/foreign checks, and logs every mapping step plus
+its requested/observed values. Build165938passed but superseded by final
+local native build20261024-170129PASS; no CI run. Kernel
+research/redfin-gpu/kernel-command-v5 SHA256
+10e2e34bf84014f871891df07d03468f3914b97c5ddbdc9346b9e128c95c7d23;
+image ports/redfin/out/gpu-command-v5/redfin-xnu.img SHA256
+611183dbc58c8665b410defd6c72175c4d2fc7ac3202c61f83d84d7360f4eb86.
+Actual loader/payload/liveFDT/Image/schema2/GPU+GMU firmware/compiled-shim
+return preflightPASS18094592bytes. Whole chain selected, hardware pending.
+V4 root remains clean/unchanged and device verified fastboot; no protected
+partition/root/backup changes. Next full integrated capture.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0x13a5916816cb97ad`.
+
+## REDFIN all GPU RAM/SQE/table preparation PASS; first CB0 readback stops — 2026-10-24
+
+Source67b4175/localbuild165045, authenticated gpu-command-v4 matches
+b9f190023f6ad8ea. GMU/HFI fresh ACK/full audits repeatPASS. All5GPU allocations
+now succeed and are observed: ring183a20000+8000, SQE183a28000+8000,
+scratch183a30000+4000, tables183a34000+4000; native aligned zap
+183b00000+100000 with physical ppnum-mask3f. Total1146880bytes,4GPU
+table pages/17mapped pages and7907SQE words copied/verified. Stage3 CB0
+mapping stopsEIO5 after150388854ns, no route/GX/PAS/CP success claim.
+CB0FSR400FORMAT,no real fault; inherited FAR/FSYNR unchanged,GFSR0.
+V4 did not print the failed mapping step, so exact register cause is UNKNOWN.
+
+Full chain review adds typed write and final requested/observed/context
+diagnostics, and matches preferred space_on's S2CR type/context mask300ff.
+HYP-controlled privilege bits can differ while our owned pages allow both;
+the complete observed word still joins every later exact audit. This source
+correction is not claimed as the observed v4 cause. The completed source
+review also aligns standalone CB0 with preferred ASID0 instead of the initial
+custom ASID2; schema2 explicitly binds ASID0, distinct from proven GMU1.
+Native Linux ASID=CB+1 differs from preferred standalone ASID=CB; this source
+alignment is not an inferred v4 diagnosis. HUPCF, all other fields and full
+foreign audits remain. No fault acknowledgement or unsafe retry is added.
+Collector authenticated/public-prime/verified-fastboot; HFSXclean,
+inconsistentfalse/write_count623088 unchanged. Full batch remains selected.
+
 ## REDFIN complete command v4 with physically aligned zap allocation built — 2026-10-24
 
 The actual gx_allocate callback is now compiled in a host allocator fixture;

@@ -129,6 +129,8 @@ static int gx_map_write(void *argument,unsigned block,uint32_t at,uint32_t value
     struct gm_context *c=argument;unsigned wanted_block;uint32_t wanted_at,wanted;
     if(gx_check(c) || rf_a6_map_step(&gx.mapping,&gx.tables,gx.mapping.step,
         &wanted_block,&wanted_at,&wanted) || block!=wanted_block || at!=wanted_at || value!=wanted)return EPERM;
+    printf("REDFIN GPU MAP WRITE: step=%u block=%u offset=%#x value=%#x\n",
+        gx.mapping.step,block,at,value);
     gm_memory_store((block?c->cb:c->smmu)+at,value);return 0;
 }
 static int gx_publish(void *argument,const struct rf_gm_pt_plan *p)
@@ -461,6 +463,14 @@ static int gx_core(struct gm_context *c)
 static void gx_diagnostic(struct gm_context *c)
 {
     if(!gm_valid(c))return;
+    const struct rf_gmm_lease *lease=&gx.mapping.state;
+    printf("REDFIN GPU MAP LAST: step=%u stores=%u block=%u offset=%#x wanted=%#x observed=%#x poisoned=%u slots=%u/%u\n",
+        lease->step,lease->stores,lease->block,lease->offset,lease->requested,lease->observed,
+        lease->poisoned,gx.mapping.slots[0],gx.mapping.slots[1]);
+    printf("REDFIN GPU MAP CONTEXT: SCTLR=%#x TCR2=%#x TCR=%#x TTBR0=%#x/%#x MAIR0=%#x CBAR=%#x CBA2R=%#x\n",
+        gm_scalar_read(c->cb),gm_scalar_read(c->cb+0x10),gm_scalar_read(c->cb+0x30),
+        gm_scalar_read(c->cb+0x20),gm_scalar_read(c->cb+0x24),gm_scalar_read(c->cb+0x38),
+        gm_scalar_read(c->smmu+0x1000),gm_scalar_read(c->smmu+0x1800));
     printf("REDFIN GPU SMMU STATE: FSR=%#x FAR=%#x/%#x FSYNR=%#x GFSR=%#x\n",
         gm_scalar_read(c->cb+0x58),gm_scalar_read(c->cb+0x60),gm_scalar_read(c->cb+0x64),
         gm_scalar_read(c->cb+0x68),gm_scalar_read(c->smmu+0x48));
