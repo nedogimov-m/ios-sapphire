@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native GPU service + iOS GUI8/WLAN integration PASS; system EAGL next — 2026-10-25
+
+Sourcef0195b2/kernel-service-v2/build20261024-235430, authenticated exact
+boot020afecf22835a8c/image036286bada403e1e5b75dc78cfe1e838e2ed462aa7947a610f1a721296acd13c.
+The8MiB IO-VA fix works: complete GMU preparation/firmware/HFI and native GPU
+command chain now pass inside GUI8. All4fresh nonce words match, PAS13 passes;
+runtime adopts256leaf tables and512MiB arena, publishes RedwoodGPU msm1.7.
+No panic/CP/SMMU fault. Native WLAN also reaches FW_READY and packet transport,
+with the GPU resources retained. Apple launchd/system GUI execute, then planned
+180s graceful shutdown completes; empty/clean HFSX, write_count631485, verified
+fastboot. Logs/checkpoint remain private under logs/redfin/gpu-gui-service-v3.
+
+No runtime submission or GPU-render process/output is observed: the new job
+has not executed. Its path was /Library/LaunchDaemons, while actual stock
+launchd's embedded bootstrap scan names /System/Library/LaunchDaemons and
+/AppleInternal/Library/LaunchDaemons. The next complete batch moves the job
+to the actual system directory and connects the system EAGL/Mesa bridge.
+User confirms the GUI still rendered on CPU and rendering-dependent apps did
+not open; no 3D/system/Metal acceleration claim follows from service startup.
+
+User reiterates: implement the entire next block before its combined build/test;
+do not test between mini-tasks. Continue autonomously, no final/status stop.
+Read preferred906425b graphics `eagl.c`, `mkeagl.py`, `eagl_slots.txt`,
+`gl_osmesa.c`, and inject.c's opengl_es path. Initial actual20H392 OpenGLES
+wrapper disassembly shows a32-byte dispatch-header shift from20F66: e.g.
+glBindTexture50vs30,glClear78vs58,glDrawArrays230vs210,glGetString3d0vs3b0,
+glCreateShader12b8vs1298. Native wrappers take context at table+20 rather
+than table+0. Derive/verify the complete table from the current cache before
+adapting the preferred bridge; never reuse20F66 absolute cache addresses.
+Preserve original Apple libraries; use a GUI3-gated backboardd injection with
+native method/UUID checks and actual hardware evidence after the full batch.
+
 ## REDFIN full GUI3 image with normal kernel VA mappings built — 2026-10-24
 
 All82selected actual-adapter/native-start/HFI/command/runtime checksPASS20.872s,
