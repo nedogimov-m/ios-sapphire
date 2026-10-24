@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN manual-v1 collected; validated GUI image relaunched for manual testing — 2026-10-24
+
+Manual-v1 collector completed: authenticated/boot-ID-matched, userspace
+alive, SEC error0/one IRQ batch/zero contacts. GUI shutdown revokes the WLAN
+lease at180s as intended; no new association/data observation. HFSX is
+clean, write_count547164; public metadata primed and verified fastboot.
+The manual UI check was not performed in that session.
+
+Continued the user's system-launch request by immediately reusing the
+same validated station-v9 image for manual-v2. No rebuild or repeated host
+suite. Fastboot send/boot OKAY,7.065s total; acceptance is observed, GUI and
+physical input still need the user. Image SHA256 `4aa7fdee1758666f9eaaf81544f3307622140f43978214ad0c37460eac2f99d7`;
+kernel `390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e`,
+local build20261024-060104 (no CI run). Collector remains running for
+logs/redfin/wifi-gui8-station-v9-manual-v2; orchestration output stays at
+research/redfin-gui-fixes/device-v9-manual-v2.txt. Existing180s cap and
+automatic recovery remain enabled. Do not interrupt the collector with a
+second device operation. No partition flash or persistent EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x58f44527d96348f3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN manual GUI/Wi-Fi session launched at user request — 2026-10-24
 
 User requests launching the system for a physical test. Reused the exact
