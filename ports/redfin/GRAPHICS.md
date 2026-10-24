@@ -21,11 +21,24 @@ the leading state page used by the preferred kernel's MiniIOSurface.
 
 The backboardd-only loader is `/redfin/lib/libredfin-graphics.dylib`.
 `gpu_userland.patch_launchd_cache(...,system_eagl=True)` preserves all other
-jobs and all unrelated backboardd properties, installs this loader and
-migrates only our known diagnostic job to System/Library/LaunchDaemons.
+jobs and all unrelated backboardd properties and migrates only our known
+diagnostic job to System/Library/LaunchDaemons. Stock launchd filters DYLD
+variables from jobs. `graphics-exec.patch` therefore appends the fixed loader
+environment entry in native exec, only for the exact GUI3 and Apple's
+absolute backboardd path. Native argument/pointer bounds remain enforced.
 Both the on-disk job and launchd's binary cache must agree. Cache updates
 keep their original length; existing roots require fresh extents/preimages,
 offline staging, readonly native fsck and complete device readback.
+
+Both graphics jobs use the actual20H392 ActiveHardMemoryLimit and
+InactiveHardMemoryLimit keys, bounded to512MiB. The older JetsamMemoryLimit
+key is deprecated by this launchd. The shader process was otherwise killed
+with JETSAM_REASON_MEMORY_PERPROCESSLIMIT before submitting work. Backboardd
+runs as mobile and cannot open the root-owned console for its spawn actions.
+Its output and the shader output go to two precreated mobile-owned files in
+`/private/var/mobile/Library/Logs/`. Collect these files with the launchd log
+from clean, unmounted recovery after each integrated boot, binding all
+userspace evidence to the fresh boot nonce and real kernel fence records.
 
 `graphics-eagl.patch` supplies the native AMFI dyld-policy query solely to
 backboardd in the exact GUI3 profile. The existing Sandbox/entitlement policy

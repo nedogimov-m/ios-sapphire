@@ -6,8 +6,13 @@
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><false/>
 <key>ProcessType</key><string>Background</string>
-<key>StandardOutPath</key><string>/dev/console</string>
-<key>StandardErrorPath</key><string>/dev/console</string>
+<key>UserName</key><string>mobile</string>
+<key>JetsamProperties</key><dict>
+<key>ActiveHardMemoryLimit</key><integer>512</integer>
+<key>InactiveHardMemoryLimit</key><integer>512</integer>
+</dict>
+<key>StandardOutPath</key><string>/private/var/mobile/Library/Logs/redfin-gpu-render.log</string>
+<key>StandardErrorPath</key><string>/private/var/mobile/Library/Logs/redfin-gpu-render.log</string>
 <key>EnvironmentVariables</key><dict>
 <key>OSMESA_SOFTWARE</key><string>0</string>
 <key>FD_MESA_DEBUG</key><string>sysmem</string>

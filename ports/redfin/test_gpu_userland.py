@@ -52,10 +52,9 @@ class GPUUserlandTests(unittest.TestCase):
         self.assertNotIn(gpu_userland.OLD_JOB_PATH,after['LaunchDaemons'])
         self.assertEqual(after['LaunchDaemons'].pop(gpu_userland.JOB_PATH),job)
         backboard=after['LaunchDaemons'].pop(gpu_userland.BACKBOARD_PATH)
-        self.assertEqual(backboard['EnvironmentVariables'],{'EXISTING_OPTION':'retained',
-            'DYLD_INSERT_LIBRARIES':gpu_userland.LOADER})
-        for key in ('StandardOutPath','StandardErrorPath'):self.assertEqual(backboard.pop(key),'/dev/console')
-        backboard['EnvironmentVariables'].pop('DYLD_INSERT_LIBRARIES')
+        self.assertEqual(backboard['EnvironmentVariables'],{'EXISTING_OPTION':'retained'})
+        for key in ('StandardOutPath','StandardErrorPath'):self.assertEqual(backboard.pop(key),gpu_userland.EAGL_LOG)
+        self.assertEqual(backboard.pop('JetsamProperties'),{'ActiveHardMemoryLimit':512,'InactiveHardMemoryLimit':512})
         self.assertEqual(backboard,self.backboard())
         before['LaunchDaemons'].pop(gpu_userland.OLD_JOB_PATH)
         before['LaunchDaemons'].pop(gpu_userland.BACKBOARD_PATH)
@@ -70,6 +69,20 @@ class GPUUserlandTests(unittest.TestCase):
             job=copy.deepcopy(original);job[field]=value
             with self.assertRaises(ValueError):gpu_userland.backboardd_job(job)
         with self.assertRaises(ValueError):gpu_userland.patch_launchd_cache(self.original(),system_eagl=True)
+
+    def test_known_old_insertion_and_diagnostic_policy_are_migrated_together(self):
+        before=plistlib.loads(self.original());b=self.backboard()
+        b['EnvironmentVariables']['DYLD_INSERT_LIBRARIES']=gpu_userland.LOADER
+        b['StandardOutPath']=b['StandardErrorPath']='/dev/console'
+        before['LaunchDaemons'][gpu_userland.BACKBOARD_PATH]=b
+        before['LaunchDaemons'][gpu_userland.JOB_PATH]=copy.deepcopy(gpu_userland.LEGACY_JOB)
+        raw=wifi_userland._encode_same_size(before,len(self.original()))[0]
+        changed,report=gpu_userland.patch_launchd_cache(raw,system_eagl=True)
+        jobs=plistlib.loads(changed)['LaunchDaemons']
+        self.assertNotIn('DYLD_INSERT_LIBRARIES',jobs[gpu_userland.BACKBOARD_PATH]['EnvironmentVariables'])
+        self.assertEqual(jobs[gpu_userland.JOB_PATH]['JetsamProperties'],
+            {'ActiveHardMemoryLimit':512,'InactiveHardMemoryLimit':512})
+        self.assertEqual(jobs[gpu_userland.JOB_PATH]['StandardOutPath'],gpu_userland.GPU_LOG)
 
 
 if __name__=='__main__':unittest.main()

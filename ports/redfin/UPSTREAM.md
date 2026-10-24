@@ -1,5 +1,25 @@
 # HackiOS upstream review — 2026-10-22
 
+## Stock launchd filtering and graphics bootstrap correction — 2026-10-25
+
+Reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+`redwood.patch` exec_inject_env/exec_extract_strings path. The current
+20H392 launchd file log explicitly filters DYLD_INSERT_LIBRARIES from jobs;
+AMFI permission alone does not supply the variable. Redfin now adapts the
+native argument insertion point to one fixed loader, exact GUI3 and the
+absolute /usr/libexec/backboardd path plus its basename. It keeps ordinary
+NCARGS/string/pointer accounting and adds no configurable/global injection.
+The earlier job EnvironmentVariables insertion is removed.
+
+The same native file log proves backboardd's posix_spawn EACCES with its
+new console redirections, and gpu-render's Jetsam per-process-limit kill.
+The final bootstrap uses precreated501-owned logs and the actual launchd
+ActiveHardMemoryLimit/InactiveHardMemoryLimit keys (512MiB each), rather
+than its deprecated JetsamMemoryLimit key. Original Apple job properties,
+all other jobs, kernel global memory policy and the full graphics block
+remain retained. Hardware EAGL/shader results still require the next full
+integrated capture; native HFS replay/clean shutdown are now observed.
+
 ## First system graphics panic: preserve high physical address bits — 2026-10-25
 
 Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab,

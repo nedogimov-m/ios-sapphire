@@ -1,5 +1,67 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native exec/logging/memory bootstrap fix built and installed — 2026-10-25
+
+All31selected native-exec-scope/journal/RW/physical/ABI/AMFI/runtime/startup
+checksPASS3.448s. Local native build20261025-011618PASS/noCI; userland
+build011619PASS with all40actual-cache library imports resolved. The Mesa,
+shader and EAGL/loader dylibs retain their previous exact hashes; only the
+startup policy changes. Native exec now supplies the fixed loader after
+launchd's job filtering, with exact GUI3/path/basename and NCARGS bounds.
+Kernel-eagl-v4 SHA2565fcd271fc492fd6b10fb223e030c25644c49c8810622575215c1d52a5b6834e2.
+Image ports/redfin/out/gpu-gui-eagl-v5/redfin-xnu.img SHA256
+793b37d05e416df6bb4ff4c5859d2db79dfe96b017b05041306d81c49b1ef6dd; bootb2479df547af18cd.
+Actual compiled loader/liveFDT/ADT/firmware/return preflightPASS.
+
+Fresh clean root-update-v3 is based on write_count642221, not the previous
+snapshot. Offline native fsck passes. Both native jobs and same-size cache
+now agree on the actual Active/InactiveHardMemoryLimit512 keys and writable
+mobile log destinations; ineffective job DYLD variable is removed. Both log
+files are precreated501:501/0644. Original job CNIDs and allocated4KiB blocks
+retained.602112bytes changed,2new log blocks,zero freed blocks; all23
+pieces backed up and fully readback verified. Journal/JIB unchanged empty,
+root clean and verified Fastboot. No device partitions outside the approved
+first16GiB root are changed. All shader/IOSurface/system-EAGL features stay
+selected. The private boot-graphics-cycle wrapper collects both file logs
+plus launchd.log from clean/unmounted recovery before leaving Fastboot.
+One complete integrated test is next; no rendering/Metal/Phone/Photos PASS
+claimed yet. Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb2479df547af18cd redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN native HFS recovery + clean shutdown PASS; graphics launch blockers identified — 2026-10-25
+
+Sourceb71d81b/kernel-eagl-v3/localbuild20261025-005500/noCI, authenticated
+boot77162b76f74d3dc4/imageba9e14f0193ae398ce89081cd4104c355ea92020aff886b6e53d05b9ddc1c777.
+The new read-only journal admission succeeds; native HFS logs replay from
+2079232to4766208 and "journal replay done". No kernel panic; normal180s
+shutdown cleanly unmounts HFSX, inconsistentfalse, write_count642221; public
+metadata primed and verified Fastboot. GPU BO creation no longer panics,
+so the high-PA fix progresses past the original crash. GPU bootstrap/PAS/
+4nonce writes/runtime service remain healthy. No runtime IB or draw yet.
+User observes console/repeated starts; final display present0, no GUI proof.
+
+A fresh clean root snapshot/read-only native launchd file log identifies
+all three current bootstrap defects: launchd explicitly says "Disallowing
+environment variable: DYLD_INSERT_LIBRARIES"; backboardd's xpcproxy then
+fails posix_spawn EACCES13 every10s with the added /dev/console redirections;
+gpu-render is killed by JETSAM_REASON_MEMORY_PERPROCESSLIMIT(ns1/code7),
+not a GPU fault. Backboardd executes0times; SpringBoard retries9times.
+Actual20H392 launchd strings deprecate JetsamMemoryLimit and name the
+ActiveHardMemoryLimit/InactiveHardMemoryLimit keys. New501-owned logs
+are not inferred from console absence: files, ownership and job data are
+read from the actual current root before making another update.
+
+Whole correction batch is implemented before its checks: preferred native
+exec environment insertion after launchd filtering, exact GUI3/absolute
+backboardd path+basename, fixed own library only, normal NCARGS accounting;
+remove the ineffective job variable, use precreated mobile501 logs for both
+jobs, and bounded512MiB per-process limits via the actual launchd keys.
+The existing AMFI dyld gate remains necessary and scoped. Private collector
+now reads fresh metadata and both graphics logs plus launchd.log before
+verified Fastboot, only from the clean unmounted root. No system graphics,
+Metal or Phone/Photos success is claimed. Full EAGL/shader path retained.
+Combined build/check, fresh root-update-v3 staging and one full boot follow.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x77162b76f74d3dc4 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete GUI3 native journal recovery block built — 2026-10-25
 
 All29selected real-helper/journal/RW/ABI/AMFI/runtime/startup checksPASS2.644s.

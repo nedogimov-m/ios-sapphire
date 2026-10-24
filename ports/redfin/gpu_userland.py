@@ -18,10 +18,15 @@ JOB_PATH='/System/Library/LaunchDaemons/com.redfin.gpu-render.plist'
 OLD_JOB_PATH='/Library/LaunchDaemons/com.redfin.gpu-render.plist'
 BACKBOARD_PATH='/System/Library/LaunchDaemons/com.apple.backboardd.plist'
 LOADER='/redfin/lib/libredfin-graphics.dylib'
+EAGL_LOG='/private/var/mobile/Library/Logs/redfin-eagl.log'
+GPU_LOG='/private/var/mobile/Library/Logs/redfin-gpu-render.log'
+LEGACY_JOB={'Label':LABEL,'ProgramArguments':['/redfin/bin/gpu-render'],'RunAtLoad':True,'KeepAlive':False,
+    'ProcessType':'Background','StandardOutPath':'/dev/console','StandardErrorPath':'/dev/console',
+    'EnvironmentVariables':{'OSMESA_SOFTWARE':'0','FD_MESA_DEBUG':'sysmem','MESA_DEBUG':'context'}}
 
 
 def backboardd_job(original):
-    """Preserve the stock event server; insert only our GUI3-gated loader."""
+    """Preserve the event server; exec supplies the gated loader after launchd."""
     services=original.get('MachServices')
     if (original.get('Label')!='com.apple.backboardd' or
         original.get('ProgramArguments')!=['/usr/libexec/backboardd'] or 'Program' in original or
@@ -34,12 +39,18 @@ def backboardd_job(original):
     env=dict(job.get('EnvironmentVariables',{}))
     if env.get('DYLD_INSERT_LIBRARIES',LOADER)!=LOADER:
         raise ValueError('backboardd already has an unrelated inserted library')
-    env['DYLD_INSERT_LIBRARIES']=LOADER
-    job['EnvironmentVariables']=env
+    # 20H392 launchd explicitly filters DYLD_* here. Remove only our known
+    # older configuration; the scoped native exec hook now supplies it.
+    env.pop('DYLD_INSERT_LIBRARIES',None)
+    if env:job['EnvironmentVariables']=env
+    else:job.pop('EnvironmentVariables',None)
     for key in ('StandardOutPath','StandardErrorPath'):
-        if job.get(key,'/dev/console')!='/dev/console':
+        if job.get(key,'/dev/console') not in ('/dev/console',EAGL_LOG):
             raise ValueError('backboardd already has a different console destination')
-        job[key]='/dev/console'
+        job[key]=EAGL_LOG
+    jetsam=dict(job.get('JetsamProperties',{}))
+    jetsam.update(ActiveHardMemoryLimit=512,InactiveHardMemoryLimit=512)
+    job['JetsamProperties']=jetsam
     return job
 
 
@@ -55,7 +66,7 @@ def patch_launchd_cache(original,system_eagl=False):
         raise ValueError('unexpected GPU diagnostic startup identity')
     found=[(key,value) for key,value in jobs.items() if value.get('Label')==LABEL]
     before=hashlib.sha256(original).hexdigest()
-    if len(found)>1 or (found and (found[0][0] not in (JOB_PATH,OLD_JOB_PATH) or found[0][1]!=job)):
+    if len(found)>1 or (found and (found[0][0] not in (JOB_PATH,OLD_JOB_PATH) or found[0][1] not in (job,LEGACY_JOB))):
         raise ValueError('refusing an existing conflicting GPU job')
     if JOB_PATH in jobs and (not found or found[0][0]!=JOB_PATH):
         raise ValueError('GPU job path already belongs to a different daemon')
