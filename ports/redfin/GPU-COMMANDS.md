@@ -27,6 +27,13 @@ the same variable-length, padded, wrapping queues, unique sequences and full
 request echoes. An ACK additionally requires actual command-consumer progress.
 Stale/malformed responses, firmware errors and timeouts stop the whole run.
 
+Immutable firmware source copies are absent from all device DMA maps.
+Arguments/policies/ranges/digests, CPU/parent/GIC/CX are checked on every
+access; full firmware bytes are rechecked at ownership/source audits,
+256-byte TCM chunks and HFI/PAS publication. The counter timing interval
+excludes the full source audit and retains guarded samples and complete
+source/reset proofs on both sides, with the original timing/frequency bounds.
+
 Only off/275MHz are advertised in the GPU performance table. The 275MHz/64
 OPP occurs in every captured speed bin, with bus use case5. Native ARC votes
 are computed from the real gfx/cx/mx CMD-DB level arrays; the GMU remains

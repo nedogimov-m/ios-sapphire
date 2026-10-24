@@ -221,7 +221,9 @@ static inline int rf_gb_run(struct rf_gb_report *s,struct rf_gb_config *c,const 
     s->firmware=1;s->phase=RF_GB_FW_LIVE;s->stage=4;
     RF_GB_TRY(o->audit(o->context,s->phase));
     s->phase=RF_GB_HFI_WAIT;
-    RF_GB_TRY(rf_gb_write(s,o,RF_GB_GMU,0x14618,1,1));
+    /* Native CTRL_INIT is a command, completed by CTRL_STATUS and the fresh
+     * HFI exchange. It need not retain/echo the command bit. */
+    RF_GB_TRY(rf_gb_write(s,o,RF_GB_GMU,0x14618,1,0));
     RF_GB_TRY(rf_gb_poll(s,o,RF_GB_GMU,0x14600,1,1,&s->hfi_status));
     s->hfi=1;s->phase=RF_GB_HFI_LIVE;s->stage=5;
     RF_GB_TRY(o->exchange(o->context,&s->version));

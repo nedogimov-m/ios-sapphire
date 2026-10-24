@@ -1,11 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full command v3 native HFI command completion built — 2026-10-24
+
+Continued after user interruption without repeating completed work. All71
+selected actual adapter/HFI/GPU/start casesPASS18.164s; every protocol read
+now runs against the real adapter read allowlist, and CTRL_INIT self-clear
+is covered through status and a fresh version ACK. Publication-source
+revocation cases also pass. Local native build20261024-164420PASS, no CI run.
+Kernel research/redfin-gpu/kernel-command-v3 SHA256
+1758c83c3fba5f7335226d0aff3c6a03639e2defb40dc505a5bb94e8cd808cba;
+image ports/redfin/out/gpu-command-v3/redfin-xnu.img SHA256
+e140f4cb1b89ded5c49f9eeb53797d13230291fa7e74cce2835a936c03f3552b.
+Actual loader/payload/liveFDT/Image/GPU+GMU firmware/compiled-shim return
+preflightPASS18094592bytes. Full GPU chain remains selected. Next integrated
+temporary capture; no GPU command/Metal result claimed. Existing root,
+working Wi-Fi/checkpoints and all protected partitions/backup remain intact.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0xd0bb1ceda1ff26b7`.
+
+## REDFIN complete-command v2 proves4.47s preparation and live GMU; HFI command semantics corrected — 2026-10-24
+
+Source6b2d1db/localbuild163732, authenticated capture gpu-command-v2 matches
+37403ba9cb079718. Counter passes23155ticks/1205365ns. All7payloads,
+393216owned bytes/5tables/43pages and nativeCB1 pass again, now4473370260ns
+instead of30721581615ns in start-v3 (6.87x faster). Early-ready lifecycle
+and full post-firmware SMMU/foreign audit now pass; firmware100/HFIstatus1,
+breadcrumb0b0c0d10/logpointer5/no genuine faults remain. CTRL_INIT1 store76
+actually executes, then adapter returnsEPERM1 before any version message:
+the optional register-echo read was missing from its read allowlist.
+Native a6xx_gmu_hfi_start writes this command without requiring its echo,
+then polls CTRL_STATUS. Corrected the command mask to0 (may self-clear),
+retained actual status/fresh echoed request/consumer proof, and included
+CTRL_INIT in diagnostic/read coverage. No weakened SMMU/firmware guard.
+The entire GPU chain stays selected, but GPU phases have not run yet.
+Collector authenticated/public-prime/verified-fastboot complete; rootHFSX
+clean/inconsistentfalse/write_count623088 unchanged. No persistent changes.
+Next integrated adapter cold-start/HFI callback coverage/build and full run.
+
 ## REDFIN full command v2 with bounded counter/source audits built — 2026-10-24
 
 Followsf6700f1; existing-counter fix and immutable-source audit batching
 preserve the entire new GPU chain.85of86targeted checks passed initially;
 the remaining assertion required the removed audit overhead to be present
-inside the counter window. Its corrected guard-time assertion and all15TCM
+inside the counter window. Its corrected guard-time assertion and all22TCM
 cases pass. GPU/PAS/HFI/adapter/native opcode checks remain passed.
 Local native build20261024-163732PASS, no CI run; kernel
 research/redfin-gpu/kernel-command-v2 SHA256

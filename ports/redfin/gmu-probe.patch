@@ -2830,7 +2830,7 @@ new file mode 100644
 +    if(unit==RF_GB_GBIF)return at==0x114 || at==0x118;
 +    if(unit!=RF_GB_GMU)return false;
 +    switch(at) {
-+    case 0x14000:case 0x14070:case 0x14600:case 0x14604:case 0x14648:case 0x24c14:
++    case 0x14000:case 0x14070:case 0x14600:case 0x14604:case 0x14618:case 0x14648:case 0x24c14:
 +    case 0x143a0:case 0x24c1c:case 0x24c20:case 0x24c4c:case 0x14404:case 0xafdc:
 +        return true;
 +    default:return at>=0xafe0 && at<=0xaff0;
@@ -3127,7 +3127,7 @@ diff --git a/bsd/dev/redfin_gmu_start.h b/bsd/dev/redfin_gmu_start.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_start.h
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,252 @@
 +/* SPDX-License-Identifier: MIT */
 +/* A620 cold GMU/PDC/RSC start and a fresh HFI v2 version exchange.
 + * Native msm500b3a2059c1eec0fec08ec56add06320ea901a8; preferred upstream
@@ -3351,7 +3351,9 @@ new file mode 100644
 +    s->firmware=1;s->phase=RF_GB_FW_LIVE;s->stage=4;
 +    RF_GB_TRY(o->audit(o->context,s->phase));
 +    s->phase=RF_GB_HFI_WAIT;
-+    RF_GB_TRY(rf_gb_write(s,o,RF_GB_GMU,0x14618,1,1));
++    /* Native CTRL_INIT is a command, completed by CTRL_STATUS and the fresh
++     * HFI exchange. It need not retain/echo the command bit. */
++    RF_GB_TRY(rf_gb_write(s,o,RF_GB_GMU,0x14618,1,0));
 +    RF_GB_TRY(rf_gb_poll(s,o,RF_GB_GMU,0x14600,1,1,&s->hfi_status));
 +    s->hfi=1;s->phase=RF_GB_HFI_LIVE;s->stage=5;
 +    RF_GB_TRY(o->exchange(o->context,&s->version));

@@ -17,12 +17,14 @@ typedef uintptr_t vm_offset_t;
 static uint32_t memory[0x5000/4],registers[0x30000/4];
 static struct {struct rf_gb_config config;vm_offset_t hfi,base[RF_GB_UNITS];
  unsigned messages,sent,received;} gm_start;
-static unsigned bad,problem,commands,padding_checks;
+static unsigned bad,problem,commands,padding_checks,payload_checks;
 static uint64_t now;
 static int gm_start_guard(void *p,unsigned phase){
  if(p!=&gm_start || phase!=RF_GB_HFI_LIVE)bad++;return problem==8?ECANCELED:0;
 }
-static bool gm_payloads_valid(void *p){return p==&gm_start;}
+static bool gm_payloads_valid(void *p){
+ payload_checks++;return p==&gm_start && problem!=9 && !(problem==10 && payload_checks==2);
+}
 static uint32_t gm_scalar_read(vm_offset_t at){return *(uint32_t *)at;}
 static void respond(void){
  uint32_t read=memory[64/4],write=memory[68/4];
@@ -55,7 +57,7 @@ static int host_printf(const char *s,...){(void)s;return 0;}
 SUFFIX = r'''
 int run(unsigned mode,unsigned repeat){
  memset(&gm_start,0,sizeof(gm_start));memset(memory,0,sizeof(memory));memset(registers,0,sizeof(registers));
- bad=commands=padding_checks=0;problem=mode;now=0;
+ bad=commands=padding_checks=payload_checks=0;problem=mode;now=0;
  gm_start.config.hfi_address=0x60001000;gm_start.hfi=(vm_offset_t)memory;
  gm_start.base[0]=(vm_offset_t)registers;
  int rc=redfin_gmu_hfi_init(memory,sizeof(memory),0x60001000,0x20000001);if(rc)return rc;
@@ -100,7 +102,7 @@ class GMUHFIQueueTests(unittest.TestCase):
     def test_timeout_wrong_echo_firmware_error_malformed_ack_and_wrong_consumer_stop(self):
         for problem, error in ((1, errno.ETIMEDOUT), (2, errno.EPROTO), (3, errno.EIO),
                                (4, errno.EPROTO), (5, errno.EPROTO), (6, errno.EIO),
-                               (8, errno.ECANCELED)):
+                               (8, errno.ECANCELED), (9, errno.EAGAIN), (10, errno.EAGAIN)):
             self.assertEqual(self.lib.run(problem, 24), error, problem)
             self.assertLessEqual(self.lib.stat(1), 1)
             self.assertEqual(self.lib.stat(0), 0)

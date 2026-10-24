@@ -2,6 +2,7 @@
 import ctypes
 import errno
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,6 +19,7 @@ static uint32_t regs[RF_GB_UNITS][0x30000/4];
 static unsigned issue,fail_store,fail_audit,stores,reads,audits,exchanges,bad,lost;
 static unsigned reset_releases,fw_reads,hfi_reads;
 static uint64_t now;
+/* ADAPTER READ ALLOWLIST */
 static int guard(void *p,unsigned phase){
  if(p!=&report || phase>RF_GB_HFI_LIVE)bad++;
  if(lost)return ECANCELED;
@@ -26,6 +28,7 @@ static int guard(void *p,unsigned phase){
  return 0;
 }
 static int read_word(void *p,unsigned u,uint32_t a,uint32_t *v){
+ if(!gm_start_read_allowed(u,a))bad++;
  if(p!=&report || lost || u>=RF_GB_UNITS || a&3u || a>=(u==RF_GB_GMU?0x30000u:0x10000u) ||
     (u==RF_GB_RSC && a>=0x1000))bad++;
  reads++;
@@ -62,6 +65,7 @@ static int write_word(void *p,unsigned u,uint32_t a,uint32_t v){
   /* Captured native hidden destinations ignore the driver's zero store. */
   regs[u][a/4]=0x82204514u-(a==0x3c?4u:0u)+(a==0x44?12u:0u);
  } else regs[u][a/4]=v;
+ if(u==RF_GB_GMU && a==0x14618 && issue==17){regs[u][a/4]=0;regs[u][0x14600/4]=1;}
  if(issue==10 && stores==8)lost=1;
  return 0;
 }
@@ -100,6 +104,7 @@ int again(void){return rf_gb_run(&report,&config,&ops);}
 uint32_t reg(unsigned unit,unsigned at){return regs[unit][at/4];}
 int ack(const uint32_t *w,unsigned n,uint32_t request,uint32_t wanted,uint32_t *version){
  return rf_gb_version_ack(w,n,request,wanted,version);}
+int allowed(unsigned u,uint32_t at){return gm_start_read_allowed(u,at);}
 '''
 
 
@@ -110,7 +115,13 @@ class GMUStartTests(unittest.TestCase):
         cls.addClassCleanup(cls.temporary.cleanup)
         root = Path(cls.temporary.name)
         source, library = root / 'start.c', root / 'start.so'
-        source.write_text(HARNESS)
+        adapter = (HERE / 'gmu-start.inc').read_text()
+        allowed = re.search(r'^static bool gm_start_read_allowed\([^\n]+\)\n\{.*?^\}',
+                            adapter, re.M | re.S)[0]
+        # Only storage names differ; every native protocol read is checked
+        # against the real kernel adapter's full allowlist, not a second list.
+        source.write_text(HARNESS.replace('/* ADAPTER READ ALLOWLIST */',
+                          allowed.replace('gm_start.report', 'report')))
         result = subprocess.run([shutil.which('cc') or 'cc', '-std=c11', '-O2', '-shared', '-fPIC',
             '-Wall', '-Wextra', '-Werror', '-Wno-misleading-indentation', '-I', str(HERE),
             str(source), '-o', str(library)], capture_output=True, text=True)
@@ -187,6 +198,13 @@ class GMUStartTests(unittest.TestCase):
         self.assertEqual(self.lib.stat(5), 1)
         self.assertEqual(self.lib.reg(0, 0x24c1c), 0)
         self.assertEqual(self.lib.stat(4), 0)
+
+    def test_native_hfi_init_command_can_self_clear_before_status_and_ack(self):
+        self.assertEqual(self.lib.run(17, 0, 0, 1), 0)
+        self.assertEqual(self.lib.reg(0, 0x14618), 0)
+        self.assertEqual(self.lib.stat(9), 1)
+        self.assertEqual(self.lib.allowed(0, 0x14618), 1)
+        self.assertEqual(self.lib.allowed(1, 0x1000), 0)
 
     def test_v2_ack_checks_full_echo_status_and_native_version_compatibility(self):
         request = 0x00100201

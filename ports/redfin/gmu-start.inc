@@ -77,7 +77,7 @@ static bool gm_start_read_allowed(unsigned unit,uint32_t at)
     if(unit==RF_GB_GBIF)return at==0x114 || at==0x118;
     if(unit!=RF_GB_GMU)return false;
     switch(at) {
-    case 0x14000:case 0x14070:case 0x14600:case 0x14604:case 0x14648:case 0x24c14:
+    case 0x14000:case 0x14070:case 0x14600:case 0x14604:case 0x14618:case 0x14648:case 0x24c14:
     case 0x143a0:case 0x24c1c:case 0x24c20:case 0x24c4c:case 0x14404:case 0xafdc:
         return true;
     default:return at>=0xafe0 && at<=0xaff0;
