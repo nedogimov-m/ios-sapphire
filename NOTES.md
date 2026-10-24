@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN separate presenter/native identity run stable; remaining app/frame blockers — 2026-10-25
+
+Source fc4bd98 / native local build20261025-034726 / no CI. Authenticated
+boot015400794fafd8d9/image9c9f110ef1e9f18c67d5a7cdc928b4a07c9411a2248fe7be124f959b08292016.
+Actual backboardd submissions exceed7424, shared-surface EAGL frames1920;
+both shader passes and complete system GPU evidence PASS, no Mesa submit
+failure/retirement/kernel panic/window-server restart. Touch111contacts/
+111releases, error/overflow0. Planned shutdown is clean, HFSX consistent/
+write_count746527; five files captured read-only and verified Fastboot.
+
+Native presenter starts async=1/workers=4. At2040copies, average copy8.312ms,
+rows7.486ms and queue25us. Its absolute timer skips127startup periods, then
+that count remains unchanged throughout the later sampled run. Of1980
+non-idle intervals<=200ms,432are under18ms and673under35ms. This is not
+stable60fps; user reports smoothness roughly unchanged. Native GPU average
+at submit7424 is3.296ms/batch, audits4.467ms and wait3.375ms. Remaining
+read-only clock/source callback recursion is the next concrete audit target;
+keep complete before/after snapshots and every hardware-write guard.
+Wi-Fi station readiness48.094s remains slow.
+
+Actual identity logs now prove tccd/Photos/assetsd root1/mount-root1,
+flags0x24004003/category1, parsed XML and Photos key1 for the latter two.
+Assetsd no longer emits its TCC SIGABRT in this session. User confirms Phone
+still works but Photos still aborts. Photos261/264 abort stacks remain an
+uncaught main-run-loop exception; native report review is next. A late
+Photos324 launch is still in dyld at shutdown. Do not claim working Photos
+or attribute the remaining assertion to Metal. Root/Mesa/EAGL files were
+unchanged by this batch. Metal implementation in the pinned userland is
+also reviewed: redwoodmetal.m plus AIR->NIR/ir3 is substantial existing
+compute/render code, not just a device-name stub; it still needs Redfin/
+20H392 adaptation and actual evidence. No Metal is enabled yet.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x015400794fafd8d9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete presentation/identity block built and preflighted — 2026-10-25
 
 All 52 selected presentation/scaler/ASan/UBSan/root-identity/quiet-display/
