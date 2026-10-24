@@ -46,6 +46,9 @@ executed while its stock launchd job required absent Apple DeviceTree
 nodes. The upstream job-gate fix is applied to Redfin's existing root and
 fresh-root builder. The next authenticated capture confirms wifid starts,
 finds en0 and reads radio capabilities, power and supported channels.
+Manual Settings freezes are traced to wifid waiting in SystemConfiguration
+for InterfaceNamer's IOKit readiness. The preferred upstream's minimal
+IONetworkStack service is now adapted; its runtime validation is pending.
 Wi-Fi association, Ethernet data/DHCP and actual Settings integration
 remain unverified.
 Display performance and GPU acceleration

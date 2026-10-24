@@ -127,6 +127,23 @@ XNU's existing resident-only frame reader and scheduler lock to copy only
 nonrunnable waiting threads, with a 200ms total budget. It does not import
 upstream's single-core sampling assumptions into the eight-core GUI.
 
+Reviewed again 2026-10-24 at preferred kernel
+`8e61187098f2c26c5daee8f9f72b6416aa64b9ab`:
+`xnu/files/iokit/Kernel/MiniIONetworkStack.cpp` documents and implements
+the exact newly observed block. Actual Redfin waiting stacks show
+`SCNetworkInterfaceCopyAll` → `__wait_for_IOKit_to_quiesce` →
+`SCDynamicStoreNotifyWait` in wifid, while Preferences waits in
+`MobileWiFi::_wifi_manager_open`. Apple's configd tag1241.140.6, commit
+`3e58490132f08916564af041ed1c818514a01a46`, independently confirms
+InterfaceNamer's stackCallback opens IONetworkStack before quietCallback
+can publish the ready network state. Redfin now adapts upstream's minimal
+IONetworkStack and user client under IOResources, in its existing WLAN
+registry translation unit. It starts before the native WLAN interface is
+published. Native BSD KPI already assigns en0, so unsupported naming writes
+are refused as in upstream; no synthetic dynamic-store ready key or
+userland binary patch bypasses the real InterfaceNamer flow. Runtime
+progress beyond the captured wait is the next validation.
+
 ## Five porting targets
 
 Kernel source references below are relative to `xnu/files/`; userland C

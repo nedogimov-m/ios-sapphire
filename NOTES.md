@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN actual wifid/configd wait identified; preferred upstream IONetworkStack adapted — 2026-10-24
+
+Waiting-stack diagnostic79af946 succeeds on hardware: two resident-only
+snapshots, no panic/ownership/parser failure. Authenticated waits-v1 capture
+matches boot ID522d0ab4a6ab6006. wifid's same thread remains blocked in
+SCNetworkInterfaceCopyAllWithPreferences → __wait_for_IOKit_to_quiesce →
+SCDynamicStoreNotifyWait in both snapshots. Another wifid thread waits on
+that dispatch_once. Final Preferences has WiFiKit/WFWiFiStateMonitor →
+MobileWiFi/WiFiManagerClientCreate → _wifi_manager_open waiting for its
+reply, while the main loop is alive. Thus the observed Wi-Fi UI wait is
+identified; Bluetooth identity is not its proven active cause. Actual
+About-specific stack has not been captured. HFSX clean/write_count605627;
+collector/public priming complete and verified fastboot restored.
+Private symbolication: research/redfin-wifi-userland/waits-v1-symbolicated.txt.
+
+Preferred upstream kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+MiniIONetworkStack.cpp explicitly describes this exact wait and solution.
+Rechecked Apple configd1241.140.6 at3e58490132f08916564af041ed1c818514a01a46:
+InterfaceNamer stackCallback must open IONetworkStack; quietCallback
+cannot publish ready interface state while its connection is absent.
+Adapted that minimal service/user client under IOResources into
+wifi_registry.cpp, before RedfinWLAN publication. Native BSD names are
+already assigned; naming setProperties returns unsupported as upstream.
+No invented ready-state key, ioctl success or userland executable patch.
+
+Runtime overlay/prepared tree synchronized. Four actual WLAN/GUI lease
+tests and native local build20261024-135049 PASS (no CI run). Actual
+loader/live-FDT/Image-window/GUI8 return/DMA32/shim-guard preflight PASS.
+Kernel SHA256014c316a51d5cfd967feeb93af016d48026c1146ee99b246516f574304479398.
+Image ports/redfin/out/wifi-gui8-network-stack-v1/redfin-xnu.img,
+SHA2568ea67f34007fcec3928aa2631dd54296982c851ca97c926a998cedb7d82e6f1d,
+decompressed130241632 bytes. Fastboot send/boot OKAY,7.041s total.
+Collector running session36288 for logs/redfin/wifi-gui8-network-stack-v1;
+private output research/redfin-wifi-userland/device-network-stack-v1.txt.
+Do not interrupt with a second device operation. Waiting-stack diagnostic
+stays explicitly enabled in chosen for this validation. User's new manual
+Wi-Fi panel result is pending. Next: configd stack open, released wait,
+actual scan/power/join and then association/WPA2/Ethernet/DHCP. GPU/Metal
+follows working GUI Wi-Fi. No partition flash, root reinstall or modem/
+persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x25d251b846ccc38d redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN both Settings panes still freeze; bounded SMP waiting stacks prepared/running — 2026-10-24
 
 User confirms both About and Wi-Fi still freeze with fcdaa28's Bluetooth

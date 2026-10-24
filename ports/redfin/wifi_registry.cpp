@@ -28,6 +28,8 @@
  */
 
 #include <IOKit/IOLib.h>
+#include <IOKit/IOKitKeys.h>
+#include <sys/proc.h>
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IOService.h>
 #include <IOKit/IOUserClient.h>
@@ -91,10 +93,108 @@ publish(IOService * service, IOService * provider, const char * name)
 	return service;
 }
 
+/* Adapted from the same pinned upstream's MiniIONetworkStack.cpp.
+ * configd's InterfaceNamer opens this before publishing Plugin:InterfaceNamer
+ * (*QUIET* or *TIMEOUT*). SCNetworkInterfaceCopyAll waits for that key, so
+ * the missing service blocks wifid and Settings even with a healthy en0.
+ * Redfin already assigns its interface's BSD name through the native KPI;
+ * unsupported renaming is refused without publishing a synthetic ready key.
+ */
+class IONetworkStack : public IOService
+{
+	OSDeclareDefaultStructors(IONetworkStack);
+
+public:
+	virtual bool start(IOService * provider) APPLE_KEXT_OVERRIDE;
+};
+
+OSDefineMetaClassAndStructors(IONetworkStack, IOService);
+
+bool
+IONetworkStack::start(IOService * provider)
+{
+	if (!IOService::start(provider)) {
+		return false;
+	}
+	setProperty(kIOUserClientClassKey, "IONetworkStackUserClient");
+	setName("IONetworkStack");
+	registerService();
+	return true;
+}
+
+class IONetworkStackUserClient : public IOUserClient
+{
+	OSDeclareDefaultStructors(IONetworkStackUserClient);
+
+public:
+	virtual bool start(IOService * provider) APPLE_KEXT_OVERRIDE;
+	virtual IOReturn clientClose(void) APPLE_KEXT_OVERRIDE;
+	virtual IOReturn setProperties(OSObject * properties) APPLE_KEXT_OVERRIDE;
+};
+
+OSDefineMetaClassAndStructors(IONetworkStackUserClient, IOUserClient);
+
+bool
+IONetworkStackUserClient::start(IOService * provider)
+{
+	char who[32] = "?";
+
+	if (!IOUserClient::start(provider)) {
+		return false;
+	}
+	/* whether the registry is quiet at this moment is what the namer goes on to ask */
+	proc_selfname(who, sizeof(who));
+	IOLog("RedfinNetworkStack: opened by %s; the registry's busy state is %u\n", who,
+	    (unsigned) IOService::getServiceRoot()->getBusyState());
+	return true;
+}
+
+IOReturn
+IONetworkStackUserClient::clientClose(void)
+{
+	if (!isInactive()) {
+		terminate();
+	}
+	return kIOReturnSuccess;
+}
+
+/* "Name this interface" (a dictionary: IONetworkStackUserCommand, IOPathMatch, IOInterfaceUnit). */
+IOReturn
+IONetworkStackUserClient::setProperties(OSObject * properties)
+{
+	static unsigned said;
+
+	if (said++ < 4) {
+		IOLog("RedfinNetworkStack: asked to name an interface: there are none of that kind\n");
+	}
+	return kIOReturnUnsupported;
+}
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+static void
+redfin_network_stack_start(void)
+{
+	/* where the real one is: IOService:/IOResources/IONetworkStack */
+	IOService * resources = IOService::getResourceService();
+	IONetworkStack * stack = OSTypeAlloc(IONetworkStack);
+
+	if (resources == NULL || stack == NULL || !stack->init() || !stack->attach(resources)) {
+		OSSafeReleaseNULL(stack);
+		IOLog("RedfinNetworkStack: cannot create the service\n");
+		return;
+	}
+	if (!stack->start(resources)) {
+		stack->detach(resources);
+	}
+	stack->release();
+}
+
 /* Once, when the interface of a radio exists. */
 void
 RedfinWLANStart(const char * interface, const uint8_t * address)
 {
+	redfin_network_stack_start();
 	IOService * platform = IOService::getPlatform();
 	IO80211Controller * controller = OSTypeAlloc(IO80211Controller);
 	RedfinWLAN * wlan = OSTypeAlloc(RedfinWLAN);
