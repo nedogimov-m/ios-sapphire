@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN real context stores confirmed; native TCR2 reserved readback identified — 2026-10-24
+
+Source1fa7383, native local build20261024-144025, kernel/image/args below.
+Authenticated memory-v3 matchesab1d41e3396dc973. Allocations/tables/ordinary
+RAM payloads again pass. Real stores now work: CB1SCTLR reads0, CBA2R1 and
+CBARstage1 readback pass, FSR FORMAT becomes400 exactly as predicted. Fourth
+store TCR2 requests38011 and reads38071: PASIZE/AS/SEP fields agree, reserved
+bits6:5 retain60. Strict whole-word comparison stops EIO/stage4 at4attempts;
+no route, ATS or TCM stage is reached. This is a readback-model issue, not
+proof of rejected translation. Actual native a6xx/arm-smmu/io-pgtable and
+preferred space_on are rechecked for implemented field masks and AArch64
+CONTEXTIDR (native only writes that register for AArch32 short descriptors).
+
+Collector completes authenticated/public-prime/verified-fastboot; staticPID1
+alive; HFSX remains clean/inconsistentfalse/write_count623088 unchanged.
+Next batch: validate native implemented TCR2/TCR/SCTLR fields, retain FULL
+observed words for every later exact audit, and omit unused AArch32-only
+CONTEXTIDR write. Add captured reserved-bit and critical-field/late-change
+regressions together, then collect full translation/TCM result. No firmware
+execution or GPU/Metal yet. Also corrected stale ports README/WiFi opening
+status to the user-confirmed working GUI8 internet checkpoint83e6e80;
+earlier staged radio evidence remains historical. No root/config/flash or
+modem/persist/EFS/backup change.
+Kernel b107ecfe5b75131e454d1550904d90a879d3a6c46372d81d3548709e29674730;
+image3b91e7adf62d60cd16c0fb2283f51e9711a98d17fd78477a6457180baf20c17f.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xab1d41e3396dc973`.
+
 ## REDFIN actual Darwin asm omission identified and fixed; memory-v3 built — 2026-10-24
 
 Sourcea92500b's memory-v2 capture authenticates and matches8b31e80485d42089.

@@ -106,7 +106,12 @@ newlines. [`test_gmu_mmio.py`](test_gmu_mmio.py) compiles their actual bodies
 for Darwin ARM64 and inspects Mach-O opcodes for zero/nonzero 32/64-bit
 stores between the correct barriers. The actual XNU object separately
 contains three complete word-store sites and one atomic ATS site. The
-fixed memory-v3 hardware result is pending.
+memory-v3 hardware capture confirms actual SCTLR0, CBA2R1 and stage1 CBAR
+stores plus FSR FORMAT `0x400`. It stops on TCR2 readback `0x38071` versus
+`0x38011`: all requested PASIZE/AS/SEP fields agree, while reserved bits6:5
+retain `0x60`. No ATS or TCM loading is reached. The next revision must
+distinguish implemented fields from reserved readback while retaining the
+complete observed word in every subsequent snapshot audit.
 
 ## Native resource and access boundary
 

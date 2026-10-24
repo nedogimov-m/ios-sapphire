@@ -1,10 +1,21 @@
-# Redfin Wi-Fi: evidence and the next two stages
+# Redfin Wi-Fi: evidence and working GUI checkpoint
 
 2026-10-24. Native MPSS/GLINK/QRTR/RMTFS and WLAN firmware readiness pass on
 Pixel 5. A separate DMON client uploads the captured Redfin BIN BDF with
 13 successful ACKs, sends CAL_REPORT and receives a real kernel FW_READY
-indication. CE packet transfer, association and GUI Wi-Fi remain unfinished.
-GUI with working Wi-Fi is the immediate goal; GPU/Metal follows.
+indication. The later native GUI8 profile also proves CE/WMI/HTT traffic,
+en0/Apple80211, WPA2 authentication/association/four-way exchange and
+bidirectional Ethernet. After adapting the preferred upstream's minimal
+IONetworkStack, configd opens it and wifid leaves its IOKit-readiness wait.
+The user confirms connection in Settings and working Safari/internet;
+About eventually opens. Authenticated network-stack-v1 records
+14,026 RX/10,712 TX frames and103 touch contacts/releases without errors.
+
+Known working image: `ports/redfin/out/wifi-gui8-network-stack-v1/redfin-xnu.img`,
+SHA256 `8ea67f34007fcec3928aa2631dd54296982c851ca97c926a998cedb7d82e6f1d`,
+source checkpoint83e6e80. Preserve its root/network configuration. An isolated
+DHCP transcript, reconnect and suspend/resume remain untested. GPU/Metal is
+the next user priority. Earlier staged evidence below remains historical.
 
 The saved live FDT (`research/redfin-root/device.dtb`) and recovery capture
 (`research/redfin-peripherals-v1/buses.txt:12`, `dmesg.txt:1185`) agree:

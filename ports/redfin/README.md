@@ -19,10 +19,12 @@ hardware drivers. A separate bounded eight-core GUI/touch profile is
 validated; rendering uses the CPU. The cutout-fit profile also passes
 authenticated automatic lock-screen captures and clean timed shutdown.
 
-The isolated native Wi-Fi profile now proves MPSS/PAS4 startup,
-GLINK/QRTR/RMTFS, MSA/CAP and DMON BDF/CAL_REPORT acknowledgements, followed
-by a real kernel FW_READY indication. CE packets, association, the iOS
-network interface and GUI Wi-Fi remain unfinished; see [Wi-Fi](WiFi.md).
+Native GUI8 Wi-Fi now works from Settings and the user confirms Safari/
+internet. The authenticated network-stack-v1 capture proves WPA2 auth,
+association/four-way exchange, en0 link-up and bidirectional Ethernet.
+The preferred upstream IONetworkStack adaptation releases configd/wifid's
+IOKit-readiness wait. Preserve the known working image and existing root;
+reconnect/suspend behavior remains untested. See [Wi-Fi](WiFi.md).
 
 `--touch-probe --usb-probe --wifi-probe --gpu-probe` adds read-only peripheral
 observers. Common startup requires confirmed PMIC/IMEM bootloader return
