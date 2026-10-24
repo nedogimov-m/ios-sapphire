@@ -11,7 +11,7 @@ import struct
 from ports.redfin import gmu_probe, mkadt
 from ports.redfin.wifi_firmware import read_regular
 
-POLICY = (4, 0x06020001, 275000000, 64, 5, 14, 32, 3, 0, 0x401, 0xFFFFFFFF, 0,
+POLICY = (5, 0x06020001, 275000000, 64, 5, 14, 32, 3, 0, 0x401, 0xFFFFFFFF, 0,
           13, 0x100000, 0x1000, 0x1000000, 0x8000, 0x1100000, 0x1200000, 500, 0, 1, 9999999)
 RANGES = (0x3D00000, 0x40000, 0x18220000, 0x10000)
 DDR_KBPS = (0, 400000, 800000, 1200000, 1804800, 2188000, 2724000, 3072000,

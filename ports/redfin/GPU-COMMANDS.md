@@ -58,8 +58,8 @@ accepted votes, live GX/OOB and native AHB fence ALLOW with no fence error.
 The complete profile follows preferred allocation/start order: GMU uses
 SMR1, leaving SMR0 free for the native GPU group. Standalone GMU modes keep
 their proven first-free selection. Obtain GX/OOB before binding the user
-stream, as preferred steps17/18; mask local GPU IRQs and hold SQE before
-route publication. Until CB0 installation begins, complete GMU lease audits
+stream, as preferred steps17/18; mask local GPU IRQs and retain the fresh
+cold CP state before route publication. Until CB0 installation begins, complete GMU lease audits
 also retain the untouched GPU context. No CP start precedes mapping proof.
 
 Private contiguous wired ring/SQE/scratch/table objects have proven host/PA
@@ -113,3 +113,9 @@ Hardware results and exact image/boot identities are recorded in NOTES.md.
 
 The iOS graphics/Mesa/Metal bridge is subsequent work. A command backend
 does not itself provide Metal or accelerate SpringBoard.
+
+The native cold-start path releases SQE with a sole CNTL1 write after the
+register/ring/SQE-address setup. The initial extra HALT3 request stalled this
+A620 at its store barrier, after RBBM read/write succeeded; it is removed.
+The adapter rejects HALT3, duplicate starts and starts before owned mapping.
+Real ME_INIT completion proves engine startup instead of command-bit echo.

@@ -23,8 +23,8 @@ SCM transport and PAS result must succeed; the upstream inherited-zap fallback
 is deliberately not used. Native crypto BCM proxy floors are retained.
 
 The same review now follows preferred native ordering as a complete profile:
-reserve SMR0 for GPU, select SMR1 for GMU, obtain GX/OOB, explicitly hold SQE
-and mask local GPU interrupts, then bind the GPU group before CP start.
+reserve SMR0 for GPU, select SMR1 for GMU, obtain GX/OOB, mask local GPU
+interrupts, then bind the GPU group before the native single CP start.
 Standalone GMU modes keep their proven first-free choice. Runtime audits
 use the unchanged GMU lease before GPU mapping, then the joint exact lease.
 
@@ -36,6 +36,12 @@ the initial adaptation only supplied GPU-initiated traffic votes. Schema4
 adds the exact native CPU configuration client and both SN10/CN0 in the GMU
 CNOC table. After GX/OOB, native fence ALLOW and exact access breadcrumbs
 precede the first GPU CSR access. The v6 cause is not proven until validated.
+
+The v7 capture validates CPU CFG votes and real RBBM CSR read/write, then
+stalls precisely storing SQE_CNTL3. Native `adreno_a6xx.c:a6xx_rb_start()`
+and preferred step20 only release SQE with CNTL1 after core/ring/SQE setup.
+Schema5 removes the extra HALT3 request, retains fresh cold-domain ownership,
+and admits exactly one native start after complete mapping/configuration.
 
 Reviewed again for the first CB0 run: preferred `space_on()` verifies S2CR
 type/context with mask300ff and preserves HYP control of other fields.

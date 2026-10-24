@@ -25,7 +25,7 @@
 /* Byte offsets, matching the Redfin ADT contract. The low OPP is common to
  * every live speed bin; its native DDR use case is 5 (2188000 KB/s). */
 static const uint32_t rf_a6_policy[] = {
-    4,0x06020001,275000000,64,5,14,32,3,0,0x401,UINT32_MAX,0,13,
+    5,0x06020001,275000000,64,5,14,32,3,0,0x401,UINT32_MAX,0,13,
     RF_A6_ZAP_ALLOC,RF_A6_ZAP_SPAN,RF_A6_RING,RF_A6_RING_BYTES,
     RF_A6_SQE,RF_A6_SCRATCH,500,0,RF_A6_GMU_SLOT,RF_A6_CFG_KBPS
 };

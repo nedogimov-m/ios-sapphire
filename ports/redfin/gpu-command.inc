@@ -21,7 +21,7 @@ static struct {
     uint32_t rptr,wptr,status,fault,interrupt,protect,values[4],wanted[4];
     uint64_t started,allocated;
     unsigned allocations,stage,registers,submissions,pas_phase,pas_completed;
-    bool bound,entered,poisoned;
+    bool bound,entered,poisoned,sqe_started;
 } gx;
 
 static bool gx_contract(struct gm_context *c)
@@ -391,8 +391,13 @@ static int gx_zap_load(struct gm_context *c)
 static int gx_register_write(struct gm_context *c,uint32_t at,uint32_t value,uint32_t mask)
 {
     if(gx_check(c) || !c->gx_granted || gx.cfg_held!=7 || !gx.gpu || at&3u || at>=0x40000)return EPERM;
+    /* Native cold start writes SQE_CNTL=1 once, after all owned mapping and
+     * core configuration. The non-native halt3 request stalls this A620. */
+    if(at==4*0x808 && (value!=1 || !gx.mapping.state.active || gx.sqe_started ||
+        gx.submissions || gx.pas_completed))return EPERM;
     printf("REDFIN GPU REGISTER BEGIN: step=%u offset=%#x value=%#x\n",gx.registers+1,at,value);
     gm_memory_store(gx.gpu+at,value);++gx.registers;
+    if(at==4*0x808)gx.sqe_started=true;
     if(gx.registers<=3)printf("REDFIN GPU REGISTER STORED: step=%u offset=%#x\n",gx.registers,at);
     if(mask) {
         uint32_t observed=gm_scalar_read(gx.gpu+at);
@@ -432,9 +437,8 @@ static int gx_core(struct gm_context *c)
     if(!gx.gpu)gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu)return ENOMEM;
     printf("REDFIN GPU CORE: first powered access status=%#x ring=%#x fault=%#x\n",
         gm_scalar_read(gx.gpu+4*0x210),gm_scalar_read(gx.gpu+4*0x806),gm_scalar_read(gx.gpu+4*0x821));
-    /* Hold the SQE before replacing its address/ring. No running inherited
-     * queue is adopted. Cold GX and the sole OOB request establish ownership. */
-    error=gx_register_write(c,4*0x808,3,2);if(error)return error;
+    /* Fresh GX collapse/reset and the sole OOB request establish cold CP
+     * ownership. Follow native initialization before the one SQE release. */
     for(unsigned i=0;i<sizeof(rf_a6_registers)/sizeof(rf_a6_registers[0]);++i) {
         const struct rf_a6_register *w=&rf_a6_registers[i];
         error=gx_register_write(c,w->at,w->value,w->mask);
@@ -443,7 +447,7 @@ static int gx_core(struct gm_context *c)
     }
     if(gm_scalar_read(gx.gpu+4*0x806) || gm_scalar_read(gx.gpu+4*0x807))return EBUSY;
     error=gx_audit(c);if(error)return error;
-    error=gx_register_write(c,4*0x808,1,2);if(error)return error;
+    error=gx_register_write(c,4*0x808,1,0);if(error)return error;
     uint32_t words[12];unsigned count=rf_a6_me_init(words);
     error=gx_ring_submit(c,words,count);if(error)return error;
     error=gx_zap_load(c);if(error)return error;
@@ -523,8 +527,8 @@ static int gx_run(struct gm_context *c)
     printf("REDFIN GPU MEMORY: owned=%llu allocations=%u tables=%u pages=%u SQE-words=%u\n",
         (unsigned long long)gx.allocated,gx.allocations,gx.tables.table_count,gx.tables.mapped_pages,
         (unsigned)(sizeof(gx.sqe)-4)/4);
-    /* Power/OOB precedes the native GPU stream binding. Local GPU IRQs
-     * stay masked and SQE is explicitly halted before publishing a route. */
+    /* Power/OOB precedes the native GPU stream binding. Local IRQs stay
+     * masked; the fresh cold CP is started only after mapping/configuration. */
     gx.stage=3;error=gx_power(c);if(error)goto done;
     printf("REDFIN GPU MMIO PREFLIGHT: cfg-held=%#x fence=%#x/%#x clocks=%#x/%#x/%#x\n",
         gx.cfg_held,gm_scalar_read(c->base[RF_GT_GMU]+0x24c40),
@@ -543,7 +547,7 @@ static int gx_run(struct gm_context *c)
     printf("REDFIN GPU MMIO FIRST READ: RBBM_STATUS=%#x\n",first_status);
     error=gx_register_write(c,4*0x38,0,UINT32_MAX);if(error)goto done;
     error=gx_register_write(c,4*0x3a,0,UINT32_MAX);if(error)goto done;
-    error=gx_register_write(c,4*0x808,3,2);if(error)goto done;
+    error=gx_register_write(c,4*0xae,0,0);if(error)goto done; /* No HWCG before CP setup. */
     gx.stage=4;struct rf_gmm_ops o=gx_mapping_ops;o.context=c;
     error=rf_a6_map_claim(&gx.mapping,&o,&gm_memory.lease,&gx.tables);if(error)goto done;
     /* Uncached host view before GPU DMA; never read its cached scratch alias

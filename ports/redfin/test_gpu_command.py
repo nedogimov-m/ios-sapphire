@@ -283,6 +283,56 @@ class GPUCommandTests(unittest.TestCase):
 
 
 class GPUAllocationTests(unittest.TestCase):
+    def test_actual_register_adapter_only_accepts_one_native_sqe_start_after_mapping(self):
+        raw = (HERE / 'gpu-command.inc').read_text()
+        body = re.search(r'^static int gx_register_write\([^\n]+\)\n\{.*?^\}', raw, re.M | re.S)[0]
+        prefix = r'''
+#include <stdint.h>
+#include <stdbool.h>
+#include <errno.h>
+struct gm_context {bool gx_granted;};
+static struct gm_context context;
+static uint32_t regs[0x40000/4];
+static struct {uintptr_t gpu;unsigned cfg_held,registers,submissions,pas_completed;
+ bool sqe_started;struct {struct {unsigned active;}state;}mapping;}gx;
+static unsigned lost,stores;
+static int gx_check(void *p){return p==&context && !lost?0:ECANCELED;}
+static void gm_memory_store(uintptr_t at,uint32_t value){stores++;*(uint32_t *)at=value;}
+static uint32_t gm_scalar_read(uintptr_t at){return *(uint32_t *)at;}
+static int host_printf(const char *f,...){(void)f;return 0;}
+#define printf host_printf
+'''
+        suffix = r'''
+int run(unsigned value,unsigned issue){
+ gx.gpu=(uintptr_t)regs;gx.cfg_held=7;gx.registers=gx.submissions=gx.pas_completed=0;
+ gx.sqe_started=false;gx.mapping.state.active=1;context.gx_granted=true;lost=stores=0;
+ if(issue==1)gx.mapping.state.active=0;if(issue==2)context.gx_granted=false;
+ if(issue==3)gx.cfg_held=0;if(issue==4)lost=1;if(issue==5)gx.pas_completed=3;
+ if(issue==6)gx.submissions=1;
+ return gx_register_write(&context,4*0x808,value,0);
+}
+int again(void){return gx_register_write(&context,4*0x808,1,0);}
+unsigned calls(void){return stores;}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, library = root / 'register.c', root / 'register.so'
+            source.write_text(prefix + body + suffix)
+            subprocess.run([shutil.which('cc') or 'cc', '-std=c11', '-O2', '-shared', '-fPIC',
+                '-Wall', '-Wextra', '-Werror', '-Wno-misleading-indentation', str(source),
+                '-o', str(library)], check=True, capture_output=True)
+            lib = ctypes.CDLL(str(library))
+            for value in (0, 2, 3, 0xFFFFFFFF):
+                self.assertEqual(lib.run(value, 0), errno.EPERM)
+                self.assertEqual(lib.calls(), 0)
+            for issue in range(1, 7):
+                self.assertEqual(lib.run(1, issue), errno.EPERM)
+                self.assertEqual(lib.calls(), 0)
+            self.assertEqual(lib.run(1, 0), 0)
+            self.assertEqual(lib.calls(), 1)
+            self.assertEqual(lib.again(), errno.EPERM)
+            self.assertEqual(lib.calls(), 1)
+
     def test_actual_adapter_requests_physical_alignment_and_retains_uncertain_allocations(self):
         raw = (HERE / 'gpu-command.inc').read_text()
         body = re.search(r'^static int gx_allocate\([^\n]+\)\n\{.*?^\}', raw, re.M | re.S)[0]

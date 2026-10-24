@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete command v8 native single SQE release built — 2026-10-24
+
+All84selected GPU/GMU/mapping/start/HFI/real-adapter checks PASS19.659s,
+including rejection of non-native SQE halt3 and duplicate/early starts before
+any MMIO. Local native build20261024-174539PASS, no CI run. Kernel
+research/redfin-gpu/kernel-command-v8 SHA256
+3de609e05f7fdc8485f0d76fbbd7ce5c0c491cf3bd5857c7063d8451c7a71ef4;
+image ports/redfin/out/gpu-command-v8/redfin-xnu.img SHA256
+7d1613283db23df75a20f6c5c76e9a9453f5a1fa233e081bd038b532bb40d872.
+Actual loader/payload/liveFDT/Image/schema5/firmware/compiled-shim return
+preflightPASS18094640bytes. Full original GPU group401/SQE/PAS/command chain
+remains selected; hardware acceptance is pending. Known GUI/Wi-Fi/HFI
+checkpoints and HFS root preserved; last capture leaves verified fastboot.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0x7d243f35bf238124`.
+
+## REDFIN CPU-CFG path and real GPU CSR read/write PASS; extra SQE halt removed — 2026-10-24
+
+First v7 attempt did not send any image: USB absent for60s. User reconnected
+in Fastboot; same verified image then booted as gpu-command-v7-retry,
+sourcedb66a4e/localbuild173307, authenticatedfee7c0747a48b9ae. New CPU CFG
+requests all ACK: SH450014/data6000095f(unit4170000,width16,VCD1),
+SN1050054/data60003fff(unit530000,width8,VCD3),CN050074/data60003fff.
+All6HFI exchanges and GX/OOB repeatPASS; cfg-held7,fenceCTRL/status0/0,
+AHBclock1,GX_GMUclock80000000,CXOclock1. Mapping full GPU MMIO succeeds;
+real RBBM_STATUS reads1. IRQ masks atGPU+e0/e8 store0 and read0 successfully.
+CPU then stops precisely at begin of SQE_CNTL(+2020) store3, before stored
+breadcrumb/readback. No map/SQE command/PAS success claimed; no PID1/panic.
+Watchdog/collector authenticate/public-prime/return verified fastboot;
+rootHFSXclean/inconsistentfalse/write_count623088 remains unchanged.
+
+Native a6xx_rb_start and preferred step20 only write SQE_CNTL1 after complete
+core/ring/SQE setup, not the added HALT3 request. Schema5 removes both early
+halt3 writes, disables HWCG via the existing native RBBM clock control before
+CP configuration and retains fresh cold-GX ownership. Adapter forbids halt3,
+duplicate starts or starts before owned mapping; sole native1 start has no
+invented echo requirement and must produce real ME_INIT completion.
+All remaining group401/SMMU/PAS/CP stages remain implemented together.
+
 ## REDFIN complete command v7 with native CPU configuration path built — 2026-10-24
 
 All83selected native/start/owned-memory/adapter/HFI/GPU checksPASS19.075s,
