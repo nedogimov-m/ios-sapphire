@@ -1,0 +1,16 @@
+diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -6911,7 +6911,11 @@
+ pmap_sync_page_attributes_phys(
+ 	ppnum_t pp)
+ {
+-	flush_dcache((vm_offset_t) (pp << PAGE_SHIFT), PAGE_SIZE, TRUE);
++	/* Preferred hackios-xnu-kernel 8e611870: ppnum_t is32 bits.
++	 * Widen before shifting; Redfin's RAM is0x180000000..0x200000000.
++	 * A cache-mode change on a GPU BO must preserve the high PA bits.
++	 * Keep the real cache operation and the physical-aperture checks. */
++	flush_dcache((vm_offset_t) pp << PAGE_SHIFT, PAGE_SIZE, TRUE);
+ }
+ 
+ #if CONFIG_COREDUMP

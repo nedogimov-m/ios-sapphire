@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN high-PA cache fix built with full system graphics retained — 2026-10-25
+
+All14selected actual-helper/high-PA/AMFI/ABI/startup/runtime casesPASS1.571s;
+the address check exercises all131072managed16KiB Redfin pages and the exact
+observed1fc598000. Local native build20261025-004048PASS/noCI, source overlay
+fingerprint verified. Frozen kernel-eagl-v2 SHA256
+abc39a0552207f7464f03b13e19a07a2c7ab57a5d9f27c52be2d5861bd5c3560.
+Actual kernel pmap_sync_page_attributes_phys now executes
+`ubfiz x0,x0,#14,#32`, preserving high bits; no32-bit w0 shift remains in
+that helper. Same installed EAGL/Mesa/diagnostic and full native GPU/WLAN/
+GUI3/capture stay selected. No root update or manual journal clearing.
+Image ports/redfin/out/gpu-gui-eagl-v3/redfin-xnu.img SHA256
+dd7a3f16ca379c31fb6992bdfdd519747118b545731a23b9867110c0f66f0856; boot2de92c185c40363c.
+Actual compiled loader/liveFDT/ADT/firmware/return preflightPASS.
+The next single combined boot must replay the native HFS journal and
+establish actual GPU shader/IOSurface and compositor results. Previous
+panic's HFS state remains unclean/not-inconsistent/write_count635023;
+collector left verified Fastboot. Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x2de92c185c40363c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN first full EAGL integration panic identified; exact preferred high-PA fix applied — 2026-10-25
+
+Sourced7e729d/053a1b6, kernel-eagl-v1/localbuild20261025-003048/noCI.
+Authenticated imagebd48381cd9514d513628a3e390ee10eb625e94041b6ef883c8d6a34ca9b2b4a0 / bootae20ff1a7ee17b05.
+All GMU/start/HFI/SQE/signedPAS13 and4fresh command nonce writes pass again;
+RedwoodGPU publishes and Apple launchd executes. The System diagnostic job
+now actually runs: panicked task is gpu-render(pid51), in its first GEM_NEW.
+Kernel stack: RedwoodGPUUserClient::create → IOBufferMemoryDescriptor →
+vm_object_change_wimg_mode → pmap_set_cache_attributes_internal →
+flush_dcache → phystokv_range. Panic is illegal PAfc598000, while the root
+RAM aperture is180000000+80000000. Actual frozen code at74b03dc executes
+`lsl w0,w20,#14`: source casts only after a32-bit ppnum_t shift.
+Preferred kernel8e611870 redwood.patch contains the exact widen-before-shift
+fix. graphics-physical.patch now adapts it; no cache flush, address check,
+GPU feature or installed system bridge is removed. Audit finds this sole
+pp/pn-before-PAGE_SHIFT expression in arm/arm64. Combined regression/build
+and the same full GUI3 graphics capture are next.
+
+No runtime submission, shader pixel result or EAGL frame was reached, so
+system rendering/Metal remain unproved. Collector authenticates, primes
+public recovery metadata and leaves verified Fastboot. Panic interrupted
+root activity: HFSX journaled, clean_unmountedfalse, inconsistentfalse,
+write_count635023. Do not reuse the previous clean snapshot/update scripts
+or mark it clean by hand; the next native HFS mount replays its journal.
+No new root update is needed; all installed EAGL/Mesa files stay selected.
+Exact failed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xae20ff1a7ee17b05 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete EAGL system files installed/readback verified; integrated capture next — 2026-10-25
 
 Source053a1b6, kernel-eagl-v1/localbuild20261025-003048/noCI retained.

@@ -1,5 +1,17 @@
 # HackiOS upstream review — 2026-10-22
 
+## First system graphics panic: preserve high physical address bits — 2026-10-25
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab,
+`xnu/redwood.patch`'s `pmap_sync_page_attributes_phys` hunk. The first
+integrated20H392 graphics run reaches GPU BO creation in gpu-render, then
+panics when a cache-mode change truncates1fc598000 tofc598000. Actual
+frozen-kernel disassembly shows `lsl w0,w20,#14` before flush_dcache;
+source casts the result of a32-bit ppnum_t shift. The preferred exact fix
+casts pp to vm_offset_t before shifting. The Redfin overlay preserves
+cache maintenance, WIMG changes and physical-aperture validation. It does
+not change GPU mappings or reduce the installed EAGL/system graphics block.
+
 ## Complete system EAGL integration for 20H392 — 2026-10-25
 
 Reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772:
