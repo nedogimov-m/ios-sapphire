@@ -64,7 +64,7 @@ def payload_info(data, *, gui_packets=False):
     required = {'cpus': '1', 'rd': 'md0', 'modem': '0', 'wifi': '0', 'gpu': '0', 'sweetusb': '0',
                 'redfinspmi': '1', 'redfinreturn': '1'}
     gui = False
-    if gui_packets and pairs.get('redfingui') == '2':
+    if gui_packets and pairs.get('redfingui') in ('2', '3'):
         from gui_profile import wifi as wifi_gui_profile
         gui = wifi_gui_profile(decoded)
     require(gui or all(pairs.get(key) == value for key, value in required.items()),
@@ -150,7 +150,7 @@ def pack(payload, firmware, digest, native_report, max_payload_bytes, *, probe_e
         command = payload[72:HEADER].split(b'\0', 1)[0].decode('ascii').split()
         from gui_profile import wifi as wifi_gui_profile
         gui = False
-        if 'redfingui=2' in command:
+        if 'redfingui=2' in command or 'redfingui=3' in command:
             gui = wifi_gui_profile(' '.join(command))
         require((gui and start and transport and auxiliary is not None and packet_dma is not None) or
                 (command.count('redfinwififw=4' if auxiliary is not None else 'redfinwififw=3' if transport else 'redfinwififw=2' if start else 'redfinwififw=1') == 1 and

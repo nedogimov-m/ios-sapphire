@@ -448,6 +448,7 @@ def main():
                 if a.gpu_smmu_memory_probe or a.gpu_gui:
                     from wifi_firmware import read_regular
                     firmware = read_regular(a.gmu_fw_file, 0x40000)
+                    gmu_firmware_bytes = len(firmware)
                     firmware_hash = bytes.fromhex(a.gmu_fw_sha256)
                     verifier = out / 'gmu-fw-check'
                     run([shutil.which('cc') or 'cc', '-std=c11', '-O2', HERE / 'gmu-fw-check.c', '-o', verifier])
@@ -815,12 +816,14 @@ def main():
         manifest['gpu_smmu_context_probe'] = True
     if a.gpu_smmu_memory_probe:
         manifest['gpu_smmu_memory_probe'] = True
+    if a.gpu_smmu_memory_probe or a.gpu_gui:
         manifest['gmu_firmware'] = {'path': str(a.gmu_fw_file.resolve()),
-            'sha256': a.gmu_fw_sha256, 'bytes': len(firmware)}
+            'sha256': a.gmu_fw_sha256, 'bytes': gmu_firmware_bytes}
     if a.gmu_firmware_start:
         manifest['gmu_firmware_start'] = True
     if a.gpu_command_start:
         manifest['gpu_command_start'] = True
+    if a.gpu_command_start or a.gpu_gui:
         manifest['gpu_firmware'] = {
             'inventory': str(a.gpu_assets_inventory.resolve()),
             'files': {name: {'bytes': len(gpu_assets[name]),

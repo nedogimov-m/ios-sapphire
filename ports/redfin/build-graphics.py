@@ -21,6 +21,12 @@ SHA256='592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6'
 PIN='906425b75e02b4f99eb5d7bb1ef7c9583472d772'
 PATCHES=('freedreno-darwin.patch','osmesa-es-profile.patch','ir3-round-default.patch',
          'ir3-ssbo-subdword.patch','ir3-shift-split.patch')
+FRAMEWORK_NAMES={
+    '/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation':
+        '/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation',
+    '/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface':
+        '/System/Library/Frameworks/IOSurface.framework/IOSurface',
+}
 
 
 def main():
@@ -103,8 +109,8 @@ def main():
                     if 'libglapi.' in dependency:
                         if not glapis:raise ValueError('OSMesa requires missing shared glapi')
                         run(['install_name_tool','-change',dependency,'/redfin/lib/libglapi.0.dylib',target])
-                    elif '.framework/Versions/A/' in dependency:
-                        run(['install_name_tool','-change',dependency,dependency.replace('/Versions/A/','/'),target])
+                    elif dependency in FRAMEWORK_NAMES:
+                        run(['install_name_tool','-change',dependency,FRAMEWORK_NAMES[dependency],target])
                 run(['codesign','--force','--sign','-',target])
             (bundle/'bin').mkdir(exist_ok=True)
             executable=bundle/'bin/gpu-render'
@@ -114,8 +120,8 @@ def main():
             dependencies=run(['otool','-L',executable],capture=True)
             for line in dependencies.splitlines()[1:]:
                 dependency=line.strip().split(' ',1)[0]
-                if '.framework/Versions/A/' in dependency:
-                    run(['install_name_tool','-change',dependency,dependency.replace('/Versions/A/','/'),executable])
+                if dependency in FRAMEWORK_NAMES:
+                    run(['install_name_tool','-change',dependency,FRAMEWORK_NAMES[dependency],executable])
             run(['codesign','--force','--sign','-',executable])
             launch=bundle/'Library/LaunchDaemons'
             launch.mkdir(parents=True,exist_ok=True)

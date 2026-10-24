@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GUI3 image/preflight and reversible iOS test files ready — 2026-10-24
+
+Sourcea9f0739, kernel-service-v1/localbuild233330 retained. Full GUI8/WLAN/GPU
+image ports/redfin/out/gpu-gui-service-v2/redfin-xnu.img SHA256
+88675d62529d38b794cd7ab67554687173dd092bdbbf3efd0238fc0811f7a4c6;
+boot48394225453568a8. Actual compiled loader/liveFDT/130437408-byte Image,
+GUI3/return/RMTFS/WLAN DMA/firmware/runtime-policy preflightPASS. V1 packing
+stopped before image creation because two host WLAN checks still selected
+GUI2 literally; both now use the complete GUI2/3 contract. The additional
+43packing/build checksPASS11.978s (one platform skip). Kernel did not change.
+
+Actual20H392 dyld-cache ABI audit checks40libraries and every nonweak import:
+none missing. Actual iOS IOKit keeps Versions/A/IOKit; its stock path is now
+preserved (the earlier untested blanket normalization is superseded).
+Final local graphics build233907PASS: Mesa SHA256
+3698e79f7bccc0abb6cc97e7cf8fd8ae13514e3dba298a995f8ffb5438b88fe0,
+program SHA256c07d81b7c5a71e111c606e6691fb6955b68ddcb85f213c55bfaf6b03667c91be.
+
+Verified temporary recovery reads the current clean/unmounted HFSX root,
+write_count623088,197MiB of special-file metadata, secondary header, empty
+journal and current launchd cache. No device filesystem write yet. Offline
+staging adds three root-owned files (program/library/job) and changes only
+the same-size launchd cache contents; every prior job is preserved. All
+three files' complete data/permissions/extents are verified. Native host
+fsck_hfs on a read-only virtual device returns0: volume appears OK.
+Private root-update-v1 write plan is16,834,560bytes/4110blocks/20runs;
+3955newly allocated blocks, zero freed blocks, all writes fenced inside the
+existing first16GiB HFS root. Device preimage backup/readback is next; no
+boot/modem/persist/EFS/backups touched. After application, one integrated boot
+will test the complete iOS path. Hardware rendering remains unproved.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x48394225453568a8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete persistent service / Mesa / iOS shader batch built — 2026-10-24
 
 Source based on9083f3a; the user explicitly requested continuing after the ETA
