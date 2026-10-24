@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN station-v9 sustained native GUI8 radio/scan PASS; manual GUI connection pending — 2026-10-24
+
+Source `190b466`, native local `build-20261024-060104.log` (no CI run).
+Authenticated station-v9 capture matches boot ID58f44527d96348f3 and the
+prepared image. The native APPS context claim, CE/HTC/WMI/HTT,255-buffer
+HTT configuration, local valid MAC, en0 and Apple80211/IOKit provider all
+succeed. Three passive scans run,25 distinct BSS rows observed across2.4/
+5GHz. All124 periodic packet reports keep HTC1/WMI1/interface1/error0;
+SMMU, owned CE/RRI, DMA guards and power remain valid throughout roughly
+125s of radio use. DMA allocation1056768 bytes, last store count611.
+No owned-field refusal, parser error, bad completion or unexpected stop.
+
+At the planned180s GUI cap the shutdown hook revokes the worker lease.
+Only then does the worker return result1 at180054ms and abandon its link;
+this is expected cancellation from the revoked policy, not startup failure.
+State remains retained until reset. SEC sensing/consumer setup and the
+whole180s event session finish error0: one IRQ batch, zero contacts/releases,
+zero malformed replies, clears or recoveries. There was no physical touch
+attempt recorded; neither touch/UI response nor its cause is inferred.
+
+Association remains idle0, Ethernet RX/TX0. No join, WPA2 exchange, DHCP
+lease, internet traffic or Settings/WiFi-manager request is observed. The
+next required evidence is physical swipe/Settings use and a user-selected
+network. An asynchronous availability question is pending; no further
+unattended reboot is needed to repeat the now-passing startup/scan checks.
+GPU/Metal stays after working GUI Wi-Fi. README now reflects this boundary.
+
+Recovery authenticates the capture, observes journaled clean HFSX with
+write_count540097, primes public metadata and leaves verified fastboot.
+No boot/recovery partition flash, persistent firmware/EFS write or backup
+change. Kernel `390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e`;
+image `4aa7fdee1758666f9eaaf81544f3307622140f43978214ad0c37460eac2f99d7`, Image130216944 bytes.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x58f44527d96348f3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Full1285 host tests passed before the final active-pipe refinement (3
+optional private skipped); all26 focused real-engine/lease/touch tests and
+the native build passed for this exact final profile. Actual complete
+Image/live-FDT/GUI8-return/DMA32/shim-initialization preflight also passed.
+Latest reviewable image: ports/redfin/out/wifi-gui8-station-v9/redfin-xnu.img.
+All logs, keys, binaries and captured Apple/modem assets remain ignored.
+
 ## REDFIN station-v8b SEC session error0; complete active-pipe profile prepared — 2026-10-24
 
 Source `cd624da`, local native build055039, authenticated station-v8b

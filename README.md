@@ -34,9 +34,16 @@ USB is validated in bounded md0 tests; integration with UFS/GUI remains
 unverified. Native MPSS/PAS4, GLINK/QRTR/RMTFS and WLAN firmware readiness
 are now observed in a bounded md0 run: a separate DMON client transfers
 the captured Redfin BDF, gets all acknowledgements and completes CAL_REPORT;
-the kernel receives a real FW_READY indication. Wi-Fi association, packets
-and GUI network integration remain unfinished. Display performance and GPU acceleration are still
-in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
+the kernel receives a real FW_READY indication. The latest combined GUI8
+run also validates the owned WLAN context, bidirectional CE/HTC/WMI/HTT
+control traffic, en0/Apple80211 publication and three passive scans with
+25 observed access points. Radio ownership/DMA checks stay healthy for
+about125 seconds until the planned GUI shutdown. The latest SEC event
+session finishes without errors after correcting blocking SPI waits, but
+physical touch must be rechecked following the user's earlier unresponsive
+touch report. Wi-Fi association, Ethernet data/DHCP and actual Settings
+integration remain unverified. Display performance and GPU acceleration
+are still in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
