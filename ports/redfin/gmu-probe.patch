@@ -2,7 +2,7 @@ diff --git a/bsd/dev/redfin_gmu_probe.c b/bsd/dev/redfin_gmu_probe.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_probe.c
-@@ -0,0 +1,544 @@
+@@ -0,0 +1,561 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Exact md0/UP adapter for the separately proved, held-CX GMU TCM leaf. */
 +#include <pexpert/arm64/board_config.h>
@@ -31,7 +31,7 @@ new file mode 100644
 +extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
 +static bool gm_attempted;
 +
-+struct gm_binding { const void *live, *expected; unsigned bytes; };
++struct gm_binding { const void *live, *expected; unsigned bytes; bool payload; };
 +struct gm_context {
 +    vm_offset_t base[3], gic, smmu, cb;
 +    const char *parent_args;
@@ -92,6 +92,9 @@ new file mode 100644
 +        binding->live = raw;
 +        binding->expected = expected;
 +        binding->bytes = bytes;
++        binding->payload = (!strcmp(path, "/redfin-gmu") && !strcmp(key, "firmware")) ||
++            (!strcmp(path, "/redfin-gpu-command") &&
++             (!strcmp(key, "sqe") || !strcmp(key, "zap-mdt") || !strcmp(key, "zap-segment")));
 +    }
 +    return true;
 +}
@@ -164,7 +167,7 @@ new file mode 100644
 +        return false;
 +    for (unsigned i = 0; i < context->binding_count; i++) {
 +        const struct gm_binding *binding = &context->bindings[i];
-+        if (memcmp(binding->live, binding->expected, binding->bytes))
++        if (!binding->payload && memcmp(binding->live, binding->expected, binding->bytes))
 +            return false;
 +    }
 +    if (context->base[RF_GT_GCC] &&
@@ -183,6 +186,20 @@ new file mode 100644
 +            ((gm_read32(context->gic + 0x158) | gm_read32(context->gic + 0x258) |
 +                gm_read32(context->gic + 0x358)) & 0x3fc2u))
 +            return false;
++    }
++    return true;
++}
++
++/* Firmware is an immutable private CPU source, absent from device DMA maps.
++ * Check it at complete ownership audits, payload chunks and publication,
++ * without re-comparing80KiB inside every nested clock/GIC MMIO access.
++ * Arguments, policies/ranges, hashes, CPU/parent/GIC/CX remain per-access. */
++static bool gm_payloads_valid(struct gm_context *context)
++{
++    if (!gm_valid(context)) return false;
++    for (unsigned i = 0; i < context->binding_count; ++i) {
++        const struct gm_binding *b = &context->bindings[i];
++        if (b->payload && memcmp(b->live, b->expected, b->bytes)) return false;
 +    }
 +    return true;
 +}
@@ -301,7 +318,7 @@ new file mode 100644
 +    if (!context)
 +        return false;
 +    context->smmu_guard = 1;
-+    if (!context->smmu_requested || !context->smmu_ready || !gm_valid(context))
++    if (!context->smmu_requested || !context->smmu_ready || !gm_payloads_valid(context))
 +        return false;
 +    const struct rf_gt_ops ops = {.context = context, .valid = gm_valid, .read = gm_read};
 +    context->smmu_guard = 2;
@@ -708,7 +725,7 @@ diff --git a/bsd/dev/redfin_gmu_tcm.h b/bsd/dev/redfin_gmu_tcm.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_tcm.h
-@@ -0,0 +1,409 @@
+@@ -0,0 +1,421 @@
 +/* SPDX-License-Identifier: MIT */
 +/*
 + * Lito-only, reset-held GMU clock/counter/TCM experiment. References: GMU.md.
@@ -1064,17 +1081,29 @@ new file mode 100644
 +    r.reset_held = true;
 +
 +    r.stage = RF_GT_COUNTER;
-+    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_before, true, true));
++    /* Keep the complete clock/reset proof outside the timing interval.
++     * The two samples still use the bound per-access owner guard. Including
++     * another sixteen-register source audit between the samples measures
++     * HYP/ADT verification latency instead of the intended counter delay;
++     * the full firmware-bound command profile exceeds that old10ms window.
++     * Re-prove the unchanged source/reset immediately after both samples. */
++    RF_GT_TRY(rf_gt_source_live(ops, &r, true));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GMU, 0x14000, &reset));
++    if (reset != 1) { error = EAGAIN; goto done; }
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GMU, 0x14220, &r.counter_before));
 +    time_before = ops->time_ns(ops->context);
 +    RF_GT_TRY(rf_gt_delay(ops, 1000));
-+    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_after, true, true));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GMU, 0x14220, &r.counter_after));
 +    time_after = ops->time_ns(ops->context);
 +    r.counter_delta = r.counter_after - r.counter_before;
++    r.counter_elapsed_ns = time_after > time_before ? time_after - time_before : 0;
++    RF_GT_TRY(rf_gt_source_live(ops, &r, true));
++    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GMU, 0x14000, &reset));
++    if (reset != 1) { error = EAGAIN; goto done; }
 +    if (time_after <= time_before || time_after - time_before < 1000000 ||
 +        time_after - time_before > 10000000) {
 +        error = ETIMEDOUT; goto done;
 +    }
-+    r.counter_elapsed_ns = time_after - time_before;
 +    expected_ticks = r.counter_elapsed_ns * 192u / 10000u;
 +    if ((uint64_t)r.counter_delta * 5 < expected_ticks * 4 ||
 +        (uint64_t)r.counter_delta * 5 > expected_ticks * 6) {
@@ -2721,7 +2750,7 @@ diff --git a/bsd/dev/redfin_gmu_start.inc b/bsd/dev/redfin_gmu_start.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_start.inc
-@@ -0,0 +1,369 @@
+@@ -0,0 +1,372 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Explicit mode4/5 only. Reset-held preparation and ownership must pass first.
 + * Local interrupts stay masked; response queues are polled. Mode5's separate
@@ -2858,6 +2887,7 @@ new file mode 100644
 +    struct gm_context *c=argument;
 +    int error=gm_start_guard(c,phase);
 +    if(error)return error;
++    if(!gm_payloads_valid(c))return EAGAIN;
 +    struct rf_gt_report clock={0};
 +    const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
 +    error=rf_gt_source_live_power(&source,&clock,true,
@@ -2938,6 +2968,7 @@ new file mode 100644
 +    if(!command || !reply || !reply_count || !count || count>255 ||
 +        gm_start.sent>=64 || id>255)return EINVAL;
 +    int error=gm_start_hfi_shape(argument);if(error)return error;
++    if(!gm_payloads_valid(argument))return EAGAIN;
 +    uint32_t read=gm_start_hfi_word(64),write=gm_start_hfi_word(68);
 +    if(read!=write)return EBUSY;
 +    *reply_count=0;
@@ -2961,6 +2992,7 @@ new file mode 100644
 +        gm_start_hfi_store(0xe0+4*((write+i)%1024),i<count?command[i]:0xfafafafa);
 +    }
 +    error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
++    if(!gm_payloads_valid(argument))return EAGAIN;
 +    gm_start_hfi_store(68,end);
 +    ++gm_start.sent;
 +    error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
@@ -3885,7 +3917,7 @@ diff --git a/bsd/dev/redfin_gpu_command.inc b/bsd/dev/redfin_gpu_command.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_command.inc
-@@ -0,0 +1,513 @@
+@@ -0,0 +1,515 @@
 +/* SPDX-License-Identifier: MIT */
 +/* One complete mode5 run. Every allocation, vote and partially started engine
 + * is held until the already armed platform reset; no unsafe rollback/retry. */
@@ -3991,10 +4023,12 @@ new file mode 100644
 +}
 +static int gx_sample(void *argument,struct rf_gs_snapshot *global,struct rf_gc_snapshot *banks)
 +{
++    if(!gm_payloads_valid(argument))return EAGAIN;
 +    const struct rf_gs_ops go={argument,gx_valid,gx_global};
 +    const struct rf_gc_ops bo={argument,gx_valid,gx_bank};
 +    int error=rf_gs_snapshot_run(&go,gm_chip,global);
-+    return error?error:rf_gc_snapshot_run(&bo,global,banks);
++    if(!error)error=rf_gc_snapshot_run(&bo,global,banks);
++    return error?error:gm_payloads_valid(argument)?0:EAGAIN;
 +}
 +static int gx_map_read(void *argument,unsigned block,uint32_t at,uint32_t *value)
 +{
@@ -4200,7 +4234,7 @@ new file mode 100644
 +
 +static bool gx_scm_valid(void *argument)
 +{
-+    return !gx_check(argument) && gx.proxy_held==63 && gx.secure.host &&
++    return !gx_check(argument) && gm_payloads_valid(argument) && gx.proxy_held==63 && gx.secure.host &&
 +        gx.secure.owned_bytes==RF_A6_ZAP_ALLOC && gx.pas_phase>=1 && gx.pas_phase<=3;
 +}
 +static void gx_scm_delay(void *argument,unsigned us)

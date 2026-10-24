@@ -22,6 +22,7 @@ static uint64_t now;
 static int gm_start_guard(void *p,unsigned phase){
  if(p!=&gm_start || phase!=RF_GB_HFI_LIVE)bad++;return problem==8?ECANCELED:0;
 }
+static bool gm_payloads_valid(void *p){return p==&gm_start;}
 static uint32_t gm_scalar_read(vm_offset_t at){return *(uint32_t *)at;}
 static void respond(void){
  uint32_t read=memory[64/4],write=memory[68/4];

@@ -353,17 +353,29 @@ rf_gt_run(const struct rf_gt_ops *ops, uint32_t chip, struct rf_gt_report *outpu
     r.reset_held = true;
 
     r.stage = RF_GT_COUNTER;
-    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_before, true, true));
+    /* Keep the complete clock/reset proof outside the timing interval.
+     * The two samples still use the bound per-access owner guard. Including
+     * another sixteen-register source audit between the samples measures
+     * HYP/ADT verification latency instead of the intended counter delay;
+     * the full firmware-bound command profile exceeds that old10ms window.
+     * Re-prove the unchanged source/reset immediately after both samples. */
+    RF_GT_TRY(rf_gt_source_live(ops, &r, true));
+    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GMU, 0x14000, &reset));
+    if (reset != 1) { error = EAGAIN; goto done; }
+    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GMU, 0x14220, &r.counter_before));
     time_before = ops->time_ns(ops->context);
     RF_GT_TRY(rf_gt_delay(ops, 1000));
-    RF_GT_TRY(rf_gt_gmu_rd(ops, &r, 0x14220, &r.counter_after, true, true));
+    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GMU, 0x14220, &r.counter_after));
     time_after = ops->time_ns(ops->context);
     r.counter_delta = r.counter_after - r.counter_before;
+    r.counter_elapsed_ns = time_after > time_before ? time_after - time_before : 0;
+    RF_GT_TRY(rf_gt_source_live(ops, &r, true));
+    RF_GT_TRY(rf_gt_rd(ops, &r, RF_GT_GMU, 0x14000, &reset));
+    if (reset != 1) { error = EAGAIN; goto done; }
     if (time_after <= time_before || time_after - time_before < 1000000 ||
         time_after - time_before > 10000000) {
         error = ETIMEDOUT; goto done;
     }
-    r.counter_elapsed_ns = time_after - time_before;
     expected_ticks = r.counter_elapsed_ns * 192u / 10000u;
     if ((uint64_t)r.counter_delta * 5 < expected_ticks * 4 ||
         (uint64_t)r.counter_delta * 5 > expected_ticks * 6) {

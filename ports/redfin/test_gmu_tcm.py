@@ -269,11 +269,12 @@ class RedfinGMUTCMTests(unittest.TestCase):
         self.assertEqual(metrics[4], 0)
         self.assertEqual(final[3:5], (0x40000000, 0x8000))
 
-    def test_counter_uses_elapsed_time_including_per_access_guard_cost(self):
+    def test_counter_counts_sample_guard_time_with_full_source_audits_outside_interval(self):
         result, r, _, _ = self.run_leaf(29)
         self.assertEqual(result, 0)
         self.assertGreater(r.counter_elapsed_ns, 1000000)
-        self.assertGreater(r.counter_delta, 23040)
+        self.assertGreater(r.counter_delta, 19200)
+        self.assertLess(r.counter_delta, 23040)
         expected = r.counter_elapsed_ns * 192 // 10000
         self.assertLessEqual(abs(r.counter_delta-expected), 1)
 

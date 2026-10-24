@@ -1,5 +1,53 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full command v2 with bounded counter/source audits built — 2026-10-24
+
+Followsf6700f1; existing-counter fix and immutable-source audit batching
+preserve the entire new GPU chain.85of86targeted checks passed initially;
+the remaining assertion required the removed audit overhead to be present
+inside the counter window. Its corrected guard-time assertion and all15TCM
+cases pass. GPU/PAS/HFI/adapter/native opcode checks remain passed.
+Local native build20261024-163732PASS, no CI run; kernel
+research/redfin-gpu/kernel-command-v2 SHA256
+dc827275aaaba0a4a2c2a23a703daab88a04fa7feb17a2f8d4e0c273013cc9e0.
+Image ports/redfin/out/gpu-command-v2/redfin-xnu.img SHA256
+47fffa8fad41b49866bd7a81afaf6bf1b34c5ee9ddbd5619a3b6d24e71887112.
+Actual payload/liveFDT/Image/GPU+GMU bound firmware/compiled-shim return
+preflightPASS, decompressed18094592bytes. Next full integrated hardware
+capture, still no command-execution or Metal claim. Device is verified
+fastboot; working root/Wi-Fi/checkpoints preserved, no persistent change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0x37403ba9cb079718`.
+
+## REDFIN complete-command v1 capture stops at inherited counter measurement — 2026-10-24
+
+Sourcef6700f1/build162801, image/kernel/args recorded below. Authenticated
+capture logs/redfin/gpu-command-v1 matches65ba28d38becbc81. CX/source/reset
+initialization passes, but old RF_GT_COUNTER failsETIMEDOUT60/stage6 before
+TCM, memory mapping, GMU firmware or any new GPU operation. Counter advances
+245c38→27e949(delta232721, about12.12ms at19.2MHz); elapsed field0 because
+the old code records it only after its10ms maximum test. The full source
+audit between samples now contains all additional bound GPU firmware
+comparisons/MMIO guards. This is host measurement overhead, not evidence of
+a stopped counter or a GPU command failure. New full source/reset proofs
+bracket the measurement, outside the short interval. Each counter sample
+still uses the complete bound per-access owner guard; unchanged source/reset
+is re-proved afterwards. Keep original1..10ms and20%frequency checks and
+record elapsed even on failure. No new power permission or clock write.
+
+The same full-package review removes recursive80KiB source comparisons
+from every nested MMIO guard: immutable private firmware payloads are checked
+at full SMMU/source audits, each256-byte TCM chunk and HFI/PAS publication.
+All policy/range/digest/args/CPU/parent/GIC/CX checks stay per-access; GPU/GMU
+cannot DMA to those immutable source copies. This avoids doubling the
+already30.7s preparation and exceeding the bounded watchdog window. Complete
+foreign-state audits remain unchanged. Validate together before next boot.
+
+StaticPID1 gives11heartbeats; collector authenticates/public-primes/returns
+verified fastboot. HFSXclean/inconsistentfalse/write_count623088 unchanged.
+The complete new GPU chain remains implemented together; next repeated
+integrated image after the corrected counter measurement/build check.
+No flash/root/modem/persist/EFS/backup change.
+
 ## REDFIN full GPU command v1 built; integrated hardware run ready — 2026-10-24
 
 Complete implementation above/below now validated as one batch.102selected

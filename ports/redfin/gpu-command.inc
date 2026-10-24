@@ -103,10 +103,12 @@ static int gx_bank(void *argument,unsigned bank,uint32_t at,uint32_t *value)
 }
 static int gx_sample(void *argument,struct rf_gs_snapshot *global,struct rf_gc_snapshot *banks)
 {
+    if(!gm_payloads_valid(argument))return EAGAIN;
     const struct rf_gs_ops go={argument,gx_valid,gx_global};
     const struct rf_gc_ops bo={argument,gx_valid,gx_bank};
     int error=rf_gs_snapshot_run(&go,gm_chip,global);
-    return error?error:rf_gc_snapshot_run(&bo,global,banks);
+    if(!error)error=rf_gc_snapshot_run(&bo,global,banks);
+    return error?error:gm_payloads_valid(argument)?0:EAGAIN;
 }
 static int gx_map_read(void *argument,unsigned block,uint32_t at,uint32_t *value)
 {
@@ -312,7 +314,7 @@ static int gx_power(struct gm_context *c)
 
 static bool gx_scm_valid(void *argument)
 {
-    return !gx_check(argument) && gx.proxy_held==63 && gx.secure.host &&
+    return !gx_check(argument) && gm_payloads_valid(argument) && gx.proxy_held==63 && gx.secure.host &&
         gx.secure.owned_bytes==RF_A6_ZAP_ALLOC && gx.pas_phase>=1 && gx.pas_phase<=3;
 }
 static void gx_scm_delay(void *argument,unsigned us)

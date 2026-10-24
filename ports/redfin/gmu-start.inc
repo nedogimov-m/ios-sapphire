@@ -134,6 +134,7 @@ static int gm_start_audit(void *argument,unsigned phase)
     struct gm_context *c=argument;
     int error=gm_start_guard(c,phase);
     if(error)return error;
+    if(!gm_payloads_valid(c))return EAGAIN;
     struct rf_gt_report clock={0};
     const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
     error=rf_gt_source_live_power(&source,&clock,true,
@@ -214,6 +215,7 @@ static int gm_start_command(void *argument,unsigned id,uint32_t *command,unsigne
     if(!command || !reply || !reply_count || !count || count>255 ||
         gm_start.sent>=64 || id>255)return EINVAL;
     int error=gm_start_hfi_shape(argument);if(error)return error;
+    if(!gm_payloads_valid(argument))return EAGAIN;
     uint32_t read=gm_start_hfi_word(64),write=gm_start_hfi_word(68);
     if(read!=write)return EBUSY;
     *reply_count=0;
@@ -237,6 +239,7 @@ static int gm_start_command(void *argument,unsigned id,uint32_t *command,unsigne
         gm_start_hfi_store(0xe0+4*((write+i)%1024),i<count?command[i]:0xfafafafa);
     }
     error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
+    if(!gm_payloads_valid(argument))return EAGAIN;
     gm_start_hfi_store(68,end);
     ++gm_start.sent;
     error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;

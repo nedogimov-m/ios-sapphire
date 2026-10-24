@@ -26,7 +26,7 @@ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
 static bool gm_attempted;
 
-struct gm_binding { const void *live, *expected; unsigned bytes; };
+struct gm_binding { const void *live, *expected; unsigned bytes; bool payload; };
 struct gm_context {
     vm_offset_t base[3], gic, smmu, cb;
     const char *parent_args;
@@ -87,6 +87,9 @@ gm_property(struct gm_context *context, const char *path, const char *key,
         binding->live = raw;
         binding->expected = expected;
         binding->bytes = bytes;
+        binding->payload = (!strcmp(path, "/redfin-gmu") && !strcmp(key, "firmware")) ||
+            (!strcmp(path, "/redfin-gpu-command") &&
+             (!strcmp(key, "sqe") || !strcmp(key, "zap-mdt") || !strcmp(key, "zap-segment")));
     }
     return true;
 }
@@ -159,7 +162,7 @@ gm_valid(void *argument)
         return false;
     for (unsigned i = 0; i < context->binding_count; i++) {
         const struct gm_binding *binding = &context->bindings[i];
-        if (memcmp(binding->live, binding->expected, binding->bytes))
+        if (!binding->payload && memcmp(binding->live, binding->expected, binding->bytes))
             return false;
     }
     if (context->base[RF_GT_GCC] &&
@@ -178,6 +181,20 @@ gm_valid(void *argument)
             ((gm_read32(context->gic + 0x158) | gm_read32(context->gic + 0x258) |
                 gm_read32(context->gic + 0x358)) & 0x3fc2u))
             return false;
+    }
+    return true;
+}
+
+/* Firmware is an immutable private CPU source, absent from device DMA maps.
+ * Check it at complete ownership audits, payload chunks and publication,
+ * without re-comparing80KiB inside every nested clock/GIC MMIO access.
+ * Arguments, policies/ranges, hashes, CPU/parent/GIC/CX remain per-access. */
+static bool gm_payloads_valid(struct gm_context *context)
+{
+    if (!gm_valid(context)) return false;
+    for (unsigned i = 0; i < context->binding_count; ++i) {
+        const struct gm_binding *b = &context->bindings[i];
+        if (b->payload && memcmp(b->live, b->expected, b->bytes)) return false;
     }
     return true;
 }
@@ -296,7 +313,7 @@ gm_smmu_valid(void *argument)
     if (!context)
         return false;
     context->smmu_guard = 1;
-    if (!context->smmu_requested || !context->smmu_ready || !gm_valid(context))
+    if (!context->smmu_requested || !context->smmu_ready || !gm_payloads_valid(context))
         return false;
     const struct rf_gt_ops ops = {.context = context, .valid = gm_valid, .read = gm_read};
     context->smmu_guard = 2;
