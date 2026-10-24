@@ -13,11 +13,11 @@ static struct {
     struct rf_a6_mapping mapping;
     struct rf_a6_perf performance;
     struct rf_a6_bw bandwidth;
-    struct rf_a6_bcm bcm[7]; /* SH0,MC0,ACV,CN0,CE0,SN6,SN0. */
+    struct rf_a6_bcm bcm[9]; /* SH0,MC0,ACV,CN0,CE0,SN6,SN0,SH4,SN10. */
     struct rf_cmddb_resource gfx;
     vm_offset_t gpu,rsc,scratch;
     struct rf_gp_slot inherited[8];
-    uint32_t rsc_id,rsc_config,rsc_irq,commands,proxy[6],proxy_held;
+    uint32_t rsc_id,rsc_config,rsc_irq,commands,proxy[9],proxy_held,cfg_held;
     uint32_t rptr,wptr,status,fault,interrupt,protect,values[4],wanted[4];
     uint64_t started,allocated;
     unsigned allocations,stage,registers,submissions,pas_phase,pas_completed;
@@ -213,8 +213,8 @@ static int gx_rsc_store(struct gm_context *c,uint32_t at,uint32_t value,bool rea
 }
 static int gx_proxy_vote(struct gm_context *c,unsigned index)
 {
-    const unsigned ids[]={4,5,6,0,1,2};
-    if(index>=6)return EINVAL;
+    const unsigned ids[]={4,5,6,0,1,2,7,8,3};
+    if(index>=9)return EINVAL;
     int error=gx_rsc_snapshot(c,false,false);if(error)return error;
     uint32_t data=gx.proxy[index],address=gx.bcm[ids[index]].address;
     const uint32_t at[]={0xd30,0xd34,0xd38,0xd10,0xd1c,0xd14,0xd14};
@@ -233,7 +233,7 @@ static int gx_proxy_vote(struct gm_context *c,unsigned index)
         delay(100);
     }
     if(!complete)return ETIMEDOUT;
-    gx.proxy_held|=1u<<index;
+    if(index<6)gx.proxy_held|=1u<<index;else gx.cfg_held|=1u<<(index-6);
     const uint32_t off[]={0xd14,0xd14,0xd1c,0xd10,0xd08},val[]={0x10000,0,0,0,1};
     for(unsigned i=0;i<5;++i) {
         error=gx_rsc_snapshot(c,false,true);if(error)return error;
@@ -244,17 +244,17 @@ static int gx_proxy_vote(struct gm_context *c,unsigned index)
 }
 static int gx_resources(struct gm_context *c)
 {
-    static const uint8_t names[7][8]={"SH0","MC0","ACV","CN0","CE0","SN6","SN0"};
+    static const uint8_t names[9][8]={"SH0","MC0","ACV","CN0","CE0","SN6","SN0","SH4","SN10"};
     const volatile uint8_t *db=(const volatile uint8_t *)gm_start.db;
     const uint8_t gfx[8]="gfx.lvl";
     if(gx_check(c) || rf_cmddb_lookup(db,RF_CMDDB_BYTES,gfx,RF_CMDDB_ARC,&gx.gfx)!=RF_CMDDB_OK)return ENXIO;
-    for(unsigned i=0;i<7;++i) {
+    for(unsigned i=0;i<9;++i) {
         int error=rf_a6_bcm_lookup(db,names[i],&gx.bcm[i]);if(error)return error;
         printf("REDFIN GPU BCM: name=%.8s address=%#x unit=%u width=%u VCD=%u\n",
             names[i],gx.bcm[i].address,gx.bcm[i].unit,gx.bcm[i].width,gx.bcm[i].vcd);
     }
     int error=rf_a6_perf_make(&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&gx.performance);
-    if(!error)error=rf_a6_bw_make(gx.bcm,&gx.bandwidth);if(error)return error;
+    if(!error)error=rf_a6_bw_make(gx.bcm,&gx.bcm[8],&gx.bandwidth);if(error)return error;
     gx.rsc=ml_io_map(0x18220000,0x10000);if(!gx.rsc)return ENOMEM;
     gx.rsc_id=gm_scalar_read(gx.rsc);gx.rsc_config=gm_scalar_read(gx.rsc+0xc);
     gx.rsc_irq=gm_scalar_read(gx.rsc+0xd00);gx.commands=(gx.rsc_config>>27)&31u;
@@ -262,11 +262,13 @@ static int gx_resources(struct gm_context *c)
     if((major!=1 && major!=2) || gx.rsc_config==UINT32_MAX || !gx.commands || gx.commands>16 ||
         ((gx.rsc_config>>12)&63u)<8 || !(gx.rsc_irq&1u) || gx.rsc_irq==UINT32_MAX)return ENOTSUP;
     error=gx_rsc_snapshot(c,true,false);if(error)return error;
-    const unsigned ids[]={4,5,6,0,1,2},width[]={8,16,16,16,4,4},ports[]={1,1,1,2,2,2};
-    for(unsigned i=0;i<6;++i) {
+    const unsigned ids[]={4,5,6,0,1,2,7,8,3},width[]={8,16,16,16,4,4,16,8,8},ports[]={1,1,1,2,2,2,1,1,1};
+    for(unsigned i=0;i<9;++i) {
         /* Native SCM crypto client125 -> EBI512, AB393.6MB/s IB3936MB/s.
          * No modem bandwidth or modem power is requested by this owner. */
-        error=rf_a6_bcm_data(&gx.bcm[ids[i]],width[i],ports[i],393600000,3936000000,
+        uint64_t ab=i<6?UINT64_C(393600000):0;
+        uint64_t ib=i<6?UINT64_C(3936000000):(uint64_t)RF_A6_CFG_KBPS*1000;
+        error=rf_a6_bcm_data(&gx.bcm[ids[i]],width[i],ports[i],ab,ib,
             i==5,&gx.proxy[i]);if(error)return error;
         gx.proxy[i]|=0x40000000;
         for(unsigned t=1;t<8;++t)for(unsigned j=0;j<gx.commands;++j) {
@@ -291,7 +293,11 @@ static int gx_hfi(struct gm_context *c,unsigned id,uint32_t *words,unsigned coun
 }
 static int gx_power(struct gm_context *c)
 {
-    int error=gx_hfi(c,4,(uint32_t *)&gx.performance,sizeof(gx.performance)/4);if(error)return error;
+    /* Native adreno_start raises APPS1 -> GPU_CFG598 to its HIGH case before
+     * waking GX. This is separate from the GPU's outgoing CNOC/DDR votes. */
+    int error;
+    for(unsigned i=6;i<9;++i){error=gx_proxy_vote(c,i);if(error)return error;}
+    error=gx_hfi(c,4,(uint32_t *)&gx.performance,sizeof(gx.performance)/4);if(error)return error;
     error=gx_hfi(c,3,(uint32_t *)&gx.bandwidth,sizeof(gx.bandwidth)/4);if(error)return error;
     uint32_t core[]={0,0},vote[]={0,1,1,5},start[]={0};
     error=gx_audit(c);if(error)return error;
@@ -384,9 +390,16 @@ static int gx_zap_load(struct gm_context *c)
 
 static int gx_register_write(struct gm_context *c,uint32_t at,uint32_t value,uint32_t mask)
 {
-    if(gx_check(c) || !c->gx_granted || !gx.gpu || at&3u || at>=0x40000)return EPERM;
+    if(gx_check(c) || !c->gx_granted || gx.cfg_held!=7 || !gx.gpu || at&3u || at>=0x40000)return EPERM;
+    printf("REDFIN GPU REGISTER BEGIN: step=%u offset=%#x value=%#x\n",gx.registers+1,at,value);
     gm_memory_store(gx.gpu+at,value);++gx.registers;
-    if(mask && ((gm_scalar_read(gx.gpu+at)^value)&mask))return EIO;
+    if(gx.registers<=3)printf("REDFIN GPU REGISTER STORED: step=%u offset=%#x\n",gx.registers,at);
+    if(mask) {
+        uint32_t observed=gm_scalar_read(gx.gpu+at);
+        printf("REDFIN GPU REGISTER READBACK: step=%u offset=%#x observed=%#x mask=%#x\n",
+            gx.registers,at,observed,mask);
+        if((observed^value)&mask)return EIO;
+    }
     return 0;
 }
 static int gx_ring_submit(struct gm_context *c,const uint32_t *words,unsigned count)
@@ -513,7 +526,21 @@ static int gx_run(struct gm_context *c)
     /* Power/OOB precedes the native GPU stream binding. Local GPU IRQs
      * stay masked and SQE is explicitly halted before publishing a route. */
     gx.stage=3;error=gx_power(c);if(error)goto done;
+    printf("REDFIN GPU MMIO PREFLIGHT: cfg-held=%#x fence=%#x/%#x clocks=%#x/%#x/%#x\n",
+        gx.cfg_held,gm_scalar_read(c->base[RF_GT_GMU]+0x24c40),
+        gm_scalar_read(c->base[RF_GT_GMU]+0x24c4c),gm_scalar_read(c->base[RF_GT_GPUCC]+0x1078),
+        gm_scalar_read(c->base[RF_GT_GPUCC]+0x1064),gm_scalar_read(c->base[RF_GT_GPUCC]+0x109c));
+    /* Native ALLOW mode is safe only after the owned GX/OOB proof. Do not
+     * discard a fence error: a nonzero status stops before core access. */
+    if(gx_check(c)){error=ECANCELED;goto done;}
+    gm_memory_store(c->base[RF_GT_GMU]+0x24c40,0);
+    if(gm_scalar_read(c->base[RF_GT_GMU]+0x24c40) || gm_scalar_read(c->base[RF_GT_GMU]+0x24c4c))
+        {error=EIO;goto done;}
+    printf("REDFIN GPU MMIO MAP: begin\n");
     gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu){error=ENOMEM;goto done;}
+    printf("REDFIN GPU MMIO MAP: ready; first RBBM_STATUS read begins\n");
+    uint32_t first_status=gm_scalar_read(gx.gpu+4*0x210);
+    printf("REDFIN GPU MMIO FIRST READ: RBBM_STATUS=%#x\n",first_status);
     error=gx_register_write(c,4*0x38,0,UINT32_MAX);if(error)goto done;
     error=gx_register_write(c,4*0x3a,0,UINT32_MAX);if(error)goto done;
     error=gx_register_write(c,4*0x808,3,2);if(error)goto done;

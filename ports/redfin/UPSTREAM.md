@@ -28,6 +28,15 @@ and mask local GPU interrupts, then bind the GPU group before CP start.
 Standalone GMU modes keep their proven first-free choice. Runtime audits
 use the unchanged GMU lease before GPU mapping, then the joint exact lease.
 
+The v6 capture obtains all performance/BW/core/start ACKs and fresh GX/OOB,
+then stalls before any logged GPU route or command. Re-review of native
+`adreno.c:_adreno_start()` reveals a separate CPU→GPU_CFG HIGH request before
+wakeup. The captured Redfin FDT binds APPS1→598 through SH4/SN10/CN0;
+the initial adaptation only supplied GPU-initiated traffic votes. Schema4
+adds the exact native CPU configuration client and both SN10/CN0 in the GMU
+CNOC table. After GX/OOB, native fence ALLOW and exact access breadcrumbs
+precede the first GPU CSR access. The v6 cause is not proven until validated.
+
 Reviewed again for the first CB0 run: preferred `space_on()` verifies S2CR
 type/context with mask300ff and preserves HYP control of other fields.
 The GPU mapping now follows that readback mask and keeps the full observed

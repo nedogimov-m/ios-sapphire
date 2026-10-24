@@ -11,8 +11,8 @@ import struct
 from ports.redfin import gmu_probe, mkadt
 from ports.redfin.wifi_firmware import read_regular
 
-POLICY = (3, 0x06020001, 275000000, 64, 5, 14, 32, 3, 0, 0x401, 0xFFFFFFFF, 0,
-          13, 0x100000, 0x1000, 0x1000000, 0x8000, 0x1100000, 0x1200000, 500, 0, 1)
+POLICY = (4, 0x06020001, 275000000, 64, 5, 14, 32, 3, 0, 0x401, 0xFFFFFFFF, 0,
+          13, 0x100000, 0x1000, 0x1000000, 0x8000, 0x1100000, 0x1200000, 500, 0, 1, 9999999)
 RANGES = (0x3D00000, 0x40000, 0x18220000, 0x10000)
 DDR_KBPS = (0, 400000, 800000, 1200000, 1804800, 2188000, 2724000, 3072000,
             4068000, 5412000, 6220000, 7216000, 8371200)
@@ -105,6 +105,12 @@ def add_contract(tree, nodes, assets):
         need(gpu, key, cells(value))
     need(gpu, 'qcom,msm-bus,vectors-KBps', b''.join(cells(26, 512, 0, n) for n in DDR_KBPS))
     need(gmu, 'qcom,msm-bus,vectors-KBps', cells(26, 10036, 0, 0, 26, 10036, 0, 100))
+    cfg = gpu + '/qcom,cpu-to-gpu-cfg-path'
+    need(cfg, 'qcom,msm-bus,name', b'gpu_cfg\0')
+    need(cfg, 'qcom,msm-bus,num-cases', cells(3))
+    need(cfg, 'qcom,msm-bus,num-paths', cells(1))
+    need(cfg, 'qcom,msm-bus,vectors-KBps', cells(1, 598, 0, 0, 1, 598, 0, 100,
+                                               1, 598, 0, 9999999))
     opp = resolve(nodes[gpu].get('operating-points-v2'))
     need(opp + '/opp-275000000', 'opp-hz', struct.pack('>Q', 275000000))
     need(opp + '/opp-275000000', 'opp-microvolt', cells(64))
@@ -157,6 +163,25 @@ def add_contract(tree, nodes, assets):
     for name, width, ports in (('mas-qnm-gpu', 32, 2), ('slv-qns-cnoc', 8, 1)):
         need(bus + name, 'qcom,buswidth', cells(width))
         need(bus + name, 'qcom,agg-ports', cells(ports))
+    cfg_route = [('mas-acm-apps0', 16, ['SH4']), ('slv-qns-gem-noc-snoc', 8, []),
+                 ('mas-qnm-gemnoc', 8, ['SN10']), ('slv-qns-cnoc', 8, []),
+                 ('mas-qnm-snoc', 8, ['CN0']), ('slv-qhs-gpuss-cfg', 8, ['CN0'])]
+    need(bus + 'mas-acm-apps0', 'cell-id', cells(1))
+    need(bus + 'slv-qhs-gpuss-cfg', 'cell-id', cells(598))
+    for index, (name, width, bcms) in enumerate(cfg_route):
+        path = bus + name
+        need(path, 'qcom,buswidth', cells(width))
+        need(path, 'qcom,agg-ports', cells(1))
+        raw = nodes[path].get('qcom,bcms', b'')
+        members = [resolve(raw[i:i + 4]) for i in range(0, len(raw), 4)]
+        if {nodes[p].get('qcom,bcm-name') for p in members} != {n.encode() + b'\0' for n in bcms}:
+            raise ValueError('GPU native CPU configuration route BCMs changed')
+        for p in members:
+            need(p, 'qcom,rscs', apps)
+        if index + 1 < len(cfg_route):
+            links = nodes[path].get('qcom,connections', b'')
+            if nodes[bus + cfg_route[index + 1][0]]['phandle'] not in [links[i:i + 4] for i in range(0, len(links), 4)]:
+                raise ValueError('GPU native CPU configuration route changed')
     need(bus + 'bcm-cn0', 'qcom,bcm-name', b'CN0\0')
     need(bus + 'bcm-cn0', 'qcom,rscs', apps)
     tree.children.append(mkadt.node('redfin-gpu-command', [

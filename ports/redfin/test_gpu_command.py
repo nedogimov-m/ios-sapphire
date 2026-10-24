@@ -121,8 +121,10 @@ uint32_t performance_word(unsigned i){return ((uint32_t *)&perf)[i];}
 static struct rf_a6_bw bw;
 int bandwidth(unsigned problem){
  struct rf_a6_bcm b[4]={{0x50004,1000000,16,1,0},{0x50000,1000000,4,0,0},{0x50088,0,0,2,0},{0x5006c,100000,8,3,0}};
+ struct rf_a6_bcm sn10={0x50028,530000,16,2,0};
  if(problem==1)b[0].unit=0;if(problem==2)b[1].address=b[0].address;if(problem==3)b[2].vcd=16;
- return rf_a6_bw_make(b,&bw);
+ if(problem==4)sn10.address=b[3].address;if(problem==5)sn10.unit=0;if(problem==6)sn10.vcd=3;
+ return rf_a6_bw_make(b,&sn10,&bw);
 }
 uint32_t bandwidth_word(unsigned i){return ((uint32_t *)&bw)[i];}
 int zap_plan(const uint8_t *p,unsigned n,unsigned segment){struct rf_a6_zap z;return rf_a6_zap_plan(p,n,segment,&z);}
@@ -241,11 +243,17 @@ class GPUCommandTests(unittest.TestCase):
         for problem in (1, 2, 4):
             self.assertNotEqual(self.lib.performance(problem), 0)
         self.assertEqual(self.lib.bandwidth(0), 0)
-        self.assertEqual([self.lib.bandwidth_word(i) for i in range(6)], [0, 13, 1, 3, 1, 7])
+        self.assertEqual([self.lib.bandwidth_word(i) for i in range(6)], [0, 13, 2, 3, 3, 7])
+        self.assertEqual([self.lib.bandwidth_word(i) for i in (6, 7)], [0x50028, 0x5006C])
+        self.assertEqual([self.lib.bandwidth_word(i) for i in (12, 13)], [0x40000000, 0x40000000])
+        self.assertEqual([self.lib.bandwidth_word(i) for i in (18, 19)], [0x60000001, 0x60000001])
         # Native full-size table, sorted VCDs: MC0, SH0, ACV.
         self.assertEqual([self.lib.bandwidth_word(i) for i in range(24, 27)], [0x50000, 0x50004, 0x50088])
-        for problem in range(1, 4):
+        for problem in range(1, 6):
             self.assertNotEqual(self.lib.bandwidth(problem), 0)
+        self.assertEqual(self.lib.bandwidth(6), 0)
+        self.assertEqual(self.lib.bandwidth_word(4), 2)
+        self.assertEqual(self.lib.bandwidth_word(12), 0)
 
     def test_pas13_uses_native_scm64_encoding_resume_cookie_and_both_success_values(self):
         for cmd in (1, 2, 5):

@@ -19,14 +19,15 @@
 #define RF_A6_ZAP_ALLOC 0x100000u
 #define RF_A6_ZAP_SPAN 0x1000u
 #define RF_A6_GMU_SLOT 1u
+#define RF_A6_CFG_KBPS 9999999u
 #define RF_A6_WAIT_NS UINT64_C(500000000)
 
 /* Byte offsets, matching the Redfin ADT contract. The low OPP is common to
  * every live speed bin; its native DDR use case is 5 (2188000 KB/s). */
 static const uint32_t rf_a6_policy[] = {
-    3,0x06020001,275000000,64,5,14,32,3,0,0x401,UINT32_MAX,0,13,
+    4,0x06020001,275000000,64,5,14,32,3,0,0x401,UINT32_MAX,0,13,
     RF_A6_ZAP_ALLOC,RF_A6_ZAP_SPAN,RF_A6_RING,RF_A6_RING_BYTES,
-    RF_A6_SQE,RF_A6_SCRATCH,500,0,RF_A6_GMU_SLOT /* GPU ASID0, GMU ASID1/slot1. */
+    RF_A6_SQE,RF_A6_SCRATCH,500,0,RF_A6_GMU_SLOT,RF_A6_CFG_KBPS
 };
 static const uint32_t rf_a6_ddr_kbps[] = {
     0,400000,800000,1200000,1804800,2188000,2724000,3072000,
@@ -133,23 +134,32 @@ static inline int rf_a6_perf_make(const struct rf_cmddb_resource *gfx,
     if(!error)*out=p;return error;
 }
 
-/* b[0..2] are SH0/MC0/ACV, b[3] CN0. Native VCD order determines command
- * ordering, commits and waits, including the DDR-off entry. */
-static inline int rf_a6_bw_make(const struct rf_a6_bcm b[4],struct rf_a6_bw *out)
+/* b[0..2] are SH0/MC0/ACV, b[3] CN0; SN10 covers Redfin's CNOC bridge.
+ * VCD order determines command ordering, commits and waits. */
+static inline int rf_a6_bw_make(const struct rf_a6_bcm b[4],const struct rf_a6_bcm *sn10,
+    struct rf_a6_bw *out)
 {
-    if(!b || !out)return EINVAL;
+    if(!b || !sn10 || !out || !sn10->address || (sn10->address&3u) || !sn10->unit ||
+        !sn10->width || sn10->vcd>=16 || sn10->reserved)return EINVAL;
     struct rf_a6_bw p={0};unsigned order[3]={0,1,2};
     for(unsigned i=0;i<4;++i) {
+        if(b[i].address==sn10->address)return EINVAL;
         if(!b[i].address || (b[i].address&3u) || b[i].vcd>=16 || b[i].reserved ||
             (i!=2 && (!b[i].unit || !b[i].width)))return EINVAL;
         for(unsigned j=0;j<i;++j)if(b[j].address==b[i].address)return EINVAL;
     }
     for(unsigned i=0;i<3;++i)for(unsigned j=i+1;j<3;++j)
         if(b[order[j]].vcd<b[order[i]].vcd){unsigned t=order[i];order[i]=order[j];order[j]=t;}
-    p.levels=13;p.cnoc_commands=1;p.ddr_commands=3;p.cnoc_wait=1;
-    p.cnoc_address[0]=b[3].address;p.cnoc_data[0][0]=0x40000000;
-    int error=rf_a6_bcm_data(&b[3],8,1,0,100000,false,&p.cnoc_data[1][0]);
-    if(error)return error;p.cnoc_data[1][0]|=0x40000000;
+    p.levels=13;p.cnoc_commands=2;p.ddr_commands=3;
+    const struct rf_a6_bcm *cnoc[]={sn10,&b[3]};
+    if(cnoc[1]->vcd<cnoc[0]->vcd){const struct rf_a6_bcm *t=cnoc[0];cnoc[0]=cnoc[1];cnoc[1]=t;}
+    int error;
+    for(unsigned j=0;j<2;++j) {
+        bool commit=j==1 || cnoc[j]->vcd!=cnoc[j+1]->vcd;
+        p.cnoc_address[j]=cnoc[j]->address;
+        error=rf_a6_bcm_data(cnoc[j],8,1,0,100000,false,&p.cnoc_data[1][j]);if(error)return error;
+        if(commit){p.cnoc_wait|=1u<<j;p.cnoc_data[0][j]|=0x40000000;p.cnoc_data[1][j]|=0x40000000;}
+    }
     for(unsigned j=0;j<3;++j) {
         unsigned resource=order[j];bool commit=j==2 || b[resource].vcd!=b[order[j+1]].vcd;
         p.ddr_address[j]=b[resource].address;if(commit)p.ddr_wait|=1u<<j;

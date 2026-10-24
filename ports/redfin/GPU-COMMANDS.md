@@ -38,7 +38,7 @@ Only off/275MHz are advertised in the GPU performance table. The 275MHz/64
 OPP occurs in every captured speed bin, with bus use case5. Native ARC votes
 are computed from the real gfx/cx/mx CMD-DB level arrays; the GMU remains
 at200MHz/CX minimum-SVS. The full13-entry native DDR use-case table is
-converted through SH0/MC0/ACV, and CNOC's two native entries through CN0.
+converted through SH0/MC0/ACV, and CNOC's two native entries through SN10/CN0.
 CMD-DB supplies addresses, units, widths and VCDs. Rounding upward avoids
 under-voting fractional units. VCD order determines command order/commit/wait
 bits. GX requests275MHz with DDR case5, not upstream's A642L frequencies.
@@ -47,6 +47,13 @@ The native CORE_FW_START transition can change GX state. Only that explicit
 mode5 phase admits it; core access additionally requires a fresh OOB grant,
 SPTPRAC accessible status and live GX GDSCR. There is no direct GX GDSC/PLL
 override. The OOB request and all resources remain held until platform reset.
+
+Redfin also has a separate **CPU-to-GPU configuration** client, APPS1→598.
+Native `adreno_start()` requests its HIGH case (IB9999999KB/s) before wakeup.
+The real route passes SH4/SN10/CN0; GPU-initiated DDR/CNOC votes cannot replace
+it. Those three APPS RSC votes use CMD-DB units/VCDs, preserve inherited floors
+and remain held for this bounded run. GPU register access requires all three
+accepted votes, live GX/OOB and native AHB fence ALLOW with no fence error.
 
 The complete profile follows preferred allocation/start order: GMU uses
 SMR1, leaving SMR0 free for the native GPU group. Standalone GMU modes keep

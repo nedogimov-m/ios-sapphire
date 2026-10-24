@@ -1,5 +1,52 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete command v7 with native CPU configuration path built — 2026-10-24
+
+All83selected native/start/owned-memory/adapter/HFI/GPU checksPASS19.075s,
+including two-command SN10/CN0 VCD grouping and same-VCD single-commit case.
+Actual captured FDT validates CPU1→GPU_CFG598 HIGH, SH4/SN10/CN0 route,
+native membership/RSCs and all signed firmware identities. Local native
+build20261024-173307PASS, no CI run; kernel
+research/redfin-gpu/kernel-command-v7 SHA256
+2ca4ca40ce9ff22a9fdb1369364990c54186530f35a741abbbf89fc210eb6ed9;
+image ports/redfin/out/gpu-command-v7/redfin-xnu.img SHA256
+a5d89cdab1fb34ef0c1e1dcd360895595d7a42769d28bd8955aecbba1e039e33.
+Actual loader/payload/liveFDT/Image/schema4/firmware/compiled-shim return
+preflightPASS18094640bytes. Adds all CPU-CFG votes before wakeup and requires
+them before CSR access, plus native verified fence ALLOW without fault W1C.
+Read/map/store/readback breadcrumbs cover any further stall. The entire
+mapping/SQE/PAS/CP chain stays included; hardware validation pending.
+Existing Wi-Fi/HFI/power checkpoints/root unchanged; device verified fastboot.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0xfee7c0747a48b9ae`.
+
+## REDFIN complete GMU performance/BW/core/frequency/OOB handshake PASS; GPU CSR transition stalls — 2026-10-24
+
+Source66c37a4/localbuild171417, authenticated gpu-command-v6 matches
+3f8384e7f532599a. GMU CB1/SMR1/stream5 complete preparation and real version
+ACK pass, proving the reserved-slot ordering. All subsequent full HFI v2
+messages receive fresh matching ACK0 and consumer progress: PERF4/59words,
+BW3/160words,CORE_FW_START14/2words,GX_BW_PERF_VOTE30/4words,START10/1word.
+Fresh OOB grant and GXon are observed: GDSCRf8222800,SPTPRAC0,RPMH0,
+requested275MHz/nativeDDRcase5. Full SMMU/foreign audits pass through8.
+This proves the GMU accepts the power protocol and reports a powered domain.
+
+Log stops immediately after POWERED, before any map-write/CP result; PID1
+does not start, no panic recorded. Exact first GPU access was not instrumented,
+so a CSR bus stall is suspected, not proven at a specific instruction.
+The watchdog returns normally; collector authenticates/public-primes/leaves
+verified fastboot, rootHFSXclean/inconsistentfalse/write_count623088 unchanged.
+Native401 GPU route acceptance remains UNTESTED (not reached).
+
+Full native review finds missing independent CPU→GPU_CFG HIGH bandwidth:
+_adreno_start requests it before powerup. Real FDT client1→598 HIGH is
+IB9999999KB/s through SH4/SN10/CN0 (width16/8/8,ports1). Schema4 adds those
+three floor-preserving APPS RSC requests before GX wakeup, extends the GMU
+CNOC table to native SN10+CN0, and requires all CPU-CFG votes before GPU MMIO.
+After fresh GX/OOB, native AHB fence ALLOW is verified without discarding any
+fence error. Exact map/read/store/readback breadcrumbs and clock/fence state
+will identify any remaining stall. Entire original GPU chain remains enabled.
+This source-backed fix is not yet claimed as the observed v6 cause.
+
 ## REDFIN complete command v6 native grouping/allocation/power order built — 2026-10-24
 
 All83selected GPU/GMU ownership/native-start/adapter/HFI/native-opcode
