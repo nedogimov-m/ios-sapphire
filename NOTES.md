@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN station-v8b SEC session error0; complete active-pipe profile prepared — 2026-10-24
+
+Source `cd624da`, local native build055039, authenticated station-v8b
+capture matches boot ID38c7fd3953e2bda0. Touch sensing and the entire180s
+event session finish error0 (one valid IRQ batch, zero contacts, no malformed
+reply/clear). This improves the first-IRQ failure of station-v7, but real
+physical touch/UI response remains unconfirmed. Context/HTC/WMI/HTT/en0
+and scan succeed. The previous CE5 refusal is gone; next exact refusal is
+CE8 destination base0xc: expectedfedc0000, firmware installs8ba796c0 in MSA.
+Worker stops EAGAIN35 at56131ms, before Ethernet data/association. HFSX
+clean/write_count527905; authenticated capture, public priming, verified
+fastboot. No persistent modem/EFS/partition change.
+
+Native target comments declare CE8 target-to-uMC and CE11 autonomous qcache;
+this profile has no pktlog or diagnostic consumer. APPS now allocates,
+programs, posts, polls and audits only connected HTC/WMI/HTT queues0..4 and
+HTT RX9/10. CEs5/6/7/8/11 remain entirely firmware/unclaimed, including CTRL1.
+The software and callback share that one profile. All owned CE/RRI mismatches
+are collected read-only in one audit before the original stop, without new
+DMA doorbells; SMMU/guard/owner failures remain immediate. Source pin and
+review recorded in UPSTREAM.md. SEC code is unchanged from station-v8b.
+
+All26 focused real CE/lease/touch tests PASS after this profile update;
+full1285 suite previously PASS (3 optional private skipped). The actual CE
+model now seeds firmware-owned5/8/11 and checks no unclaimed-engine stores.
+Native local `build-20261024-060104.log` PASS, no CI run. Actual loader,
+live-FDT, GUI8 return, DMA32 and shim initialization/guard preflight PASS.
+Kernel `390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e`;
+image `4aa7fdee1758666f9eaaf81544f3307622140f43978214ad0c37460eac2f99d7`, Image130216944 bytes.
+Exact station-v9 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x58f44527d96348f3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Next: combined station-v9 run, sustain scan/radio and inspect all remaining
+ownership evidence, then physical touch and real Settings association/data/
+DHCP. GPU/Metal remains afterward; none of those is inferred from scan alone.
+
 ## REDFIN station-v7 actual CE5 target reclaim and SEC error; consistent ownership/timing batch prepared — 2026-10-24
 
 Source `e096d20`, native build052255, authenticated station-v7 capture

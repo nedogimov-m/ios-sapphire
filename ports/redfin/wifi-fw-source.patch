@@ -4549,7 +4549,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_packets.inc b/iokit/Kernel/arm/redfin_
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_packets.inc
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,245 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin hardware owner for the complete ath10k-compatible packet and
 + * station engine. One bound worker owns routes, MMIO and fresh DMA32 memory.
@@ -4759,6 +4759,7 @@ new file mode 100644
 +        }
 +        if (!error) error = fw_start_packet_guards(context, false);
 +        if (!error) error = redfin_wifi_power_audit();
++        bool changed_host = false;
 +        for (unsigned ce = 0; !error && ce < RF_CE_COUNT; ++ce) {
 +            for (unsigned i = 0; i < 7; ++i) {
 +                uint32_t at = rf_ce_observed_offsets[i];
@@ -4769,7 +4770,7 @@ new file mode 100644
 +                if (!error && ((value ^ context->packet_expected[ce][i]) & mask)) {
 +                    IOLog("REDFIN WIFI PACKETS: host CE audit CE=%u at=%#x mask=%#x expected=%#x observed=%#x\n",
 +                        ce, at, mask, context->packet_expected[ce][i], value);
-+                    error = EAGAIN;
++                    changed_host = true;
 +                }
 +                if (error) break;
 +            }
@@ -4780,9 +4781,10 @@ new file mode 100644
 +            if (!error && ((value ^ context->packet_rri[i]) & mask)) {
 +                IOLog("REDFIN WIFI PACKETS: RRI audit at=%#x expected=%#x observed=%#x\n",
 +                    0xc004 + 4u*i, context->packet_rri[i], value);
-+                error = EAGAIN;
++                changed_host = true;
 +            }
 +        }
++        if (!error && changed_host) error = EAGAIN;
 +        if (error) return error;
 +        struct redfin_wifi_radio_state state = {};
 +        redfin_wifi_radio_state(&state);

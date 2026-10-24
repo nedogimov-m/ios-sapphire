@@ -207,6 +207,7 @@ static int fw_start_packets_poll(fw_start_context *context, uint64_t now)
         }
         if (!error) error = fw_start_packet_guards(context, false);
         if (!error) error = redfin_wifi_power_audit();
+        bool changed_host = false;
         for (unsigned ce = 0; !error && ce < RF_CE_COUNT; ++ce) {
             for (unsigned i = 0; i < 7; ++i) {
                 uint32_t at = rf_ce_observed_offsets[i];
@@ -217,7 +218,7 @@ static int fw_start_packets_poll(fw_start_context *context, uint64_t now)
                 if (!error && ((value ^ context->packet_expected[ce][i]) & mask)) {
                     IOLog("REDFIN WIFI PACKETS: host CE audit CE=%u at=%#x mask=%#x expected=%#x observed=%#x\n",
                         ce, at, mask, context->packet_expected[ce][i], value);
-                    error = EAGAIN;
+                    changed_host = true;
                 }
                 if (error) break;
             }
@@ -228,9 +229,10 @@ static int fw_start_packets_poll(fw_start_context *context, uint64_t now)
             if (!error && ((value ^ context->packet_rri[i]) & mask)) {
                 IOLog("REDFIN WIFI PACKETS: RRI audit at=%#x expected=%#x observed=%#x\n",
                     0xc004 + 4u*i, context->packet_rri[i], value);
-                error = EAGAIN;
+                changed_host = true;
             }
         }
+        if (!error && changed_host) error = EAGAIN;
         if (error) return error;
         struct redfin_wifi_radio_state state = {};
         redfin_wifi_radio_state(&state);

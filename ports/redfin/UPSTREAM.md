@@ -571,6 +571,14 @@ destination base to MSA after HTT setup. Redfin's APPS/IPA-disabled profile
 therefore leaves both CE5 rings to firmware, neither posts nor polls host RX
 there, and uses one shared host-ring table in the software and hardware owner.
 Native CE5/6 without APPS queues receive no CTRL1/RRI-enable writes either.
+Station-v8b also observes firmware installing CE8's destination in MSA.
+Native target comments identify CE8 as target-to-uMC and CE11 as autonomous
+qcache; this profile requests no pktlog/diagnostic consumers. APPS now owns
+only HTC/WMI/HTT queues0..4 and HTT receive9/10, leaving5/6/7/8/11 entirely
+untouched. The readonly audit reports all mismatched owned fields together
+before refusing, while retaining resources and issuing no additional DMA
+doorbells. These native files are pinned at Linuxv6.12
+`adc218676eef25575469234709c2d87185ca223a`.
 The generic host_ce_config_wlan CE5 receive entry is not suitable authority
 for this observed mission profile. The exact-source CE model now checks
 that CE5's firmware registers are preserved, plus real RX and TX code paths.

@@ -63,7 +63,8 @@ static int read_register(void *ctx,uint32_t at,uint32_t *out){
 }
 static int write_register(void *ctx,uint32_t at,uint32_t value){
  if(check(ctx)||at%4||at>=sizeof(registers)){violations++;return EPERM;}
- if(at/0x1000==5 || at/0x1000==6)ce5_writes++;
+ unsigned c=at/0x1000;
+ if(c>=5 && c<12 && c!=9 && c!=10)ce5_writes++;
  registers[at/4]=value;return 0;
 }
 static int shadow(void *ctx,unsigned c,uint32_t value){
@@ -79,9 +80,13 @@ int run(unsigned fault){
  used=maps=violations=ce5_writes=received=shadow_ce=0;ce_up=false;rf_radio_error=0;
  rf_radio_bus=(struct redfin_wifi_radio_ops){arena,check,NULL,read_register,write_register,shadow};
  registers[0x500c/4]=0x8ba6cf00;registers[0x5010/4]=0x30;registers[0x5014/4]=1024;
+ registers[0x800c/4]=0x8ba796c0;registers[0x8010/4]=0x30;registers[0x8014/4]=32;
+ registers[0xb00c/4]=0x8ba7a000;registers[0xb010/4]=0x30;registers[0xb014/4]=32;
  if(!ce_start())return -1;
  if(ce_host_rx(5)||ce[5].src_n||ce[5].dst_n||ce[5].rx_buf||ce5_writes||maps||violations)return -2;
  if(registers[0x500c/4]!=0x8ba6cf00||registers[0x5010/4]!=0x30||registers[0x5014/4]!=1024)return -3;
+ if(registers[0x800c/4]!=0x8ba796c0||registers[0xb00c/4]!=0x8ba7a000)return -8;
+ for(unsigned c=5;c<12;c++)if(c!=9&&c!=10&&(ce[c].src_n||ce[c].dst_n||ce[c].rx_buf))return -9;
  if(fault==0)return 0;
  ce[2].dst[0].nbytes=fault==3?2049:64;
  ce[2].dst[0].addr|=1ull<<36; /* WCN3990 completion metadata is not address. */

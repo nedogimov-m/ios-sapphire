@@ -13,11 +13,12 @@ struct redfin_sta_join;
 struct redfin_sta_bss;
 struct redfin_sta_state;
 struct redfin_sta_channel;
-/* Native Redfin mission: CE5 is the target/IPA OUT pipe. Firmware programs
- * its destination after HTT setup; APPS has no producer or RX queue there.
+/* Native Redfin mission: CE5/6/8/11 serve target/IPA, autonomous memcpy,
+ * uMC and qcache; CE7 is an unused diagnostic window in this profile.
+ * APPS uses connected HTC/WMI/HTT pipes0..4 and HTT receive pipes9/10.
  * One table drives the software rings and the MMIO ownership checks. */
-static const uint16_t redfin_wifi_ce_sources[12] = {16, 0, 0, 32, 2048, 0, 0, 2, 0, 0, 0, 0};
-static const uint16_t redfin_wifi_ce_destinations[12] = {0, 512, 64, 0, 0, 0, 0, 2, 128, 512, 512, 512};
+static const uint16_t redfin_wifi_ce_sources[12] = {16, 0, 0, 32, 2048, 0, 0, 0, 0, 0, 0, 0};
+static const uint16_t redfin_wifi_ce_destinations[12] = {0, 512, 64, 0, 0, 0, 0, 0, 0, 512, 512, 0};
 /* Native ath10k ce.h CE_DESC_ADDR_MASK: WCN3990 completion descriptors
  * carry address bits[34:0] separately from the upper control/metadata.
  * The CPU always uses its own posted-buffer pointer, never this field. */
