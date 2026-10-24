@@ -20,11 +20,13 @@ class RuntimeSnapshotTests(unittest.TestCase):
         prefix = r'''
 #include <string.h>
 #include "redfin_gpu_context.h"
-struct gm_context {unsigned smmu_mode;uintptr_t smmu,cb;};
+#include "redfin_gmu_tcm.h"
+struct gm_context {unsigned smmu_mode;uintptr_t smmu,cb,base[3];};
 static struct gm_context context;
 static struct {struct gm_context *context;bool poisoned;
  struct {struct {unsigned active,poisoned;struct rf_gs_snapshot expected;}state;}mapping;}gx;
 static uint32_t global[0x8000/4],banks[0x2000/4];
+static uint32_t gcc[0x80000/4],gpucc[0x9000/4];
 static unsigned issue,reads,live_checks,payload_checks,power_lost,payload_lost,ready,caller;
 static const uint32_t gm_chip=RF_GS_CHIP;
 static bool redfin_gpu_ready(void){return ready;}
@@ -39,6 +41,7 @@ static uint32_t gm_scalar_read(uintptr_t at){
   if(issue==4)caller=0;if(issue==5)gx.mapping.state.active=0;if(issue==6)gx.poisoned=true;
  }
  if(issue==7 && reads==58)global[0x20/4]^=1;
+ if(reads==8){if(issue==21)power_lost=1;if(issue==22)caller=0;}
  return *(uint32_t *)at;
 }
 '''
@@ -46,7 +49,7 @@ static uint32_t gm_scalar_read(uintptr_t at){
 int run(unsigned problem){
  memset(global,0,sizeof(global));memset(banks,0,sizeof(banks));memset(&gx,0,sizeof(gx));
  issue=problem;reads=live_checks=payload_checks=power_lost=payload_lost=0;ready=caller=1;
- context=(struct gm_context){6,(uintptr_t)global,(uintptr_t)banks};gx.context=&context;
+ context=(struct gm_context){.smmu_mode=6,.smmu=(uintptr_t)global,.cb=(uintptr_t)banks};gx.context=&context;
  gx.mapping.state.active=1;
  gx.mapping.state.expected=(struct rf_gs_snapshot){.page_bytes=0x1000,.global_bytes=0x8000,.streams=16,.contexts=8};
  global[0x20/4]=(1u<<30)|(1u<<27)|(11u<<9)|16;
@@ -58,6 +61,19 @@ int run(unsigned problem){
 }
 unsigned metric(unsigned n){unsigned values[]={reads,live_checks,payload_checks};return n<3?values[n]:999;}
 int direct(unsigned block,uint32_t at){uint32_t value;return gr_snapshot_read(&context,block,at,&value);}
+int source_check(unsigned problem){
+ if(run(0))return EIO;reads=live_checks=payload_checks=0;issue=problem;
+ memset(gcc,0,sizeof(gcc));memset(gpucc,0,sizeof(gpucc));
+ context.base[0]=(uintptr_t)gcc;context.base[1]=(uintptr_t)gpucc;
+ gcc[0x71004/4]=1;gcc[0]=0xc0100000;gcc[4/4]=problem==20?32:31;gcc[0xc/4]=0x103;gcc[0x40/4]=0x4000;
+ gcc[0x52010/4]=1;gcc[0x52000/4]=0x10000;gcc[0x71028/4]=3;
+ gpucc[0x1540/4]=0x80000000;gpucc[0x1124/4]=0x602;gpucc[0x1098/4]=gpucc[0x109c/4]=1;
+ const struct rf_gt_ops ops={.context=&context,.valid=gr_snapshot_valid,.read=gr_source_read};
+ struct rf_gt_report clock={0};int error=gr_live();
+ if(!error)error=rf_gt_source_live_power(&ops,&clock,true,true);
+ if(!error)error=gr_live();return error;
+}
+int source_direct(unsigned unit,uint32_t at){uint32_t value;return gr_source_read(&context,unit,at,&value);}
 '''
         source, library = root / 'snapshot.c', root / 'snapshot.so'
         source.write_text(prefix + body + suffix)
@@ -92,6 +108,20 @@ int direct(unsigned block,uint32_t at){uint32_t value;return gr_snapshot_read(&c
             before = self.lib.metric(0)
             self.assertEqual(self.lib.direct(block, offset), errno.EPERM)
             self.assertEqual(self.lib.metric(0), before)
+
+    def test_complete_source_check_reads_all_sixteen_registers_without_recursive_parent_mmio(self):
+        self.assertEqual(self.lib.source_check(0), 0)
+        self.assertEqual([self.lib.metric(i) for i in range(3)], [16, 2, 0])
+        self.assertEqual(self.lib.source_check(20), errno.EAGAIN)
+        self.assertEqual(self.lib.metric(0), 16)
+        self.assertEqual(self.lib.source_check(21), errno.EIO)
+        self.assertEqual(self.lib.metric(0), 16)
+        self.assertEqual(self.lib.source_check(22), errno.ECANCELED)
+        self.assertEqual(self.lib.metric(0), 8)
+        self.assertEqual(self.lib.source_check(0), 0)
+        for unit, offset in ((2, 0x14000), (0, 0x80000), (1, 0x9000), (0, 3)):
+            self.assertEqual(self.lib.source_direct(unit, offset), errno.EPERM)
+            self.assertEqual(self.lib.metric(0), 16)
 
 
 if __name__ == '__main__':

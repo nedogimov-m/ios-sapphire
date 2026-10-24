@@ -1,0 +1,70 @@
+diff --git a/iokit/Kernel/arm/SweetPlatformExpert.cpp b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -9,6 +9,35 @@
+ #include <IOKit/IOPlatformExpert.h>
+ #include <IOKit/IODeviceTreeSupport.h>
+ #include <IOKit/IOLib.h>
++#include <libkern/c++/OSData.h>
++#include "RedfinDeviceIdentity.h"
++
++static void redfin_publish_serial(IOService *platform, IOService *provider)
++{
++	IORegistryEntry *root = IORegistryEntry::fromPath("/", gIODTPlane);
++	IORegistryEntry *chosen = IORegistryEntry::fromPath("/chosen", gIODTPlane);
++	if (root && chosen) {
++		OSData *marker = OSDynamicCast(OSData, chosen->getProperty("redfin-identity-version"));
++		OSData *serial = OSDynamicCast(OSData, root->getProperty("serial-number"));
++		OSData *mirror = OSDynamicCast(OSData, chosen->getProperty("serial-number"));
++		unsigned version = 0;
++		if (marker && marker->getLength() == sizeof(version)) memcpy(&version, marker->getBytesNoCopy(), sizeof(version));
++		if (version == 1) {
++			bool valid = serial && mirror && serial->getLength() == mirror->getLength() &&
++			    redfin_device_serial(serial->getBytesNoCopy(), serial->getLength()) &&
++			    !memcmp(serial->getBytesNoCopy(), mirror->getBytesNoCopy(), serial->getLength());
++			bool published = false;
++			if (valid && provider) {
++				const char *text = (const char *)serial->getBytesNoCopy();
++				published = platform->setProperty("IOPlatformSerialNumber", text) &&
++				    provider->setProperty("IOPlatformSerialNumber", text);
++			}
++			IOLog("REDFIN IDENTITY: private serial published=%u valid=%u; no activation certificate supplied\n", published, valid);
++		}
++	}
++	if (chosen) chosen->release();
++	if (root) root->release();
++}
+ 
+ class SweetPlatformExpert : public IODTPlatformExpert {
+ 	OSDeclareDefaultStructors(SweetPlatformExpert);
+@@ -29,6 +58,7 @@
+ 	if (!IODTPlatformExpert::start(provider)) {
+ 		return false;
+ 	}
++	redfin_publish_serial(this, provider);
+ 	registerService();
+ 	IOLog("SWEET: platform expert registered\n");
+ 	return true;
+diff --git a/iokit/Kernel/arm/RedfinDeviceIdentity.h b/iokit/Kernel/arm/RedfinDeviceIdentity.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinDeviceIdentity.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_DEVICE_IDENTITY_H
++#define REDFIN_DEVICE_IDENTITY_H
++#include <stddef.h>
++#include <stdbool.h>
++
++/* Boot ADT bytes include exactly one final NUL. Never print the identifier. */
++static inline bool redfin_device_serial(const void *data, size_t bytes)
++{
++    if (!data || bytes < 7 || bytes > 65) return false;
++    const unsigned char *s = (const unsigned char *)data;
++    if (s[bytes - 1]) return false;
++    for (size_t i = 0; i + 1 < bytes; ++i)
++        if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'A' && s[i] <= 'Z') ||
++              (s[i] >= 'a' && s[i] <= 'z') || s[i] == '-' || s[i] == '_')) return false;
++    return true;
++}
++#endif

@@ -18,6 +18,7 @@ import stat
 import subprocess
 import sys
 import checkpoint_userland
+import photos_userland
 import wifi_userland
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -354,6 +355,8 @@ class Builder:
             tweaks.apply(target, metadata=self.metadata)
             self.manifest["wifi_userland"] = wifi_userland.prepare_root(target)
             self.manifest["checkpoint_userland"] = checkpoint_userland.prepare_root(target, self.metadata)
+            if self.args.photos_init_bundle:
+                self.manifest["photos_init"] = photos_userland.prepare_root(target, self.metadata, self.args.photos_init_bundle)
             owners = []
             for relative, metadata in self.metadata.items():
                 destination = target / relative
@@ -401,6 +404,7 @@ def main(argv=None):
     parser.add_argument("--inputs", type=Path, default=ROOT / "research/ipsw-redfin/extracted")
     parser.add_argument("--out", type=Path, default=ROOT / "research/ipsw-redfin/root-image")
     parser.add_argument("--size", default="16g")
+    parser.add_argument("--photos-init-bundle", type=Path, help="verified native first-library bootstrap from photos_userland.py")
     parser.add_argument("--reuse-mounts", type=Path, help="use existing read-only ownership-enabled os/systemos/appos mounts; leaves these external mounts attached")
     args = parser.parse_args(argv)
     if (ROOT / "research").resolve() not in args.out.resolve().parents:

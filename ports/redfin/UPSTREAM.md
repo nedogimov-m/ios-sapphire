@@ -1,5 +1,37 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete clock/photo-library/private-serial block — 2026-10-25
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and paired
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain pinned. The runtime
+source checker currently calls gm_valid in both rf_gt_rd and gm_read for
+each of16clock registers. Its runtime-only metadata callbacks preserve the
+same16actual GCC/GPUCC reads and allowlist; GMU space is excluded. Complete
+twice-read SMMU/foreign snapshots, payload/parent/power boundary guards,
+before/after-submit audit frequency and every hardware-write guard remain.
+Startup callbacks, clock rates, ownership and real fences are unchanged.
+
+Actual20H392 reports now give Photos flags0x22004001/category1, but the
+same zero-section assertion. Assetsd survives its former TCC abort. Native
+501-owned PhotoData contains only Thumbnails; the library registry only
+Syndication.photoslibrary. The first-library initializer obtains the native
+system URL/well-known identifier and calls installed Photos create/open
+APIs with verified selector types and paired cache UUIDs. Existing store
+candidates take the open path. Its mobile-only GUI3 job requests native
+own-PID512MiB, logs actual results and does not invent a schema or assets.
+Hardware creation and Photos UI remain unproved before the combined run.
+
+For the user's serial/App Store/Apple ID request, an explicit private config
+supplies this Pixel's real boot-transport serial to root/chosen and standard
+IOPlatformSerialNumber properties. Copies must match and be bounded/NUL-
+terminated; no raw identifier goes into git or public reports. No Apple
+ECID/certificate is fabricated. Re-reviewed paired mkjobs.py's account/
+apsd/mobileactivationd findings: native activation/certificates remain
+separate from local serial publication. Account login is not established.
+Also reviewed redwoodmetal.m/tools/mesa/air: substantial compute/render/
+resource and AIR-to-NIR/ir3 code exists, with documented unsupported features.
+Its Redfin/20H392 adaptation and actual evidence are still future work.
+
 ## Complete presentation pipeline and native process identity — 2026-10-25
 
 Re-reviewed preferred kernel 8e61187098f2c26c5daee8f9f72b6416aa64b9ab's

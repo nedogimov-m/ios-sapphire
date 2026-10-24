@@ -189,7 +189,7 @@ def main(argv=None):
          'wifi-native-start.patch', 'gmu-probe.patch', 'gmu-start.patch', 'scm-query.patch',
          'wifi-firmware.patch', 'wifi-fw-source.patch', 'wifi-smp2p.patch', 'wifi-fw-build.patch',
          'wifi-radio.patch', 'wifi-network.patch', 'wifi-network-build.patch', 'wifi-gui.patch',
-         'touch-response.patch', 'preinit-progress.patch', 'userspace-waits.patch', 'gpu-service.patch', 'graphics-eagl.patch', 'graphics-physical.patch', 'graphics-journal.patch', 'graphics-exec.patch', 'graphics-memory.patch', 'graphics-lifecycle.patch', 'touch-reconnect.patch', 'platform-entitlements.patch', 'display-presenter.patch')]
+         'touch-response.patch', 'preinit-progress.patch', 'userspace-waits.patch', 'gpu-service.patch', 'graphics-eagl.patch', 'graphics-physical.patch', 'graphics-journal.patch', 'graphics-exec.patch', 'graphics-memory.patch', 'graphics-lifecycle.patch', 'touch-reconnect.patch', 'platform-entitlements.patch', 'display-presenter.patch', 'device-identity.patch')]
         for extra in extra_overlays:
             run(['git', 'apply', '--check', extra], tree)
             run(['git', 'apply', extra], tree)

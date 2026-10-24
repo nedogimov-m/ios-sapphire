@@ -33,7 +33,7 @@ redfin_userspace_waits_poll(unsigned final)
     if (now > UINT64_MAX - interval) return;
     uint64_t deadline = now + interval;
     const char *wifi_names[4] = { "Preferences", "wifid", "configd", "securityd" };
-    const char *graphics_names[4] = { "MobilePhone", "MobileSlideShow", "checkpointd", "photolibraryd" };
+    const char *graphics_names[4] = { "MobilePhone", "MobileSlideShow", "assetsd", "tccd" };
     const char *const *names = gui == 3 ? graphics_names : wifi_names;
     proc_t selected[4] = { PROC_NULL, PROC_NULL, PROC_NULL, PROC_NULL };
     if (!lck_mtx_try_lock(&proc_list_mlock)) return;

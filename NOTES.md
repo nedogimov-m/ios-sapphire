@@ -1,5 +1,64 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete clock/Photos/identity batch verified and built — 2026-10-25
+
+All97selected host cases PASS across the completed batch: runtime clock/
+SMMU boundary faults, native parser/private-serial isolation, startup cache,
+ADT/hardware invariance, build-policy rejection, app-wait and root ownership.
+The initial two photo fixtures supplied ordinary plist byte data rather than
+actual free offset-table padding; the encoder correctly refused growth.
+Using real bounded padding fixes those fixtures; all3photo cases thenPASS
+0.004s, without changing the installer or executable. Native own-PID
+memorystatus7/8/512MiB ABI and Photos'20H392 selector types are reviewed.
+The signed arm64 iOS bootstrap builds and codesign strict verificationPASS;
+programSHA2567686ba2fcaa9c8aee3d9607ebecc83aaf9c1b99f4d81e0e146dd92c3c0b0c907.
+
+Local native kernel build20261025-042244PASS/noCI, exact prepared-source
+fingerprint verified. KernelSHA25641760e04b0db9df79cc7130d23efb3bd6e0e19aac750b767a1ceda22293fbc96. No source change follows its
+checks/build. The private physical serial config is mode0600 and confirmed
+ignored; no raw identifier enters this entry or tracked files.
+
+Fresh v7 staged clone adds only photos-init70640bytes, its477-byte job and
+66-byte initial501-owned log, plus the same-size startup cache policy.
+Readonly native fsckPASS:159changed blocks/651264bytes,20new blocks,
+zero freed blocks; JIB/empty journal and all unrelated captured file bytes/
+catalog records unchanged. Device root is still clean/write_count746527,
+unchanged in verified idle recovery. Bounded installation and one combined
+run follow. Native Photos library creation, MobileGestalt serial answer,
+new GPU timings and account login remain unproved; Metal remains disabled.
+Last actual boot015400794fafd8d9 exact args/results are recorded above.
+
+## REDFIN full clock/Photos/native-serial block implemented — 2026-10-25
+
+Based on84d2518/fc4bd98. Fresh v7 metadata is clean/write_count746527 in
+idle unmounted recovery. Read-only reports give Photos261/264 validated
+flags0x22004001/category1 but the same zero-section assertion. Assetsd263
+survives through shutdown. Mobile/Library/Media/PhotoData owners are501;
+PhotoData contains only Thumbnails and Library/Photos/Libraries only
+Syndication.photoslibrary. No system database is found in those directories.
+
+The whole source batch is implemented before tests: cheap runtime metadata
+callbacks eliminate32recursive parent validations from each16-register
+GCC/GPUCC source check, preserving all actual reads, complete SMMU/foreign
+snapshots, boundary guards and per-submit audit frequency. Native Photos
+first-library creation gets the actual system URL/identifier and calls the
+installed create/open APIs with verified types. Its mobile GUI3 job uses
+own-PID native512MiB and logs actual errors/results. It does not patch a
+Photos assertion or synthesize a schema/assets. Wait samples now target the
+live assetsd/tccd services. No new iOS boot or test during these subtasks.
+
+User requested serial/App Store/Apple ID. The verified physical Pixel serial
+is saved in an ignored mode0600 local config; its value is not printed or
+committed. An explicit build input supplies root/chosen and the standard
+platform serial property; a boot-bound MobileGestalt hash permits private
+comparison. Development ECID/security policy is unchanged, with no Apple
+activation certificate supplied. App Store/Apple ID login and Metal remain
+unimplemented/unverified. Preferred account and substantial Metal/AIR code
+are reviewed in UPSTREAM.md. Combined host/userspace/kernel/staging checks
+and one integrated run follow; installed root is still untouched. Last
+actual build20261025-034726/noCI and exact boot015400794fafd8d9 args/results
+remain in the preceding run entry.
+
 ## REDFIN separate presenter/native identity run stable; remaining app/frame blockers — 2026-10-25
 
 Source fc4bd98 / native local build20261025-034726 / no CI. Authenticated

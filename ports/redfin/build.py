@@ -53,6 +53,7 @@ def main():
     p.add_argument('--kernel', type=Path, help='kernel built with ports/redfin/redfin.patch')
     p.add_argument('--dtb', type=Path, help='validated live Redfin DTB, required with --kernel')
     p.add_argument('--apple-adt', type=Path, help='D22AP product identity and development policy for Apple userspace')
+    p.add_argument('--device-identity', type=Path, help='private physical Redfin serial; does not provide Apple activation certificates')
     p.add_argument('--memory-base', type=lambda x: int(x, 0))
     p.add_argument('--memory-size', type=lambda x: int(x, 0))
     p.add_argument('--boot-mpidr', type=lambda x: int(x, 0), default=0)
@@ -377,6 +378,15 @@ def main():
         p.error('Apple identity and UFS probes require --kernel')
     if a.ufs_root and not a.apple_adt:
         p.error('--ufs-root requires --apple-adt')
+    private_identity = None
+    if a.device_identity:
+        if not a.apple_adt:
+            p.error('--device-identity requires --apple-adt')
+        import device_identity
+        try:
+            private_identity = device_identity.load(a.device_identity)
+        except (OSError, ValueError, TypeError):
+            p.error('private Redfin identity is invalid or unreadable')
     if not 4320 <= a.stride <= 16384 or a.stride % 4:
         p.error('--stride must be a multiple of 4 in [4320, 16384]')
     if not 5 <= a.seconds <= 300:
@@ -424,7 +434,7 @@ def main():
         tree = (mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr, smp=True, smp_cpus=a.smp_cpus or 2)
                 if a.smp_probe or a.smp_gui else mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr))
         if a.apple_adt:
-            mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes())
+            mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes(), private_identity)
         from memory import _tree
         nodes, _ = _tree(a.dtb.read_bytes())
         from peripherals import add_observers
@@ -783,6 +793,8 @@ def main():
         manifest.update(boot_args=command_line, root_device='ufsroot0' if a.ufs_root else 'md0',
                         kernel={'path': str(a.kernel.resolve()),
                                 'sha256': hashlib.sha256(a.kernel.read_bytes()).hexdigest()})
+    if private_identity is not None:
+        manifest['device_identity'] = device_identity.report(a.device_identity, private_identity)
     if a.display_hz is not None:
         manifest['display_hz'] = a.display_hz
     if a.display_fit:

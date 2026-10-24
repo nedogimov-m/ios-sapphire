@@ -19,6 +19,10 @@ class BuildFlagTests(unittest.TestCase):
         self.refused(['--display', '--kernel', '/missing-kernel'],
                      '--display requires --kernel, --apple-adt and --splash')
 
+    def test_private_serial_requires_explicit_apple_userspace_without_reading_the_file(self):
+        self.refused(['--device-identity', '/missing-private-identity'],
+                     '--device-identity requires --apple-adt')
+
     def test_display_cadence_needs_explicit_display(self):
         self.refused(['--display-hz', '10'], '--display-hz requires --display')
 

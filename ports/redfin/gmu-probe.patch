@@ -4764,7 +4764,7 @@ diff --git a/bsd/dev/redfin_gpu_runtime.inc b/bsd/dev/redfin_gpu_runtime.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_runtime.inc
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,297 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Persistent GUI3 owner. The existing startup proof remains mandatory;
 + * all objects are retained if DMA completion or TLB synchronization is lost.
@@ -4885,11 +4885,23 @@ new file mode 100644
 +        (!rf_gc_allowed(0,at) && at!=0x28 && at!=0x2c && at!=0x7f4))return EPERM;
 +    *value=gm_scalar_read(c->cb+at);return 0;
 +}
++static int gr_source_read(void *argument,unsigned unit,uint32_t at,uint32_t *value)
++{
++    struct gm_context *c=argument;
++    /* The complete audit brackets this read-only 16-register source check.
++     * Re-entering gm_valid in both rf_gt_rd and gm_read otherwise repeats
++     * every parent/power read twice for each individual clock register.
++     * Keep the native offset allowlist and exact coherent caller lease. */
++    if(!value || !gr_snapshot_valid(c) || unit>RF_GT_GPUCC ||
++        !c->base[unit] || !rf_gt_allowed(unit,at,false))return EPERM;
++    *value=gm_scalar_read(c->base[unit]+at);return 0;
++}
 +int redfin_gpu_audit(void)
 +{
 +    struct gm_context *c=gx.context;
 +    int error=gr_live();
-+    struct rf_gt_report clock={0};const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
++    struct rf_gt_report clock={0};
++    const struct rf_gt_ops source={.context=c,.valid=gr_snapshot_valid,.read=gr_source_read};
 +    if(!error)error=rf_gt_source_live_power(&source,&clock,true,c->gx_requested);
 +    for(unsigned i=0;!error && i<sizeof(gm_smmu_clocks)/sizeof(gm_smmu_clocks[0]);++i) {
 +        const uint32_t *w=gm_smmu_clocks[i];

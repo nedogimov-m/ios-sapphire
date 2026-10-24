@@ -50,11 +50,12 @@ def node(name, props=(), children=()):
     return result
 
 
-def apple_userspace_identity(root, blob):
+def apple_userspace_identity(root, blob, device_identity=None):
     """Add D22AP product data and the upstream development boot policy.
 
     All physical memory, CPU and peripheral descriptions remain Redfin's.
-    Identity values below are synthetic; no handset identifiers are imported.
+    The default identity is synthetic; no Apple handset identifiers are imported.
+    An explicit private config may add this Pixel's own physical serial.
     """
     if not isinstance(blob, bytes) or not 32 <= len(blob) <= 2 * 1024 * 1024:
         raise ValueError('Apple ADT must be between 32 bytes and 2 MiB')
@@ -94,6 +95,9 @@ def apple_userspace_identity(root, blob):
         ('certificate-security-mode', u32(1)), ('effective-security-mode-sep', u32(1))])
     chosen.children.append(node('asmb', [
         ('AAPL,phandle', u32(0x101)), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))]))
+    if device_identity is not None:
+        from ports.redfin.device_identity import apply
+        apply(root, device_identity)
     return root
 
 

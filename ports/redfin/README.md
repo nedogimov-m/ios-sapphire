@@ -261,6 +261,21 @@ the XML's exact destination mtime. Both seconds and nanoseconds must match:
 catalog API on an unmounted staging clone. Existing-root updates require
 allocation/preimage audits, native readonly fsck and complete bounded readback.
 
+Build the native first-library bootstrap, then pass its verified bundle to
+`build-root.py --photos-init-bundle research/redfin-photos/bundle-v1`:
+
+```sh
+PYTHONPATH=ports/redfin:. python3 ports/redfin/photos_userland.py --out research/redfin-photos/bundle-v1
+```
+
+The mobile-only GUI3 job creates/opens the system library through the installed
+Photos APIs. It reports native errors and does not replace a database schema.
+For a permanent local serial, pass `build.py --device-identity` a private
+version1 JSON file containing product `redfin` and the physical Pixel's serial.
+Keep that file and generated ADTs/images under ignored local storage. This
+publishes the local device identity; Apple activation/account support still
+requires separate work.
+
 For Apple userspace boot images, add
 `--apple-adt research/ipsw-redfin/extracted/d22ap.adt`. This imports public D22AP
 product properties and the upstream development boot policy, with a synthetic
