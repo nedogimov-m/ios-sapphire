@@ -1,5 +1,18 @@
 # HackiOS upstream review — 2026-10-22
 
+## msm dependency flags are distinct from page permissions — 2026-10-25
+
+The975c644bc72f03ae integrated run rejects every submit withEINVAL22;
+there is no runtime fence or shader pixel pass, despite EAGL's queued-frame
+counters. The new readonly-allocation/submit-WRITE cross-check was wrong.
+Reviewed Mesa25.0.7 freedreno_priv.h RING_FLAGS, msm_bo.c and
+msm_ringbuffer_sp.c: command BOs are GPU_READONLY and dependency flags can
+still include READ|WRITE|DUMP. Preferred kernel8e611870 RedwoodGPU::submit
+likewise does not reject that combination. The correction retains metadata
+bounds/presumed-address checks and actual readonly SMMU AP bits. Native
+client-bound completed-fence lines distinguish backboardd's work from the
+standalone shader process; queued GL frame counters alone are insufficient.
+
 ## Complete graphics/boot performance batch — 2026-10-25
 
 Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
@@ -8,7 +21,7 @@ and prepared surface retention. Redfin adopts that push policy, invalidates
 only GPU-written surfaces after real synchronous completion, and permits
 native prepared wrapped ranges with SweetSurface's wrapDelta rather than
 MiniIOSurface's leading state page. Read-only wrapped pages retain read-only
-GPU permissions and cannot be submitted as write buffers. No asynchronous
+GPU permissions. No asynchronous
 completion or foreign fault recovery is introduced.
 
 The runtime still makes complete stable global/CB0/CB1 snapshots before and

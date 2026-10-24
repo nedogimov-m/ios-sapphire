@@ -156,7 +156,7 @@ int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only)
         !rf_gr_find(&gr.arena,address,4096) || physical<RF_GM_PT_RAM_BASE ||
         physical>RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-4096)return EINVAL;
     uint64_t *entry=gr_leaf(address);if(*entry)return EEXIST;
-    *entry=physical|(read_only?0xec3u:0xe43u);
+    *entry=rf_gr_page_entry(physical,read_only);
     gr_dirty(entry,entry+1);return 0;
 }
 int redfin_gpu_release(uint64_t address,uint64_t size)

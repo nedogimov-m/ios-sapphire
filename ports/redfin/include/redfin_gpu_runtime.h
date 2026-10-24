@@ -24,6 +24,13 @@ static const uint32_t rf_gr_policy[]={1,0x06020001,512,128,1024,128,500,0x10000,
 
 struct rf_gr_object {uint64_t address,size,span;};
 struct rf_gr_arena {struct rf_gr_object objects[RF_GR_OBJECTS];uint64_t bytes;};
+/* msm submission flags describe dependency/cache bookkeeping, not GPU page
+ * permissions. Freedreno submits its read-only command BO as READ|WRITE|DUMP.
+ * Actual write protection belongs in the SMMU entry, as in native msm. */
+static inline bool rf_gr_submit_bo(uint32_t flags,uint64_t presumed,uint64_t address)
+{return !(flags&~0xfu) && (!presumed || presumed==address);}
+static inline uint64_t rf_gr_page_entry(uint64_t physical,bool read_only)
+{return physical|(read_only?UINT64_C(0xec3):UINT64_C(0xe43));}
 /* allocSize already includes the surface's own offset. A prepared wrapped
  * range additionally starts wrapDelta bytes into its first native page. */
 static inline bool rf_gr_surface_layout(uint64_t allocation,uint32_t offset,uint32_t delta,

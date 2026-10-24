@@ -22,6 +22,7 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOLocks.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/errno.h>
 #include <kern/clock.h>
 #include <mach/mach_time.h>
@@ -60,6 +61,7 @@ static_assert(PAGE_SIZE==RF_GR_HOST_PAGE,"native prepared IOSurface page granule
 static IOLock *gLock;
 static uint32_t gStarts;
 static uint32_t gBufferLogCount;
+static uint32_t gRejectLogCount;
 extern "C" int redfin_graphics_memory_admit(task_t);
 class GPUTransaction {
     void *previous;
@@ -101,7 +103,10 @@ void RedfinGPUStart(void)
         OSSafeReleaseNULL(gpu);IOLog("REDFIN GPU SERVICE: creation failed\n");return;
     }
     if(!gpu->start(provider)){gpu->detach(provider);IOLog("REDFIN GPU SERVICE: publication failed\n");}
-    else IOLog("REDFIN GPU SERVICE: RedwoodGPU msm1.7 ready, native A620; synchronous actual fences\n");
+    else {
+        IOLog("REDFIN GPU SERVICE: RedwoodGPU msm1.7 ready, native A620; synchronous actual fences\n");
+        IOLog("REDFIN GPU SERVICE: client-bound fence evidence enabled\n");
+    }
     gpu->release();
 }
 void RedfinGPUStop(void)
@@ -303,8 +308,11 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
         copyin((user_addr_t)r->cmds,commands,r->nr_cmds*sizeof(*commands))){result=kIOReturnVMError;goto done;}
     for(unsigned i=0;i<r->nr_bos;i++) {
         gpu_buffer *b=buffer(bos[i].handle);
-        if(!b || (bos[i].flags&~0xfu) || ((b->flags&2u) && (bos[i].flags&2u)) ||
-            (bos[i].presumed && bos[i].presumed!=b->address))goto done;
+        if(!b || !rf_gr_submit_bo(bos[i].flags,bos[i].presumed,b?b->address:0)) {
+            if(gRejectLogCount++<8)IOLog("REDFIN GPU SUBMIT REJECT: BO=%u handle=%u metadata-flags=%#x present=%u\n",
+                i,bos[i].handle,bos[i].flags,b!=NULL);
+            goto done;
+        }
     }
     for(unsigned i=0;i<r->nr_cmds;i++) {
         const msm_cmd *cmd=&commands[i];
@@ -329,6 +337,11 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
     gTiming.cleaning+=gpuNow()-began;began=gpuNow();
     result=gpuError(redfin_gpu_submit(addresses,words,count,&r->fence));
     gTiming.submitting+=gpuNow()-began;began=gpuNow();gTiming.submissions++;
+    if(result==kIOReturnSuccess && (r->fence<=8 || !(r->fence%256))) {
+        char name[20]={0};proc_selfname(name,sizeof(name));
+        IOLog("REDFIN GPU CLIENT SUBMIT: name=%s pid=%d fence=%u IBs=%u completed=1\n",
+            name,proc_selfpid(),r->fence,count);
+    }
     if(result==kIOReturnSuccess)for(unsigned i=0;i<r->nr_bos;i++) {
         gpu_buffer *b=buffer(bos[i].handle);b->fence=r->fence;
         if(b->surface && (bos[i].flags&2u)) {

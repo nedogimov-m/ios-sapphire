@@ -46,6 +46,8 @@ int push(uint32_t seed,uint64_t now,int mapped){return rf_gr_surface_push(&cache
 int layout(uint64_t allocation,uint32_t offset,uint32_t delta,uint64_t descriptor,uint64_t *size,uint32_t *pixels){
     return rf_gr_surface_layout(allocation,offset,delta,descriptor,size,pixels);
 }
+int bo(uint32_t flags,uint64_t presumed,uint64_t address){return rf_gr_submit_bo(flags,presumed,address);}
+uint64_t pte(uint64_t physical,int read_only){return rf_gr_page_entry(physical,read_only);}
 '''
         cls.lib=compile_shared(Path(cls.temp.name),harness,'graphics-performance',
             flags=('-I',str(HERE/'include')))
@@ -53,6 +55,8 @@ int layout(uint64_t allocation,uint32_t offset,uint32_t delta,uint64_t descripto
         cls.lib.push.argtypes=[C.c_uint32,C.c_uint64,C.c_int]
         cls.lib.layout.argtypes=[C.c_uint64,C.c_uint32,C.c_uint32,C.c_uint64,
                                 C.POINTER(C.c_uint64),C.POINTER(C.c_uint32)]
+        cls.lib.bo.argtypes=[C.c_uint32,C.c_uint64,C.c_uint64]
+        cls.lib.pte.argtypes=[C.c_uint64,C.c_int];cls.lib.pte.restype=C.c_uint64
 
     def test_only_required_cpu_migrations_switch_the_thread(self):
         for cpu,previous,switches in ((0,-1,0),(0,0,0),(3,-1,1),(3,3,2),(0,3,1),(7,0,1)):
@@ -81,6 +85,20 @@ int layout(uint64_t allocation,uint32_t offset,uint32_t delta,uint64_t descripto
                      (16300,0,128,16384),(128*1024**2,0,1,128*1024**2+16384),
                      (2**64-1,0,0,2**64-1)):
             self.assertEqual(layout(*args),(0,99,77))
+
+    def test_freedreno_command_dependency_flags_keep_native_page_write_protection(self):
+        # Actual captured command BO: allocation GPU_READONLY, submit flags7.
+        address=0x10000000;physical=0x1f1234000
+        for flags in (1,3,7,15):
+            self.assertEqual(self.lib.bo(flags,0,address),1)
+            self.assertEqual(self.lib.bo(flags,address,address),1)
+        for flags,presumed in ((16,0),(0x80000000,0),(7,address+4096)):
+            self.assertEqual(self.lib.bo(flags,presumed,address),0)
+        read_only=self.lib.pte(physical,1);writable=self.lib.pte(physical,0)
+        self.assertEqual(read_only&~4095,physical)
+        self.assertEqual(writable&~4095,physical)
+        self.assertEqual((read_only>>6)&3,3)  # Stage1 AP: read-only for EL0/EL1.
+        self.assertEqual((writable>>6)&3,1)   # Stage1 AP: read/write for EL0/EL1.
 
 
 if __name__=='__main__':unittest.main()

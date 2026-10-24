@@ -75,7 +75,8 @@ SMMU audits through read-only snapshot callbacks and uses the preferred
 seed/4ms surface-push policy. Post-fence cache invalidation applies only to
 GPU-written surfaces. Prepared wrapped surfaces include their native page
 delta and keep the prepared descriptor/surface alive; read-only imports
-cannot be submitted for GPU writes. Normal shutdown retires the GPU after
+keep read-only SMMU entries. Submission READ/WRITE/DUMP flags describe msm
+dependency bookkeeping and do not change those permissions. Normal shutdown retires the GPU after
 process exit. Aggregate native phase timings measure the remaining cost.
 
 An image with `--userspace-waits` uses GUI3 to inspect MobilePhone,

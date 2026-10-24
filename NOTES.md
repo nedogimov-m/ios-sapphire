@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete msm compatibility correction built and preflighted — 2026-10-25
+
+All12focused actual metadata/AP-bit/affinity/cache/layout/arena/exec/memory
+casesPASS4.160s. Native local build20261025-022036PASS/noCI; complete source
+fingerprint verified. Frozen kernel-gui-performance-v2 SHA256
+0b3c1f603414a0f75683b7894ead48fae1aa613175fe79ff218aa0dfcff821c9. Native completed-fence evidence
+now identifies the actual submitting process; shader-only work or queued
+EAGL frames cannot satisfy the next system graphics check. Bounds, readonly
+SMMU entries and every previous performance/WLAN/lifecycle change remain.
+Installed userland is unchanged; no root update is needed.
+Image ports/redfin/out/gpu-gui-performance-v2/redfin-xnu.img SHA256
+ed15c8a0d48a3028f799cdc503bc8a17944cd4747a92a109d533ea94d8b860c0; actual compiled loader/liveFDT/
+ADT/firmware/return/app-wait preflightPASS. Next is one full combined boot.
+No improved frame-time, new shader/system rendering or app result yet.
+Current device verified Fastboot, clean HFSX write_count686202. Exact
+pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x594aed0d45d1d2dc redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN performance-v1 complete capture: submit-metadata regression diagnosed — 2026-10-25
+
+Source52398fb/nativebuild20261025-020736/noCI/kernel-gui-performance-v1,
+authenticated boot975c644bc72f03ae/imagefe027e5b374559d01ee89bd858b3491ee208101cf0c845e7d886f6886127a3dc.
+User observes black display. No kernel panic; clean planned shutdown and
+verified Fastboot. HFSX clean/not-inconsistent, write_count686202. Native
+bootstrap, quota admission and EAGL installation pass, but every Mesa
+submission returnsEINVAL22: zero runtime fences/pixel passes. EAGL queues
+at least60frames and reports zero GL errors even though the driver did not
+execute them; those counters alone must not establish hardware rendering.
+
+The new check wrongly treated msm submission WRITE dependency metadata as
+an actual write permission and rejected GPU_READONLY command buffers.
+Mesa25.0.7 RING_FLAGS/msm_bo/msm_ringbuffer_sp and preferred8e611870 confirm
+that metadata combination is valid. The complete correction now accepts
+native metadata while keeping actual readonly SMMU AP bits, adds a direct
+regression case and native process-bound completed-fence evidence. No
+hardware result follows before the next full run. Other performance/WLAN
+changes remain selected; no root update or installed userland change.
+
+Wi-Fi now has measured phase evidence: source2.592s, copied19.346s (the copy
+itself14.253s vs preceding20.243s), modem19.893s, FW_READY42.037s, station
+46.506s from worker start. DT cache rereads live values with16.8million hits
+and69misses. This remains slow; do not claim it fixed. GPU performance is
+unmeasurable in the rejected-submit run. Phone/Photos never execute in it,
+so bounded wait captures only see callservicesd's normal run loop; their UI
+blocker remains unresolved. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x975c644bc72f03ae redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete graphics/Wi-Fi performance batch built; one integrated run next — 2026-10-25
 
 Combined relevant checks:78PASS/2optional private-bundle checksSKIP
