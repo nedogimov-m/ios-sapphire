@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native tables/TLB accepted; SCTLR ASIDPNE RAZ modeled in memory-v5 — 2026-10-24
+
+Source094de03, local native build145033, memory-v4 capture authenticates/
+matches803cd5eaf485c890. Context writes progress through14attempts: SCTLR0,
+CBA2R/CBAR,TCR2read38071,TCR802019,owned TTBR0root/ASID1,zero TTBR1,
+MAIR0f404ff44/MAIR1zero and TLB sync all accepted. SCTLR1027 reads27:
+ASIDPNEbit12 RAZ, other active fields agree. Strict ASIDPNE check stops
+before any valid route or ATS/TCM stage. No fault is observed; FSR400 is
+format. StaticPID1 alive; authenticated collector/public-prime/verified
+fastboot done; HFSXclean/inconsistentfalse/write_count623088 unchanged.
+Kernel ee03850bbc7a0ccefb3619ab46869aa75546038671778ef7e345d87b5137128d;
+image33cc7d754bf521564f57b4c1bd5441c5b09df98c52b7b22baef7a95e58bcd0c4.
+
+Memory-policy schema4 now permits observed ASIDPNE RAZ and audits the
+complete observed SCTLR afterwards; TCR2ASID16,TTBR0ASID1 andTCRA1zero
+stay exact. Native/upstream still request1027, matching their control
+sequence. Critical fault/IRQ/stall/endian/memory-type checks unchanged.
+6lease testsPASS in0.751s including native RAZ fixture; actual native
+object still has complete word+atomic stores/barriers. Added elapsed-ns
+measurement for the integrated memory path. Local native build145613PASS,
+no CI run. Kernel memory-v5 SHA2567efc7e563a1688ea3ed538c9effaf0cb366824e4f5a3aa72dc2095f2aa75144e;
+image ports/redfin/out/gmu-memory-v5/redfin-xnu.img,
+SHA256ac296aab9ee97a63bc00b77cba896d08868d1562770e90943b26f6ca00ad41e6.
+Actual loader/FDT/Image/firmware/hash/shim-return preflightPASS; hardware
+pending. Next owned route/positive ATS/all firmware payload verification.
+No flash/root/modem/persist/EFS/backup change; GPU/Metal still unfinished.
+Exact args v4: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x803cd5eaf485c890`.
+Exact args v5: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x658c4fbd98fcedd6`.
+
 ## REDFIN native implemented context-field model built as memory-v4 — 2026-10-24
 
 Source follows109fe3f. Memory-policy schema3 compares active TCR2 PASIZE/

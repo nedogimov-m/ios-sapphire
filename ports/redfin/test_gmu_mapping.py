@@ -48,7 +48,7 @@ static int write_word(void *c,unsigned block,uint32_t at,uint32_t v){
  if(block && at==0x34){violations++;return EPERM;} /* AArch32-only register. */
  if(block && at==0x10)v=(regs[index]&~0x38017u)|(v&0x38017u);
  if(block && at==0x30)v=(regs[index]&~0x00c0ffbfu)|(v&0x00c0ffbfu);
- if(block && at==0 && v)v=(v&~6u); /* AFE/TRE can read as zero in AArch64. */
+ if(block && at==0 && v)v=(v&~0x1006u); /* Native ASIDPNE RAZ; AFE/TRE may also be ignored. */
  if(issue==13 && block && at==0x10)v^=1;
  if(issue==14 && block && at==0x30)v^=0x100;
  if(issue==15 && block && at==0 && v)v|=0x80;

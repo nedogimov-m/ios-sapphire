@@ -115,13 +115,20 @@ complete observed word in every subsequent snapshot audit.
 
 Schema3 implements those readback semantics: TCR2 checks PASIZE/AS/SEP,
 TCR checks T0SZ/EPD0/IRGN0/ORGN0/SH0/TG0/A1/EPD1, and SCTLR checks
-M/E/CFRE/CFIE/CFCFG/HUPCF/ASIDPNE/MTCFG. Dormant TTBR1 geometry is ignored
+M/E/CFRE/CFIE/CFCFG/HUPCF/MTCFG. Dormant TTBR1 geometry is ignored
 while EPD1 is asserted. Native AArch64 does not use the short-descriptor
 CONTEXTIDR write, so it is omitted. Every complete observed word remains
 part of subsequent exact lease audits; later reserved-bit changes revoke
 ownership. The captured TCR2 `0x30061→0x38071` transition is covered alongside
 critical-field rejection, fault/IRQ/stall refusal, foreign changes and each
 of the sixteen failed stores. No register retry or firmware start is added.
+
+Memory-v4 accepts native TCR2/TCR/TTBR0/TTBR1/MAIR and TLB sync. SCTLR
+reads `0x27` for requested `0x1027`, with ASIDPNE bit12 RAZ on this SMMU;
+the other requested controls agree. It stops before route publication.
+Schema4 permits that observed ASIDPNE readback while checking TCR2's ASID16,
+TTBR0's actual ASID1 and TCR.A1=0 independently. The full observed SCTLR
+remains in later exact audits. New hardware mapping/ATS results are pending.
 
 ## Native resource and access boundary
 

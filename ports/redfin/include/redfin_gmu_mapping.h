@@ -151,11 +151,13 @@ static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *
         s->observed = got;
         /* Native active fields only: TCR2 PASIZE/AS/SEP; TCR T0SZ,
          * EPD0/IRGN0/ORGN0/SH0/TG0, A1 and EPD1; SCTLR M/E/CFRE/CFIE/
-         * CFCFG/HUPCF/ASIDPNE/MTCFG. AFE/TRE are AArch32 controls. Keep every
+         * CFCFG/HUPCF/MTCFG. AFE/TRE are AArch32 controls; ASIDPNE reads
+         * as zero on this SMMU. ASID16 and TTBR's ASID are checked separately.
+         * Keep every
          * observed bit afterwards, including reserved and dormant fields,
          * so a later unexplained change still revokes the lease. */
         uint32_t mask = step == 2 ? 0x30000u : step == 3 ? 0x38017u :
-            step == 4 ? 0x00c0ffbfu : step == 13 ? 0x001011f1u :
+            step == 4 ? 0x00c0ffbfu : step == 13 ? 0x001001f1u :
             step == 14 ? 0x030300ffu : UINT32_MAX;
         if ((got & mask) != (value & mask)) { error = EIO; goto failed; }
         if (step == 7 || step == 8) s->ttbr1_valid |= 1u << (step - 7);

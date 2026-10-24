@@ -266,6 +266,12 @@ the AArch64 sequence. The inherited snapshot value stays audited. Tests
 include the captured reserved-bit behavior and refusal of altered PASIZE,
 walk cacheability, TTBR1 ASID selection, stall and memory-type override.
 
+Native hardware memory-v4 also reports SCTLR.ASIDPNE RAZ (`0x1027→0x27`),
+with all other active controls accepted. Schema4 records that readback and
+continues requiring TCR2.AS, TTBR0 ASID1 and TCR.A1=0. The preferred
+upstream checks SCTLR.M rather than whole-word ASIDPNE equality; the local
+fault/IRQ/stall/endian/memory-type checks remain more explicit.
+
 ## Display fit and camera geometry review — 2026-10-23
 
 Rechecked both pinned HEADs in the table above. Kernel

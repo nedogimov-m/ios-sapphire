@@ -6,7 +6,7 @@ extern int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32
 /* The BSD pmap view omits this machine-private declaration. */
 extern pmap_paddr_t kvtophys(vm_offset_t);
 static const uint32_t gm_memory_policy[] = {
-    3, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
+    4, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
 };
 static struct {
     struct gm_context *context;
@@ -224,6 +224,7 @@ static int gm_memory_translate(struct gm_context *context, const struct rf_gmm_o
 static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot *global,
     const struct rf_gc_snapshot *banks)
 {
+    uint64_t started = gm_time_ns(context);
     int error = gm_memory_check(context);
     struct rf_gm_memory_owner owner = {context, gm_memory_valid, gm_memory_owns};
     struct rf_gmm_ops ops = {context, gm_memory_check, gm_memory_sample, gm_memory_read,
@@ -279,10 +280,11 @@ done:
             gm_memory.lease.fresh_banks.words[1][0], gm_memory.lease.fresh_banks.words[1][1],
             gm_memory.lease.fresh_banks.words[1][2], gm_memory.lease.fresh_banks.words[1][3],
             gm_memory.lease.fresh_banks.words[1][4], gm_memory.lease.fresh_banks.words[1][8]);
-    printf("REDFIN GMU MEMORY: result=%d stage=%u firmware=%u payloads=%u loaded=%u verified=%u allocations=%u bytes=%llu tables=%u pages=%u bank=1 slot=%u stores=%u translations=%u retained=%u; CM3 reset held, no GX/firmware execution\n",
+    printf("REDFIN GMU MEMORY: result=%d stage=%u firmware=%u payloads=%u loaded=%u verified=%u allocations=%u bytes=%llu tables=%u pages=%u bank=1 slot=%u stores=%u translations=%u retained=%u elapsed-ns=%llu; CM3 reset held, no GX/firmware execution\n",
         error, stage, gm_memory.bytes, gm_memory.firmware.payload_count, gm_memory.loaded,
         gm_memory.verified, gm_memory.allocations,
         (unsigned long long)gm_memory.allocated, gm_memory.tables.table_count, gm_memory.tables.mapped_pages,
-        gm_memory.lease.slot, gm_memory.lease.stores, gm_memory.translations, gm_memory.allocations != 0);
+        gm_memory.lease.slot, gm_memory.lease.stores, gm_memory.translations, gm_memory.allocations != 0,
+        (unsigned long long)(gm_time_ns(context) - started));
     return error;
 }
