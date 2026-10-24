@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V6 image preflight and bounded native photo-bootstrap installation complete — 2026-10-25
+
+Source9fc592e, local native build20261025-042244/noCI. Frozen kernel
+SHA25641760e04b0db9df79cc7130d23efb3bd6e0e19aac750b767a1ceda22293fbc96.
+Image ports/redfin/out/gpu-gui-performance-v6/redfin-xnu.img SHA256
+c3f05dfdf1d2f1ed4e17a7317c66cd77a9b988c355c515acd437cc5bcd33e1ae.
+Actual loader/payload/ADT/live FDT, exact firmware inventory, bounded return
+policy and private serial equality preflight PASS. No V6 hardware run yet.
+
+Fresh v7 installation is complete: all159changed blocks/651264bytes have
+saved and verified live preimages and complete device readback. Allocation
+bitmap matched; data preceded metadata/headers;20new blocks, none freed.
+Native readonly fsck PASS; root clean/write_count746527; JIB and empty
+journal unchanged. Only the new native Photos executable/job/initial log
+and bounded same-size launchd cache update were installed. Device returned
+to verified Redfin Fastboot. Do not reuse this v7 snapshot after a boot.
+
+One combined run will establish actual native library creation, Photos/
+Phone behavior, MobileGestalt serial presence, audit cost and GUI cadence.
+GPU composition was already observed in V5; final panel scaling/copy still
+uses CPU. Direct native-size GPU presentation, stable60fps, Metal and Apple
+account activation remain unfinished. No raw identifier is recorded here.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x46a64490da6d616a redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete clock/Photos/identity batch verified and built — 2026-10-25
 
 All97selected host cases PASS across the completed batch: runtime clock/
