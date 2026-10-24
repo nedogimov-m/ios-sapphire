@@ -215,6 +215,32 @@ device array; it is not a portable Redfin fix. There is no new XNU DWC3
 driver in these snapshots: loader/UEFI USB transport does not replace the
 Redfin PHY, clock and DMA work in [USB.md](USB.md).
 
+## A620 GMU memory/context adaptation — 2026-10-24
+
+Re-reviewed preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`,
+`redwood_adreno.c` step13 and `space_on()`: clean owned tables, program a
+disabled context, synchronize TLB, publish S2CR then valid SMR, and verify
+hypervisor-mediated readback. Redfin now adapts this sequence to the native
+64KiB aperture, CB1, stream5/mask `0x400`, A620 firmware memory map and
+native noncached page attributes. Global controls and foreign routes stay
+outside the write interface; initial faults are refused rather than cleared.
+
+Native Google msm `500b3a2059c1eec0fec08ec56add06320ea901a8` was rechecked
+for `arm-smmu.c` context setup, mandatory atomic ATS1PR writes and PAR
+interpretation, `arm-smmu-regs.h` FSR fault/FORMAT separation, and
+`io-pgtable-arm.c` 39-bit/4KiB/36-bit-PA NC walks. The Lito DT remains pinned
+at `afc98e2bb0716a57bf4f8d2b6191378dd7123ce4`. XNU supplies wired zeroed
+contiguous allocations and verified physical pairs; no bootloader TTBR or
+upstream A660 firmware is reused. The private inventory's A650-family GMU
+image is bound by recorded SHA256 before power writes.
+
+The preferred userland snapshots remain `a79ff0772a3454fd1ef127e181e5b3bce6c9ce18`
+and `906425b75e02b4f99eb5d7bb1ef7c9583472d772`; this stage does not change
+their ABI or publish graphics capability. CM3/GX stay stopped while the
+memory profile verifies every payload and owned ATS translation. Native
+firmware execution/HFI, GPU command output and the actual20H392 graphics
+bridge remain unfinished; see [GPU-SMMU.md](GPU-SMMU.md).
+
 ## Display fit and camera geometry review — 2026-10-23
 
 Rechecked both pinned HEADs in the table above. Kernel

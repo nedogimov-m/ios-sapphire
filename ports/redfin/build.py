@@ -91,6 +91,9 @@ def main():
     p.add_argument('--gmu-tcm-probe', action='store_true', help='isolated md0/UP held-CX plus reset-held GMU clock/counter/TCM test')
     p.add_argument('--gpu-smmu-probe', action='store_true', help='GMU test followed by read-only GPU-SMMU global/route metadata')
     p.add_argument('--gpu-smmu-context-probe', action='store_true', help='GPU-SMMU snapshot then read-only CB0/1 registers; no translations or DMA')
+    p.add_argument('--gpu-smmu-memory-probe', action='store_true', help='reset-held GMU firmware/owned RAM, translated kernel stream and positive ATS checks; isolated md0 only')
+    p.add_argument('--gmu-fw-file', type=Path, help='private native A620 GMU firmware for the memory profile')
+    p.add_argument('--gmu-fw-sha256', help='recorded SHA256 of that firmware')
     p.add_argument('--scm-probe', action='store_true', help='isolated md0/UP read-only TrustZone ABI/call/PAS capability queries')
     p.add_argument('--wifi-probe', action='store_true', help='inspect reserved SMEM transport without firmware or FIFO writes')
     p.add_argument('--wifi-native-probe', action='store_true', help='isolated md0/UP read-only AOP/SMEM/CMD-DB prerequisite snapshot')
@@ -138,6 +141,12 @@ def main():
         a.wifi_wlan_bdf_download = a.wifi_wlan_power = a.wifi_wlfw_setup = a.wifi_host_services = True
     if a.display_fit and not a.smp_gui:
         p.error('--display-fit requires the strict --smp-gui profile')
+    if a.gpu_smmu_memory_probe:
+        a.gpu_smmu_context_probe = True
+        if not a.gmu_fw_file or not a.gmu_fw_sha256:
+            p.error('--gpu-smmu-memory-probe requires its private firmware file and recorded SHA256')
+    elif a.gmu_fw_file or a.gmu_fw_sha256:
+        p.error('--gmu-fw-file/--gmu-fw-sha256 require --gpu-smmu-memory-probe')
     if a.gpu_smmu_context_probe:
         a.gpu_smmu_probe = True
     if a.gpu_smmu_probe:
@@ -202,13 +211,13 @@ def main():
                 any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('wifi_native_probe', 'wifi_power_probe', 'wifi_fw_source_probe'))):
             p.error(f'{label} requires its separate RAM-only profile')
     if a.gpu_power_probe:
-        label = '--gpu-smmu-context-probe' if a.gpu_smmu_context_probe else '--gpu-smmu-probe' if a.gpu_smmu_probe else '--gmu-tcm-probe' if a.gmu_tcm_probe else '--gpu-power-probe'
+        label = '--gpu-smmu-memory-probe' if a.gpu_smmu_memory_probe else '--gpu-smmu-context-probe' if a.gpu_smmu_context_probe else '--gpu-smmu-probe' if a.gpu_smmu_probe else '--gmu-tcm-probe' if a.gmu_tcm_probe else '--gpu-power-probe'
         if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
             p.error(f'{label} requires kernel, live DTB, CPU0 and --return-bootloader')
         competing = ('display', 'splash', 'touch_events', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
                      'capture_screen', 'userspace_stacks', 'trace_syscalls', 'smp_gui', 'shim_early_return')
         if (any(getattr(a, name) for name in competing) or
-                any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('gpu_power_probe', 'gmu_tcm_probe', 'gpu_smmu_probe', 'gpu_smmu_context_probe'))):
+                any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('gpu_power_probe', 'gmu_tcm_probe', 'gpu_smmu_probe', 'gpu_smmu_context_probe', 'gpu_smmu_memory_probe'))):
             p.error(f'{label} requires its separate RAM-only profile')
         a.rpmh_probe = True
     if a.smp_cpus is not None and not (a.smp_probe or a.smp_gui):
@@ -416,7 +425,16 @@ def main():
         if a.gmu_tcm_probe:
             from gmu_probe import add_contract
             try:
-                add_contract(tree, nodes, smmu=a.gpu_smmu_probe, context=a.gpu_smmu_context_probe)
+                firmware = firmware_hash = None
+                if a.gpu_smmu_memory_probe:
+                    from wifi_firmware import read_regular
+                    firmware = read_regular(a.gmu_fw_file, 0x40000)
+                    firmware_hash = bytes.fromhex(a.gmu_fw_sha256)
+                    verifier = out / 'gmu-fw-check'
+                    run([shutil.which('cc') or 'cc', '-std=c11', '-O2', HERE / 'gmu-fw-check.c', '-o', verifier])
+                    run([verifier, a.gmu_fw_file])
+                add_contract(tree, nodes, smmu=a.gpu_smmu_probe, context=a.gpu_smmu_context_probe,
+                             memory=a.gpu_smmu_memory_probe, firmware=firmware, firmware_sha256=firmware_hash)
             except ValueError as error:
                 p.error(str(error))
         if a.wifi_native_probe:
@@ -589,7 +607,7 @@ def main():
         if a.gmu_tcm_probe:
             command_line += ' redfingmu=1'
         if a.gpu_smmu_probe:
-            command_line += ' redfinsmmu=2' if a.gpu_smmu_context_probe else ' redfinsmmu=1'
+            command_line += ' redfinsmmu=3' if a.gpu_smmu_memory_probe else ' redfinsmmu=2' if a.gpu_smmu_context_probe else ' redfinsmmu=1'
         if a.scm_probe:
             command_line += ' redfinscm=1'
         if a.wifi_native_probe and not a.wifi_gui:
@@ -766,6 +784,10 @@ def main():
         manifest['gpu_smmu_probe'] = True
     if a.gpu_smmu_context_probe:
         manifest['gpu_smmu_context_probe'] = True
+    if a.gpu_smmu_memory_probe:
+        manifest['gpu_smmu_memory_probe'] = True
+        manifest['gmu_firmware'] = {'path': str(a.gmu_fw_file.resolve()),
+            'sha256': a.gmu_fw_sha256, 'bytes': len(firmware)}
     if a.scm_probe:
         manifest['scm_probe'] = True
     if a.wifi_native_probe:

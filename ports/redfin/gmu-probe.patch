@@ -2,7 +2,7 @@ diff --git a/bsd/dev/redfin_gmu_probe.c b/bsd/dev/redfin_gmu_probe.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_probe.c
-@@ -0,0 +1,519 @@
+@@ -0,0 +1,530 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Exact md0/UP adapter for the separately proved, held-CX GMU TCM leaf. */
 +#include <pexpert/arm64/board_config.h>
@@ -14,10 +14,14 @@ new file mode 100644
 +#include <pexpert/pexpert.h>
 +#include <pexpert/device_tree.h>
 +#include <machine/machine_routines.h>
++#include <vm/vm_kern.h>
++#include <vm/pmap.h>
++#include <arm/pmap_public.h>
 +#include "redfin_gmu_probe.h"
 +#include "redfin_gmu_tcm.h"
 +#include "redfin_gpu_smmu.h"
 +#include "redfin_gpu_context.h"
++#include "redfin_gmu_mapping.h"
 +
 +extern int redfin_spmi_return_ready(void);
 +extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
@@ -31,12 +35,14 @@ new file mode 100644
 +    redfin_gmu_parent_valid_fn parent_valid;
 +    unsigned args_bytes;
 +    char args[608];
-+    struct gm_binding bindings[15];
++    struct gm_binding bindings[20];
 +    uint64_t breadcrumbs;
 +    unsigned binding_count, dtcm_writes, smmu_reads, smmu_guard, smmu_breadcrumbs;
 +    unsigned smmu_mode, cb_reads, cb_breadcrumbs;
 +    bool active, smmu_requested, smmu_ready;
 +};
++static bool gm_memory_contract(struct gm_context *);
++static int gm_memory_run(struct gm_context *, const struct rf_gs_snapshot *, const struct rf_gc_snapshot *);
 +
 +static const uint64_t gm_reg[] = {
 +    0x00100000, 0x1f0000, 0x03d90000, 0x9000,
@@ -101,8 +107,9 @@ new file mode 100644
 +        gm_property(context, "/redfin-gpu-smmu", "format-policy", gm_smmu_format, sizeof(gm_smmu_format)) &&
 +        gm_property(context, "/redfin-gpu-smmu", "clock-policy", gm_smmu_clocks, sizeof(gm_smmu_clocks)) &&
 +        gm_property(context, "/redfin-gpu-smmu", "gic-intids", gm_smmu_irqs, sizeof(gm_smmu_irqs)) &&
-+        (mode != 2 || gm_property(context, "/redfin-gpu-smmu", "context-policy",
-+            gm_cb_policy, sizeof(gm_cb_policy)));
++        (mode < 2 || gm_property(context, "/redfin-gpu-smmu", "context-policy",
++            gm_cb_policy, sizeof(gm_cb_policy))) &&
++        (mode != 3 || gm_memory_contract(context));
 +}
 +
 +int
@@ -360,7 +367,7 @@ new file mode 100644
 +gm_cb_read(void *argument, unsigned bank, uint32_t at, uint32_t *value)
 +{
 +    struct gm_context *context = argument;
-+    if (!context || !context->cb || context->smmu_mode != 2 ||
++    if (!context || !context->cb || context->smmu_mode < 2 ||
 +        !value || !rf_gc_allowed(bank, at))
 +        return EINVAL;
 +    if (!gm_smmu_valid(context))
@@ -376,12 +383,14 @@ new file mode 100644
 +    return 0;
 +}
 +
++#include "redfin_gmu_memory.inc"
++
 +static int
 +gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
 +{
 +    struct rf_gc_snapshot snapshot = {0};
 +    int result = ECANCELED;
-+    if (context->smmu_mode == 2 && global->stable && global->map_format_supported &&
++    if (context->smmu_mode >= 2 && global->stable && global->map_format_supported &&
 +        !global->error && global->stage == 4 && global->contexts >= RF_GC_BANKS &&
 +        !global->stage2_contexts && gm_smmu_valid(context)) {
 +        printf("REDFIN GPU CONTEXT STEP: stable globals; inspect CB0/1, no table dereference\n");
@@ -403,6 +412,7 @@ new file mode 100644
 +        printf("REDFIN GPU CONTEXT BANK: bank=%u SCTLR=%#x TCR2=%#x TTBR0=%#x/%#x TCR=%#x CONTEXTID=%#x MAIR=%#x/%#x FSR=%#x FAR=%#x/%#x FSYNR=%#x\n",
 +            bank, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11]);
 +    }
++    if (!result && context->smmu_mode == 3) result = gm_memory_run(context, global, &snapshot);
 +    return result;
 +}
 +
@@ -447,7 +457,7 @@ new file mode 100644
 +        printf("REDFIN SMMU ANALYSIS: stream4=%u/%u stream5=%u/%u unreferenced=%#x malformed=%u; unreferenced is not owned\n",
 +            snapshot.gmu_matches[0], snapshot.gmu_slot[0], snapshot.gmu_matches[1], snapshot.gmu_slot[1],
 +            snapshot.unreferenced_mask, snapshot.malformed_routes);
-+    if (!result && context->smmu_mode == 2)
++    if (!result && context->smmu_mode >= 2)
 +        result = gm_cb_run(context, &snapshot);
 +    return result;
 +}
@@ -456,11 +466,12 @@ new file mode 100644
 +redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
 +    void *held_cx_context, redfin_gmu_parent_valid_fn held_cx_valid)
 +{
-+    struct gm_context context = {0};
++    static struct gm_context context;
 +    struct rf_gt_report report = {0};
 +    int result;
 +    if (__atomic_exchange_n(&gm_attempted, true, __ATOMIC_ACQ_REL))
 +        return EBUSY;
++    memset(&context, 0, sizeof(context));
 +    result = redfin_gmu_probe_contract(frozen_args, args_bytes);
 +    if (result)
 +        return result;
@@ -526,7 +537,7 @@ diff --git a/bsd/dev/redfin_gmu_probe.h b/bsd/dev/redfin_gmu_probe.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_probe.h
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,148 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Synchronous Redfin reset-held GMU probe; no standalone power authority. */
 +#ifndef REDFIN_GMU_PROBE_H
@@ -540,7 +551,8 @@ new file mode 100644
 +
 +/*
 + * bytes includes the NUL; every word and the nonzero boot nonce is unique.
-+ * Optional redfinsmmu=1 reads globals; =2 additionally reads CB0/1.
++ * Optional redfinsmmu=1 reads globals; =2 reads CB0/1; =3 prepares the
++ * explicitly bound reset-held firmware/memory mapping contract.
 + * A rejected argument list leaves the optional selection output unchanged.
 + */
 +static inline bool
@@ -585,7 +597,7 @@ new file mode 100644
 +        static const char smmu[] = "redfinsmmu=";
 +        if (n == sizeof(smmu)) {
 +            for (i = 0; i < sizeof(smmu) - 1 && args[first + i] == smmu[i]; i++) {}
-+            if (i == sizeof(smmu) - 1 && (args[first + i] == '1' || args[first + i] == '2')) {
++            if (i == sizeof(smmu) - 1 && args[first + i] >= '1' && args[first + i] <= '3') {
 +                if (smmu_seen) return false;
 +                smmu_seen = true;
 +                mode = (unsigned)(args[first + i] - '0');
@@ -1295,7 +1307,7 @@ diff --git a/bsd/dev/redfin_gpu_context.h b/bsd/dev/redfin_gpu_context.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_context.h
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,98 @@
 +/* SPDX-License-Identifier: MIT */
 +/*
 + * Read-only context 0/1 observation after a fresh GPU-SMMU global snapshot.
@@ -1310,6 +1322,7 @@ new file mode 100644
 +#define RF_GC_BANKS 2u
 +#define RF_GC_WORDS 12u
 +#define RF_GC_MAP_BYTES 0x4000u /* XNU's mapping granule; access only CB0/1. */
++#define RF_GC_FAULT_BITS 0xc00001feu /* FSR.FORMAT[10:9] is status, not a fault. */
 +
 +static const uint32_t rf_gc_offsets[RF_GC_WORDS] = {
 +    0, 0x10, 0x20, 0x24, 0x30, 0x34, 0x38, 0x3c, 0x58, 0x60, 0x64, 0x68
@@ -1381,7 +1394,7 @@ new file mode 100644
 +    for (unsigned bank = 0; bank < RF_GC_BANKS; bank++) {
 +        if (!(out->words[bank][0] & 1))
 +            out->disabled_mask |= 1u << bank;
-+        if (out->words[bank][8])
++        if (out->words[bank][8] & RF_GC_FAULT_BITS)
 +            out->fault_mask |= 1u << bank;
 +    }
 +    out->stage = 3;
@@ -1393,3 +1406,1212 @@ new file mode 100644
 +}
 +
 +#endif /* REDFIN_GPU_CONTEXT_H */
+diff --git a/bsd/dev/redfin_gmu_mapping.h b/bsd/dev/redfin_gmu_mapping.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_mapping.h
+@@ -0,0 +1,175 @@
++/* SPDX-License-Identifier: MIT */
++/* Native A620 GMU kernel-stream context, while CM3/GX remain reset-held.
++ * Sources: preferred redwood_adreno.c space_on(); native arm-smmu.c and
++ * io-pgtable-arm.c at the pins in GPU-SMMU.md. No global reset/fault ack,
++ * foreign route update, context release or firmware execution is provided.
++ */
++#ifndef REDFIN_GMU_MAPPING_H
++#define REDFIN_GMU_MAPPING_H
++#include <string.h>
++#include "redfin_gpu_context.h"
++#include "redfin_gmu_pagetables.h"
++
++#define RF_GMM_BANK 1u
++#define RF_GMM_STEPS 17u
++#define RF_GMM_TCR 0x00802019u /* 39-bit/4KiB, NC walks, outer-shareable, EPD1. */
++#define RF_GMM_TCR2 0x00038011u /* 36-bit PA, ASID16, upstream SEP. */
++#define RF_GMM_SCTLR 0x1027u /* M/TRE/AFE/CFRE/ASIDPNE; no stall or IRQ. */
++
++struct rf_gmm_ops {
++    void *context;
++    int (*check)(void *);
++    int (*sample)(void *, struct rf_gs_snapshot *, struct rf_gc_snapshot *);
++    int (*read)(void *, unsigned block, uint32_t, uint32_t *);
++    int (*write)(void *, unsigned block, uint32_t, uint32_t);
++    int (*publish)(void *, const struct rf_gm_pt_plan *);
++    int (*delay)(void *, unsigned);
++};
++
++struct rf_gmm_lease {
++    unsigned attempted, owned, active, poisoned, slot, stores, polls;
++    unsigned ttbr1_valid;
++    unsigned step, block;
++    uint32_t offset, requested, observed;
++    struct rf_gs_snapshot expected, fresh;
++    struct rf_gc_snapshot banks, fresh_banks;
++};
++
++static inline bool rf_gmm_equal(const struct rf_gmm_lease *s)
++{
++    const struct rf_gs_snapshot *a = &s->expected, *b = &s->fresh;
++    return b->stable && b->stage == 4 && !b->error &&
++        a->id0 == b->id0 && a->id1 == b->id1 && a->id2 == b->id2 && a->id7 == b->id7 &&
++        a->control == b->control && a->fault == b->fault &&
++        !memcmp(a->syndrome, b->syndrome, sizeof(a->syndrome)) &&
++        !memcmp(a->smr, b->smr, sizeof(a->smr)) && !memcmp(a->s2cr, b->s2cr, sizeof(a->s2cr)) &&
++        !memcmp(a->cbar, b->cbar, sizeof(a->cbar)) && !memcmp(a->cba2r, b->cba2r, sizeof(a->cba2r)) &&
++        s->fresh_banks.stable && s->fresh_banks.stage == 3 && !s->fresh_banks.error &&
++        !memcmp(s->banks.words, s->fresh_banks.words, sizeof(s->banks.words));
++}
++
++static inline int rf_gmm_verify(struct rf_gmm_lease *s, const struct rf_gmm_ops *o)
++{
++    if (!s || !o || !o->check || !o->sample || !o->read || !o->write ||
++        !o->publish || !o->delay || s->poisoned) return EINVAL;
++    int error = o->check(o->context);
++    if (!error) error = o->sample(o->context, &s->fresh, &s->fresh_banks);
++    if (!error && !rf_gmm_equal(s)) error = EAGAIN;
++    for (unsigned i = 0; !error && i < 2; ++i) if (s->ttbr1_valid & (1u << i)) {
++        uint32_t value;
++        error = o->read(o->context, 1, 0x28 + 4u*i, &value);
++        if (!error && value) error = EAGAIN;
++    }
++    if (!error) error = o->check(o->context);
++    if (error) { s->poisoned = 1; s->active = 0; }
++    return error;
++}
++
++static inline int rf_gmm_step(const struct rf_gmm_lease *s, const struct rf_gm_pt_plan *p,
++    unsigned step, unsigned *block, uint32_t *at, uint32_t *value)
++{
++    if (!s || !s->owned || !p || step >= RF_GMM_STEPS || !block || !at || !value) return EINVAL;
++    *block = 1; *at = 0; *value = 0;
++    switch (step) {
++    case 0: break;
++    case 1: *block = 0; *at = 0x1804; *value = 1; break;
++    case 2: *block = 0; *at = 0x1004; *value = 0x1f300; break;
++    case 3: *at = 0x10; *value = RF_GMM_TCR2; break;
++    case 4: *at = 0x30; *value = RF_GMM_TCR; break;
++    case 5: *at = 0x20; *value = (uint32_t)p->root_physical; break;
++    case 6: *at = 0x24; *value = (uint32_t)(p->root_physical >> 32) | 0x10000; break;
++    case 7: *at = 0x28; break;
++    case 8: *at = 0x2c; break;
++    case 9: *at = 0x34; break;
++    case 10: *at = 0x38; *value = p->mair0; break;
++    case 11: *at = 0x3c; break;
++    case 12: *at = 0x610; *value = RF_GMM_BANK; break;
++    case 13: *at = 0x7f0; *value = 1; break;
++    case 14: *value = RF_GMM_SCTLR; break;
++    case 15: *block = 0; *at = 0xc00 + 4u*s->slot; *value = RF_GMM_BANK; break;
++    default: *block = 0; *at = 0x800 + 4u*s->slot; *value = 0x84000005; break;
++    }
++    return 0;
++}
++
++static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *o,
++    const struct rf_gs_snapshot *initial, const struct rf_gc_snapshot *banks,
++    const struct rf_gm_pt_plan *plan, const struct rf_gm_memory_owner *owner)
++{
++    int error = EINVAL;
++    if (!s || !o || !o->check || !o->sample || !o->read || !o->write || !o->publish ||
++        !o->delay || !initial || !banks || !plan || !owner || !owner->valid || !owner->owns) return error;
++    if (s->attempted) return EBUSY;
++    s->attempted = 1;
++    if (!rf_gm_snapshot_format(initial) || initial->id0 != 0x4c017e05u ||
++        initial->id1 != 0x20000005u || initial->id2 != 0x5511u || initial->id7 != 0x24u ||
++        initial->fault || (initial->control & 9u) || initial->gmu_matches[0] || initial->gmu_matches[1] ||
++        initial->references[RF_GMM_BANK] || initial->cbar[RF_GMM_BANK] || initial->cba2r[RF_GMM_BANK] ||
++        !banks->stable || banks->stage != 3 || banks->error || banks->fault_mask ||
++        banks->disabled_mask != 3 || plan->granule != 0x1000 || plan->virtual_bits != 39 ||
++        plan->physical_bits != 36 || plan->mair0 != 0xf404ff44u ||
++        !rf_gm_memory_valid(&plan->tables) || plan->root_physical != plan->tables.physical ||
++        !plan->table_count || plan->table_count > RF_GM_PT_MAX_TABLES ||
++        plan->table_bytes != (uint64_t)plan->table_count * 4096 || plan->table_bytes > plan->tables.owned_bytes ||
++        !plan->extent_count || plan->extent_count > RF_GM_PT_MAX_EXTENTS) { error = EPERM; goto failed; }
++    s->slot = initial->streams;
++    for (unsigned i = 0; i < initial->streams; ++i)
++        if (!(initial->smr[i] & 0x80000000u)) { s->slot = i; break; }
++    if (s->slot == initial->streams) { error = ENOSPC; goto failed; }
++    if (!owner->valid(owner->context) || !owner->owns(owner->context, &plan->tables, RF_GM_PT_TABLE_POOL))
++        { error = EACCES; goto failed; }
++    for (unsigned i = 0; i < plan->extent_count; ++i)
++        if (!owner->valid(owner->context) || !owner->owns(owner->context, &plan->extents[i].memory, RF_GM_PT_DATA))
++            { error = EACCES; goto failed; }
++    s->expected = *initial; s->banks = *banks;
++    error = rf_gmm_verify(s, o); if (error) goto failed;
++    error = o->publish(o->context, plan); if (error) goto failed;
++    error = rf_gmm_verify(s, o); if (error) goto failed;
++    s->owned = 1;
++    for (unsigned step = 0; step < RF_GMM_STEPS; ++step) {
++        unsigned block; uint32_t at, value, got = 0;
++        error = rf_gmm_verify(s, o); if (error) goto failed;
++        error = rf_gmm_step(s, plan, step, &block, &at, &value); if (error) goto failed;
++        s->step = step; s->block = block; s->offset = at;
++        s->requested = value; s->observed = 0;
++        ++s->stores;
++        error = o->write(o->context, block, at, value); if (error) goto failed;
++        if (step == 12) continue; /* command register, no readable stored value */
++        if (step == 13) {
++            for (unsigned us = 0; us < 1000; ++us) {
++                error = o->check(o->context); if (error) goto failed;
++                ++s->polls; error = o->read(o->context, 1, 0x7f4, &got); if (error) goto failed;
++                s->observed = got;
++                if (!(got & 1)) break;
++                error = o->delay(o->context, 1); if (error) goto failed;
++            }
++            if (got & 1) { error = ETIMEDOUT; goto failed; }
++            continue;
++        }
++        error = o->check(o->context); if (error) goto failed;
++        error = o->read(o->context, block, at, &got); if (error) goto failed;
++        s->observed = got;
++        /* The native/upstream contract tests CBAR's type and S2CR's
++         * implemented route/privilege fields. Retain the complete observed
++         * word afterwards; reserved HYP readback bits are not assumptions. */
++        uint32_t mask = step == 2 ? 0x30000u : step == 15 ? 0x030300ffu : UINT32_MAX;
++        if ((got & mask) != (value & mask)) { error = EIO; goto failed; }
++        if (step == 7 || step == 8) s->ttbr1_valid |= 1u << (step - 7);
++        if (!block) {
++            if (step == 1) {
++                s->expected.cba2r[1] = value;
++                s->banks.words[1][8] = (s->banks.words[1][8] & ~0x600u) | 0x400u;
++            } else if (step == 2) s->expected.cbar[1] = got;
++            else if (step == 15) s->expected.s2cr[s->slot] = got;
++            else s->expected.smr[s->slot] = value;
++        } else for (unsigned i = 0; i < RF_GC_WORDS; ++i)
++            if (rf_gc_offsets[i] == at) s->banks.words[1][i] = value;
++    }
++    error = rf_gmm_verify(s, o); if (error) goto failed;
++    s->active = 1;
++    return 0;
++failed:
++    s->poisoned = 1; s->active = 0;
++    return error;
++}
++#endif
+diff --git a/bsd/dev/redfin_gmu_pagetables.h b/bsd/dev/redfin_gmu_pagetables.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_pagetables.h
+@@ -0,0 +1,291 @@
++/* SPDX-License-Identifier: MIT */
++/*
++ * CPU-only A620 GMU 4KiB/LPAE table construction. No SMMU, route, TTBR, TLB,
++ * cache-publication or firmware-start operation is provided. Every memory
++ * object must already be exclusively allocated and unreachable by DMA.
++ * The ownership callbacks prove the host/physical pair and complete lifetime;
++ * a routing snapshot alone cannot do so. References: ../GPU-SMMU.md.
++ */
++#ifndef REDFIN_GMU_PAGETABLES_H
++#define REDFIN_GMU_PAGETABLES_H
++
++#include "redfin_gmu_firmware.h"
++#include "redfin_gpu_smmu.h"
++
++#define RF_GM_PT_MAX_TABLES 40u
++#define RF_GM_PT_MAX_EXTENTS (REDFIN_GMU_MAX_REGIONS - 2u)
++#define RF_GM_PT_RAM_BASE UINT64_C(0x180000000)
++#define RF_GM_PT_RAM_BYTES UINT64_C(0x80000000)
++
++struct rf_gm_memory {
++    void *host;
++    uint64_t physical, owned_bytes, token;
++    uint32_t gmu_address;
++};
++
++enum { RF_GM_PT_DATA = 1, RF_GM_PT_TABLE_POOL = 2 };
++struct rf_gm_memory_owner {
++    void *context;
++    bool (*valid)(void *);
++    bool (*owns)(void *, const struct rf_gm_memory *, unsigned);
++};
++
++struct rf_gm_pt_node {
++    uint32_t level, prefix, parent, slot;
++};
++
++struct rf_gm_pt_extent {
++    struct rf_gm_memory memory;
++    uint32_t mapped_bytes, permissions;
++};
++
++struct rf_gm_pt_plan {
++    uint32_t table_count, extent_count, mapped_pages, mapped_bytes;
++    uint32_t granule, virtual_bits, physical_bits, mair0;
++    uint64_t root_physical, table_bytes;
++    struct rf_gm_memory tables;
++    struct rf_gm_pt_node nodes[RF_GM_PT_MAX_TABLES];
++    struct rf_gm_pt_extent extents[RF_GM_PT_MAX_EXTENTS];
++};
++
++static inline bool
++rf_gm_memory_valid(const struct rf_gm_memory *memory)
++{
++    if (!memory)
++        return false;
++    uint64_t host = (uint64_t)(uintptr_t)memory->host;
++    return host && memory->token && !(memory->physical & 0xfffu) &&
++        memory->owned_bytes && !(memory->owned_bytes & 0xfffu) &&
++        memory->owned_bytes <= 0x200000u &&
++        memory->physical >= RF_GM_PT_RAM_BASE &&
++        memory->physical - RF_GM_PT_RAM_BASE < RF_GM_PT_RAM_BYTES &&
++        memory->owned_bytes <= RF_GM_PT_RAM_BYTES -
++            (memory->physical - RF_GM_PT_RAM_BASE) &&
++        memory->owned_bytes <= UINTPTR_MAX &&
++        host <= UINTPTR_MAX - memory->owned_bytes;
++}
++
++static inline bool
++rf_gm_overlaps(uint64_t first, uint64_t first_bytes,
++    uint64_t second, uint64_t second_bytes)
++{
++    if (!first_bytes || !second_bytes)
++        return false;
++    return first <= second ? second - first < first_bytes : first - second < second_bytes;
++}
++
++static inline bool
++rf_gm_host_alias(const struct rf_gm_memory *memory, const void *p, size_t bytes)
++{
++    return rf_gm_overlaps((uint64_t)(uintptr_t)memory->host, memory->owned_bytes,
++        (uint64_t)(uintptr_t)p, bytes);
++}
++
++static inline bool
++rf_gm_memory_alias(const struct rf_gm_memory *a, const struct rf_gm_memory *b)
++{
++    return a->token == b->token ||
++        rf_gm_overlaps(a->physical, a->owned_bytes, b->physical, b->owned_bytes) ||
++        rf_gm_overlaps((uint64_t)(uintptr_t)a->host, a->owned_bytes,
++            (uint64_t)(uintptr_t)b->host, b->owned_bytes);
++}
++
++static inline bool
++rf_gm_snapshot_format(const struct rf_gs_snapshot *s)
++{
++    return s && s->stable && s->error == 0 && s->stage == 4 && s->map_format_supported &&
++        s->page_bytes == 0x1000 && s->global_bytes == 0x8000 &&
++        s->streams && s->streams <= RF_GS_MAX_STREAMS &&
++        s->contexts && s->contexts <= RF_GS_MAX_CONTEXTS &&
++        s->streams == (s->id0 & 255u) && s->contexts == (s->id1 & 255u) &&
++        (s->id1 & 0xf0000000u) == 0x20000000u &&
++        s->stage2_contexts == ((s->id1 >> 16) & 255u) &&
++        s->stage2_contexts <= s->contexts &&
++        s->sid_bits == ((s->id0 >> 9) & 15u) &&
++        s->input_bits == rf_gs_address_bits(s->id2 & 15u) && s->input_bits &&
++        s->output_bits == rf_gs_address_bits((s->id2 >> 4) & 15u) &&
++        s->virtual_bits == rf_gs_address_bits((s->id2 >> 8) & 15u) &&
++        (s->id0 & (1u << 30)) && (s->id0 & (1u << 27)) && !(s->id0 & (1u << 8)) &&
++        (s->id2 & (1u << 12)) && rf_gs_address_bits((s->id2 >> 4) & 15u) >= 36 &&
++        rf_gs_address_bits((s->id2 >> 8) & 15u) >= 39 &&
++        ((s->id0 >> 9) & 15u) >= 11 && !s->malformed_routes;
++}
++
++static inline int
++rf_gm_pt_node_index(struct rf_gm_pt_plan *plan, uint32_t level,
++    uint32_t prefix, uint32_t parent, uint32_t slot, uint32_t *index)
++{
++    uint32_t i;
++    for (i = 0; i < plan->table_count; i++) {
++        if (plan->nodes[i].level == level && plan->nodes[i].prefix == prefix) {
++            if (plan->nodes[i].parent != parent || plan->nodes[i].slot != slot)
++                return EINVAL;
++            *index = i;
++            return 0;
++        }
++    }
++    if (plan->table_count == RF_GM_PT_MAX_TABLES)
++        return ENOSPC;
++    plan->nodes[i].level = level;
++    plan->nodes[i].prefix = prefix;
++    plan->nodes[i].parent = parent;
++    plan->nodes[i].slot = slot;
++    plan->table_count++;
++    *index = i;
++    return 0;
++}
++
++static inline void
++rf_gm_write_le64(uint8_t *destination, uint64_t value)
++{
++    for (unsigned i = 0; i < 8; i++)
++        destination[i] = (uint8_t)(value >> (8*i));
++}
++
++/*
++ * All malformed/denied inputs fail before touching the table pool. On a later
++ * lifetime revocation, stop writing immediately at the next bounded operation
++ * and leave output unchanged. The pool may then contain incomplete CPU-only
++ * tables: no success means no caller may publish/install them. The immutable
++ * firmware blob, memory metadata and callback state must not change during
++ * this call. Callback state must remain disjoint from the writable pool.
++ */
++static inline int
++rf_gm_pt_build(const struct rf_gs_snapshot *snapshot, uint32_t chip,
++    const void *image, size_t image_bytes, const struct rf_gm_memory *backing,
++    unsigned backing_count, const struct rf_gm_memory *table_pool,
++    const struct rf_gm_memory_owner *owner, struct rf_gm_pt_plan *output)
++{
++    struct redfin_gmu_fw_plan firmware;
++    struct rf_gm_pt_plan plan = {0};
++    struct rf_gm_memory pool;
++    uint64_t image_start = (uint64_t)(uintptr_t)image;
++    uint32_t i, j, l2, l3;
++    int error;
++    if (!output || !backing || !table_pool || !owner || !owner->valid || !owner->owns ||
++        backing_count > RF_GM_PT_MAX_EXTENTS || !image ||
++        image_bytes > UINTPTR_MAX || image_start > UINTPTR_MAX - image_bytes ||
++        (uintptr_t)output > UINTPTR_MAX - sizeof(*output))
++        return EINVAL;
++    if (!rf_gm_snapshot_format(snapshot))
++        return ENOTSUP;
++    error = redfin_gmu_fw_plan_make(chip, image, image_bytes, &firmware);
++    if (error)
++        return error;
++    if (backing_count != firmware.region_count - 2u)
++        return EINVAL;
++    pool = *table_pool;
++    if (pool.gmu_address != 0 || !rf_gm_memory_valid(&pool) ||
++        rf_gm_host_alias(&pool, image, image_bytes) ||
++        rf_gm_host_alias(&pool, snapshot, sizeof(*snapshot)) ||
++        rf_gm_host_alias(&pool, backing, backing_count * sizeof(*backing)) ||
++        rf_gm_host_alias(&pool, table_pool, sizeof(*table_pool)) ||
++        rf_gm_host_alias(&pool, owner, sizeof(*owner)) ||
++        rf_gm_host_alias(&pool, output, sizeof(*output)) ||
++        rf_gm_overlaps((uintptr_t)output, sizeof(*output), image_start, image_bytes) ||
++        rf_gm_overlaps((uintptr_t)output, sizeof(*output),
++            (uintptr_t)snapshot, sizeof(*snapshot)) ||
++        rf_gm_overlaps((uintptr_t)output, sizeof(*output),
++            (uintptr_t)backing, backing_count * sizeof(*backing)) ||
++        rf_gm_overlaps((uintptr_t)output, sizeof(*output),
++            (uintptr_t)table_pool, sizeof(*table_pool)) ||
++        rf_gm_overlaps((uintptr_t)output, sizeof(*output),
++            (uintptr_t)owner, sizeof(*owner)))
++        return EINVAL;
++    plan.extent_count = backing_count;
++    plan.granule = 0x1000;
++    plan.virtual_bits = 39;
++    plan.physical_bits = 36;
++    plan.mair0 = 0xf404ff44u;
++    plan.root_physical = pool.physical;
++    plan.tables = pool;
++    plan.table_count = 1;
++    plan.nodes[0].level = 1;
++    plan.nodes[0].parent = UINT32_MAX;
++
++    for (i = 0; i < backing_count; i++) {
++        const struct redfin_gmu_region *region = &firmware.regions[i + 2];
++        struct rf_gm_pt_extent *extent = &plan.extents[i];
++        for (j = 0; j < backing_count; j++)
++            if (backing[j].gmu_address == region->address)
++                break;
++        if (j == backing_count)
++            return EINVAL;
++        extent->memory = backing[j];
++        extent->mapped_bytes = region->mapped_bytes;
++        extent->permissions = region->permissions;
++        if (!rf_gm_memory_valid(&extent->memory) ||
++            extent->memory.owned_bytes < region->mapped_bytes ||
++            rf_gm_memory_alias(&pool, &extent->memory) ||
++            rf_gm_host_alias(&extent->memory, image, image_bytes) ||
++            rf_gm_host_alias(&extent->memory, output, sizeof(*output)))
++            return EINVAL;
++        for (j = 0; j < i; j++)
++            if (rf_gm_memory_alias(&plan.extents[j].memory, &extent->memory))
++                return EINVAL;
++        for (j = 0; j < region->mapped_bytes; j += 0x1000) {
++            uint32_t va = region->address + j;
++            error = rf_gm_pt_node_index(&plan, 2, va >> 30, 0, (va >> 30) & 511u, &l2);
++            if (error)
++                return error;
++            error = rf_gm_pt_node_index(&plan, 3, va >> 21, l2, (va >> 21) & 511u, &l3);
++            if (error)
++                return error;
++            plan.mapped_pages++;
++        }
++        plan.mapped_bytes += region->mapped_bytes;
++    }
++    plan.table_bytes = (uint64_t)plan.table_count * 0x1000;
++    if (plan.table_bytes > pool.owned_bytes)
++        return ENOSPC;
++    if (!owner->valid(owner->context))
++        return ECANCELED;
++    if (!owner->owns(owner->context, &pool, RF_GM_PT_TABLE_POOL))
++        return EACCES;
++    for (i = 0; i < plan.extent_count; i++) {
++        if (!owner->valid(owner->context))
++            return ECANCELED;
++        if (!owner->owns(owner->context, &plan.extents[i].memory, RF_GM_PT_DATA))
++            return EACCES;
++    }
++    /* All metadata is copied; revalidate the lifetime before the first write. */
++    if (!owner->valid(owner->context))
++        return ECANCELED;
++    for (i = 0; i < plan.table_count; i++) {
++        if (!owner->valid(owner->context))
++            return ECANCELED;
++        uint8_t *table = (uint8_t *)pool.host + i * 0x1000;
++        for (j = 0; j < 0x1000; j++)
++            table[j] = 0;
++    }
++    for (i = 1; i < plan.table_count; i++) {
++        const struct rf_gm_pt_node *node = &plan.nodes[i];
++        uint64_t descriptor = (pool.physical + (uint64_t)i * 0x1000) | 3u;
++        if (!owner->valid(owner->context))
++            return ECANCELED;
++        rf_gm_write_le64((uint8_t *)pool.host + node->parent * 0x1000 + node->slot * 8, descriptor);
++    }
++    for (i = 0; i < plan.extent_count; i++) {
++        const struct rf_gm_pt_extent *extent = &plan.extents[i];
++        for (j = 0; j < extent->mapped_bytes; j += 0x1000) {
++            uint32_t va = extent->memory.gmu_address + j;
++            uint64_t descriptor = extent->memory.physical + j;
++            /* Native RW/no-CACHE map: normal-NC, outer-shareable, AF, nG. */
++            descriptor |= (extent->permissions & REDFIN_GMU_PRIV) ? 0xe03u : 0xe43u;
++            for (l3 = 0; l3 < plan.table_count; l3++)
++                if (plan.nodes[l3].level == 3 && plan.nodes[l3].prefix == va >> 21)
++                    break;
++            if (l3 == plan.table_count)
++                return EINVAL;
++            if (!owner->valid(owner->context))
++                return ECANCELED;
++            rf_gm_write_le64((uint8_t *)pool.host + l3 * 0x1000 + ((va >> 12) & 511u) * 8, descriptor);
++        }
++    }
++    if (!owner->valid(owner->context))
++        return ECANCELED;
++    *output = plan;
++    return 0;
++}
++
++#endif /* REDFIN_GMU_PAGETABLES_H */
+diff --git a/bsd/dev/redfin_gmu_firmware.h b/bsd/dev/redfin_gmu_firmware.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_firmware.h
+@@ -0,0 +1,474 @@
++/* SPDX-License-Identifier: MIT */
++/*
++ * Redfin A620v2 GMU firmware planning and the KGSL HFI v2 wire layout.
++ * Hardware protocol references are pinned in ../GMU.md. This header performs
++ * no MMIO, allocation, SMMU programming, power voting, or firmware start.
++ */
++#ifndef REDFIN_GMU_FIRMWARE_H
++#define REDFIN_GMU_FIRMWARE_H
++
++#include <stdint.h>
++#include <stddef.h>
++#include <sys/errno.h>
++
++#define REDFIN_GMU_CHIP_ID 0x06020001u
++#define REDFIN_GMU_PHYS 0x03d6a000u
++#define REDFIN_GMU_REG_BYTES 0x30000u
++#define REDFIN_GMU_ITCM_ADDR 0u
++#define REDFIN_GMU_DTCM_ADDR 0x10004000u
++#define REDFIN_GMU_TCM_BYTES 0x4000u
++#define REDFIN_GMU_ITCM_MMIO 0x3000u
++#define REDFIN_GMU_DTCM_MMIO 0x7000u
++#define REDFIN_GMU_PAGE_BYTES 0x1000u
++#define REDFIN_GMU_MAX_FILE_BYTES 0x40000u
++#define REDFIN_GMU_MAX_DMA_BYTES 0x100000u
++#define REDFIN_GMU_MAX_RECORDS 64u
++#define REDFIN_GMU_MAX_REGIONS 20u
++#define REDFIN_GMU_MAX_PAYLOADS 32u
++
++/* These permission bits describe the plan, not an ARM SMMU descriptor. */
++#define REDFIN_GMU_READ 1u
++#define REDFIN_GMU_WRITE 2u
++#define REDFIN_GMU_PRIV 4u
++
++#define REDFIN_GMU_HFI_QUEUE_COUNT 4u
++#define REDFIN_GMU_HFI_QUEUE_WORDS 1024u
++#define REDFIN_GMU_HFI_TABLE_BYTES 216u
++#define REDFIN_GMU_HFI_QUEUE_OFFSET 224u
++#define REDFIN_GMU_HFI_REQUEST_BYTES 0x40e8u
++#define REDFIN_GMU_HFI_MAPPED_BYTES 0x5000u
++#define REDFIN_GMU_LOG_BYTES 0x1000u
++
++enum redfin_gmu_memory_kind {
++    REDFIN_GMU_ITCM = 0,
++    REDFIN_GMU_DTCM,
++    REDFIN_GMU_CACHE,
++    REDFIN_GMU_KERNEL,
++    REDFIN_GMU_HFI,
++    REDFIN_GMU_LOG
++};
++
++struct redfin_gmu_region {
++    uint32_t address;
++    uint32_t requested_bytes;
++    uint32_t mapped_bytes;
++    uint32_t kind;
++    uint32_t permissions;
++    uint32_t persistent;
++};
++
++struct redfin_gmu_payload {
++    uint32_t file_offset;
++    uint32_t address;
++    uint32_t bytes;
++    uint32_t region;
++};
++
++struct redfin_gmu_fw_plan {
++    uint32_t file_bytes;
++    uint32_t record_count;
++    uint32_t metadata_count;
++    uint32_t region_count;
++    uint32_t payload_count;
++    uint32_t initialized_bytes;
++    uint32_t dma_bytes;
++    /* core, core_dev, power, power_dev, HFI; DTCM byte offset 0x3fe0. */
++    uint32_t versions[5];
++    uint32_t hfi_address;
++    uint32_t log_address;
++    struct redfin_gmu_region regions[REDFIN_GMU_MAX_REGIONS];
++    struct redfin_gmu_payload payloads[REDFIN_GMU_MAX_PAYLOADS];
++};
++
++static inline uint32_t
++redfin_gmu_read_le32(const uint8_t *p)
++{
++    return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
++        (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
++}
++
++static inline void
++redfin_gmu_write_le32(uint8_t *p, uint32_t value)
++{
++    p[0] = (uint8_t)value;
++    p[1] = (uint8_t)(value >> 8);
++    p[2] = (uint8_t)(value >> 16);
++    p[3] = (uint8_t)(value >> 24);
++}
++
++static inline int
++redfin_gmu_contains(uint32_t base, uint32_t size,
++    uint32_t address, uint32_t bytes)
++{
++    return bytes != 0 && address >= base && address - base < size &&
++        bytes <= size - (address - base);
++}
++
++static inline int
++redfin_gmu_domain(uint32_t address, uint32_t bytes)
++{
++    if (redfin_gmu_contains(REDFIN_GMU_ITCM_ADDR,
++            REDFIN_GMU_TCM_BYTES, address, bytes))
++        return REDFIN_GMU_ITCM;
++    if (redfin_gmu_contains(REDFIN_GMU_DTCM_ADDR,
++            REDFIN_GMU_TCM_BYTES, address, bytes))
++        return REDFIN_GMU_DTCM;
++    if (redfin_gmu_contains(0x4000u, 0xffc000u, address, bytes))
++        return REDFIN_GMU_CACHE;
++    if (redfin_gmu_contains(0x60000000u, 0x20000000u, address, bytes))
++        return REDFIN_GMU_KERNEL;
++    /* A620's current kernel firmware does not request a user-context map. */
++    return -1;
++}
++
++static inline int
++redfin_gmu_add_region(struct redfin_gmu_fw_plan *plan,
++    uint32_t address, uint32_t requested, uint32_t kind, uint32_t persistent)
++{
++    uint64_t rounded = ((uint64_t)requested + 0xfffu) & ~UINT64_C(0xfff);
++    uint64_t end = (uint64_t)address + rounded;
++    uint32_t i;
++    struct redfin_gmu_region *region;
++
++    if (!requested || (address & 0xfffu) || rounded > REDFIN_GMU_MAX_DMA_BYTES ||
++        end > UINT64_C(0x80000000) ||
++        redfin_gmu_domain(address, (uint32_t)rounded) !=
++        (kind == REDFIN_GMU_HFI || kind == REDFIN_GMU_LOG ?
++            REDFIN_GMU_KERNEL : (int)kind))
++        return EINVAL;
++    if (plan->region_count == REDFIN_GMU_MAX_REGIONS)
++        return ENOSPC;
++    if (rounded > REDFIN_GMU_MAX_DMA_BYTES - plan->dma_bytes)
++        return EFBIG;
++    for (i = 0; i < plan->region_count; i++) {
++        const struct redfin_gmu_region *previous = &plan->regions[i];
++        if ((uint64_t)address < (uint64_t)previous->address +
++                previous->mapped_bytes && previous->address < end)
++            return EINVAL;
++    }
++    region = &plan->regions[plan->region_count++];
++    region->address = address;
++    region->requested_bytes = requested;
++    region->mapped_bytes = (uint32_t)rounded;
++    region->kind = kind;
++    region->permissions = REDFIN_GMU_READ | REDFIN_GMU_WRITE |
++        (kind == REDFIN_GMU_HFI ? 0u : REDFIN_GMU_PRIV);
++    region->persistent = persistent;
++    plan->dma_bytes += (uint32_t)rounded;
++    return 0;
++}
++
++/*
++ * Validate the entire immutable blob before returning any usable write plan.
++ * Native preallocations in TCM refer to the two existing full TCM windows;
++ * they are not DMA allocations, and their requests may overlap. Non-TCM
++ * preallocations must be distinct. Data header type/value are opaque: the
++ * actual A650 image uses 0xefbeadde in both fields, and KGSL ignores them.
++ * No output is modified on error. A valid plan does not authenticate firmware.
++ */
++static inline int
++redfin_gmu_fw_plan_make(uint32_t chip, const void *image, size_t bytes,
++    struct redfin_gmu_fw_plan *output)
++{
++    const uint8_t *fw = (const uint8_t *)image;
++    struct redfin_gmu_fw_plan plan = {0};
++    uint32_t offset = 0, data_seen = 0, i, j, next_kernel = 0x60000000u;
++    int error;
++
++    if (!fw || !output || chip != REDFIN_GMU_CHIP_ID || bytes < 16 ||
++        bytes > REDFIN_GMU_MAX_FILE_BYTES || (bytes & 3u))
++        return EINVAL;
++    plan.file_bytes = (uint32_t)bytes;
++    plan.region_count = 2;
++    plan.regions[0].kind = REDFIN_GMU_ITCM;
++    plan.regions[0].address = REDFIN_GMU_ITCM_ADDR;
++    plan.regions[1].kind = REDFIN_GMU_DTCM;
++    plan.regions[1].address = REDFIN_GMU_DTCM_ADDR;
++    for (i = 0; i < 2; i++) {
++        plan.regions[i].requested_bytes = REDFIN_GMU_TCM_BYTES;
++        plan.regions[i].mapped_bytes = REDFIN_GMU_TCM_BYTES;
++        plan.regions[i].permissions = REDFIN_GMU_READ | REDFIN_GMU_WRITE;
++    }
++    while (offset < bytes) {
++        uint32_t address, size, type, value;
++        int kind;
++        if (bytes - offset < 16 || ++plan.record_count > REDFIN_GMU_MAX_RECORDS)
++            return EINVAL;
++        address = redfin_gmu_read_le32(fw + offset);
++        size = redfin_gmu_read_le32(fw + offset + 4);
++        type = redfin_gmu_read_le32(fw + offset + 8);
++        value = redfin_gmu_read_le32(fw + offset + 12);
++        offset += 16;
++        if (size == 0) {
++            if (data_seen)
++                return EINVAL;
++            plan.metadata_count++;
++            if (type >= 2 && type <= 6)
++                continue; /* Known optional metadata; versions come from DTCM. */
++            if (type != 1 && type != 7)
++                return ENOTSUP;
++            if ((address & 3u) || (value & 3u))
++                return EINVAL;
++            kind = redfin_gmu_domain(address, value);
++            if (kind < 0)
++                return EINVAL;
++            if (kind == REDFIN_GMU_ITCM || kind == REDFIN_GMU_DTCM)
++                continue;
++            error = redfin_gmu_add_region(&plan, address, value,
++                (uint32_t)kind, type == 7);
++            if (error)
++                return error;
++            if (kind == REDFIN_GMU_KERNEL && address +
++                    plan.regions[plan.region_count - 1].mapped_bytes > next_kernel)
++                next_kernel = address + plan.regions[plan.region_count - 1].mapped_bytes;
++            continue;
++        }
++        data_seen = 1;
++        if (size > bytes - offset || ((address | size) & 3u) ||
++            redfin_gmu_domain(address, size) < 0)
++            return EINVAL;
++        if (plan.payload_count == REDFIN_GMU_MAX_PAYLOADS)
++            return ENOSPC;
++        for (i = 0; i < plan.region_count; i++)
++            if (redfin_gmu_contains(plan.regions[i].address,
++                    plan.regions[i].requested_bytes, address, size))
++                break;
++        if (i == plan.region_count)
++            return EINVAL;
++        for (j = 0; j < plan.payload_count; j++) {
++            const struct redfin_gmu_payload *previous = &plan.payloads[j];
++            if ((uint64_t)address < (uint64_t)previous->address +
++                    previous->bytes && previous->address < (uint64_t)address + size)
++                return EINVAL;
++        }
++        plan.payloads[plan.payload_count].file_offset = offset;
++        plan.payloads[plan.payload_count].address = address;
++        plan.payloads[plan.payload_count].bytes = size;
++        plan.payloads[plan.payload_count++].region = i;
++        plan.initialized_bytes += size;
++        offset += size;
++    }
++    if (!plan.payload_count || !plan.metadata_count)
++        return EINVAL;
++    /* A partial/missing version tuple cannot determine the start/HFI ABI. */
++    for (i = 0; i < 5; i++) {
++        uint32_t address = REDFIN_GMU_DTCM_ADDR + 0x3fe0u + i * 4;
++        for (j = 0; j < plan.payload_count; j++) {
++            const struct redfin_gmu_payload *payload = &plan.payloads[j];
++            if (redfin_gmu_contains(payload->address, payload->bytes, address, 4)) {
++                plan.versions[i] = redfin_gmu_read_le32(fw + payload->file_offset +
++                    address - payload->address);
++                break;
++            }
++        }
++        if (j == plan.payload_count)
++            return EINVAL;
++    }
++    if ((plan.versions[4] >> 16) != 0x2000u)
++        return ENOTSUP;
++    plan.hfi_address = next_kernel;
++    error = redfin_gmu_add_region(&plan, next_kernel,
++        REDFIN_GMU_HFI_REQUEST_BYTES, REDFIN_GMU_HFI, 0);
++    if (error)
++        return error;
++    next_kernel += REDFIN_GMU_HFI_MAPPED_BYTES;
++    plan.log_address = next_kernel;
++    error = redfin_gmu_add_region(&plan, next_kernel,
++        REDFIN_GMU_LOG_BYTES, REDFIN_GMU_LOG, 0);
++    if (error)
++        return error;
++    *output = plan;
++    return 0;
++}
++
++/* Convert only a TCM payload into an offset inside the Redfin GMU aperture. */
++static inline int
++redfin_gmu_tcm_mmio(const struct redfin_gmu_region *region,
++    uint32_t offset, uint32_t bytes, uint32_t *aperture_offset)
++{
++    uint32_t base, address;
++    if (!region || !aperture_offset || ((offset | bytes) & 3u))
++        return EINVAL;
++    if (region->kind == REDFIN_GMU_ITCM) {
++        base = REDFIN_GMU_ITCM_MMIO;
++        address = REDFIN_GMU_ITCM_ADDR;
++    } else if (region->kind == REDFIN_GMU_DTCM) {
++        base = REDFIN_GMU_DTCM_MMIO;
++        address = REDFIN_GMU_DTCM_ADDR;
++    } else {
++        return EINVAL;
++    }
++    if (region->address != address || region->mapped_bytes != REDFIN_GMU_TCM_BYTES ||
++        !redfin_gmu_contains(0, REDFIN_GMU_TCM_BYTES, offset, bytes))
++        return EINVAL;
++    *aperture_offset = base + offset;
++    return 0;
++}
++
++/* Native KGSL selects the completion mask from the version loaded in DTCM. */
++static inline int
++redfin_gmu_started(uint32_t core_version, uint32_t result)
++{
++    return core_version <= 0x20010004u ? result == 0xbabefaceu :
++        (result & 0x1ffu) == 0x100u;
++}
++
++/*
++ * Host-memory construction only. Caller owns a zeroable, contiguous 20KiB
++ * view at this GMU IOVA; mapping, cache publication and reset ownership must
++ * be established separately. Counts reproduce the pinned native driver,
++ * including num_active_q=4 with the dispatch descriptor disabled.
++ */
++static inline int
++redfin_gmu_hfi_init(void *buffer, size_t bytes, uint32_t address, uint32_t version)
++{
++    uint8_t *p = (uint8_t *)buffer;
++    uint32_t i;
++    static const uint32_t priorities[4] = {10, 10, 40, 20};
++    if (!p || bytes != REDFIN_GMU_HFI_MAPPED_BYTES || (address & 0xfffu) ||
++        (version >> 16) != 0x2000u ||
++        !redfin_gmu_contains(0x60000000u, 0x20000000u, address, (uint32_t)bytes))
++        return EINVAL;
++    for (i = 0; i < bytes; i++)
++        p[i] = 0;
++    redfin_gmu_write_le32(p + 4, REDFIN_GMU_HFI_TABLE_BYTES / 4);
++    redfin_gmu_write_le32(p + 8, 6);
++    redfin_gmu_write_le32(p + 12, 12);
++    redfin_gmu_write_le32(p + 16, REDFIN_GMU_HFI_QUEUE_COUNT);
++    redfin_gmu_write_le32(p + 20, REDFIN_GMU_HFI_QUEUE_COUNT);
++    for (i = 0; i < REDFIN_GMU_HFI_QUEUE_COUNT; i++) {
++        uint8_t *q = p + 24 + 48 * i;
++        redfin_gmu_write_le32(q, i == 3 ? 0 : 1);
++        redfin_gmu_write_le32(q + 4, address + REDFIN_GMU_HFI_QUEUE_OFFSET + 4096 * i);
++        redfin_gmu_write_le32(q + 8, i | priorities[i] << 8);
++        redfin_gmu_write_le32(q + 12, REDFIN_GMU_HFI_QUEUE_WORDS);
++    }
++    return 0;
++}
++
++/* Pure v2 ring arithmetic; a caller publishes only after writing and fencing. */
++struct redfin_gmu_hfi_write {
++    uint32_t first_word;
++    uint32_t first_words;
++    uint32_t second_words;
++    uint32_t padding_words;
++    uint32_t next_write;
++};
++
++static inline int
++redfin_gmu_hfi_write_plan(uint32_t read, uint32_t write, uint32_t message_words,
++    struct redfin_gmu_hfi_write *output)
++{
++    struct redfin_gmu_hfi_write plan;
++    uint32_t padded, occupied, available;
++    if (!output || read >= 1024 || write >= 1024 || ((read | write) & 3u) ||
++        !message_words || message_words > 255)
++        return EINVAL;
++    padded = (message_words + 3u) & ~3u;
++    occupied = (write + 1024u - read) % 1024u;
++    available = 1024u - occupied;
++    /* Keep the producer/consumer equality unambiguously empty. */
++    if (padded >= available)
++        return ENOSPC;
++    plan.first_word = write;
++    plan.first_words = message_words < 1024u - write ? message_words : 1024u - write;
++    plan.second_words = message_words - plan.first_words;
++    plan.padding_words = padded - message_words;
++    plan.next_write = (write + padded) % 1024u;
++    *output = plan;
++    return 0;
++}
++
++static inline int
++redfin_gmu_hfi_command_header(uint32_t id, uint32_t words, uint32_t sequence,
++    uint32_t *output)
++{
++    if (!output || id > 255 || !words || words > 255 || !sequence || sequence > 4095)
++        return EINVAL;
++    *output = id | words << 8 | sequence << 20;
++    return 0;
++}
++
++/*
++ * A future hardware adapter may use this bounded transfer loop. Preflight and
++ * guard are read-only: they must prove current CX/clocks, held CM3 reset,
++ * image identity, every owned buffer/translation and exclusive lifetime.
++ * Initialize/zero DMA buffers and HFI before enabling their owned context.
++ * The immutable blob and callback storage must outlive the whole operation.
++ * Each write and verification is preceded by a fresh guard. A callback error
++ * stops immediately: no retry, firmware start, power down or unsafe rollback.
++ * After an attempted write, caller must keep reset asserted and all backing
++ * memory pinned until a proved context shutdown or platform reset.
++ */
++struct redfin_gmu_load_ops {
++    void *context;
++    int (*preflight)(void *, const struct redfin_gmu_fw_plan *);
++    int (*guard)(void *);
++    int (*write)(void *, const struct redfin_gmu_region *, uint32_t,
++        const uint8_t *, uint32_t);
++    int (*publish)(void *);
++    int (*verify)(void *, const struct redfin_gmu_region *, uint32_t,
++        const uint8_t *, uint32_t);
++};
++
++struct redfin_gmu_load_progress {
++    uint32_t attempted;
++    uint32_t completed;
++    uint32_t verified;
++};
++
++static inline int
++redfin_gmu_fw_load(uint32_t chip, const void *image, size_t bytes,
++    const struct redfin_gmu_load_ops *ops, struct redfin_gmu_load_progress *progress)
++{
++    struct redfin_gmu_fw_plan plan;
++    const uint8_t *fw = (const uint8_t *)image;
++    uint32_t i;
++    int error;
++    if (!progress)
++        return EINVAL;
++    progress->attempted = progress->completed = progress->verified = 0;
++    if (!ops || !ops->preflight || !ops->guard || !ops->write ||
++        !ops->publish || !ops->verify)
++        return EINVAL;
++    error = redfin_gmu_fw_plan_make(chip, image, bytes, &plan);
++    if (error)
++        return error;
++    error = ops->preflight(ops->context, &plan);
++    if (error)
++        return error;
++    for (i = 0; i < plan.payload_count; i++) {
++        const struct redfin_gmu_payload *payload = &plan.payloads[i];
++        const struct redfin_gmu_region *region = &plan.regions[payload->region];
++        error = ops->guard(ops->context);
++        if (error)
++            return error;
++        progress->attempted++;
++        error = ops->write(ops->context, region, payload->address - region->address,
++            fw + payload->file_offset, payload->bytes);
++        if (error)
++            return error;
++        progress->completed++;
++    }
++    error = ops->guard(ops->context);
++    if (error)
++        return error;
++    error = ops->publish(ops->context);
++    if (error)
++        return error;
++    for (i = 0; i < plan.payload_count; i++) {
++        const struct redfin_gmu_payload *payload = &plan.payloads[i];
++        const struct redfin_gmu_region *region = &plan.regions[payload->region];
++        error = ops->guard(ops->context);
++        if (error)
++            return error;
++        error = ops->verify(ops->context, region, payload->address - region->address,
++            fw + payload->file_offset, payload->bytes);
++        if (error)
++            return error;
++        progress->verified++;
++    }
++    return 0;
++}
++
++#endif /* REDFIN_GMU_FIRMWARE_H */
+diff --git a/bsd/dev/redfin_gmu_memory.inc b/bsd/dev/redfin_gmu_memory.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_memory.inc
+@@ -0,0 +1,249 @@
++/* SPDX-License-Identifier: MIT */
++/* Reset-held A620 firmware, owned RAM and GMU kernel-stream translation.
++ * All allocations and installed state are retained until platform reset.
++ */
++extern int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32]);
++/* The BSD pmap view omits this machine-private declaration. */
++extern pmap_paddr_t kvtophys(vm_offset_t);
++static const uint32_t gm_memory_policy[] = {
++    1, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
++};
++static struct {
++    struct gm_context *context;
++    struct redfin_gmu_fw_plan firmware;
++    struct rf_gm_pt_plan tables;
++    struct rf_gmm_lease lease;
++    struct rf_gm_memory data[RF_GM_PT_MAX_EXTENTS], pool;
++    unsigned count, allocations, translations;
++    uint64_t allocated;
++    uint32_t bytes;
++    uint8_t digest[32], image[REDFIN_GMU_MAX_FILE_BYTES];
++    bool bound, retained;
++} gm_memory;
++
++static bool gm_memory_contract(struct gm_context *context)
++{
++    DTEntry entry;
++    const void *image, *digest;
++    unsigned bytes, hash_bytes;
++    uint8_t actual[32];
++    struct redfin_gmu_fw_plan plan;
++    if (SecureDTLookupEntry(NULL, "/redfin-gmu", &entry) != kSuccess ||
++        SecureDTGetProperty(entry, "firmware", &image, &bytes) != kSuccess ||
++        SecureDTGetProperty(entry, "firmware-sha256", &digest, &hash_bytes) != kSuccess || hash_bytes != 32 ||
++        bytes < 16 || bytes > REDFIN_GMU_MAX_FILE_BYTES ||
++        !gm_property(context, "/redfin-gmu", "memory-policy", gm_memory_policy, sizeof(gm_memory_policy)) ||
++        redfin_mpss_kernel_sha256(NULL, image, bytes, actual) || memcmp(actual, digest, 32) ||
++        redfin_gmu_fw_plan_make(gm_chip, image, bytes, &plan)) return false;
++    if (!context) return true;
++    if (gm_memory.bound) return false;
++    memcpy(gm_memory.image, image, bytes); memcpy(gm_memory.digest, digest, 32);
++    gm_memory.bytes = bytes; gm_memory.firmware = plan; gm_memory.context = context;
++    gm_memory.bound = true;
++    return gm_property(context, "/redfin-gmu", "firmware", gm_memory.image, bytes) &&
++        gm_property(context, "/redfin-gmu", "firmware-sha256", gm_memory.digest, 32);
++}
++
++static bool gm_memory_valid(void *argument)
++{
++    return gm_memory.bound && argument == gm_memory.context && gm_smmu_valid(argument);
++}
++static bool gm_memory_same(const struct rf_gm_memory *a, const struct rf_gm_memory *b)
++{
++    return a->host == b->host && a->physical == b->physical && a->owned_bytes == b->owned_bytes &&
++        a->token == b->token && a->gmu_address == b->gmu_address;
++}
++static bool gm_memory_owns(void *argument, const struct rf_gm_memory *memory, unsigned use)
++{
++    if (!gm_memory_valid(argument) || !rf_gm_memory_valid(memory)) return false;
++    bool own = use == RF_GM_PT_TABLE_POOL && gm_memory_same(memory, &gm_memory.pool);
++    if (use == RF_GM_PT_DATA) for (unsigned i = 0; i < gm_memory.count; ++i)
++        if (gm_memory_same(memory, &gm_memory.data[i])) own = true;
++    if (!own) return false;
++    for (uint64_t i = 0; i < memory->owned_bytes; i += 4096)
++        if (kvtophys((vm_offset_t)memory->host + i) != memory->physical + i) return false;
++    return true;
++}
++static int gm_memory_allocate(struct rf_gm_memory *out, uint32_t address, uint32_t bytes, uint64_t token)
++{
++    vm_offset_t host = 0;
++    vm_size_t size = (bytes + PAGE_MASK) & ~PAGE_MASK;
++    if (!size || size > gm_memory_policy[6] ||
++        gm_memory.allocated + size > gm_memory_policy[6]) return EFBIG;
++    if (kmem_alloc_contig(kernel_map, &host, size, PAGE_MASK,
++            (ppnum_t)((RF_GM_PT_RAM_BASE + RF_GM_PT_RAM_BYTES - 1) >> PAGE_SHIFT), 0,
++            KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) return ENOMEM;
++    ++gm_memory.allocations; gm_memory.allocated += size;
++    *out = (struct rf_gm_memory){(void *)host, kvtophys(host), size, token, address};
++    return rf_gm_memory_valid(out) ? 0 : ERANGE;
++}
++static void gm_memory_clean(const struct rf_gm_memory *memory)
++{
++    for (uintptr_t at = (uintptr_t)memory->host; at < (uintptr_t)memory->host + memory->owned_bytes; at += 64)
++        __asm__ volatile("dc cvac, %0" :: "r"(at) : "memory");
++    __asm__ volatile("dsb osh" ::: "memory");
++}
++static int gm_memory_check(void *argument) { return gm_memory_valid(argument) ? 0 : ECANCELED; }
++static int gm_memory_sample(void *argument, struct rf_gs_snapshot *global, struct rf_gc_snapshot *banks)
++{
++    const struct rf_gs_ops gs = {argument, gm_smmu_valid, gm_smmu_read};
++    const struct rf_gc_ops gc = {argument, gm_smmu_valid, gm_cb_read};
++    int error = rf_gs_snapshot_run(&gs, gm_chip, global);
++    return error ? error : rf_gc_snapshot_run(&gc, global, banks);
++}
++static bool gm_memory_cb_offset(uint32_t at)
++{
++    return rf_gc_allowed(1, at) || at == 0x28 || at == 0x2c || at == 0x7f4 ||
++        at == 0x50 || at == 0x54 || at == 0x8f0;
++}
++static int gm_memory_read(void *argument, unsigned block, uint32_t at, uint32_t *out)
++{
++    struct gm_context *context = argument;
++    if (!out || block > 1 || !gm_memory_valid(argument)) return ECANCELED;
++    if (block) {
++        if (!gm_memory_cb_offset(at)) return EINVAL;
++        *out = gm_scalar_read(context->cb + 0x1000 + at);
++        return 0;
++    }
++    return gm_smmu_read(argument, at, out);
++}
++static void gm_memory_store(vm_offset_t address, uint32_t value)
++{
++    __asm__ volatile("dmb oshst; mov w9, %w0; str w9, [%1]; dsb osh" ::
++        "r"(value), "r"(address) : "x9", "memory");
++}
++static int gm_memory_write(void *argument, unsigned block, uint32_t at, uint32_t value)
++{
++    struct gm_context *context = argument;
++    unsigned expected_block; uint32_t expected_at, expected_value;
++    if (!gm_memory.lease.stores || !gm_memory_valid(argument) ||
++        rf_gmm_step(&gm_memory.lease, &gm_memory.tables, gm_memory.lease.stores - 1,
++                    &expected_block, &expected_at, &expected_value) ||
++        block != expected_block || at != expected_at || value != expected_value) return EPERM;
++    gm_memory_store((block ? context->cb + 0x1000 : context->smmu) + at, value);
++    return 0;
++}
++static int gm_memory_publish(void *argument, const struct rf_gm_pt_plan *plan)
++{
++    if (plan != &gm_memory.tables || !gm_memory_owns(argument, &plan->tables, RF_GM_PT_TABLE_POOL)) return EPERM;
++    for (unsigned i = 0; i < gm_memory.count; ++i) {
++        if (!gm_memory_owns(argument, &gm_memory.data[i], RF_GM_PT_DATA)) return EPERM;
++        gm_memory_clean(&gm_memory.data[i]);
++    }
++    gm_memory_clean(&gm_memory.pool);
++    return gm_memory_check(argument);
++}
++static int gm_memory_delay(void *argument, unsigned microseconds)
++{
++    if (!gm_memory_valid(argument) || microseconds != 1) return ECANCELED;
++    delay(1); return 0;
++}
++
++static int gm_memory_transfer(struct gm_context *context)
++{
++    for (unsigned p = 0; p < gm_memory.firmware.payload_count; ++p) {
++        const struct redfin_gmu_payload *payload = &gm_memory.firmware.payloads[p];
++        const struct redfin_gmu_region *region = &gm_memory.firmware.regions[payload->region];
++        const uint8_t *source = gm_memory.image + payload->file_offset;
++        uint32_t offset = payload->address - region->address;
++        if (!gm_memory_valid(context)) return ECANCELED;
++        if (payload->region < 2) {
++            uint32_t mmio;
++            if (redfin_gmu_tcm_mmio(region, offset, payload->bytes, &mmio)) return EINVAL;
++            for (unsigned j = 0; j < payload->bytes; j += 4) {
++                if (!gm_memory_valid(context)) return ECANCELED;
++                gm_memory_store(context->base[RF_GT_GMU] + mmio + j, redfin_gmu_read_le32(source + j));
++            }
++            for (unsigned j = 0; j < payload->bytes; j += 4) {
++                if (!gm_memory_valid(context)) return ECANCELED;
++                if (gm_scalar_read(context->base[RF_GT_GMU] + mmio + j) != redfin_gmu_read_le32(source + j)) return EIO;
++            }
++        } else {
++            struct rf_gm_memory *target = &gm_memory.data[payload->region - 2];
++            if (!gm_memory_owns(context, target, RF_GM_PT_DATA) || offset > target->owned_bytes ||
++                payload->bytes > target->owned_bytes - offset) return EPERM;
++            memcpy((uint8_t *)target->host + offset, source, payload->bytes);
++            if (memcmp((uint8_t *)target->host + offset, source, payload->bytes)) return EIO;
++        }
++    }
++    for (unsigned i = 0; i < gm_memory.count; ++i)
++        if (gm_memory.data[i].gmu_address == gm_memory.firmware.hfi_address)
++            return redfin_gmu_hfi_init(gm_memory.data[i].host, REDFIN_GMU_HFI_MAPPED_BYTES,
++                gm_memory.firmware.hfi_address, gm_memory.firmware.versions[4]);
++    return ENOENT;
++}
++
++static int gm_memory_translate(struct gm_context *context, const struct rf_gmm_ops *ops,
++    uint32_t address, uint64_t physical)
++{
++    int error = rf_gmm_verify(&gm_memory.lease, ops);
++    if (error) return error;
++    uint64_t request = address;
++    vm_offset_t ats = context->cb + 0x1000 + 0x800;
++    __asm__ volatile("dmb oshst; mov x9, %0; str x9, [%1]; dsb osh" :: "r"(request), "r"(ats) : "x9", "memory");
++    uint32_t status = 1, low, high;
++    for (unsigned us = 0; us < 1000; ++us) {
++        error = gm_memory_read(context, 1, 0x8f0, &status); if (error) return error;
++        if (!(status & 1)) break;
++        error = gm_memory_delay(context, 1); if (error) return error;
++    }
++    if (status & 1) return ETIMEDOUT;
++    error = gm_memory_read(context, 1, 0x50, &low); if (error) return error;
++    error = gm_memory_read(context, 1, 0x54, &high); if (error) return error;
++    uint64_t translated = ((uint64_t)high << 32) | low;
++    printf("REDFIN GMU ATS: address=%#x PAR=%#llx expected=%#llx\n", address,
++        (unsigned long long)translated, (unsigned long long)physical);
++    if ((translated & 1) || (translated & 0x0000000ffffff000ULL) != physical) return EFAULT;
++    ++gm_memory.translations;
++    return rf_gmm_verify(&gm_memory.lease, ops);
++}
++
++static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot *global,
++    const struct rf_gc_snapshot *banks)
++{
++    int error = gm_memory_check(context);
++    struct rf_gm_memory_owner owner = {context, gm_memory_valid, gm_memory_owns};
++    struct rf_gmm_ops ops = {context, gm_memory_check, gm_memory_sample, gm_memory_read,
++        gm_memory_write, gm_memory_publish, gm_memory_delay};
++    unsigned stage = 0;
++    if (error) goto done;
++    stage = 1; gm_memory.count = gm_memory.firmware.region_count - 2;
++    printf("REDFIN GMU MEMORY STEP: bound firmware=%u payloads=%u extents=%u; allocate private zeroed RAM\n",
++        gm_memory.bytes, gm_memory.firmware.payload_count, gm_memory.count);
++    for (unsigned i = 0; i < gm_memory.count; ++i) {
++        const struct redfin_gmu_region *r = &gm_memory.firmware.regions[i + 2];
++        error = gm_memory_allocate(&gm_memory.data[i], r->address, r->mapped_bytes, i + 1); if (error) goto done;
++    }
++    error = gm_memory_allocate(&gm_memory.pool, 0, RF_GM_PT_MAX_TABLES * 4096, 0x100); if (error) goto done;
++    stage = 2;
++    error = rf_gm_pt_build(global, gm_chip, gm_memory.image, gm_memory.bytes,
++        gm_memory.data, gm_memory.count, &gm_memory.pool, &owner, &gm_memory.tables); if (error) goto done;
++    printf("REDFIN GMU MEMORY STEP: tables=%u pages=%u root=%#llx; transfer and verify firmware\n",
++        gm_memory.tables.table_count, gm_memory.tables.mapped_pages,
++        (unsigned long long)gm_memory.tables.root_physical);
++    stage = 3; error = gm_memory_transfer(context); if (error) goto done;
++    stage = 4;
++    printf("REDFIN GMU MEMORY STEP: firmware verified and HFI initialized; publish CB1 and stream5\n");
++    error = rf_gmm_claim(&gm_memory.lease, &ops, global, banks, &gm_memory.tables, &owner); if (error) goto done;
++    gm_memory.retained = true; stage = 5;
++    for (unsigned i = 0; i < gm_memory.tables.extent_count; ++i) {
++        const struct rf_gm_pt_extent *r = &gm_memory.tables.extents[i];
++        error = gm_memory_translate(context, &ops, r->memory.gmu_address, r->memory.physical); if (error) goto done;
++        error = gm_memory_translate(context, &ops, r->memory.gmu_address + r->mapped_bytes - 4096,
++            r->memory.physical + r->mapped_bytes - 4096); if (error) goto done;
++    }
++    stage = 6;
++done:
++    if (gm_memory.lease.attempted)
++        printf("REDFIN GMU MEMORY LEASE: step=%u block=%u offset=%#x requested=%#x observed=%#x poisoned=%u; CB1 SCTLR=%#x TCR2=%#x TTBR=%#x/%#x TCR=%#x FSR=%#x\n",
++            gm_memory.lease.step, gm_memory.lease.block, gm_memory.lease.offset,
++            gm_memory.lease.requested, gm_memory.lease.observed, gm_memory.lease.poisoned,
++            gm_memory.lease.fresh_banks.words[1][0], gm_memory.lease.fresh_banks.words[1][1],
++            gm_memory.lease.fresh_banks.words[1][2], gm_memory.lease.fresh_banks.words[1][3],
++            gm_memory.lease.fresh_banks.words[1][4], gm_memory.lease.fresh_banks.words[1][8]);
++    printf("REDFIN GMU MEMORY: result=%d stage=%u firmware=%u payloads=%u allocations=%u bytes=%llu tables=%u pages=%u bank=1 slot=%u stores=%u translations=%u retained=%u; CM3 reset held, no GX/firmware execution\n",
++        error, stage, gm_memory.bytes, gm_memory.firmware.payload_count, gm_memory.allocations,
++        (unsigned long long)gm_memory.allocated, gm_memory.tables.table_count, gm_memory.tables.mapped_pages,
++        gm_memory.lease.slot, gm_memory.lease.stores, gm_memory.translations, gm_memory.allocations != 0);
++    return error;
++}

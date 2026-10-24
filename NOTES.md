@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN reset-held GMU firmware/owned memory batch built; hardware pending — 2026-10-24
+
+Following working Wi-Fi checkpoint83e6e80, added explicit memory-only
+redfinsmmu3/--gpu-smmu-memory-probe. Binds native firmware and recorded
+SHA256 in ADT and verifies both before power writes; allocates private
+zeroed contiguous XNU RAM with per4KiB physical ownership proof, constructs
+the existing native page tables, loads/verifies TCM/data and initializes
+HFI, then cleans data/tables to PoC. Adapts preferred upstream8e611870's
+space_on to one-shot disabled/unreferenced CB1 and a free route slot for
+stream5/mask400;17 typed stores with complete snapshot/readback auditing,
+bounded TLB sync and positive first/last-page ATS checks. CM3 stays reset
+held/GX collapsed, no firmware execution. All allocations remain retained
+through failure/partial installation until platform reset. Native FSR
+FORMAT is status, not a fault; genuine fault bits are retained/refused.
+
+Initial native compile failure was the BSD view missing kvtophys's exact
+prototype; fixed using pmap_paddr_t. Retained static context now initializes
+after its one-shot guard (repeat real calls still return EBUSY). The new
+test harness no longer imports unrelated GUI test modules. Final192focused
+firmware/table/context/adapter/return tests PASS in18.996s; actual write
+protocol covers every failed store, foreign route/TTBR changes, denied
+ownership/cache publication, wrong readback, timeout and lease revocation.
+No unrelated full-suite repeat. Local native build20261024-142257PASS;
+no Codemagic/GitHub Actions run. Kernel e38b8fe82d6a6408c268aafb30da7aab2b087da4b1824b6236db603c223f0f1b,
+private research/redfin-gpu/kernel-memory-v1. Firmware41,548bytes matches
+inventory SHA256df79fa8482fcc7587bb239b9c9e2b24bce4729893b990fe3f82b30da8175b01c;
+host actual C planner reports7payloads/8regions/176128DMAbytes.
+
+Image ports/redfin/out/gmu-memory-v1/redfin-xnu.img,
+SHA256e5dcc08b8077aeb6fa8d609797ba503135439a622ca96d7725b0b5b4a9e8145f,
+decompressed18001904bytes. Actual loader/live-FDT/Image-window, packed
+firmware SHA256 and compiled-shim/UP md0 return preflight PASS.
+Hardware memory/ATS result pending; no device operation started for this
+batch yet. Next: one integrated authenticated RAM capture, then native
+PDC/RSC/CM3/HFI startup if hardware translation succeeds. Working Wi-Fi
+image/root/network configuration preserved; GPU/Metal still unfinished.
+No partition flash, root reinstall, modem/persist/EFS or backup change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x05424c063f225200`.
+
 ## REDFIN GUI Wi-Fi and internet WORKING; user and authenticated packets confirm — 2026-10-24
 
 User reports: About eventually opens, Wi-Fi works, and internet works.

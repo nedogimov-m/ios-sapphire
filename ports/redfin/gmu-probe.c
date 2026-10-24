@@ -9,10 +9,14 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
 #include <machine/machine_routines.h>
+#include <vm/vm_kern.h>
+#include <vm/pmap.h>
+#include <arm/pmap_public.h>
 #include "redfin_gmu_probe.h"
 #include "redfin_gmu_tcm.h"
 #include "redfin_gpu_smmu.h"
 #include "redfin_gpu_context.h"
+#include "redfin_gmu_mapping.h"
 
 extern int redfin_spmi_return_ready(void);
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
@@ -26,12 +30,14 @@ struct gm_context {
     redfin_gmu_parent_valid_fn parent_valid;
     unsigned args_bytes;
     char args[608];
-    struct gm_binding bindings[15];
+    struct gm_binding bindings[20];
     uint64_t breadcrumbs;
     unsigned binding_count, dtcm_writes, smmu_reads, smmu_guard, smmu_breadcrumbs;
     unsigned smmu_mode, cb_reads, cb_breadcrumbs;
     bool active, smmu_requested, smmu_ready;
 };
+static bool gm_memory_contract(struct gm_context *);
+static int gm_memory_run(struct gm_context *, const struct rf_gs_snapshot *, const struct rf_gc_snapshot *);
 
 static const uint64_t gm_reg[] = {
     0x00100000, 0x1f0000, 0x03d90000, 0x9000,
@@ -96,8 +102,9 @@ gm_contract(struct gm_context *context, unsigned mode)
         gm_property(context, "/redfin-gpu-smmu", "format-policy", gm_smmu_format, sizeof(gm_smmu_format)) &&
         gm_property(context, "/redfin-gpu-smmu", "clock-policy", gm_smmu_clocks, sizeof(gm_smmu_clocks)) &&
         gm_property(context, "/redfin-gpu-smmu", "gic-intids", gm_smmu_irqs, sizeof(gm_smmu_irqs)) &&
-        (mode != 2 || gm_property(context, "/redfin-gpu-smmu", "context-policy",
-            gm_cb_policy, sizeof(gm_cb_policy)));
+        (mode < 2 || gm_property(context, "/redfin-gpu-smmu", "context-policy",
+            gm_cb_policy, sizeof(gm_cb_policy))) &&
+        (mode != 3 || gm_memory_contract(context));
 }
 
 int
@@ -355,7 +362,7 @@ static int
 gm_cb_read(void *argument, unsigned bank, uint32_t at, uint32_t *value)
 {
     struct gm_context *context = argument;
-    if (!context || !context->cb || context->smmu_mode != 2 ||
+    if (!context || !context->cb || context->smmu_mode < 2 ||
         !value || !rf_gc_allowed(bank, at))
         return EINVAL;
     if (!gm_smmu_valid(context))
@@ -371,12 +378,14 @@ gm_cb_read(void *argument, unsigned bank, uint32_t at, uint32_t *value)
     return 0;
 }
 
+#include "redfin_gmu_memory.inc"
+
 static int
 gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
 {
     struct rf_gc_snapshot snapshot = {0};
     int result = ECANCELED;
-    if (context->smmu_mode == 2 && global->stable && global->map_format_supported &&
+    if (context->smmu_mode >= 2 && global->stable && global->map_format_supported &&
         !global->error && global->stage == 4 && global->contexts >= RF_GC_BANKS &&
         !global->stage2_contexts && gm_smmu_valid(context)) {
         printf("REDFIN GPU CONTEXT STEP: stable globals; inspect CB0/1, no table dereference\n");
@@ -398,6 +407,7 @@ gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
         printf("REDFIN GPU CONTEXT BANK: bank=%u SCTLR=%#x TCR2=%#x TTBR0=%#x/%#x TCR=%#x CONTEXTID=%#x MAIR=%#x/%#x FSR=%#x FAR=%#x/%#x FSYNR=%#x\n",
             bank, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11]);
     }
+    if (!result && context->smmu_mode == 3) result = gm_memory_run(context, global, &snapshot);
     return result;
 }
 
@@ -442,7 +452,7 @@ gm_smmu_run(struct gm_context *context, const struct rf_gt_report *gmu)
         printf("REDFIN SMMU ANALYSIS: stream4=%u/%u stream5=%u/%u unreferenced=%#x malformed=%u; unreferenced is not owned\n",
             snapshot.gmu_matches[0], snapshot.gmu_slot[0], snapshot.gmu_matches[1], snapshot.gmu_slot[1],
             snapshot.unreferenced_mask, snapshot.malformed_routes);
-    if (!result && context->smmu_mode == 2)
+    if (!result && context->smmu_mode >= 2)
         result = gm_cb_run(context, &snapshot);
     return result;
 }
@@ -451,11 +461,12 @@ int
 redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
     void *held_cx_context, redfin_gmu_parent_valid_fn held_cx_valid)
 {
-    struct gm_context context = {0};
+    static struct gm_context context;
     struct rf_gt_report report = {0};
     int result;
     if (__atomic_exchange_n(&gm_attempted, true, __ATOMIC_ACQ_REL))
         return EBUSY;
+    memset(&context, 0, sizeof(context));
     result = redfin_gmu_probe_contract(frozen_args, args_bytes);
     if (result)
         return result;

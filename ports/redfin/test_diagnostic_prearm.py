@@ -17,6 +17,9 @@ PROFILES = (
     (dict(gpu_power_probe=True, gmu_tcm_probe=True, gpu_smmu_probe=True), ' redfingpu=2 redfingpupower=1 redfinrpmh=1 redfingmu=1 redfinsmmu=1'),
     (dict(gpu_power_probe=True, gmu_tcm_probe=True, gpu_smmu_probe=True, gpu_smmu_context_probe=True),
      ' redfingpu=2 redfingpupower=1 redfinrpmh=1 redfingmu=1 redfinsmmu=2'),
+    (dict(gpu_power_probe=True, gmu_tcm_probe=True, gpu_smmu_probe=True,
+          gpu_smmu_context_probe=True, gpu_smmu_memory_probe=True),
+     ' redfingpu=2 redfingpupower=1 redfinrpmh=1 redfingmu=1 redfinsmmu=3'),
     (dict(wifi_native_probe=True), ' redfinwifi=2 redfinwifinative=1'),
     (dict(wifi_native_probe=True, wifi_power_probe=True), ' redfinwifi=2 redfinwifinative=1 redfinwifipower=1'),
     (dict(wifi_native_probe=True, wifi_fw_source_probe=True), ' redfinwifi=2 redfinwifinative=1 redfinwififw=1'),
@@ -95,12 +98,12 @@ class DiagnosticPrearmTests(unittest.TestCase):
         m = self.manifest(*PROFILES[0])
         for key in ('root_writable', 'cpu_copy_display', 'capture_screen', 'userspace_stacks',
                     'syscall_tracing', 'splash_reservation_assumption', 'wifi_native_probe', 'scm_probe',
-                    'wifi_power_probe', 'wifi_fw_source_probe', 'wifi_fw_start', 'gpu_smmu_probe', 'gpu_smmu_context_probe'):
+                    'wifi_power_probe', 'wifi_fw_source_probe', 'wifi_fw_start', 'gpu_smmu_probe', 'gpu_smmu_context_probe', 'gpu_smmu_memory_probe'):
             changed = dict(m, **{key: True})
             with self.subTest(key=key), self.assertRaises(ValueError):
                 self.verify(changed)
         for key, value in (('gpu_power_probe', 1), ('shim_early_return', 1),
-                           ('gpu_smmu_context_probe', 1), ('wifi_fw_source_probe', 1), ('wifi_fw_start', 1),
+                           ('gpu_smmu_context_probe', 1), ('gpu_smmu_memory_probe', 1), ('wifi_fw_source_probe', 1), ('wifi_fw_start', 1),
                            ('root_device', 'ufsroot0'), ('shutdown_seconds', False)):
             with self.assertRaises(ValueError):
                 self.verify(dict(m, **{key: value}))

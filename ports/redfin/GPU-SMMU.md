@@ -35,10 +35,53 @@ both SCTLR.M bits are clear and both FSRs zero. Other configuration registers
 are nonzero; disabled does not mean blank or owned. The current stable raw
 TTBR/TCR/MAIR words remain private evidence and are never followed as pointers.
 The test reaches PID1 and returns to fastboot with the same clean HFS header.
-This supplies the next memory-manager prerequisite; it installs no translation.
+This supplies the memory-manager prerequisite; that read-only profile installs no translation.
 [`include/redfin_gmu_pagetables.h`](include/redfin_gmu_pagetables.h) separately
 constructs CPU-only 4KiB tables from owned allocations. It installs no table
-or route and is also unwired.
+or route itself. The explicit memory profile below connects its output to CB1.
+
+## Reset-held firmware and owned context profile — 2026-10-24
+
+`--gpu-smmu-memory-probe --gmu-fw-file PATH --gmu-fw-sha256 HEX` selects
+`redfinsmmu=3`. It requires the same isolated CPU0/md0 held-CX, clocked TCM,
+global and CB0/1 prerequisites; it cannot be combined with the GUI/root profile.
+The SHA256 must match the private native firmware inventory. The host uses
+the actual C firmware planner before packing, and XNU verifies the complete
+firmware/hash/ADT contract before any parent power write.
+
+[`gmu-memory.inc`](gmu-memory.inc) allocates zeroed, wired, contiguous private
+RAM through XNU, verifies every 4KiB physical/host pair and retains the full
+allocations until platform reset. The total bound is 1MiB; the table pool is
+`0x28000` bytes. It constructs native 4KiB/39-bit tables, transfers and reads
+back every firmware payload in reset-held ITCM/DTCM or owned RAM, initializes
+the four-queue native HFI table, then cleans data and tables to PoC.
+
+[`include/redfin_gmu_mapping.h`](include/redfin_gmu_mapping.h) adapts the
+preferred upstream's `space_on()` into a one-shot CB1 lease. Fresh snapshots
+must show no fault, active stream4/5 match, CB1 reference (including invalid
+slots), existing CBAR/CBA2R or enabled CB0/1. It changes only CB1 and one
+invalid SMR/S2CR slot. Seventeen typed stores set native NC table walks,
+TCR `0x802019`, TCR2 `0x38011`, MAIR0 `0xf404ff44`, ASID1 and SCTLR
+`0x1027`, synchronize the TLB, then route stream5/mask `0x400`. Faults are
+recorded without interrupts/stalls; no global reset or fault acknowledgement
+is used. Readback must confirm the installed fields; complete observed
+CBAR/S2CR words are retained to detect subsequent changes. FSR FORMAT is
+status, separately masked from the native genuine fault bits.
+
+The adapter requests positive hardware ATS translations for the first and
+last page of every owned extent and checks PAR against the independently
+known physical allocation. ATS writes are atomic 64-bit stores as required
+by native `arm-smmu.c`. Explicit scalar stores also avoid the known HYP
+WZR-store issue. CM3 remains reset-held and GX collapsed throughout. A
+failed or partial install never frees its backing memory or retries.
+
+Host validation: 192 focused firmware/table/context/adapter/return tests pass;
+the new lease covers foreign changes, denied ownership/publication, each
+failed store, wrong readback, timeout and revocation. Local native build
+`build-20261024-142257.log` links successfully. The packed memory-v1 image
+passes the real loader/live FDT/Image-window, bound-firmware and compiled
+shim-return preflight. Hardware mapping/ATS success is pending; this source
+milestone does not establish GMU execution, GPU commands or Metal.
 
 ## Native resource and access boundary
 
@@ -312,11 +355,11 @@ cases. The private header copy also passes the actual XNU
 `DEVELOPMENT_ARM64_SWEET` BSD compiler flags with `-Werror`.
 These are CPU-memory results; no table is installed or firmware started.
 
-Next: collect a fresh authenticated temporary-boot result for reset-held TCM
-and the separately selected read-only snapshot. Hardware TCM/SMMU success is
-not claimed by this source milestone. Only then decide whether any candidate
-bank/SME can receive an independent
-software/hypervisor ownership grant and validated 4KiB page tables.
+TCM, globals and read-only CB0/1 now have authenticated hardware results as
+recorded above and in NOTES.md. Next: collect memory-v1's firmware readback,
+native context readback and positive ATS results. Only successful hardware
+translation can support the later PDC/RSC/CM3/HFI start; GPU commands and iOS
+graphics integration follow separately.
 
 [hackios]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [smmu]: https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/iommu/arm-smmu.c

@@ -2,6 +2,7 @@
 import copy
 import ctypes
 import errno
+import hashlib
 from pathlib import Path
 import re
 import shutil
@@ -115,6 +116,10 @@ class RedfinGMUContractTests(unittest.TestCase):
                 'bsd/dev/redfin_gmu_tcm.h': HERE/'include/redfin_gmu_tcm.h',
                 'bsd/dev/redfin_gpu_smmu.h': HERE/'include/redfin_gpu_smmu.h',
                 'bsd/dev/redfin_gpu_context.h': HERE/'include/redfin_gpu_context.h',
+                'bsd/dev/redfin_gmu_mapping.h': HERE/'include/redfin_gmu_mapping.h',
+                'bsd/dev/redfin_gmu_pagetables.h': HERE/'include/redfin_gmu_pagetables.h',
+                'bsd/dev/redfin_gmu_firmware.h': HERE/'include/redfin_gmu_firmware.h',
+                'bsd/dev/redfin_gmu_memory.inc': HERE/'gmu-memory.inc',
             }
             actual = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
             self.assertEqual(actual, set(wanted))
@@ -266,9 +271,44 @@ class RedfinGMUContractTests(unittest.TestCase):
                 gmu_probe.add_contract(tree, nodes, smmu=smmu, context=context)
             self.assertEqual(mkadt.adt.serialize(tree), before)
 
+    def test_memory_contract_binds_exact_firmware_digest_and_separate_native_profile(self):
+        tree, nodes = fixture(True)
+        image = bytes(range(64))
+        digest = hashlib.sha256(image).digest()
+        gmu_probe.add_contract(tree, nodes, smmu=True, context=True, memory=True,
+                               firmware=image, firmware_sha256=digest)
+        leaf = next(n for n in tree.children if n.name == 'redfin-gmu')
+        self.assertEqual(leaf.prop('firmware'), image)
+        self.assertEqual(leaf.prop('firmware-sha256'), digest)
+        self.assertEqual(leaf.prop('memory-policy'), mkadt.u32(*gmu_probe.MEMORY_POLICY))
+        self.assertEqual(next(n for n in tree.children if n.name == 'redfin-gpu-smmu').prop(
+            'context-policy'), mkadt.u32(*gmu_probe.CONTEXT_POLICY))
+
+    def test_unbound_changed_oversized_or_unselected_firmware_fails_before_adt_changes(self):
+        image = bytes(range(64))
+        selected = dict(smmu=True, context=True, memory=True, firmware=image,
+                        firmware_sha256=hashlib.sha256(image).digest())
+        for changed in (dict(memory=1), dict(context=False), dict(smmu=False),
+                        dict(firmware=None), dict(firmware=b'x' * 15),
+                        dict(firmware=image + b'x'), dict(firmware=b'x' * 0x40004),
+                        dict(firmware_sha256=None), dict(firmware_sha256=b'x' * 32),
+                        dict(memory=False)):
+            tree, nodes = fixture(True)
+            before = mkadt.adt.serialize(tree)
+            with self.subTest(changed=list(changed)), self.assertRaises(ValueError):
+                gmu_probe.add_contract(tree, nodes, **dict(selected, **changed))
+            self.assertEqual(mkadt.adt.serialize(tree), before)
+
 
 def adapter_source():
     code = (HERE/'gmu-probe.c').read_text()
+    # These tests retain the existing read-only modes. The new write lease
+    # is exercised separately; an unbound memory contract must be refused.
+    code = code.replace('#include "redfin_gmu_memory.inc"', '''
+static bool gm_memory_contract(struct gm_context *c) {(void)c; return false;}
+static int gm_memory_run(struct gm_context *c, const struct rf_gs_snapshot *g,
+    const struct rf_gc_snapshot *b) {(void)c; (void)g; (void)b; return EPERM;}
+''')
     code = '\n'.join(line for line in code.splitlines() if not line.startswith('#include'))
     code = code.replace('__builtin_arm_rsr64("CurrentEL")', 'host_el')
     code = code.replace('__builtin_arm_rsr64("MPIDR_EL1")', 'host_mpidr')
@@ -741,7 +781,7 @@ class RedfinGMUAdapterTests(unittest.TestCase):
             raw = args.encode()+b'\0'
             self.assertEqual(self.lib.host_select(raw, len(raw), ctypes.byref(selected)), 1)
             self.assertEqual(selected.value, expected)
-        bad = [ARGS+' '+word for word in ('redfinsmmu=0', 'redfinsmmu=3', 'redfinsmmu=01',
+        bad = [ARGS+' '+word for word in ('redfinsmmu=0', 'redfinsmmu=4', 'redfinsmmu=01',
                                           'redfinsmmu=1x', 'redfinsmmu=+1',
                                           'redfinsmmu=1 redfinsmmu=1')]
         bad += [SMMU_ARGS.replace(word, '', 1) for word in ('redfingmu=1', 'redfinreturn=1', 'rd=md0')]

@@ -11,7 +11,8 @@ typedef bool (*redfin_gmu_parent_valid_fn)(void *);
 
 /*
  * bytes includes the NUL; every word and the nonzero boot nonce is unique.
- * Optional redfinsmmu=1 reads globals; =2 additionally reads CB0/1.
+ * Optional redfinsmmu=1 reads globals; =2 reads CB0/1; =3 prepares the
+ * explicitly bound reset-held firmware/memory mapping contract.
  * A rejected argument list leaves the optional selection output unchanged.
  */
 static inline bool
@@ -56,7 +57,7 @@ redfin_gmu_args_mode(const char *args, unsigned bytes, unsigned *smmu_mode)
         static const char smmu[] = "redfinsmmu=";
         if (n == sizeof(smmu)) {
             for (i = 0; i < sizeof(smmu) - 1 && args[first + i] == smmu[i]; i++) {}
-            if (i == sizeof(smmu) - 1 && (args[first + i] == '1' || args[first + i] == '2')) {
+            if (i == sizeof(smmu) - 1 && args[first + i] >= '1' && args[first + i] <= '3') {
                 if (smmu_seen) return false;
                 smmu_seen = true;
                 mode = (unsigned)(args[first + i] - '0');

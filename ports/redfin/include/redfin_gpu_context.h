@@ -12,6 +12,7 @@
 #define RF_GC_BANKS 2u
 #define RF_GC_WORDS 12u
 #define RF_GC_MAP_BYTES 0x4000u /* XNU's mapping granule; access only CB0/1. */
+#define RF_GC_FAULT_BITS 0xc00001feu /* FSR.FORMAT[10:9] is status, not a fault. */
 
 static const uint32_t rf_gc_offsets[RF_GC_WORDS] = {
     0, 0x10, 0x20, 0x24, 0x30, 0x34, 0x38, 0x3c, 0x58, 0x60, 0x64, 0x68
@@ -83,7 +84,7 @@ rf_gc_snapshot_run(const struct rf_gc_ops *ops, const struct rf_gs_snapshot *glo
     for (unsigned bank = 0; bank < RF_GC_BANKS; bank++) {
         if (!(out->words[bank][0] & 1))
             out->disabled_mask |= 1u << bank;
-        if (out->words[bank][8])
+        if (out->words[bank][8] & RF_GC_FAULT_BITS)
             out->fault_mask |= 1u << bank;
     }
     out->stage = 3;
