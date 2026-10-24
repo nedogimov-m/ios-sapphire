@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native GMU cold-start/HFI batch built; hardware pending — 2026-10-24
+
+User continues GPU work after4ccd4d6. Added explicit --gmu-firmware-start/
+redfinsmmu4 after complete owned memory/7payload verification. New portable
+native sequence and kernel adapter program A620 localPDC/RSC, discover
+CMD-DBxo/cx/mx/optionalvrm.soc, use bounded native wake for inheritedRSC
+sleep, preserve maskedGIC/local IRQs and checked foreign SMMU state. Source
+pins preferredkernel8e611870/native500b3a20/DTafc98e2bb re-reviewed; native
+adreno.c IRQ masking additionally read. A620PDC programming/hiddenTCS
+80000000 replace upstream's AOP/80000021 variant. RSC resource4KiB is
+enforced: inspect only containedTCS0/1, no genericTCS2/3 overrun.
+
+Owned HFI/log get contiguous uncached host views after cache clean/invalidate;
+no cached access after CM3 can write. Program native firmware registers/
+chip06020100/memory locations/power baseline, verify fresh INIT0, one reset
+release, bounded FW/HFI completion and one v2 version request. ACK checks
+echoed full request/sequence/status/native2.0 compatibility and real command
+consumer progress. Header reserved fields/deprecated ACK126 are not invented
+requirements. No performance tables/CORE_FW_START/GX request/CP/PAS or iOS
+graphics capability. Backing memory stays pinned until platform reset on
+all paths; no retry/clock rollback or free after partial startup.
+
+97focused tests PASS18.047s; final native IRQ-mask semantics pass8protocol
+tests0.650s. Tests cover full native vectors/optionalVRM/asleep wake, each
+failed store, every full ownership audit failure, busy TCS/RSC, stale result,
+wrong readback, completion with fault, timeouts and exact HFI ACK binding.
+Actual local native build20261024-153708PASS (153459superseded), no CI run.
+Actual native object contains complete word-store/barrier sequences; no
+Darwin asm semicolon separators. Kernel research/redfin-gpu/kernel-start-v1,
+SHA25686d2f7e1ce4dcd0b0ca8b7dce73a50d9a6c19df2bccf1219f1925bc91fa2b885.
+Image ports/redfin/out/gmu-start-v1/redfin-xnu.img,
+SHA25641781620ea54e7caf1c9bb08b90a45d0ad5e47bae156828b7c1150372d337c6e,
+decompressed18019312bytes. Actual loader/live-FDT/Image-window, packed
+memory/start policies+firmware hash and compiled-shim UP return PASS.
+Hardware capture not started yet. Next: integrated PDC/RSC/CM3/HFI log;
+host/build success is not firmware/DMA/GPU proof. Working Wi-Fi/root and
+memory-v6 image remain preserved. No flash/root/config/modem/persist/EFS/
+backup change; artifacts/logs/identifiers remain private.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x5a47cd8fdde10bb1`.
+
 ## REDFIN GMU owned memory/context and ALL firmware payloads hardware PASS — 2026-10-24
 
 Source54e9dbe, local native build20261024-150519 (no CI run). Authenticated

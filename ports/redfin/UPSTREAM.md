@@ -1,5 +1,39 @@
 # HackiOS upstream review — 2026-10-22
 
+## A620 CM3/PDC/RSC/HFI start adaptation — 2026-10-24
+
+Re-reviewed preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`,
+`redwood_adreno.c` steps15/16, `block_uncached()` and HFI receive/send.
+The separate explicit `--gmu-firmware-start`/redfinsmmu4 profile now adapts
+that complete bring-up to A620 using native msm
+`500b3a2059c1eec0fec08ec56add06320ea901a8`: `adreno_a6xx_gmu.c`,
+`kgsl_hfi.c/.h`, `a6xx_reg.h`, `kgsl_gmu.c` and newly reviewed `adreno.c`
+local interrupt masking. DT remains pinned at
+`afc98e2bb0716a57bf4f8d2b6191378dd7123ce4`; actual captured FDT is validated.
+
+A620 programs its own PDC instruction memory and TCS1/TCS3 commands using
+runtime-validated CMD-DB xo/cx/mx and optional vrm.soc. RSC uses native
+A650-family code and hidden TCS data80000000. These replace upstream's
+AOP-programmed PDC and80000021 assumptions. The native RSC aperture is
+4KiB: only contained TCS0/1 status/control are inspected; generic helper's
+TCS2/3 outside the range are not touched. Inherited RSC sleep, if observed,
+uses the native wake handshake before programming, with no retry.
+
+HFI and log gain a verified contiguous uncached host view as upstream;
+cached aliases are cleaned/invalidated before use and not accessed after
+CM3 can write. Native HFI has4descriptors, not upstream's17. Version request
+uses v2 header/16-byte padding; ACK checks full original header, status,
+bounds and native2.0 version compatibility. No dependency on deprecated
+v1 ACK ID126. Initial IRQ masks follow native `adreno_gmu_mask_and_clear_irqs`;
+GIC remains disabled and host queues are polled. Lifecycle checks distinguish
+held reset, fresh firmware completion and HFI startup; all owned SMMU/foreign
+state is audited at transitions. Only one reset release is provided.
+
+This profile sends no performance/bandwidth table, CORE_FW_START, GX request,
+GPU CP command or PAS call and publishes no graphics/Metal capability. No
+preferred userland ABI was changed; source snapshots remain those reviewed
+below. Hardware CM3/HFI evidence is pending; host tests/build are not DMA proof.
+
 Project upstream preference, 2026-10-23: the user designates
 [oosexgang/hackios-xnu-kernel][kernel] and
 [oosexgang/hackios-xnu-userland][userland] as the most stable source repositories.

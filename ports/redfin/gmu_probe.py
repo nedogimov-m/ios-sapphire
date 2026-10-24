@@ -3,7 +3,7 @@
 The optional SMMU leaf permits a separately selected global snapshot;
 context=True additionally binds read-only CB0/1 inspection. Explicit memory=True
 binds private firmware and a reset-held CB1/stream5 translation experiment.
-CM3 release, PDC and GX are outside these profiles.
+start=True additionally binds native A620 PDC/RSC/CM3/HFI execution.
 All native inputs are checked before appending any new node.
 """
 import struct
@@ -28,9 +28,12 @@ SMMU_CLOCK_POLICY = (0, 0x7100C, 0x80000001, 1,
 SMMU_INTERRUPTS = (705, *range(710, 718))
 CONTEXT_POLICY = (1, 0x8000, 0x4000, 2, 0x1000, 12)
 MEMORY_POLICY = (5, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, 0x802019, 0x38011, 0x1027)
+START_RANGES = (0x3DE0000, 0x1000, 0xB290000, 0x10000, 0xB490000, 0x10000,
+                0x3D0F000, 0x1000, 0x80860000, 0x20000)
+START_POLICY = (1, 2, 0, 0x06020100, 500, 1, 0, 0)
 
 
-def add_contract(tree, nodes, *, smmu=False, context=False, memory=False,
+def add_contract(tree, nodes, *, smmu=False, context=False, memory=False, start=False,
                  firmware=None, firmware_sha256=None):
     def need(path, key, expected):
         if nodes.get(path, {}).get(key) != expected:
@@ -56,6 +59,8 @@ def add_contract(tree, nodes, *, smmu=False, context=False, memory=False,
         raise ValueError('GPU context snapshot requires boolean selection and SMMU')
     if not isinstance(memory, bool) or (memory and not context):
         raise ValueError('GMU memory mapping requires explicit context selection')
+    if not isinstance(start, bool) or (start and not memory):
+        raise ValueError('GMU firmware start requires its explicit memory profile')
     if memory:
         if (not isinstance(firmware, bytes) or not 16 <= len(firmware) <= 0x40000 or len(firmware) % 4
                 or not isinstance(firmware_sha256, bytes) or len(firmware_sha256) != 32
@@ -92,6 +97,8 @@ def add_contract(tree, nodes, *, smmu=False, context=False, memory=False,
     need(gpu, 'qcom,chipid', struct.pack('>I', 0x06020001))
     need(gpu, 'reg', struct.pack('>8I', 0x3D00000, 0x40000, 0x3D61000, 0x800,
                                 0x3DE0000, 0x1000, 0x3D8B000, 0x2000))
+    if start:
+        need(gpu, 'reg-names', b'kgsl_3d0_reg_memory\0cx_dbgc\0rscc\0isense_cntl\0')
 
     gcc_handle, gpucc_handle, aop_handle = phandle(gcc), phandle(gpucc), phandle(aop)
     clocks = ((gpucc_handle, 3), (gpucc_handle, 6), (gcc_handle, 13),
@@ -111,7 +118,9 @@ def add_contract(tree, nodes, *, smmu=False, context=False, memory=False,
         ('cx-parent', mkadt.u32(*CX_PARENT)),
         ('gic-intids', mkadt.u32(*INTERRUPTS)),
     ] + ([('memory-policy', mkadt.u32(*MEMORY_POLICY)), ('firmware', firmware),
-           ('firmware-sha256', firmware_sha256)] if memory else []))]
+           ('firmware-sha256', firmware_sha256)] if memory else []) +
+       ([('start-ranges', mkadt.u64(*START_RANGES)),
+         ('start-policy', mkadt.u32(*START_POLICY))] if start else []))]
     if smmu:
         modern, legacy = '/soc/kgsl-smmu@3da0000', '/soc/qcom,kgsl-iommu@3da0000'
         need(modern, 'compatible', b'qcom,qsmmu-v500\0')

@@ -7,6 +7,24 @@ owned context/route readback have authenticated hardware results. GMU
 execution, real DMA translations and accelerated rendering remain unproved.
 Keep the inherited Sapphire `gpu=0`; its A610 wrapper is incompatible.
 
+`--gmu-firmware-start --gmu-fw-file PATH --gmu-fw-sha256 HEX` is a separate
+explicit CPU0/md0 profile, selecting redfinsmmu4 after complete memory
+preparation. It programs native A620 PDC/RSC with CMD-DB resource discovery,
+keeps local/GIC interrupts masked, creates uncached HFI/log views, configures
+the GMU, clears and verifies its completion word, then releases CM3 once.
+Bounded polling requires fresh version-dependent firmware completion and HFI
+startup, followed by one native2.0 version request and matched ACK. Complete
+owned SMMU/foreign-state audits surround the transitions. All allocations
+remain retained through any failure until platform reset. No automatic
+retry, GX request or graphics publication is part of this stage.
+
+The actual protocol in `include/redfin_gmu_start.h` is exercised through
+callback tests for every failed store, busy RSC/TCS, stale completion, wrong
+readback, fault/timeout, lifecycle and audit revocation, optional VRM and
+inherited sleep. Native instruction-memory words and HFI ACK framing are
+checked separately. The mode is included in exact ADT/argument/compiled-shim
+return checks; hardware execution is still a pending validation.
+
 The2026-10-24 memory-v6 capture passes complete reset-held preparation:
 seven zeroed/wired allocations, five native4KiB table pages/43 mapped pages,
 CB1/stream5 readback, native TCM retention and all seven firmware payloads

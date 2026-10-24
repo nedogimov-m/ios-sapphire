@@ -92,6 +92,7 @@ def main():
     p.add_argument('--gpu-smmu-probe', action='store_true', help='GMU test followed by read-only GPU-SMMU global/route metadata')
     p.add_argument('--gpu-smmu-context-probe', action='store_true', help='GPU-SMMU snapshot then read-only CB0/1 registers; no translations or DMA')
     p.add_argument('--gpu-smmu-memory-probe', action='store_true', help='reset-held GMU firmware/owned RAM and native context/route readback; ATS only when supported; isolated md0 only')
+    p.add_argument('--gmu-firmware-start', action='store_true', help='native A620 PDC/RSC/CM3 start and fresh HFI version ACK after complete owned memory preparation; isolated md0 only')
     p.add_argument('--gmu-fw-file', type=Path, help='private native A620 GMU firmware for the memory profile')
     p.add_argument('--gmu-fw-sha256', help='recorded SHA256 of that firmware')
     p.add_argument('--scm-probe', action='store_true', help='isolated md0/UP read-only TrustZone ABI/call/PAS capability queries')
@@ -141,6 +142,8 @@ def main():
         a.wifi_wlan_bdf_download = a.wifi_wlan_power = a.wifi_wlfw_setup = a.wifi_host_services = True
     if a.display_fit and not a.smp_gui:
         p.error('--display-fit requires the strict --smp-gui profile')
+    if a.gmu_firmware_start:
+        a.gpu_smmu_memory_probe = True
     if a.gpu_smmu_memory_probe:
         a.gpu_smmu_context_probe = True
         if not a.gmu_fw_file or not a.gmu_fw_sha256:
@@ -211,7 +214,7 @@ def main():
                 any(value for name, value in vars(a).items() if name.endswith('_probe') and name not in ('wifi_native_probe', 'wifi_power_probe', 'wifi_fw_source_probe'))):
             p.error(f'{label} requires its separate RAM-only profile')
     if a.gpu_power_probe:
-        label = '--gpu-smmu-memory-probe' if a.gpu_smmu_memory_probe else '--gpu-smmu-context-probe' if a.gpu_smmu_context_probe else '--gpu-smmu-probe' if a.gpu_smmu_probe else '--gmu-tcm-probe' if a.gmu_tcm_probe else '--gpu-power-probe'
+        label = '--gmu-firmware-start' if a.gmu_firmware_start else '--gpu-smmu-memory-probe' if a.gpu_smmu_memory_probe else '--gpu-smmu-context-probe' if a.gpu_smmu_context_probe else '--gpu-smmu-probe' if a.gpu_smmu_probe else '--gmu-tcm-probe' if a.gmu_tcm_probe else '--gpu-power-probe'
         if not (a.kernel and a.dtb and a.return_bootloader) or a.boot_mpidr:
             p.error(f'{label} requires kernel, live DTB, CPU0 and --return-bootloader')
         competing = ('display', 'splash', 'touch_events', 'ufs_root', 'ufs_rw', 'shutdown_seconds',
@@ -434,7 +437,8 @@ def main():
                     run([shutil.which('cc') or 'cc', '-std=c11', '-O2', HERE / 'gmu-fw-check.c', '-o', verifier])
                     run([verifier, a.gmu_fw_file])
                 add_contract(tree, nodes, smmu=a.gpu_smmu_probe, context=a.gpu_smmu_context_probe,
-                             memory=a.gpu_smmu_memory_probe, firmware=firmware, firmware_sha256=firmware_hash)
+                             memory=a.gpu_smmu_memory_probe, start=a.gmu_firmware_start,
+                             firmware=firmware, firmware_sha256=firmware_hash)
             except ValueError as error:
                 p.error(str(error))
         if a.wifi_native_probe:
@@ -607,7 +611,7 @@ def main():
         if a.gmu_tcm_probe:
             command_line += ' redfingmu=1'
         if a.gpu_smmu_probe:
-            command_line += ' redfinsmmu=3' if a.gpu_smmu_memory_probe else ' redfinsmmu=2' if a.gpu_smmu_context_probe else ' redfinsmmu=1'
+            command_line += ' redfinsmmu=4' if a.gmu_firmware_start else ' redfinsmmu=3' if a.gpu_smmu_memory_probe else ' redfinsmmu=2' if a.gpu_smmu_context_probe else ' redfinsmmu=1'
         if a.scm_probe:
             command_line += ' redfinscm=1'
         if a.wifi_native_probe and not a.wifi_gui:
@@ -788,6 +792,8 @@ def main():
         manifest['gpu_smmu_memory_probe'] = True
         manifest['gmu_firmware'] = {'path': str(a.gmu_fw_file.resolve()),
             'sha256': a.gmu_fw_sha256, 'bytes': len(firmware)}
+    if a.gmu_firmware_start:
+        manifest['gmu_firmware_start'] = True
     if a.scm_probe:
         manifest['scm_probe'] = True
     if a.wifi_native_probe:

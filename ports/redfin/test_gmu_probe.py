@@ -120,6 +120,8 @@ class RedfinGMUContractTests(unittest.TestCase):
                 'bsd/dev/redfin_gmu_pagetables.h': HERE/'include/redfin_gmu_pagetables.h',
                 'bsd/dev/redfin_gmu_firmware.h': HERE/'include/redfin_gmu_firmware.h',
                 'bsd/dev/redfin_gmu_memory.inc': HERE/'gmu-memory.inc',
+                'bsd/dev/redfin_gmu_start.inc': HERE/'gmu-start.inc',
+                'bsd/dev/redfin_gmu_start.h': HERE/'include/redfin_gmu_start.h',
             }
             actual = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
             self.assertEqual(actual, set(wanted))
@@ -299,9 +301,31 @@ class RedfinGMUContractTests(unittest.TestCase):
                 gmu_probe.add_contract(tree, nodes, **dict(selected, **changed))
             self.assertEqual(mkadt.adt.serialize(tree), before)
 
+    def test_firmware_start_is_separate_and_binds_native_pdc_rsc_resources(self):
+        tree, nodes = fixture(True)
+        nodes['/soc/qcom,kgsl-3d0@3d00000']['reg-names'] = (
+            b'kgsl_3d0_reg_memory\0cx_dbgc\0rscc\0isense_cntl\0')
+        image = bytes(range(64))
+        selected = dict(smmu=True, context=True, memory=True, start=True,
+                        firmware=image, firmware_sha256=hashlib.sha256(image).digest())
+        gmu_probe.add_contract(tree, nodes, **selected)
+        leaf = next(n for n in tree.children if n.name == 'redfin-gmu')
+        self.assertEqual(leaf.prop('start-ranges'), mkadt.u64(*gmu_probe.START_RANGES))
+        self.assertEqual(leaf.prop('start-policy'), mkadt.u32(*gmu_probe.START_POLICY))
+        for changed in (dict(start=1), dict(memory=False), dict(context=False)):
+            tree, nodes = fixture(True)
+            before = mkadt.adt.serialize(tree)
+            with self.assertRaises(ValueError):
+                gmu_probe.add_contract(tree, nodes, **dict(selected, **changed))
+            self.assertEqual(mkadt.adt.serialize(tree), before)
+
 
 def adapter_source():
     code = (HERE/'gmu-probe.c').read_text()
+    code = code.replace('#include "redfin_gmu_start.inc"', '''
+static bool gm_start_contract(struct gm_context *c) {(void)c; return false;}
+static int gm_start_run(struct gm_context *c) {(void)c; return ENOTSUP;}
+''')
     # These tests retain the existing read-only modes. The new write lease
     # is exercised separately; an unbound memory contract must be refused.
     code = code.replace('#include "redfin_gmu_memory.inc"', '''
@@ -781,7 +805,7 @@ class RedfinGMUAdapterTests(unittest.TestCase):
             raw = args.encode()+b'\0'
             self.assertEqual(self.lib.host_select(raw, len(raw), ctypes.byref(selected)), 1)
             self.assertEqual(selected.value, expected)
-        bad = [ARGS+' '+word for word in ('redfinsmmu=0', 'redfinsmmu=4', 'redfinsmmu=01',
+        bad = [ARGS+' '+word for word in ('redfinsmmu=0', 'redfinsmmu=5', 'redfinsmmu=01',
                                           'redfinsmmu=1x', 'redfinsmmu=+1',
                                           'redfinsmmu=1 redfinsmmu=1')]
         bad += [SMMU_ARGS.replace(word, '', 1) for word in ('redfingmu=1', 'redfinreturn=1', 'rd=md0')]

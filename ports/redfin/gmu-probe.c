@@ -17,9 +17,12 @@
 #include "redfin_gpu_smmu.h"
 #include "redfin_gpu_context.h"
 #include "redfin_gmu_mapping.h"
+#include "redfin_gmu_start.h"
+#include "redfin_rpmh.h"
 
 extern int redfin_spmi_return_ready(void);
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
 static bool gm_attempted;
 
 struct gm_binding { const void *live, *expected; unsigned bytes; };
@@ -30,7 +33,7 @@ struct gm_context {
     redfin_gmu_parent_valid_fn parent_valid;
     unsigned args_bytes;
     char args[608];
-    struct gm_binding bindings[20];
+    struct gm_binding bindings[24];
     uint64_t breadcrumbs;
     unsigned binding_count, dtcm_writes, smmu_reads, smmu_guard, smmu_breadcrumbs;
     unsigned smmu_mode, cb_reads, cb_breadcrumbs;
@@ -38,6 +41,8 @@ struct gm_context {
 };
 static bool gm_memory_contract(struct gm_context *);
 static int gm_memory_run(struct gm_context *, const struct rf_gs_snapshot *, const struct rf_gc_snapshot *);
+static bool gm_start_contract(struct gm_context *);
+static int gm_start_run(struct gm_context *);
 
 static const uint64_t gm_reg[] = {
     0x00100000, 0x1f0000, 0x03d90000, 0x9000,
@@ -104,7 +109,8 @@ gm_contract(struct gm_context *context, unsigned mode)
         gm_property(context, "/redfin-gpu-smmu", "gic-intids", gm_smmu_irqs, sizeof(gm_smmu_irqs)) &&
         (mode < 2 || gm_property(context, "/redfin-gpu-smmu", "context-policy",
             gm_cb_policy, sizeof(gm_cb_policy))) &&
-        (mode != 3 || gm_memory_contract(context));
+        (mode < 3 || gm_memory_contract(context)) &&
+        (mode != 4 || gm_start_contract(context));
 }
 
 int
@@ -379,6 +385,7 @@ gm_cb_read(void *argument, unsigned bank, uint32_t at, uint32_t *value)
 }
 
 #include "redfin_gmu_memory.inc"
+#include "redfin_gmu_start.inc"
 
 static int
 gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
@@ -407,7 +414,8 @@ gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
         printf("REDFIN GPU CONTEXT BANK: bank=%u SCTLR=%#x TCR2=%#x TTBR0=%#x/%#x TCR=%#x CONTEXTID=%#x MAIR=%#x/%#x FSR=%#x FAR=%#x/%#x FSYNR=%#x\n",
             bank, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11]);
     }
-    if (!result && context->smmu_mode == 3) result = gm_memory_run(context, global, &snapshot);
+    if (!result && context->smmu_mode >= 3) result = gm_memory_run(context, global, &snapshot);
+    if (!result && context->smmu_mode == 4) result = gm_start_run(context);
     return result;
 }
 

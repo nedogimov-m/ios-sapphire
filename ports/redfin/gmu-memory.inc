@@ -18,7 +18,7 @@ static struct {
     uint64_t allocated;
     uint32_t bytes;
     uint8_t digest[32], image[REDFIN_GMU_MAX_FILE_BYTES];
-    bool bound, retained;
+    bool bound, retained, ready;
 } gm_memory;
 
 static bool gm_memory_contract(struct gm_context *context)
@@ -294,7 +294,7 @@ static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot
     if (retention != 1) { error = EIO; goto done; }
     error = gm_memory_transfer(context, true); if (error) goto done;
     error = rf_gmm_verify(&gm_memory.lease, &ops); if (error) goto done;
-    stage = 7;
+    stage = 7; gm_memory.ready = true;
 done:
     if (gm_memory.lease.attempted)
         printf("REDFIN GMU MEMORY LEASE: step=%u block=%u offset=%#x requested=%#x observed=%#x poisoned=%u; CB1 SCTLR=%#x TCR2=%#x TTBR=%#x/%#x TCR=%#x FSR=%#x\n",

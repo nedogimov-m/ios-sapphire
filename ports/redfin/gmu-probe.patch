@@ -2,7 +2,7 @@ diff --git a/bsd/dev/redfin_gmu_probe.c b/bsd/dev/redfin_gmu_probe.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_probe.c
-@@ -0,0 +1,530 @@
+@@ -0,0 +1,538 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Exact md0/UP adapter for the separately proved, held-CX GMU TCM leaf. */
 +#include <pexpert/arm64/board_config.h>
@@ -22,9 +22,12 @@ new file mode 100644
 +#include "redfin_gpu_smmu.h"
 +#include "redfin_gpu_context.h"
 +#include "redfin_gmu_mapping.h"
++#include "redfin_gmu_start.h"
++#include "redfin_rpmh.h"
 +
 +extern int redfin_spmi_return_ready(void);
 +extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
 +static bool gm_attempted;
 +
 +struct gm_binding { const void *live, *expected; unsigned bytes; };
@@ -35,7 +38,7 @@ new file mode 100644
 +    redfin_gmu_parent_valid_fn parent_valid;
 +    unsigned args_bytes;
 +    char args[608];
-+    struct gm_binding bindings[20];
++    struct gm_binding bindings[24];
 +    uint64_t breadcrumbs;
 +    unsigned binding_count, dtcm_writes, smmu_reads, smmu_guard, smmu_breadcrumbs;
 +    unsigned smmu_mode, cb_reads, cb_breadcrumbs;
@@ -43,6 +46,8 @@ new file mode 100644
 +};
 +static bool gm_memory_contract(struct gm_context *);
 +static int gm_memory_run(struct gm_context *, const struct rf_gs_snapshot *, const struct rf_gc_snapshot *);
++static bool gm_start_contract(struct gm_context *);
++static int gm_start_run(struct gm_context *);
 +
 +static const uint64_t gm_reg[] = {
 +    0x00100000, 0x1f0000, 0x03d90000, 0x9000,
@@ -109,7 +114,8 @@ new file mode 100644
 +        gm_property(context, "/redfin-gpu-smmu", "gic-intids", gm_smmu_irqs, sizeof(gm_smmu_irqs)) &&
 +        (mode < 2 || gm_property(context, "/redfin-gpu-smmu", "context-policy",
 +            gm_cb_policy, sizeof(gm_cb_policy))) &&
-+        (mode != 3 || gm_memory_contract(context));
++        (mode < 3 || gm_memory_contract(context)) &&
++        (mode != 4 || gm_start_contract(context));
 +}
 +
 +int
@@ -384,6 +390,7 @@ new file mode 100644
 +}
 +
 +#include "redfin_gmu_memory.inc"
++#include "redfin_gmu_start.inc"
 +
 +static int
 +gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
@@ -412,7 +419,8 @@ new file mode 100644
 +        printf("REDFIN GPU CONTEXT BANK: bank=%u SCTLR=%#x TCR2=%#x TTBR0=%#x/%#x TCR=%#x CONTEXTID=%#x MAIR=%#x/%#x FSR=%#x FAR=%#x/%#x FSYNR=%#x\n",
 +            bank, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11]);
 +    }
-+    if (!result && context->smmu_mode == 3) result = gm_memory_run(context, global, &snapshot);
++    if (!result && context->smmu_mode >= 3) result = gm_memory_run(context, global, &snapshot);
++    if (!result && context->smmu_mode == 4) result = gm_start_run(context);
 +    return result;
 +}
 +
@@ -537,7 +545,7 @@ diff --git a/bsd/dev/redfin_gmu_probe.h b/bsd/dev/redfin_gmu_probe.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_probe.h
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,151 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Synchronous Redfin reset-held GMU probe; no standalone power authority. */
 +#ifndef REDFIN_GMU_PROBE_H
@@ -552,7 +560,8 @@ new file mode 100644
 +/*
 + * bytes includes the NUL; every word and the nonzero boot nonce is unique.
 + * Optional redfinsmmu=1 reads globals; =2 reads CB0/1; =3 prepares the
-+ * explicitly bound reset-held firmware/memory mapping contract.
++ * explicitly bound reset-held firmware/memory mapping contract; =4 additionally
++ * runs the separate native PDC/RSC/CM3/HFI contract.
 + * A rejected argument list leaves the optional selection output unchanged.
 + */
 +static inline bool
@@ -597,7 +606,7 @@ new file mode 100644
 +        static const char smmu[] = "redfinsmmu=";
 +        if (n == sizeof(smmu)) {
 +            for (i = 0; i < sizeof(smmu) - 1 && args[first + i] == smmu[i]; i++) {}
-+            if (i == sizeof(smmu) - 1 && args[first + i] >= '1' && args[first + i] <= '3') {
++            if (i == sizeof(smmu) - 1 && args[first + i] >= '1' && args[first + i] <= '4') {
 +                if (smmu_seen) return false;
 +                smmu_seen = true;
 +                mode = (unsigned)(args[first + i] - '0');
@@ -677,6 +686,8 @@ new file mode 100644
 + * reset-held TCM leaf and fresh parent/source/reset/IRQ proofs; no SMMU
 + * write, table install or firmware start is provided. Mode2 additionally
 + * reads only CB0/1 after that stable snapshot and its separate exact policy.
++ * Mode3 adds owned memory/firmware preparation; mode4 explicitly authorizes
++ * native PDC/RSC, one CM3 reset release and a bounded HFI version exchange.
 + */
 +int redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
 +    void *held_cx_context, redfin_gmu_parent_valid_fn held_cx_valid);
@@ -2398,7 +2409,7 @@ new file mode 100644
 +    uint64_t allocated;
 +    uint32_t bytes;
 +    uint8_t digest[32], image[REDFIN_GMU_MAX_FILE_BYTES];
-+    bool bound, retained;
++    bool bound, retained, ready;
 +} gm_memory;
 +
 +static bool gm_memory_contract(struct gm_context *context)
@@ -2674,7 +2685,7 @@ new file mode 100644
 +    if (retention != 1) { error = EIO; goto done; }
 +    error = gm_memory_transfer(context, true); if (error) goto done;
 +    error = rf_gmm_verify(&gm_memory.lease, &ops); if (error) goto done;
-+    stage = 7;
++    stage = 7; gm_memory.ready = true;
 +done:
 +    if (gm_memory.lease.attempted)
 +        printf("REDFIN GMU MEMORY LEASE: step=%u block=%u offset=%#x requested=%#x observed=%#x poisoned=%u; CB1 SCTLR=%#x TCR2=%#x TTBR=%#x/%#x TCR=%#x FSR=%#x\n",
@@ -2692,3 +2703,607 @@ new file mode 100644
 +        (unsigned long long)(gm_time_ns(context) - started));
 +    return error;
 +}
+diff --git a/bsd/dev/redfin_gmu_start.inc b/bsd/dev/redfin_gmu_start.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_start.inc
+@@ -0,0 +1,348 @@
++/* SPDX-License-Identifier: MIT */
++/* Explicit mode4 only. Reset-held preparation and ownership must pass first.
++ * Local GMU interrupts are masked; response queues are polled. No IRQ enable,
++ * foreign route, GX request, PAS call, GPU submission or power release.
++ */
++static const uint64_t gm_start_ranges[] = {
++    0x03de0000,0x1000,0x0b290000,0x10000,0x0b490000,0x10000,
++    0x03d0f000,0x1000,0x80860000,0x20000
++};
++static const uint32_t gm_start_policy[] = {1,2,0,0x06020100,500,1,0,0};
++static struct {
++    struct gm_context *context;
++    struct rf_gb_config config;
++    struct rf_gb_report report;
++    vm_offset_t base[RF_GB_UNITS], db, hfi, log;
++    struct rf_gm_memory *hfi_memory, *log_memory;
++    struct rf_cmddb_resource resources[4];
++    unsigned phase, audited, messages, sent, received;
++    bool bound, entered;
++} gm_start;
++
++static bool gm_start_contract(struct gm_context *context)
++{
++    if (!gm_property(context,"/redfin-gmu","start-ranges",gm_start_ranges,sizeof(gm_start_ranges)) ||
++        !gm_property(context,"/redfin-gmu","start-policy",gm_start_policy,sizeof(gm_start_policy))) return false;
++    if (context) { if(gm_start.bound)return false;gm_start.context=context;gm_start.bound=true; }
++    return true;
++}
++
++/* Keep every original bound args/ADT/parent/CPU/CX/GIC constraint. The
++ * separate lifecycle gate changes only the reset/INIT/HFI expectations. */
++static bool gm_start_base_valid(void *argument)
++{
++    struct gm_context *c=argument;
++    if(!c || c!=gm_start.context || !gm_start.bound || !gm_memory.ready ||
++        !gm_memory.retained || c->smmu_mode!=4 || !c->smmu_ready ||
++        !gm_memory.lease.active || gm_memory.lease.poisoned || !gm_valid(c))return false;
++    if((gm_scalar_read(c->base[RF_GT_GPUCC]+0x1098)&0x80000001u)!=1 ||
++        (gm_scalar_read(c->base[RF_GT_GPUCC]+0x100c)&0x80000001u)!=1 ||
++        (gm_scalar_read(c->base[RF_GT_GPUCC]+0x1064)&0x80000001u)!=0x80000000u)return false;
++    return true;
++}
++static int gm_start_guard(void *argument,unsigned phase)
++{
++    struct gm_context *c=argument;
++    if(phase>RF_GB_HFI_LIVE || !gm_start_base_valid(c))return ECANCELED;
++    gm_start.phase=phase;
++    uint32_t reset=gm_scalar_read(c->base[RF_GT_GMU]+0x14000);
++    uint32_t init=gm_scalar_read(c->base[RF_GT_GMU]+0x14070);
++    uint32_t hfi=gm_scalar_read(c->base[RF_GT_GMU]+0x14600);
++    if(reset!=(phase==RF_GB_HELD?1u:0u))return EAGAIN;
++    if(phase==RF_GB_HELD && (init || hfi))return EAGAIN;
++    if(phase!=RF_GB_HELD && gm_start.config.core_version>0x20010004u && (init&0xe00u))return EIO;
++    if(phase>=RF_GB_FW_LIVE && !redfin_gmu_started(gm_start.config.core_version,init))return EIO;
++    if(phase<RF_GB_HFI_WAIT && (hfi&1u))return EAGAIN;
++    if(phase==RF_GB_HFI_LIVE && !(hfi&1u))return EIO;
++    if(phase!=RF_GB_HELD) {
++        if(gm_scalar_read(c->base[RF_GT_GMU]+0x24c14)&0x29u)return EIO;
++        if((gm_scalar_read(c->base[RF_GT_GMU]+0x1464c)&7u)!=7u ||
++            (gm_scalar_read(c->base[RF_GT_GMU]+0x24c18)&0x29u)!=0x29u)return EAGAIN;
++        if(gm_scalar_read(c->cb+0x1058)&RF_GC_FAULT_BITS)return EFAULT;
++    }
++    return 0;
++}
++
++static bool gm_start_read_allowed(unsigned unit,uint32_t at)
++{
++    if(unit>=RF_GB_UNITS || (at&3u))return false;
++    for(unsigned i=0;i<gm_start.report.program_count;++i) {
++        const struct rf_gb_store *w=&gm_start.report.program[i];
++        if(unit==w->unit && at==w->at)return true;
++    }
++    if(unit==RF_GB_RSC)return at==0x10 || at==0x404 || at==0xd18 || at==0xfb8 || at==0xd14 || at==0xfb4;
++    if(unit==RF_GB_GBIF)return at==0x114 || at==0x118;
++    if(unit!=RF_GB_GMU)return false;
++    switch(at) {
++    case 0x14000:case 0x14070:case 0x14600:case 0x14604:case 0x14648:case 0x24c14:
++    case 0x143a0:case 0x24c1c:case 0x24c20:case 0x24c4c:case 0x14404:case 0xafdc:
++        return true;
++    default:return at>=0xafe0 && at<=0xaff0;
++    }
++}
++static int gm_start_read(void *argument,unsigned unit,uint32_t at,uint32_t *value)
++{
++    if(!value || !gm_start_base_valid(argument) || !gm_start_read_allowed(unit,at) ||
++        !gm_start.base[unit])return EPERM;
++    *value=gm_scalar_read(gm_start.base[unit]+at);return 0;
++}
++static int gm_start_write(void *argument,unsigned unit,uint32_t at,uint32_t value)
++{
++    if(!gm_start_base_valid(argument) || unit>=RF_GB_UNITS || !gm_start.base[unit])return ECANCELED;
++    const struct rf_gb_report *s=&gm_start.report;
++    bool allowed=s->last_unit==unit && s->last_offset==at && s->wanted==value;
++    if(!allowed)return EPERM;
++    allowed=false;
++    for(unsigned i=0;i<s->program_count;++i) {
++        const struct rf_gb_store *w=&s->program[i];
++        if(w->unit==unit && w->at==at && w->value==value)allowed=true;
++    }
++    if(unit==RF_GB_GMU) {
++        if(at==0x14000 && value==0 && s->released && s->phase==RF_GB_FW_WAIT)allowed=true;
++        if(at==0x14618 && value==1 && s->firmware && s->phase==RF_GB_HFI_WAIT)allowed=true;
++        if(at==0x24c1c && (value==0 || value==2) && s->phase==RF_GB_HELD)allowed=true;
++    }
++    if(!allowed)return EPERM;
++    if(unit!=RF_GB_GMU || (at!=0x14000 && at!=0x14618))
++        if(gm_start_guard(argument,s->phase))return ECANCELED;
++    printf("REDFIN GMU START WRITE: step=%u unit=%u offset=%#x value=%#x\n",s->stores,unit,at,value);
++    if(!gm_start_base_valid(argument))return ECANCELED;
++    gm_memory_store(gm_start.base[unit]+at,value);return 0;
++}
++
++/* Read-only complete SMMU audit without recursively taking the reset-held
++ * source proof at every word. It still guards each MMIO access. */
++static bool gm_start_sample_valid(void *argument)
++{ return gm_start_guard(argument,gm_start.phase)==0; }
++static int gm_start_global(void *argument,uint32_t at,uint32_t *value)
++{
++    struct gm_context *c=argument;
++    if(!value || !rf_gs_read_allowed(at,&gm_memory.lease.expected) || !gm_start_sample_valid(c))return EPERM;
++    *value=gm_scalar_read(c->smmu+at);return 0;
++}
++static int gm_start_bank(void *argument,unsigned bank,uint32_t at,uint32_t *value)
++{
++    struct gm_context *c=argument;
++    if(!value || !rf_gc_allowed(bank,at) || !gm_start_sample_valid(c))return EPERM;
++    *value=gm_scalar_read(c->cb+0x1000*bank+at);return 0;
++}
++static int gm_start_audit(void *argument,unsigned phase)
++{
++    struct gm_context *c=argument;
++    int error=gm_start_guard(c,phase);
++    if(error)return error;
++    struct rf_gt_report clock={0};
++    const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
++    error=rf_gt_source_live(&source,&clock,true);if(error)return error;
++    for(unsigned i=0;i<sizeof(gm_smmu_clocks)/sizeof(gm_smmu_clocks[0]);++i) {
++        const uint32_t *w=gm_smmu_clocks[i];
++        if((gm_scalar_read(c->base[w[0]]+w[1])&w[2])!=w[3])return EAGAIN;
++    }
++    const struct rf_gs_ops go={c,gm_start_sample_valid,gm_start_global};
++    const struct rf_gc_ops bo={c,gm_start_sample_valid,gm_start_bank};
++    error=rf_gs_snapshot_run(&go,gm_chip,&gm_memory.lease.fresh);
++    if(!error)error=rf_gc_snapshot_run(&bo,&gm_memory.lease.fresh,&gm_memory.lease.fresh_banks);
++    if(!error && !rf_gmm_equal(&gm_memory.lease))error=EAGAIN;
++    if(!error && (gm_scalar_read(c->cb+0x1028) || gm_scalar_read(c->cb+0x102c)))error=EAGAIN;
++    if(error){gm_memory.lease.poisoned=1;gm_memory.lease.active=0;return error;}
++    ++gm_start.audited;
++    printf("REDFIN GMU START AUDIT: phase=%u complete=%u FSR=%#x\n",phase,gm_start.audited,
++        gm_memory.lease.fresh_banks.words[1][8]);
++    return gm_start_guard(c,phase);
++}
++static int gm_start_delay(void *argument,unsigned us)
++{
++    if(us!=100 || !gm_start_base_valid(argument))return ECANCELED;
++    delay(100);return 0;
++}
++
++static uint32_t gm_start_hfi_word(uint32_t at)
++{ return gm_scalar_read(gm_start.hfi+at); }
++static void gm_start_hfi_store(uint32_t at,uint32_t value)
++{ gm_memory_store(gm_start.hfi+at,value); }
++static int gm_start_hfi_shape(void *argument)
++{
++    int error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
++    static const uint32_t header[]={0,54,6,12,4,4};
++    static const uint32_t priority[]={10,10,40,20};
++    for(unsigned i=1;i<6;++i)if(gm_start_hfi_word(4*i)!=header[i])return EPROTO;
++    for(unsigned q=0;q<4;++q) {
++        uint32_t at=24+48*q;
++        if(gm_start_hfi_word(at)!=(q==3?0u:1u) ||
++            gm_start_hfi_word(at+4)!=gm_start.config.hfi_address+0xe0+4096*q ||
++            gm_start_hfi_word(at+8)!=(q|(priority[q]<<8)) ||
++            gm_start_hfi_word(at+12)!=1024 || gm_start_hfi_word(at+16))return EPROTO;
++        uint32_t read=gm_start_hfi_word(at+40),write=gm_start_hfi_word(at+44);
++        if(read>=1024 || write>=1024 || ((read|write)&3u))return EPROTO;
++    }
++    return gm_start_guard(argument,RF_GB_HFI_LIVE);
++}
++static int gm_start_receive(void *argument,unsigned q,uint32_t request,uint32_t *version)
++{
++    if(q!=1 && q!=2)return EINVAL;
++    int error=gm_start_hfi_shape(argument);if(error)return error;
++    uint32_t base=24+48*q,read=gm_start_hfi_word(base+40),write=gm_start_hfi_word(base+44);
++    if(read==write)return ENOENT;
++    uint32_t at=0xe0+4096*q;
++    uint32_t first=gm_start_hfi_word(at+4*read),count=(first>>8)&255u;
++    uint32_t available=(write+1024-read)%1024,padded=(count+3u)&~3u;
++    if(!count || padded>available || padded>=1024 || gm_start.messages>=16)return EPROTO;
++    uint32_t words[255];
++    for(unsigned i=0;i<count;++i)words[i]=gm_start_hfi_word(at+4*((read+i)%1024));
++    ++gm_start.messages;
++    printf("REDFIN GMU HFI RECEIVE: queue=%u count=%u header=%#x word1=%#x word2=%#x word3=%#x\n",
++        q,count,words[0],count>1?words[1]:0,count>2?words[2]:0,count>3?words[3]:0);
++    if((words[0]&255u)==100u)return EIO;
++    error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
++    gm_start_hfi_store(base+40,(read+padded)%1024);
++    if(q==1 && ((words[0]>>16)&15u)==1) {
++        error=rf_gb_version_ack(words,count,request,0x20000000,version);
++        if(!error)++gm_start.received;
++        return error;
++    }
++    return ENOMSG;
++}
++static int gm_start_exchange(void *argument,uint32_t *version)
++{
++    int error=gm_start_hfi_shape(argument);if(error)return error;
++    if(gm_start.sent || gm_start_hfi_word(64) || gm_start_hfi_word(68))return EBUSY;
++    for(unsigned i=0;i<16;++i) {
++        bool pending=false;
++        for(unsigned q=1;q<=2;++q) {
++            uint32_t unused=0;
++            error=gm_start_receive(argument,q,UINT32_MAX,&unused);
++            if(error==ENOMSG){pending=true;continue;}
++            if(error!=ENOENT)return error;
++        }
++        if(!pending)break;
++        if(i==15)return EPROTO;
++    }
++    uint32_t request;
++    error=redfin_gmu_hfi_command_header(1,2,1,&request);if(error)return error;
++    uint32_t command[]={request,0x20000000,0xfafafafa,0xfafafafa};
++    for(unsigned i=0;i<4;++i) {
++        error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
++        gm_start_hfi_store(0xe0+4*i,command[i]);
++    }
++    error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
++    gm_start_hfi_store(68,4);
++    ++gm_start.sent;
++    error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
++    gm_memory_store(gm_start.base[RF_GB_GMU]+0x14650,1);
++    printf("REDFIN GMU HFI SENT: request=%#x supported=0x20000000 sequence=1\n",request);
++    uint64_t first=gm_time_ns(argument);
++    for(unsigned i=0;i<5000 && gm_time_ns(argument)-first<RF_GB_WAIT_NS;++i) {
++        error=gm_start_receive(argument,1,request,version);
++        if(!error) {
++            if(gm_start_hfi_word(64)!=4)return EPROTO;
++            error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
++            gm_memory_store(gm_start.base[RF_GB_GMU]+0x14644,1);
++            return 0;
++        }
++        if(error!=ENOENT && error!=ENOMSG)return error;
++        error=gm_start_receive(argument,2,request,version);
++        if(error!=ENOENT && error!=ENOMSG)return error;
++        error=gm_start_delay(argument,100);if(error)return error;
++    }
++    return ETIMEDOUT;
++}
++
++static int gm_start_resources(struct gm_context *context)
++{
++    static const uint8_t names[4][8]={"xo.lvl","cx.lvl","mx.lvl","vrm.soc"};
++    for(unsigned i=0;i<4;++i) {
++        if(!gm_start_base_valid(context))return ECANCELED;
++        enum rf_cmddb_status e=rf_cmddb_lookup((volatile const uint8_t *)gm_start.db,
++            RF_CMDDB_BYTES,names[i],i==3?RF_CMDDB_VRM:RF_CMDDB_ARC,&gm_start.resources[i]);
++        if(i==3 && e==RF_CMDDB_MISSING)continue;
++        if(e!=RF_CMDDB_OK)return ENXIO;
++    }
++    gm_start.config=(struct rf_gb_config){
++        .chip=gm_chip,.core_version=gm_memory.firmware.versions[0],
++        .hfi_version=gm_memory.firmware.versions[4],.hfi_address=gm_memory.firmware.hfi_address,
++        .log_address=gm_memory.firmware.log_address,.xo=gm_start.resources[0].address,
++        .cx=gm_start.resources[1].address,.mx=gm_start.resources[2].address,.vrm=gm_start.resources[3].address
++    };
++    printf("REDFIN GMU START RESOURCES: xo=%#x cx=%#x mx=%#x vrm=%#x core=%#x hfi=%#x\n",
++        gm_start.config.xo,gm_start.config.cx,gm_start.config.mx,gm_start.config.vrm,
++        gm_start.config.core_version,gm_start.config.hfi_version);
++    return rf_gb_config_valid(&gm_start.config)?0:ENOTSUP;
++}
++static int gm_start_memory(struct gm_context *context)
++{
++    for(unsigned i=0;i<gm_memory.count;++i) {
++        struct rf_gm_memory *memory=&gm_memory.data[i];
++        if(memory->gmu_address==gm_start.config.hfi_address)gm_start.hfi_memory=memory;
++        if(memory->gmu_address==gm_start.config.log_address)gm_start.log_memory=memory;
++    }
++    struct rf_gm_memory *objects[]={gm_start.hfi_memory,gm_start.log_memory};
++    for(unsigned i=0;i<2;++i) {
++        struct rf_gm_memory *m=objects[i];
++        if(!m || !gm_memory_owns(context,m,RF_GM_PT_DATA))return EACCES;
++        for(uintptr_t at=(uintptr_t)m->host;at<(uintptr_t)m->host+m->owned_bytes;at+=64)
++            __asm__ volatile("dc civac, %0"::"r"(at):"memory");
++        __asm__ volatile("dsb osh":::"memory");
++        vm_offset_t mapped=ml_io_map_wcomb(m->physical,m->owned_bytes);
++        if(!mapped)return ENOMEM;
++        if(i)gm_start.log=mapped;else gm_start.hfi=mapped;
++    }
++    /* Only the uncached view is used after CM3 can write. */
++    return 0;
++}
++static void gm_start_diagnostic(struct gm_context *context)
++{
++    if(!gm_start_base_valid(context))return;
++    const uint32_t offsets[]={0x14000,0x14070,0x14600,0x14604,0x14648,0x24c14,0x24c4c,0xafdc,0x14404};
++    for(unsigned i=0;i<sizeof(offsets)/sizeof(offsets[0]);++i)
++        printf("REDFIN GMU START STATE: offset=%#x value=%#x\n",offsets[i],
++            gm_scalar_read(gm_start.base[RF_GB_GMU]+offsets[i]));
++    printf("REDFIN GMU START FAULT: FSR=%#x FAR=%#x/%#x FSYNR=%#x GFSR=%#x\n",
++        gm_scalar_read(context->cb+0x1058),gm_scalar_read(context->cb+0x1060),
++        gm_scalar_read(context->cb+0x1064),gm_scalar_read(context->cb+0x1068),
++        gm_scalar_read(context->smmu+0x48));
++    if(gm_start.hfi)
++        for(unsigned q=0;q<4;++q)printf("REDFIN GMU START QUEUE: q=%u status=%#x read=%u write=%u\n",
++            q,gm_start_hfi_word(24+48*q),gm_start_hfi_word(64+48*q),gm_start_hfi_word(68+48*q));
++    if(gm_start.log)
++        for(unsigned i=0;i<16;i+=4)printf("REDFIN GMU START LOG: at=%#x words=%#x/%#x/%#x/%#x\n",4*i,
++            gm_scalar_read(gm_start.log+4*i),gm_scalar_read(gm_start.log+4*i+4),
++            gm_scalar_read(gm_start.log+4*i+8),gm_scalar_read(gm_start.log+4*i+12));
++}
++static int gm_start_run(struct gm_context *context)
++{
++    int error=EPERM;
++    if(!gm_start.bound || gm_start.entered || context!=gm_start.context ||
++        !gm_memory.ready || gm_memory.loaded!=gm_memory.firmware.payload_count ||
++        gm_memory.verified!=gm_memory.firmware.payload_count)return error;
++    gm_start.entered=true;gm_start.base[RF_GB_GMU]=context->base[RF_GT_GMU];
++    gm_start.base[RF_GB_RSC]=ml_io_map(0x03de0000,0x4000);
++    gm_start.base[RF_GB_PDC]=ml_io_map(0x0b290000,0x10000);
++    gm_start.base[RF_GB_SEQ]=ml_io_map(0x0b490000,0x10000);
++    gm_start.base[RF_GB_GBIF]=ml_io_map(0x03d0f000,0x1000);
++    gm_start.db=ml_io_map_wcomb(0x80860000,RF_CMDDB_BYTES);
++    if(!gm_start_base_valid(context))return ECANCELED;
++    for(unsigned i=0;i<RF_GB_UNITS;++i)if(!gm_start.base[i])return ENOMEM;
++    if(!gm_start.db)return ENOMEM;
++    uint64_t started=gm_time_ns(context);
++    error=gm_start_resources(context);if(error)goto done;
++    error=gm_start_memory(context);if(error)goto done;
++    const struct rf_gb_ops ops={context,gm_start_guard,gm_start_read,gm_start_write,
++        gm_start_audit,gm_start_exchange,gm_start_delay,gm_time_ns};
++    printf("REDFIN GMU START: native A620 cold PDC/RSC/CM3/HFI begins; no GX request\n");
++    error=rf_gb_run(&gm_start.report,&gm_start.config,&ops);
++done:
++    gm_start_diagnostic(context);
++    printf("REDFIN GMU START RESULT: result=%d stage=%u phase=%u stores=%u polls=%u released=%u firmware=%u hfi=%u sent=%u received=%u ack=%u version=%#x elapsed-ns=%llu\n",
++        error,gm_start.report.stage,gm_start.report.phase,gm_start.report.stores,gm_start.report.polls,
++        gm_start.report.released,gm_start.report.firmware,gm_start.report.hfi,gm_start.sent,gm_start.received,
++        gm_start.report.ack,gm_start.report.version,(unsigned long long)(gm_time_ns(context)-started));
++    printf("REDFIN GMU START LAST: unit=%u offset=%#x wanted=%#x observed=%#x audits=%u; allocations retained until reset\n",
++        gm_start.report.last_unit,gm_start.report.last_offset,gm_start.report.wanted,
++        gm_start.report.observed,gm_start.audited);
++    printf("REDFIN GMU START CACHED SMMU: error=%d stable=%u FSR=%#x FAR=%#x/%#x FSYNR=%#x GFSR=%#x poisoned=%u\n",
++        gm_memory.lease.fresh_banks.error,gm_memory.lease.fresh_banks.stable,
++        gm_memory.lease.fresh_banks.words[1][8],gm_memory.lease.fresh_banks.words[1][9],
++        gm_memory.lease.fresh_banks.words[1][10],gm_memory.lease.fresh_banks.words[1][11],
++        gm_memory.lease.fresh.fault,gm_memory.lease.poisoned);
++    return error;
++}
+diff --git a/bsd/dev/redfin_gmu_start.h b/bsd/dev/redfin_gmu_start.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gmu_start.h
+@@ -0,0 +1,246 @@
++/* SPDX-License-Identifier: MIT */
++/* A620 cold GMU/PDC/RSC start and a fresh HFI v2 version exchange.
++ * Native msm500b3a2059c1eec0fec08ec56add06320ea901a8; preferred upstream
++ * redwood_adreno.c steps15/16. No GX request, performance tables or GPU CP.
++ */
++#ifndef REDFIN_GMU_START_H
++#define REDFIN_GMU_START_H
++#include <stdbool.h>
++#include <string.h>
++#include "redfin_gmu_firmware.h"
++
++enum { RF_GB_GMU, RF_GB_RSC, RF_GB_PDC, RF_GB_SEQ, RF_GB_GBIF, RF_GB_UNITS };
++enum { RF_GB_HELD, RF_GB_FW_WAIT, RF_GB_FW_LIVE, RF_GB_HFI_WAIT, RF_GB_HFI_LIVE };
++#define RF_GB_MAX_STORES 96u
++#define RF_GB_WAIT_NS UINT64_C(500000000)
++
++struct rf_gb_config {
++    uint32_t chip, core_version, hfi_version, hfi_address, log_address;
++    uint32_t xo, cx, mx, vrm, rpmh;
++};
++struct rf_gb_store { uint32_t unit, at, value, mask; };
++struct rf_gb_report {
++    unsigned attempted, stage, phase, stores, polls, released, firmware, hfi, ack;
++    uint32_t last_unit, last_offset, wanted, observed, init, hfi_status, version;
++    uint32_t rsc_status, rsc_busy, tcs[4];
++    struct rf_gb_store program[RF_GB_MAX_STORES];
++    unsigned program_count;
++    int error;
++};
++struct rf_gb_ops {
++    void *context;
++    int (*guard)(void *, unsigned phase);
++    int (*read)(void *, unsigned unit, uint32_t at, uint32_t *);
++    int (*write)(void *, unsigned unit, uint32_t at, uint32_t value);
++    int (*audit)(void *, unsigned phase);
++    int (*exchange)(void *, uint32_t *version);
++    int (*delay)(void *, unsigned us);
++    uint64_t (*time_ns)(void *);
++};
++
++static inline bool rf_gb_config_valid(const struct rf_gb_config *c)
++{
++    return c && c->chip == 0x06020001u && c->core_version &&
++        (c->hfi_version >> 28) == 2 && c->hfi_address == 0x60001000u &&
++        c->log_address == 0x60006000u && c->xo && c->cx && c->mx &&
++        !((c->xo | c->cx | c->mx | c->vrm) & 3u) &&
++        (c->xo >> 16) == 3 && (c->cx >> 16) == 3 && (c->mx >> 16) == 3 &&
++        c->xo != c->cx && c->xo != c->mx && c->cx != c->mx &&
++        (!c->vrm || ((c->vrm >> 16) == 4 && c->vrm <= UINT32_MAX - 4));
++}
++
++static inline int rf_gb_add(struct rf_gb_report *r, unsigned unit, uint32_t at,
++    uint32_t value, uint32_t mask)
++{
++    if (r->program_count == RF_GB_MAX_STORES) return ENOSPC;
++    r->program[r->program_count++] = (struct rf_gb_store){unit, at, value, mask};
++    return 0;
++}
++
++static inline int rf_gb_program(const struct rf_gb_config *c, struct rf_gb_report *r)
++{
++    static const uint32_t rsc_code[] = {0xeaaae5a0,0xe1a1ebab,0xa2e0a581,0xecac82e2,0x0020edad};
++    static const uint32_t pdc_code[] = {0xfebea1e1,0xa5a4a3a2,0x8382a6e0,0xbce3e284,0x002081fc};
++    int error;
++    if (!r || !rf_gb_config_valid(c)) return EINVAL;
++    r->program_count = 0;
++#define RF_GB_ADD(u,a,v,m) do { error=rf_gb_add(r,u,a,v,m); if(error)return error; } while(0)
++    RF_GB_ADD(RF_GB_GMU,0x24c18,UINT32_MAX,0x29); /* Native GMU_AO_INT_MASK. */
++    RF_GB_ADD(RF_GB_GMU,0x1464c,UINT32_MAX,7); /* Native HFI_IRQ_MASK. */
++    RF_GB_ADD(RF_GB_GMU,0x24c10,UINT32_MAX,0); /* Owned local interrupt W1C. */
++    RF_GB_ADD(RF_GB_GMU,0x14644,UINT32_MAX,0);
++    RF_GB_ADD(RF_GB_RSC,0x10,1u<<24,0); /* Disable SDE gating, status/command. */
++    RF_GB_ADD(RF_GB_RSC,0x2c,1,0xff);
++    for (unsigned i=0;i<3;++i) {
++        RF_GB_ADD(RF_GB_RSC,0x38+8*i,i==2?0x80000000u:0,UINT32_MAX);
++        RF_GB_ADD(RF_GB_RSC,0x34+8*i,0,UINT32_MAX);
++    }
++    RF_GB_ADD(RF_GB_RSC,0x400,0,0xffff);
++    RF_GB_ADD(RF_GB_RSC,0x20,0x4520,0xffff);
++    RF_GB_ADD(RF_GB_RSC,0x24,0x4510,0xffff);
++    RF_GB_ADD(RF_GB_RSC,0x28,0x4514,0xffff);
++    for (unsigned i=0;i<5;++i) RF_GB_ADD(RF_GB_RSC,0x600+4*i,rsc_code[i],UINT32_MAX);
++    for (unsigned i=0;i<5;++i) RF_GB_ADD(RF_GB_SEQ,4*i,pdc_code[i],UINT32_MAX);
++    for (unsigned group=0;group<2;++group) {
++        uint32_t base=4u*(group?0x15d6:0x1572);
++        RF_GB_ADD(RF_GB_PDC,base+4,7,0xffff);
++        RF_GB_ADD(RF_GB_PDC,base+8,0,0xffff);
++        RF_GB_ADD(RF_GB_PDC,base,0,0x1010000);
++        uint32_t addresses[4]={c->mx,c->cx,c->xo,c->vrm?c->vrm+4:0};
++        uint32_t values[4]={group?2u:1u,group?2u:0u,group?3u:0u,group?1u:0u};
++        for (unsigned cmd=0;cmd<(c->vrm?4u:3u);++cmd) {
++            RF_GB_ADD(RF_GB_PDC,base+12+16*cmd,0x10108,0x3ffff);
++            RF_GB_ADD(RF_GB_PDC,base+16+16*cmd,addresses[cmd],UINT32_MAX);
++            RF_GB_ADD(RF_GB_PDC,base+20+16*cmd,values[cmd],UINT32_MAX);
++        }
++    }
++    RF_GB_ADD(RF_GB_PDC,0x4520,0,0xffff);
++    RF_GB_ADD(RF_GB_PDC,0x4500,0x80000001,0x80000001);
++    /* A620 vetoes FAL10; the A642L-only FALNEXT register is not used. */
++    RF_GB_ADD(RF_GB_GMU,0x143c0,1,1);
++    RF_GB_ADD(RF_GB_GMU,0x14070,0,UINT32_MAX);
++    RF_GB_ADD(RF_GB_GMU,0x14004,2,3);
++    RF_GB_ADD(RF_GB_GMU,0x14614,c->hfi_address,UINT32_MAX);
++    RF_GB_ADD(RF_GB_GMU,0x14610,1,1);
++    RF_GB_ADD(RF_GB_GMU,0x24c44,0x80a008a0,UINT32_MAX);
++    RF_GB_ADD(RF_GB_GMU,0x140b4,0x4052,0xffff);
++    RF_GB_ADD(RF_GB_GBIF,0x114,0,7);
++    RF_GB_ADD(RF_GB_GMU,0x14404,0,UINT32_MAX);
++    RF_GB_ADD(RF_GB_GMU,0x14608,0x06020100,UINT32_MAX);
++    RF_GB_ADD(RF_GB_GMU,0x14400,c->log_address,UINT32_MAX);
++    RF_GB_ADD(RF_GB_GMU,0x1303c,1,1);
++    RF_GB_ADD(RF_GB_GMU,0x13000,1,1);
++    RF_GB_ADD(RF_GB_GMU,0x13004,1,1);
++    RF_GB_ADD(RF_GB_GMU,0x14300,0x09c40400,UINT32_MAX);
++    RF_GB_ADD(RF_GB_GMU,0x143a0,c->rpmh|0xf11u,0xf11);
++#undef RF_GB_ADD
++    return 0;
++}
++
++static inline int rf_gb_read(struct rf_gb_report *s,const struct rf_gb_ops *o,
++    unsigned unit,uint32_t at,uint32_t *value)
++{
++    int error=o->guard(o->context,s->phase);
++    if(!error)error=o->read(o->context,unit,at,value);
++    return error;
++}
++static inline int rf_gb_write(struct rf_gb_report *s,const struct rf_gb_ops *o,
++    unsigned unit,uint32_t at,uint32_t value,uint32_t mask)
++{
++    int error=o->guard(o->context,s->phase);
++    if(error)return error;
++    s->last_unit=unit;s->last_offset=at;s->wanted=value;s->observed=0;
++    ++s->stores;
++    error=o->write(o->context,unit,at,value);
++    if(error || !mask)return error;
++    error=rf_gb_read(s,o,unit,at,&s->observed);
++    if(!error && ((s->observed^value)&mask))error=EIO;
++    return error;
++}
++static inline int rf_gb_poll(struct rf_gb_report *s,const struct rf_gb_ops *o,
++    unsigned unit,uint32_t at,uint32_t wanted,uint32_t mask,uint32_t *out)
++{
++    uint64_t first=o->time_ns(o->context);
++    for(unsigned i=0;i<5000;++i) {
++        int error=rf_gb_read(s,o,unit,at,out);if(error)return error;
++        ++s->polls;
++        if((*out&mask)==wanted)return 0;
++        if(o->time_ns(o->context)-first>=RF_GB_WAIT_NS)return ETIMEDOUT;
++        error=o->delay(o->context,100);if(error)return error;
++    }
++    return ETIMEDOUT;
++}
++
++static inline int rf_gb_run(struct rf_gb_report *s,struct rf_gb_config *c,const struct rf_gb_ops *o)
++{
++    int error=EINVAL;
++    if(!s || !c || !o || !o->guard || !o->read || !o->write || !o->audit ||
++        !o->exchange || !o->delay || !o->time_ns)return error;
++    if(s->attempted)return EBUSY;
++    s->attempted=1;s->phase=RF_GB_HELD;s->stage=1;
++    if(!rf_gb_config_valid(c))goto done;
++#define RF_GB_TRY(x) do {error=(x);if(error)goto done;} while(0)
++    RF_GB_TRY(o->guard(o->context,s->phase));
++    RF_GB_TRY(o->audit(o->context,s->phase));
++    RF_GB_TRY(rf_gb_read(s,o,RF_GB_RSC,0x10,&s->rsc_status));
++    RF_GB_TRY(rf_gb_read(s,o,RF_GB_RSC,0x404,&s->rsc_busy));
++    if(s->rsc_busy){error=EBUSY;goto done;}
++    /* A620's separate RSC resource is 4KiB: TCS0/1 only. The generic
++     * native helper also names TCS2/3 beyond this resource; do not follow. */
++    for(unsigned i=0;i<2;++i) {
++        RF_GB_TRY(rf_gb_read(s,o,RF_GB_RSC,4u*(0x346+0xa8*i),&s->tcs[i]));
++        uint32_t control;
++        RF_GB_TRY(rf_gb_read(s,o,RF_GB_RSC,4u*(0x346+0xa8*i)-4,&control));
++        if(control&(1u<<16)){error=EBUSY;goto done;}
++    }
++    RF_GB_TRY(rf_gb_read(s,o,RF_GB_GMU,0x143a0,&c->rpmh));
++    RF_GB_TRY(rf_gb_program(c,s));
++    /* Apply masking before a possible inherited RSC wake; no GIC enables. */
++    for(unsigned i=0;i<4;++i) {
++        struct rf_gb_store *w=&s->program[i];
++        RF_GB_TRY(rf_gb_write(s,o,w->unit,w->at,w->value,w->mask));
++    }
++    if(s->rsc_status&(1u<<16)) {
++        uint32_t ack;
++        RF_GB_TRY(rf_gb_write(s,o,RF_GB_GMU,0x24c1c,2,3));
++        RF_GB_TRY(rf_gb_poll(s,o,RF_GB_GMU,0x24c20,2,2,&ack));
++        RF_GB_TRY(rf_gb_poll(s,o,RF_GB_RSC,0x404,0,UINT32_MAX,&s->rsc_busy));
++        RF_GB_TRY(rf_gb_write(s,o,RF_GB_GMU,0x24c1c,0,3));
++    }
++    s->stage=2;
++    for(unsigned i=4;i<s->program_count;++i) {
++        struct rf_gb_store *w=&s->program[i];
++        RF_GB_TRY(rf_gb_write(s,o,w->unit,w->at,w->value,w->mask));
++    }
++    RF_GB_TRY(o->audit(o->context,s->phase));
++    /* Fresh zero is verified immediately before the sole reset release. */
++    RF_GB_TRY(rf_gb_read(s,o,RF_GB_GMU,0x14070,&s->init));
++    if(s->init){error=EAGAIN;goto done;}
++    s->stage=3;
++    RF_GB_TRY(o->guard(o->context,RF_GB_HELD));
++    s->phase=RF_GB_FW_WAIT;
++    s->last_unit=RF_GB_GMU;s->last_offset=0x14000;s->wanted=0;s->observed=0;
++    ++s->stores;s->released=1;
++    RF_GB_TRY(o->write(o->context,RF_GB_GMU,0x14000,0));
++    uint64_t first=o->time_ns(o->context);
++    error=ETIMEDOUT;
++    for(unsigned i=0;i<5000;++i) {
++        RF_GB_TRY(rf_gb_read(s,o,RF_GB_GMU,0x14070,&s->init));
++        ++s->polls;
++        if(c->core_version>0x20010004u && (s->init&0xe00u)){error=EIO;goto done;}
++        if(redfin_gmu_started(c->core_version,s->init)){error=0;break;}
++        if(o->time_ns(o->context)-first>=RF_GB_WAIT_NS){error=ETIMEDOUT;goto done;}
++        RF_GB_TRY(o->delay(o->context,100));
++        error=ETIMEDOUT;
++    }
++    if(error)goto done;
++    s->firmware=1;s->phase=RF_GB_FW_LIVE;s->stage=4;
++    RF_GB_TRY(o->audit(o->context,s->phase));
++    s->phase=RF_GB_HFI_WAIT;
++    RF_GB_TRY(rf_gb_write(s,o,RF_GB_GMU,0x14618,1,1));
++    RF_GB_TRY(rf_gb_poll(s,o,RF_GB_GMU,0x14600,1,1,&s->hfi_status));
++    s->hfi=1;s->phase=RF_GB_HFI_LIVE;s->stage=5;
++    RF_GB_TRY(o->exchange(o->context,&s->version));
++    if((s->version>>28)!=2u){error=EPROTO;goto done;}
++    s->ack=1;
++    RF_GB_TRY(o->audit(o->context,s->phase));
++    s->stage=6;error=0;
++done:
++    s->error=error;
++#undef RF_GB_TRY
++    return error;
++}
++
++/* HFI v2 ACK: reply type1, original full request header, status, version.
++ * ID126 is a v1 convention and is not required for a v2 response. */
++static inline int rf_gb_version_ack(const uint32_t *words,unsigned count,uint32_t request,
++    uint32_t expected,uint32_t *version)
++{
++    if(!words || !version || count<4 || count>255 || ((words[0]>>8)&255u)!=count ||
++        ((words[0]>>16)&15u)!=1 || words[1]!=request)return EPROTO;
++    if(words[2])return EIO;
++    if((words[3]>>28)!=(expected>>28) ||
++        ((words[3]>>16)&0xfffu)<((expected>>16)&0xfffu))return EPROTONOSUPPORT;
++    *version=words[3];return 0;
++}
++#endif
