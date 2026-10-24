@@ -1,5 +1,53 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete GUI3 native journal recovery block built — 2026-10-25
+
+All29selected real-helper/journal/RW/ABI/AMFI/runtime/startup checksPASS2.644s.
+The same compiled journal validators also accept the actual freshly read
+post-panic primary/alternate, JIB and nonempty ring/checksum; all3PASS.
+No device filesystem write is involved in these reads/checks. Local native
+build20261025-005500PASS/noCI, exact complete overlay fingerprint verified.
+Frozen kernel-eagl-v3 SHA25685113a63b863bd8253c818d69b199bb070e07d864c8ac4ec75a014a24fe752c1.
+Image ports/redfin/out/gpu-gui-eagl-v4/redfin-xnu.img SHA256
+ba9e14f0193ae398ce89081cd4104c355ea92020aff886b6e53d05b9ddc1c777; boot77162b76f74d3dc4.
+Actual compiled loader/liveFDT/ADT/firmware/runtime/return preflightPASS.
+The whole EAGL/Mesa/IOSurface/QuartzCore/diagnostic remains installed and
+selected; the high-PA pmap fix is retained. Recovery last left verified
+Fastboot; root still dirty/not-inconsistent/write_count635023 before native
+replay. One complete integrated boot is next. No drawing/Metal result yet.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x77162b76f74d3dc4 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN post-panic clean-only root gate blocks native journal replay — 2026-10-25
+
+Sourcebc1bbb1/kernel-eagl-v2/build20261025-004048/noCI; authenticated
+boot2de92c185c40363c/imagedd7a3f16ca379c31fb6992bdfdd519747118b545731a23b9867110c0f66f0856.
+GPU bootstrap/4nonce writes/runtime publication pass again. Root publication
+returnsEINVAL22 and IOFindBSDRoot panics before HFS or any userspace; the
+high-PA BO fix is therefore not exercised by this run. The strict preexisting
+redfin_rw_hfs gate requires a clean primary header, preventing native HFS
+from replaying the previous panic's committed journal. The earlier statement
+that the next mount would replay it omitted this gate.
+
+Read-only temporary recovery captures current primary/alternate/JIB/header
+and returns verified Fastboot. Primaryattrs80002000, lastMountedHFSJ,
+jib129/internalflags1, journal532480+8388608, native start2079232/end4766208,
+header512/list32768. HFS remains journaled/not-inconsistent/write_count635023.
+No root repair, manual clean-bit write or file update was performed.
+
+The complete additional crash-recovery block is now implemented before its
+checks: GUI3-only read-only preflight validates the two existing structural
+headers, exact initialized internal journal, ring bounds and native checksum.
+It leaves the actual dirty header and transactions untouched for native HFS;
+all existing GPT/16GiB/write-command/uncertain-DMA guards remain unchanged.
+Other profiles keep the original clean-only gate. Native HFS hfs_vfsops and
+hfs_journal.c are reviewed at the built hfs627.100.6 source. No journal reset
+or format is introduced. Combined source/tests/build and one full integrated
+GPU/GUI/WLAN/capture run follow. Installed system graphics files unchanged.
+User identifies Phone(MobilePhone) and Photos(MobileSlideShow) as the apps
+that fail to open; audit their own service/crash paths as well as graphics,
+without treating Phone failure itself as evidence of a Metal dependency.
+Exact failed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x2de92c185c40363c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN high-PA cache fix built with full system graphics retained — 2026-10-25
 
 All14selected actual-helper/high-PA/AMFI/ABI/startup/runtime casesPASS1.571s;

@@ -37,3 +37,12 @@ GPU submissions/fences, two shader/IOSurface pixel passes and backboardd
 EAGL frames with real draws. A published service, a successful host build,
 an installed bridge or a visible CPU-rendered GUI does not establish this.
 This EAGL path does not implement Metal application support.
+
+After a graphics panic the root can have pending HFS transactions. The older
+strict RW publication gate requires a clean primary header, so it prevents
+HFS from reaching its own replay. GUI3 alone now has a separate read-only
+preflight for this installed root's initialized internal journal. It checks
+both volume headers, the exact journal location, the native ring/header
+bounds and checksum. Native HFS receives the original dirty header and
+replays its own transactions; no clean bit or journal pointer is rewritten
+by the preflight. The existing16GiB UFS write fence remains in force.

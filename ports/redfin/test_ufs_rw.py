@@ -45,6 +45,13 @@ def patched_source():
         target = Path(directory) / "bsd/dev/sweet_ufs.c"
         target.parent.mkdir(parents=True)
         target.write_text(original)
+        later = HERE / 'graphics-journal.patch'
+        if '#include "redfin_graphics_journal.inc"' in original:
+            # Exercise the original strict RW contract independently of the
+            # separate GUI3/native-journal preflight, which has its own cases.
+            shutil.copy2(source.parent/'redfin_graphics_journal.inc',target.parent/'redfin_graphics_journal.inc')
+            subprocess.run(['git','apply','--reverse',str(later)],cwd=directory,check=True,capture_output=True)
+            original = target.read_text()
         command = ["git", "apply", "--check", str(HERE / "ufs-root-rw.patch")]
         checked = subprocess.run(command, cwd=directory, capture_output=True)
         if checked.returncode:
