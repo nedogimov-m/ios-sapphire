@@ -78,16 +78,15 @@ static int gr_live(void)
 /* Runtime snapshots remain complete, twice-read and compared to the exact
  * original foreign-state lease. Bracket the read-only snapshot with the
  * full parent/args/firmware/power guard; each nested read needs only this
- * serialized coherent-CPU/fixed-CX epoch, rather than all parents again.
+ * serialized coherent-CPU/context metadata, rather than power MMIO and all
+ * parents again. Power is held by this owner and checked at both boundaries.
  * No table publish, TLB store or ring doorbell uses this read-only shortcut. */
 static bool gr_snapshot_valid(void *argument)
 {
     struct gm_context *c=argument;
     return redfin_gpu_ready() && c && c==gx.context && c->smmu_mode==6 &&
         (redfin_gui_cpu0() || redfin_gpu_runtime_caller()) && !gx.poisoned && gx.mapping.state.active &&
-        !gx.mapping.state.poisoned &&
-        (gm_scalar_read(c->base[RF_GT_GPUCC]+0x1098)&0x80000001u)==1 &&
-        !(gm_scalar_read(c->base[RF_GT_GMU]+0x14340)&0xc0u);
+        !gx.mapping.state.poisoned;
 }
 static int gr_snapshot_global(void *argument,uint32_t at,uint32_t *value)
 {
@@ -133,6 +132,8 @@ int redfin_gpu_audit(void)
     if(!error)error=rf_a6_map_verify(&gx.mapping,&o);
     if(!error)for(unsigned bank=0;bank<2;bank++)
         if(gm_scalar_read(c->cb+4096*bank+0x28) || gm_scalar_read(c->cb+4096*bank+0x2c))error=EAGAIN;
+    if(!error)error=gr_live();
+    if(!error && !gm_payloads_valid(c))error=ECANCELED;
     if(error)redfin_gpu_poison("complete SMMU/foreign-state audit failed");
     return error;
 }

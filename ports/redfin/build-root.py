@@ -17,6 +17,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import checkpoint_userland
 import wifi_userland
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -282,6 +283,13 @@ class Builder:
                 checks.append(record)
             self.manifest["critical_content_checks"] = checks
             atomic(self.out / "critical-content.json", checks)
+            source, cache = check_root / checkpoint_userland.SOURCE, check_root / checkpoint_userland.CACHE
+            item = cache.stat()
+            if (cache.read_bytes() != source.read_bytes() or item.st_mtime_ns != source.stat().st_mtime_ns or
+                    (item.st_uid, item.st_gid, stat.S_IMODE(item.st_mode)) != (501, 501, 0o644)):
+                raise ValueError("native checkpoint cache content, timestamp or ownership differs")
+            self.manifest["checkpoint_verify"] = {"content_matches": True, "mtime_ns": item.st_mtime_ns,
+                                                   "uid": item.st_uid, "gid": item.st_gid, "mode": 0o644}
         finally:
             self.detach(attachment)
 
@@ -345,6 +353,7 @@ class Builder:
             tweak_spec.loader.exec_module(tweaks)
             tweaks.apply(target, metadata=self.metadata)
             self.manifest["wifi_userland"] = wifi_userland.prepare_root(target)
+            self.manifest["checkpoint_userland"] = checkpoint_userland.prepare_root(target, self.metadata)
             owners = []
             for relative, metadata in self.metadata.items():
                 destination = target / relative

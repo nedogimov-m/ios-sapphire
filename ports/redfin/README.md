@@ -251,6 +251,16 @@ and modes are collected before copying and restored offline by catalog ID via
 the pinned HFS library. `sweet-root-tweaks.py` supports deferred ownership for
 this staging flow. A filesystem check is required before the image is accepted.
 Preparing an image does not install it on the phone or demonstrate Apple launchd.
+
+Fresh roots also seed MobileCheckpoint's native cache from the installed
+`System/Library/CoreServices/Checkpoint.xml`. The dictionary remains verbatim;
+`private/var/mobile/Library/Caches/Checkpoint.plist` receives501:501/0644 and
+the XML's exact destination mtime. Both seconds and nanoseconds must match:
+20H392 Photos otherwise waits synchronously for checkpointd. The offline
+`hfs-checkpoint.c` helper copies the native HFS contentModDate through the
+catalog API on an unmounted staging clone. Existing-root updates require
+allocation/preimage audits, native readonly fsck and complete bounded readback.
+
 For Apple userspace boot images, add
 `--apple-adt research/ipsw-redfin/extracted/d22ap.adt`. This imports public D22AP
 product properties and the upstream development boot policy, with a synthetic

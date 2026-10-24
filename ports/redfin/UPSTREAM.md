@@ -1,5 +1,32 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native MobileCheckpoint cache and bracketed snapshot reads — 2026-10-25
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and paired
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain the graphics baseline.
+Re-reviewed the latter's mkjobs.py CommCenter findings: even the selected
+noncellular job eventually crashes on absent AppleIPAppender/AppleBasebandPCI.
+Keep it disabled rather than introducing that known loop to answer Phone's
+voicemail worker. Phone's sampled main thread is in its normal run loop.
+
+Actual20H392 libMobileCheckpoint's MCCopyCheckpoint path returns its native
+NSDictionary cache directly when stat mtime seconds AND nanoseconds match
+the installed Checkpoint.xml. A missing cache sends synchronous command0 to
+checkpointd; that is Photos' observed main-thread wait. Redfin seeds the
+verbatim installed XML dictionary, with mobile ownership and its destination
+filesystem timestamp. The offline HFS helper copies contentModDate through
+updateCatalog; it does not convert a host extraction date or invent image
+capabilities. Checkpointd itself already starts. Its own underlying wait is
+not yet observed; a bounded sample now targets it in place of callservicesd.
+
+Redfin retains complete twice-read global/CB0/CB1 snapshots and the original
+foreign-state comparisons on every submission. Only nested read callbacks
+lose their redundant CX/GX power reads: the serialized caller/context lease
+stays mandatory, full parent/source/power checks bracket the snapshot, and
+the outer audit now closes with another full guard and payload check after
+its final TTBR reads. All hardware-write guards and DMA bounds remain.
+Paired graphics userland is unchanged; Metal remains separate work.
+
 ## Runtime caller ownership, final fence reads and GPU timestamps — 2026-10-25
 
 Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's

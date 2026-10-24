@@ -1,5 +1,61 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete Photos/audit block built and staged — 2026-10-25
+
+All 54 selected native-cache/timestamp/path-scope/runtime-snapshot/boundary-
+fault/SMMU/mapping/arena/packet/performance/app-wait/root-tweak checks PASS
+in 3.922s. The offline helper's first compile exposed old libhfs/Darwin stat
+macro spellings; explicitly using the library's equivalent definitions fixes
+that host compatibility issue. Native local build 20261025-031425 PASS/no CI;
+exact prepared-source fingerprint verified. Frozen kernel-gui-performance-v4
+SHA256 bd4dd05f4501079c88a497c01224271fac69c11dc3aaeb60e7e77923f49434c2. Installed Mesa/EAGL is unchanged.
+
+Fresh v5 staging creates only the absent 24,288-byte native checkpoint cache:
+501:501/0644, HFS contentModDate 3860363594 copied from the installed XML,
+stat nanoseconds 0 on both. Dictionary/source SHA256
+9249b1f06c86a971bd0ddaaed3e5f43da49d7cc43375e2ad5010a3b1ad49d63b.
+All previously captured files/catalog records remain unchanged. Native
+readonly fsck PASS; 15 changed blocks/61,440 bytes, 6 new blocks, zero freed
+blocks; JIB/empty journal unchanged. No device write yet; clean current
+root generation is write_count710362, device idle in unmounted recovery.
+
+Image ports/redfin/out/gpu-gui-performance-v4/redfin-xnu.img SHA256
+fa43d3ddf92213cc712fbb2954dfd5537764208082932c83169af9f14ca6c2b1; actual compiled-loader/live FDT/ADT/firmware/return/app-wait
+preflight PASS. The first validator invocation lacked PYTHONPATH; running
+with the documented ports/redfin:. path passes without rebuilding. One
+bounded readback installation and one complete integrated run follow.
+Photos opening, improved frame times and Metal are not yet established.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x685d1d92479c5aeb redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN Photos native-cache and complete snapshot callback block implemented — 2026-10-25
+
+Based ona802bd0 and the stable4096-submit performance-v3 checkpoint. Actual
+20H392 libMobileCheckpoint validates /var/mobile/Library/Caches/Checkpoint.plist
+against the installed Checkpoint.xml's stat mtime seconds AND nanoseconds.
+The cache is absent on the fresh clean write_count710362 root; checkpointd
+already starts. Photos' main thread waits synchronously for its response.
+The full source batch now seeds the original dictionary verbatim,501:501
+0644, with the actual destination XML timestamp. Fresh-root construction
+defers ownership to its CNID pass and verifies the native cache afterward;
+the offline helper uses HFS updateCatalog to copy contentModDate directly.
+No source XML/Apple binary rewrite or invented image capabilities.
+
+Runtime SMMU snapshots stay complete, twice-read and before/after every
+submission. Nested callbacks now validate caller/context metadata without
+two redundant power reads per callback. Full parent/source/power guards
+remain at snapshot boundaries; the enclosing audit also closes after its
+final TTBR reads. Hardware writes retain their full guards. Bounded app
+wait sampling selects checkpointd instead of the normally idle callservicesd.
+Preferred paired upstream pins are re-reviewed in UPSTREAM.md; its explicit
+noncellular CommCenter crash chain rules out blindly enabling that job.
+
+No intermediate device boot or test occurred during this implementation
+block. Fresh private v5 metadata is still the only root-update base; device
+remains in unmounted recovery. Combined host/native-build/staging checks
+and one integrated GUI/Photos/Phone run follow. No new Photos, frame-time,
+Wi-Fi or Metal result yet. Last actual build20261025-024425/noCI and exact
+boot77fdfa764956dff4 args/results remain in the preceding capture entry.
+
 ## REDFIN complete multicore GPU run PASS; Photos wait identified — 2026-10-25
 
 Source7b42b7b/nativebuild20261025-024425/noCI/kernel-gui-performance-v3,
