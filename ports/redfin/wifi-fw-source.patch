@@ -4328,8 +4328,8 @@ new file mode 100644
 +    case 4: return source_entries ? 0x1fu : 0;
 +    case 0x0c: case 0x14: return dest_entries ? UINT32_MAX : 0;
 +    case 0x10: return dest_entries ? 0x1fu : 0;
-+    case 0x18: return (1u << 19) | (source_entries ? 0xffffu | (1u << 17) : 0) |
-+        (dest_entries ? 1u << 18 : 0);
++    case 0x18: return (source_entries || dest_entries) ?
++        (1u << 19) | (source_entries ? 0xffffu | (1u << 17) : 0) | (dest_entries ? 1u << 18 : 0) : 0;
 +    default: return 0;
 +    }
 +}
@@ -4549,7 +4549,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_packets.inc b/iokit/Kernel/arm/redfin_
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_packets.inc
-@@ -0,0 +1,244 @@
+@@ -0,0 +1,243 @@
 +/* SPDX-License-Identifier: MIT
 + * Native Redfin hardware owner for the complete ath10k-compatible packet and
 + * station engine. One bound worker owns routes, MMIO and fresh DMA32 memory.
@@ -4644,8 +4644,6 @@ new file mode 100644
 +    *out = value;
 +    return value == UINT32_MAX ? EIO : 0;
 +}
-+static const uint32_t fw_packet_source_entries[12] = {16, 0, 0, 32, 2048, 0, 0, 2, 0, 0, 0, 0};
-+static const uint32_t fw_packet_dest_entries[12] = {0, 512, 64, 0, 0, 512, 0, 2, 128, 512, 512, 512};
 +static bool fw_start_packet_address(const fw_start_context *context, uint32_t value)
 +{
 +    return value >= context->packet_buffer[0] && value < context->packet_buffer[0] + context->packet_used && !(value & 15u);
@@ -4660,21 +4658,22 @@ new file mode 100644
 +        allowed = (offset == 4 && fw_start_packet_address(context, value)) || (offset == 8 && !value);
 +    } else if (ce < 12) {
 +        for (unsigned i = 0; i < RF_CE_OBSERVED_REGS; ++i) if (rf_ce_observed_offsets[i] == offset) index = i;
-+        if (offset == 0 && fw_packet_source_entries[ce]) allowed = fw_start_packet_address(context, value);
-+        else if (offset == 4 && fw_packet_source_entries[ce]) allowed = !value;
-+        else if (offset == 8 && fw_packet_source_entries[ce]) allowed = value == fw_packet_source_entries[ce];
-+        else if (offset == 0x0c && fw_packet_dest_entries[ce]) allowed = fw_start_packet_address(context, value);
-+        else if (offset == 0x10 && fw_packet_dest_entries[ce]) allowed = !((value ^ context->packet_expected[ce][4]) & ~0x1fu) && !(value & 0x1fu);
-+        else if (offset == 0x14 && fw_packet_dest_entries[ce]) allowed = value == fw_packet_dest_entries[ce];
++        if (offset == 0 && redfin_wifi_ce_sources[ce]) allowed = fw_start_packet_address(context, value);
++        else if (offset == 4 && redfin_wifi_ce_sources[ce]) allowed = !value;
++        else if (offset == 8 && redfin_wifi_ce_sources[ce]) allowed = value == redfin_wifi_ce_sources[ce];
++        else if (offset == 0x0c && redfin_wifi_ce_destinations[ce]) allowed = fw_start_packet_address(context, value);
++        else if (offset == 0x10 && redfin_wifi_ce_destinations[ce]) allowed = !((value ^ context->packet_expected[ce][4]) & ~0x1fu) && !(value & 0x1fu);
++        else if (offset == 0x14 && redfin_wifi_ce_destinations[ce]) allowed = value == redfin_wifi_ce_destinations[ce];
 +        else if (offset == 0x18) {
 +            uint32_t live = 0;
-+            uint32_t owned = rf_ce_host_config_mask(offset, fw_packet_source_entries[ce], fw_packet_dest_entries[ce]);
++            uint32_t owned = rf_ce_host_config_mask(offset, redfin_wifi_ce_sources[ce], redfin_wifi_ce_destinations[ce]);
++            if (!owned) return EPERM;
 +            if (fw_start_packet_ce_read(context, at, &live)) return EPERM;
 +            allowed = !((value ^ live) & ~owned);
 +        }
-+        else if (offset == 0x4c && fw_packet_source_entries[ce]) allowed = value == fw_packet_source_entries[ce];
-+        else if (offset == 0x50 && fw_packet_dest_entries[ce]) allowed = value == fw_packet_dest_entries[ce];
-+        else if (offset == 0x40 && fw_packet_dest_entries[ce] && ce != 7) allowed = value < fw_packet_dest_entries[ce];
++        else if (offset == 0x4c && redfin_wifi_ce_sources[ce]) allowed = value == redfin_wifi_ce_sources[ce];
++        else if (offset == 0x50 && redfin_wifi_ce_destinations[ce]) allowed = value == redfin_wifi_ce_destinations[ce];
++        else if (offset == 0x40 && redfin_wifi_ce_destinations[ce] && ce != 7) allowed = value < redfin_wifi_ce_destinations[ce];
 +    }
 +    if (!allowed) return EPERM;
 +    ++context->packet_stores;
@@ -4686,7 +4685,7 @@ new file mode 100644
 +static int fw_start_packet_shadow(void *opaque, unsigned ce, uint32_t value)
 +{
 +    fw_start_context *context = (fw_start_context *)opaque;
-+    if ((ce != 0 && ce != 3 && ce != 4) || value >= fw_packet_source_entries[ce] ||
++    if ((ce != 0 && ce != 3 && ce != 4) || value >= redfin_wifi_ce_sources[ce] ||
 +        fw_start_packet_bus_check(context) || !context->packet_maps[3].base) return EPERM;
 +    ++context->packet_stores;
 +    fw_start_packet_store(context->packet_maps[3].base + 0x2000 + 4u*ce, value);
@@ -4763,7 +4762,7 @@ new file mode 100644
 +        for (unsigned ce = 0; !error && ce < RF_CE_COUNT; ++ce) {
 +            for (unsigned i = 0; i < 7; ++i) {
 +                uint32_t at = rf_ce_observed_offsets[i];
-+                uint32_t mask = rf_ce_host_config_mask(at, fw_packet_source_entries[ce], fw_packet_dest_entries[ce]);
++                uint32_t mask = rf_ce_host_config_mask(at, redfin_wifi_ce_sources[ce], redfin_wifi_ce_destinations[ce]);
 +                if (!mask) continue;
 +                uint32_t value = 0;
 +                error = fw_start_packet_ce_read(context, 0x1000u*ce + at, &value);

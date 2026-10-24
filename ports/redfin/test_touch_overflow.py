@@ -195,6 +195,7 @@ int redfin_touch_spi_events_sense_init(void){return 0;}
                 text = text.replace('if(fault==3 || fault==14)return EIO;',
                     'if(fault==3 || fault==14)return EIO; if(fault>=22 && fault<=24)return EILSEQ;')
                 text = text.replace('read60++;', 'read60++;if(fault==24 && read60>=5)return EILSEQ;')
+                text = text.replace('read60++;', 'read60++;if((fault==27 && read60>=4 && read60<=6) || (fault==28 && read60>=4))return EILSEQ;')
                 text = text.replace('if(base==1 && offset==0x1004)return 0;', '''if(base==1 && offset==0x1004){
                     if(fault==25)return 1;
                     if(fault==26){
@@ -265,6 +266,18 @@ int redfin_touch_spi_events_sense_init(void){return 0;}
         self.assertEqual(self.lib.stat(4), 5)  # Initial2 + DOWN/MOVE/UP, no idle reads.
         self.assertEqual(self.lib.stat(8), 3)
         self.assertEqual(self.lib.stat(10), 0)
+
+    def test_discarded_resync_reads_tolerate_two_bad_replies_and_bound_persistent_failure(self):
+        self.assertEqual(self.lib.run(27, 1, 1), 0)
+        self.assertEqual(self.lib.stat(10), 0)
+        self.assertEqual(self.lib.clear_calls(), 1)
+        self.assertEqual(self.lib.stat(8), 2)  # Release before discarding/retrying.
+        self.assertEqual(self.lib.run(28, 1, 1), 0)
+        self.assertEqual(self.lib.stat(10), errno.EILSEQ)
+        self.assertEqual(self.lib.stat(4), 7)  # Four live reads + exactly three resync attempts.
+        self.assertEqual(self.lib.clear_calls(), 1)
+        self.assertEqual(self.lib.stat(6), 1)
+        self.assertEqual(self.lib.stat(7), 1)
 
 
 if __name__ == '__main__':

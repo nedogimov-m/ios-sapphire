@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN station-v7 actual CE5 target reclaim and SEC error; consistent ownership/timing batch prepared — 2026-10-24
+
+Source `e096d20`, native build052255, authenticated station-v7 capture
+matches boot IDfee8f49837a07418. Native context, HTC/WMI/HTT, local station
+MAC, en0 and RF scan succeed. At55491ms the exact refusal is CE5 destination
+base0xc: host expectedfedbe000, firmware installs8ba6cf00 in MSA. The SMMU,
+guards and earlier audit checks passed before that field. Native QMI target
+configuration declares CE5 PIPEDIR_OUT/HTT-IPA; APPS/IPA is disabled. The
+new native profile leaves CE5 entirely to firmware, and leaves the already
+autonomous CE6 untouched. One shared host source/destination table drives
+allocation, polling, callback authority and audits. No CTRL1/RRI-enable
+writes go to unclaimed engines. Shadow addresses0/3/4 were source-rechecked
+and already correct; they are not changed to QMI array ordinals.
+
+Touch's first level-low event still yielded a zero-header reply; the clear
+then another bad reply stopped EILSEQ92, with zero contacts. Preemption/gap
+was not measured there, and a Wi-Fi cause remains unproved. XNU clock.c now
+confirms delay() can block when preemption is enabled. Open HID-session
+read transactions (including volatile sensing initialization) now hold
+preemption disabled across TX/settle/RX with CPU IRQs enabled and existing
+bounded GENI loops. Invalid replies log the measured gap. Clear settles1ms;
+only discarded resync reads may make at most3 native-style attempts1ms apart.
+Live coordinate batches never replay; real host/owner failures still stop.
+HFSX clean/write_count520157; authenticated capture and verified fastboot.
+
+Full1285 host tests PASS (3 optional private cases skipped); the final
+unclaimed-CTRL1/sensing-envelope refinements additionally pass all26 focused
+tests. The new model reconstructs actual CE code from the public patches,
+proves zero CE5/6 stores, preserves firmware geometry, and executes real
+RX-metadata/foreign-address/oversize and native TX paths. Actual transaction
+models check balanced preemption on all tested errors and bounded discarded
+resync retries. Native local `build-20261024-055039.log` PASS; no CI run.
+Actual loader/live-FDT/GUI8 return/DMA32/shim guard preflight PASS.
+Kernel `c36f730a70f3fcb08fcd752d0e6c073d7caefce81a0fa06f834ffd2085cb803f`;
+image `c5e755b6b6bb059d4d2838363413f19dad4965c9849904bfcbf88dbcf6231c5c`, Image130216944 bytes.
+Exact station-v8b args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x38c7fd3953e2bda0 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Read-only review of preferred userland net_test.m at906425b is recorded in
+UPSTREAM.md; no helper/job/prebuilt or root file was installed. Next: one
+combined station-v8b run, sustain radio/scans to GUI shutdown, then physical
+touch and actual Settings association/data/DHCP. GPU/Metal follows. No
+partition flash, persistent modem/EFS write or backup change.
+
 ## REDFIN station-v6 actual HTC/WMI/HTT, en0 and RF scan PASS; live CE ownership prepared — 2026-10-24
 
 Source `7ffef39`, native build051051, authenticated station-v6 capture

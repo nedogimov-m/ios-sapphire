@@ -30,7 +30,14 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	size = (size + 0xfff) & ~0xfffull;
  	if (pool == NULL || pool_used + size > MODEM_POOL_SIZE) {
  		return NULL;
-@@ -5007,8 +5022,24 @@
+@@ -5002,13 +5017,30 @@
+ static uint64_t ce_rri_pa;
+ static bool ce_up;
+ 
+-static bool ce_host_rx(uint32_t c) { return ce_attr[c].dst_n != 0 && c != 7; }
++static bool ce_host_rx(uint32_t c) { return c != 7 &&
++    (rf_radio_bus.context ? redfin_wifi_ce_destinations[c] != 0 : ce_attr[c].dst_n != 0); }
+ static bool ce_host_tx(uint32_t c) { return c == 0 || c == 3 || c == 4; }
  static uint32_t ce_tx_slots(uint32_t c) { return MIN(ce[c].src_n, (uint32_t)TX_SLOTS_MAX); }
  static uint32_t ce_tx_sz(uint32_t c) { return ce_attr[c].src_max; }
  static uint32_t pow2(uint32_t n) { uint32_t p = 1; while (p < n) { p <<= 1; } return p; }
@@ -57,7 +64,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  
  static void
  ce_post(uint32_t c)
-@@ -5028,8 +5059,10 @@
+@@ -5028,18 +5060,22 @@
  	if (ce_up) {
  		return true;
  	}
@@ -68,9 +75,15 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
 +		ce_shadow = (volatile uint8_t *)ml_io_map(SHADOW_PA, 0x1000);
 +	}
  	for (uint32_t c = 0; c < CE_COUNT; c++) {
- 		ce[c].src_n = ce_attr[c].src_n ? pow2(ce_attr[c].src_n) : 0;
- 		ce[c].dst_n = ce_attr[c].dst_n ? pow2(ce_attr[c].dst_n) : 0;
-@@ -5039,7 +5072,7 @@
+-		ce[c].src_n = ce_attr[c].src_n ? pow2(ce_attr[c].src_n) : 0;
+-		ce[c].dst_n = ce_attr[c].dst_n ? pow2(ce_attr[c].dst_n) : 0;
++		unsigned source = rf_radio_bus.context ? redfin_wifi_ce_sources[c] : ce_attr[c].src_n;
++		unsigned destination = rf_radio_bus.context ? redfin_wifi_ce_destinations[c] : ce_attr[c].dst_n;
++		ce[c].src_n = source ? pow2(source) : 0;
++		ce[c].dst_n = destination ? pow2(destination) : 0;
+ 		off += ((uint64_t)ce[c].src_n * sizeof(struct ce_desc) + 0xfff) & ~0xfffull;
+ 		off += ((uint64_t)ce[c].dst_n * sizeof(struct ce_desc) + 0xfff) & ~0xfffull;
+ 		off += ce_host_rx(c) ? RX_POST * RX_BUF_SIZE : 0;
  		off += ce_host_tx(c) ? ce_tx_slots(c) * ce_tx_sz(c) : 0;
  	}
  	uint8_t *va = (uint8_t *)pool_alloc(off, &pa);
@@ -79,7 +92,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  		LOG("ce: map/alloc failed (%llu bytes)", off);
  		return false;
  	}
-@@ -5071,8 +5104,12 @@
+@@ -5071,9 +5107,14 @@
  		}
  	}
  	/* the CE writes its read indices to ce_rri[ce] (src [15:0], dst [31:16]) */
@@ -92,9 +105,11 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
 +		w32(ce_regs, WRAP_RRI_HI, (uint32_t)(ce_rri_pa >> 32) & ADDR_HI_MASK);
 +	}
  	for (uint32_t c = 0; c < CE_COUNT; c++) {
++		if (rf_radio_bus.context && !ce[c].src_n && !ce[c].dst_n) continue;
  		ce_wr(c, CTRL1, ce_rd(c, CTRL1) | CTRL1_RRI_UPD);
  	}
-@@ -5106,6 +5143,7 @@
+ 	for (uint32_t c = 0; c < CE_COUNT; c++) {
+@@ -5106,6 +5147,7 @@
  		mb();
  		ce_wr(c, DR_WR_IDX, ce[c].dst_wr);
  	}
@@ -102,7 +117,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	ce_up = true;
  	LOG("t=%u ms: ce: %u rings programmed, rx posted", g_ms, CE_COUNT);
  	return true;
-@@ -5130,7 +5168,16 @@
+@@ -5130,7 +5172,16 @@
  			if (n == 0) {
  				break;
  			}
@@ -120,7 +135,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  			s->dst[slot].nbytes = 0;
  			s->dst_sw = (slot + 1) & (s->dst_n - 1);
  			s->rx++;
-@@ -5166,7 +5213,10 @@
+@@ -5166,7 +5217,10 @@
  	s->src_wr = (slot + 1) & mask;
  	s->tx++;
  	mb();
@@ -132,7 +147,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	mb();
  	return true;
  }
-@@ -5279,7 +5329,11 @@
+@@ -5279,7 +5333,11 @@
  	if (len < sizeof(*h)) {
  		return;
  	}
@@ -145,7 +160,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	if ((h->flags & HTC_FLAG_TRAILER) != 0 && h->trailer <= plen) {
  		const uint8_t *t = p + plen - h->trailer;   /* records {id, len, data}; id 1 = credits */
  		for (uint32_t o = 0; o + 2 <= h->trailer && o + 2 + t[o + 1] <= h->trailer; o += 2 + t[o + 1]) {
-@@ -5445,11 +5499,12 @@
+@@ -5445,11 +5503,12 @@
  			break;
  		}
  		const uint8_t *v = p + o + 4;
@@ -159,7 +174,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  			LOG("wmi: fw %08x abi %08x rf_chains %u", fw, a0, rf);
  		} else if (tag == TAG_ARRAY_UINT32 && !wmi_seen_bmap) {
  			wmi_seen_bmap = true;
-@@ -5491,6 +5546,11 @@
+@@ -5491,6 +5550,11 @@
  		} else if (wmi_req[i].num_unit_info & 1) {
  			units = NUM_VDEVS + 1;
  		}
@@ -171,7 +186,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  		wmi_chunk_len[i] = units * ((wmi_req[i].unit_size + 3) & ~3u);
  		total += (wmi_chunk_len[i] + 0xfff) & ~0xfffu;
  	}
-@@ -5524,6 +5584,10 @@
+@@ -5524,6 +5588,10 @@
  	rc[6] = 16;                                 /* ast skid limit */
  	rc[7] = 0x7;                                /* tx chain mask */
  	rc[8] = 0x7;                                /* rx chain mask */
@@ -182,7 +197,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	rc[9] = 0x64; rc[10] = 0x64; rc[11] = 0x64; rc[12] = 0x28;
  	rc[13] = 1;                                 /* rx decap: native wifi */
  	rc[14] = 4;                                 /* scan max pending */
-@@ -5568,7 +5632,7 @@
+@@ -5568,7 +5636,7 @@
  	5745, 5765, 5785, 5805, 5825,
  };
  #define NFREQ ((uint32_t)(sizeof(scan_freqs) / sizeof(scan_freqs[0])))
@@ -191,7 +206,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  struct bss {
  	uint8_t bssid[6]; char ssid[33]; uint8_t chan; int8_t rssi; uint16_t seen;
  	uint8_t raw_ssid[32], raw_ssid_len; uint16_t freq, bintval, capab, ie_len; uint32_t last_ms; uint8_t ie[768];
-@@ -6613,7 +6677,7 @@
+@@ -6613,7 +6681,7 @@
  }
  
  static bool
@@ -200,7 +215,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  {
  	uint8_t m[4 + 92 + 4 + 32] = {}, *p;
  	uint32_t kl = (klen + 3) & ~3u;
-@@ -6623,6 +6687,7 @@
+@@ -6623,6 +6691,7 @@
  	p = w_p32(p, idx);
  	p = w_p32(p, group ? 1 : 0);
  	p = w_p32(p, cipher);
@@ -208,7 +223,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	p += 3 * 8 + 16 + 16;
  	p = w_p32(p, klen);
  	p = w_p32(p, cipher == WMI_CIPHER_TKIP ? 8 : 0);
-@@ -6772,6 +6837,7 @@
+@@ -6772,6 +6841,7 @@
  static void
  w_eapol_rx(const uint8_t *e, size_t elen)
  {
@@ -216,7 +231,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	uint8_t frame[512];
  	const uint8_t *src = e + 6;
  	if (s_state != S_4WAY || elen < 14 + 4 + 95 || elen - 14 > sizeof(frame) || memcmp(src, s_bssid, 6) != 0) {
-@@ -6853,6 +6919,7 @@
+@@ -6853,6 +6923,7 @@
  static void
  w_teardown(void)
  {
@@ -224,7 +239,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	if (s_state >= S_START) {
  		if (s_state >= S_4WAY) {
  			w_vdev_simple(CMD_VDEV_DOWN, TAG_VDEV_DOWN);
-@@ -6877,12 +6944,12 @@
+@@ -6877,12 +6948,12 @@
  		w_teardown();
  	} else {
  		s_state = S_UP;
@@ -239,7 +254,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  }
  
  static void
-@@ -6933,8 +7000,7 @@
+@@ -6933,8 +7004,7 @@
  	}
  	s_msg1s = 0;
  	s_start_resp = false;
@@ -249,7 +264,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	w_ps_off();
  	if (!w_vdev_start(s_freq, bcn, dtim)) {
  		w_join_end(EIO);
-@@ -7026,7 +7092,7 @@
+@@ -7026,7 +7096,7 @@
  		s_leave_asked = false;
  		w_teardown();
  	}
@@ -258,7 +273,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  		s_join_asked = false;
  		w_teardown();
  		w_join_begin();
-@@ -7124,7 +7190,8 @@
+@@ -7124,7 +7194,8 @@
  	}
  	uint8_t pmk[32] = {};
  	if (pass_len != 0) {
@@ -268,7 +283,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	}
  	int r = w_join_with(ssid, ssid_len, bssid, pass_len != 0 ? pmk : NULL);
  	bzero(pmk, sizeof(pmk));
-@@ -7159,12 +7226,12 @@
+@@ -7159,12 +7230,12 @@
  	} else {
  		bzero(s_pmk, 32);
  	}
@@ -285,7 +300,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  }
  
  int
-@@ -7244,6 +7311,7 @@
+@@ -7244,6 +7315,7 @@
  	id &= 0xFFFFFF;
  	switch (id) {
  	case WMI_EV_SERVICE_AVAILABLE: {
@@ -293,7 +308,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  		uint16_t tag;
  		memcpy(&tag, d + 6, 2);
  		if (len >= 12 + sizeof(wmi_svc_ext) && tag == TAG_SERVICE_AVAILABLE) {
-@@ -7267,6 +7335,13 @@
+@@ -7267,6 +7339,13 @@
  				break;
  			}
  			if (tag == TAG_READY_EVENT && l >= 24 + 8 + 4) {
@@ -307,7 +322,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  				memcpy(wmi_mac, d + o + 4 + 24, 6);
  				wmi_ready = true;
  			}
-@@ -7275,6 +7350,16 @@
+@@ -7275,6 +7354,16 @@
  		LOG("t=%u ms: *** WMI READY (fw MAC %02x:%02x:%02x:%02x:%02x:%02x) ***", g_ms, wmi_mac[0], wmi_mac[1],
  		    wmi_mac[2], wmi_mac[3], wmi_mac[4], wmi_mac[5]);
  		if (wmi_ready) {
@@ -324,7 +339,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  			htt_start();                        /* the host rx ring first, then the scan */
  		}
  		break;
-@@ -7343,6 +7428,7 @@
+@@ -7343,6 +7432,7 @@
  	}
  	(void)ce_poll();
  	htt_poll();
@@ -332,7 +347,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	if (scan_started && !api_ready) {
  		if (etxq_lock == NULL) {
  			etxq_lock = IOSimpleLockAlloc();
-@@ -7352,7 +7438,7 @@
+@@ -7352,7 +7442,7 @@
  		if (topaz_wlan_ready_hook != NULL) {
  			topaz_wlan_ready_hook();
  		}
@@ -341,7 +356,7 @@ diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
  	}
  	if (api_ready) {
  		w_join_poll();
-@@ -7372,6 +7458,8 @@
+@@ -7372,6 +7462,8 @@
  		LOG("t=%u ms: scan: passive scan %u %s", g_ms, scans + 1, scanning ? "requested" : "FAILED");
  	}
  }

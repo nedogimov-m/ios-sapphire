@@ -555,6 +555,38 @@ unicast address is chosen for this boot when firmware supplies no usable
 address, consistently before vdev/station/ifnet publication. A nonzero READY
 status never grants native readiness.
 
+Read-only userland review2026-10-24 at `906425b75e02b4f99eb5d7bb1ef7c9583472d772`:
+`userland/src/net_test.m` supplies getifaddrs/SystemConfiguration, DNS/TCP/TLS
+checks and a bounded interface wait. Its `wifi` job keys off legacy `wifi=1`
+and uses a handwritten IPConfiguration MIG20011 fallback only when configd
+has no service. Redfin GUI deliberately keeps legacy wifi0; the companion
+job/prebuilt is therefore not imported as-is. Stock service discovery must
+be assessed before introducing that optional fallback, and its20H392 Mach
+layout remains a separate validation item. No helper/job or Apple binary
+is installed by this review.
+
+Reviewed again2026-10-24 after station-v7: QMI's native target table declares
+CE5 PIPEDIR_OUT (target destination, HTT/IPA); live firmware changes its
+destination base to MSA after HTT setup. Redfin's APPS/IPA-disabled profile
+therefore leaves both CE5 rings to firmware, neither posts nor polls host RX
+there, and uses one shared host-ring table in the software and hardware owner.
+Native CE5/6 without APPS queues receive no CTRL1/RRI-enable writes either.
+The generic host_ce_config_wlan CE5 receive entry is not suitable authority
+for this observed mission profile. The exact-source CE model now checks
+that CE5's firmware registers are preserved, plus real RX and TX code paths.
+Native `ce.c:shadow_sr_wr_ind_addr` independently confirms the existing
+0/3/4 shadow addresses32000/3200c/32010; QMI array order is not their index.
+
+The pinned SEC source's IO_RETRY_CNT3 and1ms retry wait now apply only to
+discarded queue-resynchronization reads, after releasing held contacts.
+Live coordinate batches are never replayed. The two-CS open HID-session read
+keeps preemption disabled with CPU IRQs enabled and existing bounded GENI
+loops. A measured gap accompanies invalid replies; scheduling latency is
+still a candidate, not a proven Wi-Fi cause.
+XNU8796 `clock.c:_clock_delay_until_deadline_with_leeway` confirms that
+`delay()` can block; preemption-disabled callers select `machine_delay_until`.
+This applies to sensing initialization as well as subsequent event reads.
+
 GUI2 composes these resources with the existing GUI8 root/display/touch
 profile. It uses the same bounded boot-argument length, frozen CPU/root
 checks and cached shim return. Touch completes its DRV2 power setup first;

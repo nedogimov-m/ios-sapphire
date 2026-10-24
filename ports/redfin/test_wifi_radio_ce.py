@@ -49,6 +49,7 @@ class RadioCECompletionTests(unittest.TestCase):
             self.assertEqual(self.lib.check(posted, posted, count, 2048), 0)
 
     def test_rx_only_ce_keeps_firmware_source_ring_and_source_control_live(self):
+        self.assertEqual(self.lib.owned_mask(0x18, 0, 0), 0)
         for at in (0, 4, 8):
             self.assertEqual(self.lib.owned_mask(at, 0, 64), 0)
         self.assertEqual(self.lib.owned_mask(0x0c, 0, 64), 0xffffffff)

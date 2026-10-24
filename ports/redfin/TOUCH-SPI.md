@@ -8,12 +8,21 @@ scheduled100us minimum allows a longer wait). This is a conservative
 settling margin for the observed zero headers, pending device validation.
 The patch
 logs the header and computed/received checksum of a rejected complete reply.
+Open HID-session reads keep preemption disabled across the bounded TX,
+settle and RX phases, while CPU IRQs stay enabled. Invalid replies also log
+the measured TX-to-RX gap. This prevents another CPU0 thread stretching a
+polled exchange; its role in the observed failures remains a timing candidate.
+XNU `clock.c` explicitly lets `delay()` block when preemption is enabled;
+the guarded section selects its nonblocking machine-delay path, including
+the session's volatile sensing initialization.
 Only an already sensed event session with an idle GENI host, empty FIFOs
 and no fault status can return `EILSEQ` without closing SPI. The HID worker
 releases held contacts, issues the existing exact CLEAR_EVENT_STACK and
 requires an empty validated queue before delivering more input. The total
-clear budget remains eight per boot; a clear/transport/ownership failure or
-another malformed reply while resynchronizing stops the worker. Consumed
+clear budget remains eight per boot. The clear settles for1ms; discarded
+resynchronization reads tolerate at most three malformed completed replies,
+separated by1ms, following native SEC's retry count. Clear/transport/ownership
+failure or persistent malformed resynchronization stops the worker. Consumed
 events are discarded, never replayed. Identity and sensing checks stay
 strict. This follows native SEC tolerance for malformed responses without
 assuming that the latest GUI failure was caused by Wi-Fi.

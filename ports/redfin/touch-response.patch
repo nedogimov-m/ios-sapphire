@@ -1,11 +1,28 @@
 diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
 --- a/bsd/dev/redfin_touch_spi.c
 +++ b/bsd/dev/redfin_touch_spi.c
-@@ -263,10 +263,33 @@
+@@ -11,6 +11,7 @@
+ #include <sys/systm.h>
+ #include <sys/errno.h>
+ #include <kern/clock.h>
++#include <kern/cpu_data.h>
+ #include <pexpert/pexpert.h>
+ #include "redfin_touch_protocol.h"
+ #include "redfin_touch_sensing.h"
+@@ -256,19 +257,59 @@
+ }
+ 
+ static int
+-redfin_spi_read(struct redfin_spi *s, unsigned reg, unsigned count, uint8_t *out)
++redfin_spi_read_transaction(struct redfin_spi *s, unsigned reg, unsigned count, uint8_t *out)
+ {
+ 	uint8_t request[8], response[256];
+ 	unsigned bytes = redfin_touch_response_size(reg, count);
  	if (!out || !bytes || !redfin_touch_read_request(reg, count, request)) return EINVAL;
  	int error = redfin_spi_transfer(s, request, NULL, sizeof(request));
  	if (error) return error;
 -	delay(redfin_touch_read_delay(reg));
++	uint64_t gap_started = mach_absolute_time();
 +	unsigned settle = redfin_touch_read_delay(reg);
 +    /* Native SEC uses a scheduled wait with this minimum. A tight busy wait
 +     * on an idle/waking controller needs margin; keep the existing 500us
@@ -13,6 +30,7 @@ diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
 +    if (s == &redfin_spi_event_context && redfin_spi_event_open && redfin_spi_event_sensing &&
 +        (reg == 0x60 || reg == 0x61) && settle < 500) settle = 500;
 +	delay(settle);
++	uint64_t gap_finished = mach_absolute_time();
  	error = redfin_spi_transfer(s, NULL, response, bytes);
  	if (error) return error;
 -	if (!redfin_touch_response_valid(reg, count, response, bytes)) return redfin_spi_failed(s, EIO);
@@ -23,9 +41,11 @@ diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
 +         * its queue. GENI errors/timeouts and non-event reads stay fatal. */
 +        uint8_t checksum = 0;
 +        for (unsigned i = 0; i < 7u + count; ++i) checksum = (uint8_t)(checksum + response[i]);
-+        printf("REDFIN TOUCH RESPONSE: reg=%#x count=%u header=%02x:%02x:%02x:%02x:%02x:%02x:%02x checksum=%02x/%02x\n",
++        uint64_t gap_ns = 0;
++        absolutetime_to_nanoseconds(gap_finished-gap_started,&gap_ns);
++        printf("REDFIN TOUCH RESPONSE: reg=%#x count=%u header=%02x:%02x:%02x:%02x:%02x:%02x:%02x checksum=%02x/%02x gap_us=%llu\n",
 +            reg, count, response[0], response[1], response[2], response[3], response[4], response[5], response[6],
-+            checksum, response[7u + count]);
++            checksum, response[7u + count],(unsigned long long)(gap_ns/1000));
 +        if (s == &redfin_spi_event_context && redfin_spi_event_open && redfin_spi_event_sensing &&
 +            !s->dead && !s->command_owned && (reg == 0x60 || reg == 0x61) &&
 +            !(redfin_spi_rd(s, 0x40) & 0x1001) &&
@@ -36,8 +56,23 @@ diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
 +    }
  	memcpy(out, response + 7, count);
  	return 0;
++}
++
++static int
++redfin_spi_read(struct redfin_spi *s, unsigned reg, unsigned count, uint8_t *out)
++{
++    /* A polled SEC exchange is two CS phases plus the settle interval.
++     * Keep an unrelated CPU0 worker from stretching that interval or an RX
++     * FIFO pause. IRQs remain enabled. All GENI loops are already bounded. */
++    bool critical = s == &redfin_spi_event_context && redfin_spi_event_open;
++    if (critical) disable_preemption();
++    int error = redfin_spi_read_transaction(s,reg,count,out);
++    if (critical) enable_preemption();
++    return error;
  }
-@@ -346,7 +369,7 @@
+ 
+ int
+@@ -346,7 +387,7 @@
  		return EINVAL;
  	}
  	int error = redfin_spi_read(&redfin_spi_event_context,reg,count,out);
@@ -49,7 +84,61 @@ diff --git a/bsd/dev/redfin_touch_spi.c b/bsd/dev/redfin_touch_spi.c
 diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
 --- a/bsd/dev/redfin_touch_events.c
 +++ b/bsd/dev/redfin_touch_events.c
-@@ -94,7 +94,7 @@
+@@ -32,6 +32,7 @@
+ static unsigned redfin_events_seconds;
+ static int redfin_events_sleep;
+ static bool redfin_events_delivery_failed;
++static bool redfin_events_resyncing;
+ static uint32_t
+ redfin_events_rd(vm_offset_t base,unsigned offset)
+ {
+@@ -59,9 +60,18 @@
+ redfin_events_read(void *ctx,unsigned reg,unsigned count,uint8_t *out)
+ {
+ 	(void)ctx;
+-	if (!redfin_events_owned()) return EBUSY;
+-	if (!sweet_hid_redfin_touch_ready()) return EPIPE;
+-	return redfin_touch_spi_event_read(reg,count,out);
++    int error = 0;
++    /* Native SEC allows three malformed completed replies, separated by1ms.
++     * Only discarded resynchronization reads may repeat; no uncertain live
++     * coordinate batch is replayed or delivered by these extra attempts. */
++    for (unsigned attempt = 0; attempt < 3; ++attempt) {
++        if (!redfin_events_owned()) return EBUSY;
++        if (!sweet_hid_redfin_touch_ready()) return EPIPE;
++        error = redfin_touch_spi_event_read(reg,count,out);
++        if (error != EILSEQ || !redfin_events_resyncing) return error;
++        if (attempt < 2) redfin_events_wait(1);
++    }
++    return error;
+ }
+ static int
+ redfin_events_clear(void *ctx)
+@@ -69,7 +79,17 @@
+  (void)ctx;
+  if(!redfin_events_owned()) return EBUSY;
+  if(!sweet_hid_redfin_touch_ready()) return EPIPE;
+- return redfin_touch_spi_events_clear();
++ int error = redfin_touch_spi_events_clear();
++ if (!error) redfin_events_wait(1); /* Let the completed volatile clear settle. */
++ return error;
++}
++static int
++redfin_events_resynchronize(struct redfin_events_state *state,const struct redfin_events_ops *ops)
++{
++ redfin_events_resyncing = true;
++ int error = redfin_events_recover(state,ops);
++ redfin_events_resyncing = false;
++ return error;
+ }
+ static void
+ redfin_events_emit_hid(void *ctx,unsigned finger,int down,unsigned x,unsigned y)
+@@ -90,11 +110,12 @@
+ 	struct redfin_events_state state = {0};
+ 	state.startup_reset = true;
+ 	redfin_events_delivery_failed = false;
++	redfin_events_resyncing = false;
+ 	const struct redfin_events_ops ops = {redfin_events_read,redfin_events_emit_hid,NULL,redfin_events_clear};
  	uint64_t deadline;
  	clock_interval_to_deadline(redfin_events_seconds,NSEC_PER_SEC,&deadline);
  	int error = 0;
@@ -58,7 +147,7 @@ diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
  	/* No SPI events consumed and no DOWN emitted before a real callback consumer. */
  	while (!sweet_hid_redfin_touch_ready()) {
  		if (!redfin_touch_boot_lease_valid(REDFIN_TOUCH_UFS_EVENTS)) { error = EPERM; goto done; }
-@@ -121,8 +121,18 @@
+@@ -121,13 +142,23 @@
  	while (mach_absolute_time() < deadline) {
  		if (!sweet_hid_redfin_touch_ready()) { error = EPIPE; break; }
  		if (!redfin_events_owned()) { error = EBUSY; break; }
@@ -71,10 +160,16 @@ diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
 +			if (error == EILSEQ) {
 +				/* No DOWN from this batch was committed. Release old contacts,
 +				 * clear once and require an empty validated reply before resuming.
-+				 * The SPI leaf caps clears at eight; a second bad reply here stops. */
-+				error = redfin_events_recover(&state,&ops);
++				 * The SPI leaf caps clears at eight; three bad discarded replies stop. */
++				error = redfin_events_resynchronize(&state,&ops);
 +				printf("REDFIN TOUCH RESPONSE: resync=%d recovered=%u\n",error,state.recoveries);
 +			}
  			if (error == EOVERFLOW) {
  				const uint8_t *p = state.overflow_event;
  				printf("REDFIN TOUCH OVERFLOW: count=%u raw=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
+ 				    state.overflows,p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7]);
+-				error = redfin_events_recover(&state,&ops);
++				error = redfin_events_resynchronize(&state,&ops);
+ 				printf("REDFIN TOUCH OVERFLOW: resync=%d recovered=%u\n",error,state.recoveries);
+ 			}
+ 			if (error) break;

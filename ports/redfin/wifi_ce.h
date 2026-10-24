@@ -31,8 +31,8 @@ static inline uint32_t rf_ce_host_config_mask(uint32_t at, unsigned source_entri
     case 4: return source_entries ? 0x1fu : 0;
     case 0x0c: case 0x14: return dest_entries ? UINT32_MAX : 0;
     case 0x10: return dest_entries ? 0x1fu : 0;
-    case 0x18: return (1u << 19) | (source_entries ? 0xffffu | (1u << 17) : 0) |
-        (dest_entries ? 1u << 18 : 0);
+    case 0x18: return (source_entries || dest_entries) ?
+        (1u << 19) | (source_entries ? 0xffffu | (1u << 17) : 0) | (dest_entries ? 1u << 18 : 0) : 0;
     default: return 0;
     }
 }

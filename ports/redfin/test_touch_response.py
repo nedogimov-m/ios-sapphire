@@ -17,7 +17,7 @@ class TouchResponseTests(unittest.TestCase):
         root = Path(cls.tmp.name)
         (root / 'protocol.h').write_text(patched_source('bsd/dev/redfin_touch_protocol.h'))
         source = patched_source('bsd/dev/redfin_touch_spi.c')
-        read = function(source, 'static int\nredfin_spi_read(')
+        read = function(source, 'static int\nredfin_spi_read_transaction(') + function(source, 'static int\nredfin_spi_read(')
         event = function(source, 'int\nredfin_touch_spi_event_read(')
         stub = r'''
 #include <stdbool.h>
@@ -31,7 +31,13 @@ struct redfin_spi{uintptr_t se;unsigned tx_depth,rx_depth;bool dead,command_owne
 static struct redfin_spi redfin_spi_event_context;
 static bool redfin_spi_event_open,redfin_spi_event_sensing;
 static unsigned fault,commands,failed,closed,requested,requested_count,settled;
-static void delay(unsigned us){settled+=us;}
+static unsigned preempt_depth,preempt_calls;
+static uint64_t now;
+static void disable_preemption(void){preempt_depth++;preempt_calls++;}
+static void enable_preemption(void){preempt_depth--;}
+static uint64_t mach_absolute_time(void){return now;}
+static void absolutetime_to_nanoseconds(uint64_t in,uint64_t *out){*out=in;}
+static void delay(unsigned us){settled+=us;now+=(uint64_t)us*1000;}
 static uint32_t redfin_spi_rd(struct redfin_spi *s,unsigned at){
  (void)s;if(fault==9 && at==0x40)return 1;
  if(fault==10 && at==0x800)return 1;
@@ -56,7 +62,7 @@ static int redfin_spi_transfer(struct redfin_spi *s,const uint8_t *tx,uint8_t *r
         wrapper = r'''
 static uint8_t output[248];
 int run(unsigned issue,unsigned reg,unsigned count){
- fault=issue;commands=failed=closed=settled=0;memset(output,0x5a,sizeof(output));
+ fault=issue;commands=failed=closed=settled=preempt_depth=preempt_calls=0;now=0;memset(output,0x5a,sizeof(output));
  redfin_spi_event_context=(struct redfin_spi){1,16,16,false,false};
  redfin_spi_event_open=redfin_spi_event_sensing=true;
  if(issue==5)redfin_spi_event_sensing=false;
@@ -64,7 +70,12 @@ int run(unsigned issue,unsigned reg,unsigned count){
  if(issue==7)redfin_spi_event_context.dead=true;
  return redfin_touch_spi_event_read(reg,count,output);
 }
-unsigned stat(unsigned n){const unsigned v[]={commands,failed,closed,redfin_spi_event_open,redfin_spi_event_context.dead,output[0],settled};return n<7?v[n]:0;}
+int identity(void){
+ struct redfin_spi local={1,16,16,false,false};
+ fault=commands=failed=closed=settled=preempt_depth=preempt_calls=0;now=0;
+ return redfin_spi_read(&local,0x22,5,output);
+}
+unsigned stat(unsigned n){const unsigned v[]={commands,failed,closed,redfin_spi_event_open,redfin_spi_event_context.dead,output[0],settled,preempt_depth,preempt_calls};return n<9?v[n]:0;}
 '''
         cls.lib = compile_shared(root, stub + read + event + wrapper, 'response')
         cls.lib.run.argtypes = [C.c_uint] * 3
@@ -74,6 +85,8 @@ unsigned stat(unsigned n){const unsigned v[]={commands,failed,closed,redfin_spi_
             for reg, count in ((0x60, 8), (0x61, 248)):
                 self.assertEqual(self.lib.run(fault, reg, count), errno.EILSEQ)
                 self.assertEqual([self.lib.stat(i) for i in range(6)], [2, 0, 0, 1, 0, 0x5a])
+                self.assertEqual(self.lib.stat(7), 0)
+                self.assertEqual(self.lib.stat(8), 1)
 
     def test_transport_errors_non_event_reads_and_unproved_host_state_stay_fatal(self):
         self.assertEqual(self.lib.run(4, 0x60, 8), errno.ETIMEDOUT)
@@ -85,13 +98,20 @@ unsigned stat(unsigned n){const unsigned v[]={commands,failed,closed,redfin_spi_
             self.assertEqual(self.lib.stat(1), 1, fault)
             self.assertEqual(self.lib.stat(2), 1, fault)
             self.assertEqual(self.lib.stat(5), 0x5a, fault)
+            self.assertEqual(self.lib.stat(7), 0, fault)
 
     def test_valid_response_is_delivered_once(self):
         self.assertEqual(self.lib.run(0, 0x60, 8), 0)
         self.assertEqual([self.lib.stat(i) for i in range(6)], [2, 0, 0, 1, 0, 1])
         self.assertEqual(self.lib.stat(6), 500)
+        self.assertEqual(self.lib.stat(7), 0)
+        self.assertEqual(self.lib.stat(8), 1)
         self.assertEqual(self.lib.run(0, 0x55, 1), 0)
         self.assertEqual(self.lib.stat(6), 100)
+        self.assertEqual(self.lib.stat(8), 1)
+        self.assertEqual(self.lib.identity(), 0)
+        self.assertEqual(self.lib.stat(6), 100)
+        self.assertEqual(self.lib.stat(8), 0)
 
 
 if __name__ == '__main__':
