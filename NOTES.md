@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GMU allocations/tables pass; TCM transfer readback stops before context writes — 2026-10-24
+
+Source8f2924d, native local build20261024-142257 and memory-v1 image below.
+Authenticated capture logs/redfin/gmu-memory-v1 matches boot ID05424c063f225200.
+Held CX,200MHz/reset-held GMU/TCM test,58-read globals and48-read CB0/1
+all repeat PASS. Memory stage allocates7private contiguous zeroed extents,
+393216owned bytes, constructs5table pages and43mapped pages. Firmware
+transfer returns EIO5 atstage3; no payload/word detail was emitted, so its
+specific TCM address/cause is UNRESOLVED. No context/route store or ATS
+was attempted (stores0/translations0). Do not infer a mapping failure.
+CM3 reset stays asserted; staticPID1 records11heartbeats. Collector
+authenticates/decrypts, primes public metadata and completes in verified
+fastboot. HFSX remains clean/inconsistentfalse/write_count623088 unchanged.
+
+Next source batch: follow native a6xx_gmu_fw_start's TCM-retention setup,
+include exact payload/word readback diagnostics, and finish zeroed-owned
+mapping/ATS before TCM loading, as preferred upstream steps13→14 do. Thus
+one bounded run can establish translation independently of TCM readback;
+firmware execution still requires ALL checks to pass. The retention omission
+is source-observed, not yet proved to be the cause. No second device action
+has started. GPU/Metal remains unfinished; working GUI/Wi-Fi preserved.
+Kernel e38b8fe82d6a6408c268aafb30da7aab2b087da4b1824b6236db603c223f0f1b;
+image e5dcc08b8077aeb6fa8d609797ba503135439a622ca96d7725b0b5b4a9e8145f.
+No flash/root reinstall/modem/persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x05424c063f225200`.
+
 ## REDFIN reset-held GMU firmware/owned memory batch built; hardware pending — 2026-10-24
 
 Following working Wi-Fi checkpoint83e6e80, added explicit memory-only

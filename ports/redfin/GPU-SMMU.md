@@ -83,6 +83,14 @@ passes the real loader/live FDT/Image-window, bound-firmware and compiled
 shim-return preflight. Hardware mapping/ATS success is pending; this source
 milestone does not establish GMU execution, GPU commands or Metal.
 
+The first authenticated memory-v1 run repeats all clock/global/context
+prerequisites and successfully allocates seven extents/393216 bytes and
+constructs five table pages/43 mapped pages. TCM transfer readback returns
+EIO at stage3 before any context/route store or ATS request. The failing
+payload/word and cause were not captured. HFS stays clean at the unchanged
+write count623088; the collector returns to verified fastboot. This result
+proves allocation/construction only, not translation or firmware execution.
+
 ## Native resource and access boundary
 
 The preferred [HackiOS kernel][hackios] at
