@@ -73,7 +73,9 @@ static inline int rf_gb_program(const struct rf_gb_config *c, struct rf_gb_repor
     RF_GB_ADD(RF_GB_RSC,0x2c,1,0xff);
     for (unsigned i=0;i<3;++i) {
         RF_GB_ADD(RF_GB_RSC,0x38+8*i,i==2?0x80000000u:0,UINT32_MAX);
-        RF_GB_ADD(RF_GB_RSC,0x34+8*i,0,UINT32_MAX);
+        /* Native writes zero, but these hidden destinations are hard-wired
+         * on Redfin (e.g. CMD0 reads 0x82204514). Do not require zero. */
+        RF_GB_ADD(RF_GB_RSC,0x34+8*i,0,0);
     }
     RF_GB_ADD(RF_GB_RSC,0x400,0,0xffff);
     RF_GB_ADD(RF_GB_RSC,0x20,0x4520,0xffff);

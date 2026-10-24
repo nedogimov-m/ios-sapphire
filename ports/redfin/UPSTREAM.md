@@ -34,6 +34,12 @@ GPU CP command or PAS call and publishes no graphics/Metal capability. No
 preferred userland ABI was changed; source snapshots remain those reviewed
 below. Hardware CM3/HFI evidence is pending; host tests/build are not DMA proof.
 
+First17464e8 hardware run reaches hidden RSC CMD0_ADDR: native zero write
+reads back82204514. Native/upstream do not require zero destination readback;
+the local protocol now preserves that behavior for the three hidden ADDR
+registers while still checking data/uCode, actual PDC resource destinations
+and control fields. No reset release or permission bypass was attempted.
+
 Project upstream preference, 2026-10-23: the user designates
 [oosexgang/hackios-xnu-kernel][kernel] and
 [oosexgang/hackios-xnu-userland][userland] as the most stable source repositories.

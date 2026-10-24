@@ -55,7 +55,10 @@ static int write_word(void *p,unsigned u,uint32_t a,uint32_t v){
   if(v!=1 || !report.firmware || report.phase!=RF_GB_HFI_WAIT)bad++;
  }
  if(u==RF_GB_GMU && a==0x24c1c && v==2)regs[u][0x24c20/4]=2;
- regs[u][a/4]=v;
+ if(u==RF_GB_RSC && (a==0x34 || a==0x3c || a==0x44)) {
+  /* Captured native hidden destinations ignore the driver's zero store. */
+  regs[u][a/4]=0x82204514u-(a==0x3c?4u:0u)+(a==0x44?12u:0u);
+ } else regs[u][a/4]=v;
  if(issue==10 && stores==8)lost=1;
  return 0;
 }

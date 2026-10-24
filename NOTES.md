@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected native RSC hidden destination semantics built as start-v2 — 2026-10-24
+
+Follows17464e8 and authenticated v1 result below. Actual source callback
+tests reproduce ignored hidden ADDR stores and all8complete protocol cases
+PASS0.647s. No new register, retry or permission path; native writes remain
+exact, only unsupported hidden-ADDR zero equality removed. Local native
+build20261024-154528PASS, no CI run. Kernel research/redfin-gpu/kernel-start-v2
+SHA2561038f9ca86e6a3da5c6f5aa6b66132d810f4b1a3b03422a88f70aabc98c3296e;
+image ports/redfin/out/gmu-start-v2/redfin-xnu.img,
+SHA256ad1df5914cfa3d752972b16324337a5ae71e7ba3bd2b901305ce532b5b7c1097.
+Loader/live-FDT/Image-window, exact memory/start contracts+firmware and
+compiled-shim UP return proof PASS. Hardware validation pending. Existing
+working Wi-Fi and memory-v6 artifacts/root preserved; next integrated
+PDC/RSC/CM3/HFI result. No flash/root/config/modem/persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x66c3e349cf06f010`.
+
+## REDFIN cold-start v1 reaches native RSC; hidden ADDR readback corrected — 2026-10-24
+
+Source17464e8, local native build153708, start-v1 capture authenticates and
+matches5a47cd8fdde10bb1. Complete memory/firmware preparation againPASS
+result0/stage7/7loaded/7verified/30.722s. Runtime CMD-DB lookup succeeds:
+xo300a0,cx30000,mx30010,vrm43400,core20010008,HFI20000001. Uncached host
+HFI view has correct four descriptors/zero indices; log zero. Initial full
+owned SMMU/foreign audit passes, native RSC sequence/TCS controls quiescent.
+GMU local masks/W1Cs and initial RSC writes progress. At8thstore hidden
+CMD0_ADDR34, native requested0 reads82204514. Whole-word zero expectation
+stopsEIO/stage2/phaseHELD; released0/firmware0/HFI0/no request. Master
+reset1/INIT0/HFI0 and no AO/SMMU faults. The native/upstream driver writes
+zero to hidden destinations without requiring zero readback; on this device
+that destination stays hardware/inherited, not an ARC resource address.
+
+Changed only readback expectations for three hidden ADDR writes, keeping
+the native writes and verification of hidden data, sequencer instructions,
+PDC ARC destinations and control fields. Host model now reproduces ignored
+hidden-destination stores, so the complete sequence can be checked together.
+No reset release, PAS, GX/GPU command, root/config or flash occurred in v1.
+StaticPID1 alive; collector authenticated/public-prime/verified-fastboot
+complete; HFSXclean/inconsistentfalse/write_count623088 unchanged. Next:
+rebuilt integrated cold-start capture, real firmware/HFI evidence still
+pending. Kernel86d2f7e1ce4dcd0b0ca8b7dce73a50d9a6c19df2bccf1219f1925bc91fa2b885;
+image41781620ea54e7caf1c9bb08b90a45d0ad5e47bae156828b7c1150372d337c6e.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x5a47cd8fdde10bb1`.
+
 ## REDFIN complete native GMU cold-start/HFI batch built; hardware pending — 2026-10-24
 
 User continues GPU work after4ccd4d6. Added explicit --gmu-firmware-start/
