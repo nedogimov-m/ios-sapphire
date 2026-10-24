@@ -533,6 +533,15 @@ and retained RMTFS before the shim initializes it. RMTFS is never spare CE
 RAM. Native callbacks admit only the host CE fields, owned ring addresses
 and three reviewed TX shadows; firmware-side ring geometry stays intact.
 
+Reviewed again2026-10-24: Linuxv6.12 `ce.h` defines WCN3990's
+`CE_DESC_ADDR_MASK=GENMASK_ULL(34,0)`; `ce.c` posts masked addresses and
+returns RX through the saved transfer context. The native Redfin receive
+guard now compares those address bits to its exact posted buffer while
+retaining the actual2048-byte bound. The CPU uses only its own buffer
+pointer. Upper completion control/metadata is not a new DMA pointer.
+The completion barrier precedes remaining descriptor/payload loads; rejected
+descriptors log length, raw address/flags and the expected posted address.
+
 GUI2 composes these resources with the existing GUI8 root/display/touch
 profile. It uses the same bounded boot-argument length, frozen CPU/root
 checks and cached shim return. Touch completes its DRV2 power setup first;

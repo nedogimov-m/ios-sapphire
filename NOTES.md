@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN station-v5 owned WLAN context/CE start PASS; native RX guard adaptation prepared — 2026-10-24
+
+Source `839af8b`, native build050040, authenticated station-v5 capture
+matches boot IDc4cbc22785ee1a26. The owned CB4/slot4 claim now completes
+all five stores, result0. The packet engine allocates675840 bytes from its
+separate DMA32 pool, programs12 host rings and posts RX. Its first poll
+returns EOVERFLOW84 at54787ms, before a logged HTC/WMI handshake. The old
+guard did not distinguish oversized length from a changed descriptor
+address, so no actual buffer overflow or transport corruption is claimed.
+Touch completes error0 (one IRQ batch, zero contacts); physical UI input
+remains unconfirmed. HFSX is clean/write_count506582, verified fastboot.
+
+Reviewed native Linuxv6.12 CE_DESC_ADDR_MASK35 and saved RX contexts.
+The guard now compares the hardware address bits to the exact posted DMA
+buffer, keeping the2048-byte length bound, and never uses a descriptor
+pointer to access payload. Completion ordering precedes other descriptor
+loads. First refusals now log exact CE/slot/length/raw address/flags, native
+MMIO errors and final HTC/WMI/interface counters. No ring geometry, route,
+pool bounds or foreign-state checks are relaxed. A metadata mismatch is a
+source-backed candidate for the former refusal, not yet a hardware result.
+
+All16 focused completion/lease/firmware tests PASS (1 optional private case
+skipped). They cover every address bit, each upper metadata bit, zero/large
+lengths and the existing native lease/failure cases. Local
+`build-20261024-051051.log` PASS; no CI run. Actual loader/live-FDT/GUI8
+return/DMA32/shim guards PASS. Image130216768 bytes.
+Kernel `99ad4660d86899b1c6fbac77135da9f9cb5571579221fd56c25c95cae616445a`;
+image `0a66f143b4585f8a45eeb91f994f2da655695dafdf43fddad6efc924515eebbb`.
+Exact station-v6 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb9b7975b444fd6fa redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Next: temporary combined station-v6 run, actual HTC/WMI/HTT and GUI network
+publication/scan, then association/data/DHCP. Touch input still needs a
+physical attempt; GPU/Metal follows working GUI Wi-Fi. No partition flash,
+persistent firmware/EFS write or backup change.
+
 ## REDFIN station-v4 result and native WLAN FORMAT correction prepared — 2026-10-24
 
 Source `f360ed1`, native build045148, authenticated station-v4 capture

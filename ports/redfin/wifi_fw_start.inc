@@ -1311,7 +1311,13 @@ static void fw_start_worker(void *, wait_result_t)
     IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());
     uint64_t started_ns = fw_start_ns(&fw_start);
     int error = fw_start_run(&fw_start);
-    if (error && fw_start.packets_started) redfin_wifi_radio_abandon();
+    if (error && fw_start.packets_started) {
+        struct redfin_wifi_radio_state state = {};
+        redfin_wifi_radio_state(&state);
+        IOLog("REDFIN WIFI PACKETS: stopped error=%d HTC=%u WMI=%u interface=%u RX=%u TX=%u\n",
+            error, state.htc, state.wmi, state.ready, state.received, state.transmitted);
+        redfin_wifi_radio_abandon();
+    }
     IOLog("REDFIN WIFI START: result=%d phase=%u reset=%u init=%u setup=%u auth=%u smp_stage=%u copies=%u payload=%llu BSS=%llu wlan=%u/%#x bdf=%u/%u/%u cal=%u bdf_ready=%u elapsed_ms=%llu retained=1\n",
         error, fw_start.phase, fw_start.reset, fw_start.initialized, fw_start.setup,
         fw_start.authenticated, fw_start.smp2p.stage, fw_start.copies,

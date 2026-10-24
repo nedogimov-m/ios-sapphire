@@ -13,6 +13,18 @@ struct redfin_sta_join;
 struct redfin_sta_bss;
 struct redfin_sta_state;
 struct redfin_sta_channel;
+/* Native ath10k ce.h CE_DESC_ADDR_MASK: WCN3990 completion descriptors
+ * carry address bits[34:0] separately from the upper control/metadata.
+ * The CPU always uses its own posted-buffer pointer, never this field. */
+#define REDFIN_WIFI_CE_DESC_ADDRESS UINT64_C(0x7ffffffff)
+static inline unsigned redfin_wifi_ce_receive_check(uint64_t reported, uint64_t posted,
+    unsigned bytes, unsigned capacity)
+{
+    if (!bytes || bytes > capacity) return 1;
+    if (!posted || (posted & ~REDFIN_WIFI_CE_DESC_ADDRESS) ||
+        (reported & REDFIN_WIFI_CE_DESC_ADDRESS) != posted) return 2;
+    return 0;
+}
 struct redfin_wifi_radio_ops {
     void *context;
     int (*check)(void *);
