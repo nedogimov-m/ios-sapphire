@@ -61,8 +61,11 @@ seven GMU firmware payloads loaded and verified, with CM3 still reset-held.
 The subsequent capture observes fresh GMU firmware completion and HFI-ready;
 a fresh version request now receives its matching HFI ACK with actual queue
 consumer progress, proving GMU DMA. The complete native GPU command chain
-is implemented for integrated validation; its latest run reaches GPU memory
-allocation. GPU commands and iOS graphics/Metal remain unproved.
+now passes an authenticated hardware run: native CB0/SID0 routing, SQE,
+ME_INIT, signed PAS13 zap, exit from secure mode and four boot-bound values
+actually written by the GPU and read back uncached. GPU/SMMU faults remain
+clear. The next step is the persistent buffer/submission backend and the iOS
+graphics bridge; rendering and Metal remain unproved.
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

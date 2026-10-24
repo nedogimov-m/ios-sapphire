@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native GPU command chain HARDWARE PASS — 2026-10-24
+
+Source5eb33bd/local native build20261024-174539 (no CI run), authenticated
+gpu-command-v8 capture matches boot7d243f35bf238124 and the frozen image.
+Native GPU SID0/mask401 in SMR0 reads84010000 exactly; CB0/ASID0/HUPCF and
+all16mapping steps pass. All89native core register writes and address/mode
+readbacks pass, followed by the sole SQE_CNTL1 start. Real ME_INIT completes
+rptr/wptr12, idle status1. All6crypto proxy votes are accepted and retained;
+PAS13 INIT/MEM_SETUP/AUTH succeed in both SCM transport and secure result
+(INIT3calls/2resumes). CP_SET_SECURE_MODE0 completes at14. Two subsequent
+MEM_WRITE/WAIT_IDLE submissions complete at24/34 and uncached host readback
+matches all4boot-bound values: 60238124,9fdc7edb,51243f35,aedbc0ca.
+Final result0/stage6/mapped1/GX1/PAS3/submissions4/registers97;
+command-chain elapsed357564947ns. GPU interrupts/fault/protection0;
+SMMU FSR400FORMAT only, GFSR0, foreign-state audits remain clean.
+This proves GPU command execution and DMA, not drawing/Metal/iOS acceleration.
+
+RAM PID1 runs and sends heartbeats after the GPU chain. Collector authenticates,
+primes public recovery metadata and leaves verified fastboot. HFSX remains
+clean/unmounted/inconsistentfalse/write_count623088, unchanged. All images,
+firmware and logs remain private/ignored; GPU checkpoint is saved privately in
+research/redfin-gpu/working-command.json. Next substantial batch: persistent
+owned buffer/command backend and iOS userspace graphics bridge, using preferred
+RedwoodGPU/Mesa/EAGL interfaces with Redfin hardware and20H392 ABI adaptation.
+Kernel SHA2563de609e05f7fdc8485f0d76fbbd7ce5c0c491cf3bd5857c7063d8451c7a71ef4;
+image SHA2567d1613283db23df75a20f6c5c76e9a9453f5a1fa233e081bd038b532bb40d872.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=5 redfinspmi=1 redfinreturn=1 redfinbootid=0x7d243f35bf238124`.
+
 ## REDFIN complete command v8 native single SQE release built — 2026-10-24
 
 All84selected GPU/GMU/mapping/start/HFI/real-adapter checks PASS19.659s,
