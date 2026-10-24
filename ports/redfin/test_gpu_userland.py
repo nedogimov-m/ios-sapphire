@@ -33,5 +33,43 @@ class GPUUserlandTests(unittest.TestCase):
         for value in variants:
             with self.assertRaises(ValueError):gpu_userland.patch_launchd_cache(value)
 
+    def backboard(self):
+        return {'Label':'com.apple.backboardd','ProgramArguments':['/usr/libexec/backboardd'],
+            'RunAtLoad':True,'KeepAlive':True,'UserName':'mobile','POSIXSpawnType':'Interactive',
+            'MachServices':{'com.apple.CARenderServer':{'ResetAtClose':True},'PurpleSystemEventPort':True},
+            'EnvironmentVariables':{'EXISTING_OPTION':'retained'},'HighPriorityIO':True}
+
+    def test_legacy_job_migration_and_system_bridge_preserve_all_other_jobs(self):
+        raw=self.original();before=plistlib.loads(raw)
+        job=plistlib.loads(gpu_userland.Path(gpu_userland.__file__).with_name('gpu-render-job.plist').read_bytes())
+        before['LaunchDaemons'][gpu_userland.OLD_JOB_PATH]=job
+        before['LaunchDaemons'][gpu_userland.BACKBOARD_PATH]=self.backboard()
+        original=wifi_userland._encode_same_size(before,len(raw))[0]
+        patched,report=gpu_userland.patch_launchd_cache(original,system_eagl=True)
+        after=plistlib.loads(patched)
+        self.assertEqual(len(patched),len(original))
+        self.assertEqual(report['migrated_from'],gpu_userland.OLD_JOB_PATH)
+        self.assertNotIn(gpu_userland.OLD_JOB_PATH,after['LaunchDaemons'])
+        self.assertEqual(after['LaunchDaemons'].pop(gpu_userland.JOB_PATH),job)
+        backboard=after['LaunchDaemons'].pop(gpu_userland.BACKBOARD_PATH)
+        self.assertEqual(backboard['EnvironmentVariables'],{'EXISTING_OPTION':'retained',
+            'DYLD_INSERT_LIBRARIES':gpu_userland.LOADER})
+        for key in ('StandardOutPath','StandardErrorPath'):self.assertEqual(backboard.pop(key),'/dev/console')
+        backboard['EnvironmentVariables'].pop('DYLD_INSERT_LIBRARIES')
+        self.assertEqual(backboard,self.backboard())
+        before['LaunchDaemons'].pop(gpu_userland.OLD_JOB_PATH)
+        before['LaunchDaemons'].pop(gpu_userland.BACKBOARD_PATH)
+        self.assertEqual(after,before)
+        self.assertEqual(gpu_userland.patch_launchd_cache(patched,system_eagl=True)[0],patched)
+
+    def test_backboard_identity_or_existing_foreign_insertion_is_refused(self):
+        original=self.backboard()
+        for field,value in (('ProgramArguments',['/another/program']),('UserName','root'),
+            ('MachServices',{}),('KeepAlive',False),
+            ('EnvironmentVariables',{'DYLD_INSERT_LIBRARIES':'/unrelated/library.dylib'})):
+            job=copy.deepcopy(original);job[field]=value
+            with self.assertRaises(ValueError):gpu_userland.backboardd_job(job)
+        with self.assertRaises(ValueError):gpu_userland.patch_launchd_cache(self.original(),system_eagl=True)
+
 
 if __name__=='__main__':unittest.main()

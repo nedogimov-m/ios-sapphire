@@ -1,5 +1,65 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete EAGL/system graphics bundle built; offline install next — 2026-10-25
+
+Whole planned block implemented before validation. All22selected ABI,
+AMFI-scope, startup-cache migration, GUI and native runtime checksPASS6.858s.
+All457actual20H392 wrappers derive correctly;409macro slots,356generated
+Mesa forwards,30manual handlers and23unsupported entries (upstream's ES1/
+Apple-specific remainder). All nonweak imports across40actual cache libraries
+resolve. OpenGLES UUID670db66fa3fd35e1b8c845dd8a48c607 and QuartzCore
+UUID9e40b2eb260c3af1ae45a1a551a8c1b9 bind the bridge. No shader/drawing
+hardware result yet. Mesa and shader binary hashes remain identical to the
+previous installed files; the new EAGL/loader libraries are separate files.
+
+Local native kernel build20261025-003048PASS, noCI. Existing GitHub
+credential is pull-only for origin, so the new Redfin Actions profile could
+not be published/dispatched. Exact overlay/source verification passes.
+Kernel-eagl-v1 SHA25696e52928362edf122b5ef62ad1f060cd947d93d66342ae1807c075cd696c3f90.
+Image ports/redfin/out/gpu-gui-eagl-v1/redfin-xnu.img SHA256
+e636d204ee63c818c6a4571a4084ae4b04e8089d4aee93af5fd2fa8d6fc17d73; boot5ef6a49b58fc500c.
+Actual compiled loader/liveFDT/ADT/firmware/runtime/return preflightPASS.
+Userland build002830PASS; EAGL SHA256696ee1c460712fa3f925e6dd993e07b1902ee7f36f0a8098bf64ca315808c8b4,
+loader SHA2562fb7d22658a650ed2fa029e7714da9cfa59a87c2a6f2817f14e827fff1e8da36.
+
+Fresh verified recovery reads clean HFSX write_count631485; snapshot,
+current file extents and empty journal stay private under root-update-v2.
+Offline staging adds the new files and updates only the same-size startup
+cache and backboardd's own job (1045→1145bytes, retaining its same4KiB block
+and CNID). The native job must agree with the cache; no unrelated job is
+changed. Native readonly fsck/full preimages/readback precede installation.
+No device filesystem writes or new hardware boot yet. Exact pending args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x5ef6a49b58fc500c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN full system EAGL block implemented; combined validation next — 2026-10-25
+
+Based ond9bedc6. User again requires completing the whole block before
+testing; no mini-task tests or device boots have run during implementation.
+Implemented together: preferred EAGL/Mesa source adaptation, actual-cache
+457-wrapper/ObjC/QuartzCore ABI derivation, dual native/macro context bases,
+current-context TLS, hardware-only ES3 guard, native SweetSurface imports
+and copies, actual QuartzCore function-uniform observer, scoped backboardd
+loader, GUI3-only AMFI request5a adapter, System job/cache migration and
+the complete userspace build/actual-import audit. The xnu Actions workflow
+now has a Redfin board profile with exact-source identity artifacts.
+Private fresh-snapshot/offline clone/preimage/readback root tooling is ready;
+it refuses the previous root generation. Nothing has been installed yet.
+
+Correction to the previous dispatch hypothesis: native20H392
+getMacroContextPrivate returns native+20(hex). Public GL stubs take context
+at native+20; QuartzCore's macro table takes it at+0. After subtracting this
+prefix the complete preferred macro offsets must match. Do not shift the
+QuartzCore table itself. The actual QuartzCore local symbols identify the
+function_uniform vtable entry and its unchanged10/10 state/function fields;
+no20F66 address is reused.
+
+Combined userspace/host checks and the new kernel build are next, followed
+by one integrated hardware run. No system-render/Metal PASS claimed.
+Last observed device state remains the previous GUI3 service capture,
+kernel-service-v2/localbuild20261024-235430/noCI, boot020afecf22835a8c,
+clean HFSX write_count631485 and verified Fastboot. Its exact args remain:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x020afecf22835a8c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native GPU service + iOS GUI8/WLAN integration PASS; system EAGL next — 2026-10-25
 
 Sourcef0195b2/kernel-service-v2/build20261024-235430, authenticated exact

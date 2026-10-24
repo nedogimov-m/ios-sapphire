@@ -1,5 +1,40 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete system EAGL integration for 20H392 — 2026-10-25
+
+Reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772:
+`userland/src/eagl.c`, `gl_osmesa.c`, `redwood_gl.h`, `eagl_slots.txt`,
+`userland/mkeagl.py` and the function-uniform hook in `src/inject.c`.
+The MIT shader/IOSurface adaptations are kept together in the private build;
+`eagl_userland.py` records and applies the Redfin source adaptations, with
+the upstream license included. None of inject.c's 20F66 addresses, input
+replacement or prototype Metal device is copied.
+
+The initial interpretation of the 32-byte dispatch difference is superseded:
+actual20H392 `getMacroContextPrivate` returns native-context+32. All457 GL
+wrappers use the native context, with their first argument at+32; QuartzCore
+uses the macro table with its context at+0. Subtracting that prefix gives
+the preferred macro offsets. The adapter derives every stub, both ObjC
+method signatures and the QuartzCore uniform vtable entry from this root's
+paired arm64 cache/local symbols. It checks image UUIDs, exact method RVAs
+and signatures before installing11methods. Its native prefix also supports
+the reserved OpenGLES TLS key and class current-context methods. A private
+copy of the actual QuartzCore uniform data page supplies the preferred
+shader-less function parameters; the original function is still called.
+
+Reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+`xnu/files/bsd/kern/kern_minimac.c`, AMFI request0x5a. Our previous policy
+has no handler namedAMFI. The adaptation admits that native dyld query
+only for backboardd in the exact GUI3 profile; other callers/requests retain
+ENOPOLICY. The only inserted library is a minimal loader in backboardd's
+existing job. It requires the published native A620/runtime ABI before
+opening the Mesa bridge. GUI1/2 retain the existing graphics path.
+
+The rendering diagnostic migrates its exact known cache key from Library
+to System/Library/LaunchDaemons, matching the actual stock bootstrap scan.
+The complete block is implemented before its combined build/verification;
+system drawing and Metal remain unproved until actual hardware evidence.
+
 ## A620 persistent GUI3 / Mesa / IOSurface bridge — 2026-10-24
 
 Reviewed kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab again, now

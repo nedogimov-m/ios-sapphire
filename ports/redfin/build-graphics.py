@@ -15,6 +15,10 @@ import sys
 import tarfile
 import time
 
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+from ports.redfin.eagl_userland import prepare as prepare_eagl
+from ports.redfin.graphics_abi import Cache,DEFAULT_CACHE,audit_bundle
+
 ROOT=Path(__file__).resolve().parents[2]
 VERSION='25.0.7'
 SHA256='592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6'
@@ -33,6 +37,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--upstream',type=Path,default=ROOT/'research/hackios-upstream/userland')
     p.add_argument('--work-dir',type=Path,default=ROOT/'research/redfin-graphics')
+    p.add_argument('--cache',type=Path,default=DEFAULT_CACHE,help='actual installed arm64 dyld cache and paired .symbols')
     a=p.parse_args();work=a.work_dir.resolve();work.mkdir(parents=True,exist_ok=True)
     upstream=a.upstream.resolve()
     actual=subprocess.check_output(['git','-C',upstream,'rev-parse','HEAD'],text=True).strip()
@@ -123,9 +128,43 @@ def main():
                 if dependency in FRAMEWORK_NAMES:
                     run(['install_name_tool','-change',dependency,FRAMEWORK_NAMES[dependency],executable])
             run(['codesign','--force','--sign','-',executable])
-            launch=bundle/'Library/LaunchDaemons'
+            # Prepare the entire system bridge, using this root's own ObjC,
+            # TLS/macro dispatch and QuartzCore vtable metadata.
+            eagl=work/'eagl'
+            abi=prepare_eagl(upstream,source,bundle/'lib/libOSMesa.8.dylib',eagl,a.cache)
+            result['eagl_abi']={'system':abi['abi']['system'],'uuid':abi['abi']['uuid'],
+                'quartz_uuid':abi['ca']['uuid'],'wrappers':abi['wrappers'],
+                'macro_bias':abi['abi']['macro_bias'],'tls_offset':abi['abi']['tls_offset']}
+            bridge=bundle/'lib/libredfin-eagl.dylib'
+            loader=bundle/'lib/libredfin-graphics.dylib'
+            run([*c,'-dynamiclib','-O2','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
+                '-I'+str(eagl),'-I'+str(ROOT/'ports/redfin'),
+                eagl/'eagl.c',eagl/'gl_osmesa.c',ROOT/'ports/redfin/eagl-guard.c',
+                '-L'+str(bundle/'lib'),'-lOSMesa.8','-framework','CoreFoundation','-framework','IOKit',
+                '-framework','IOSurface','-lobjc','-Wl,-rpath,/redfin/lib',
+                '-Wl,-install_name,/redfin/lib/libredfin-eagl.dylib','-o',bridge])
+            run([*c,'-dynamiclib','-O2','-Wall','-Wextra','-Werror','-Wno-deprecated-declarations',
+                '-I'+str(ROOT/'ports/redfin'),ROOT/'ports/redfin/graphics-loader.c',
+                '-framework','CoreFoundation','-framework','IOKit',
+                '-Wl,-install_name,/redfin/lib/libredfin-graphics.dylib','-o',loader])
+            for target in (bridge,loader):
+                dependencies=run(['otool','-L',target],capture=True)
+                for line in dependencies.splitlines()[1:]:
+                    dependency=line.strip().split(' ',1)[0]
+                    if dependency in FRAMEWORK_NAMES:
+                        run(['install_name_tool','-change',dependency,FRAMEWORK_NAMES[dependency],target])
+                run(['codesign','--force','--sign','-',target])
+            launch=bundle/'System/Library/LaunchDaemons'
             launch.mkdir(parents=True,exist_ok=True)
             shutil.copy2(ROOT/'ports/redfin/gpu-render-job.plist',launch/'com.redfin.gpu-render.plist')
+            old_job=bundle/'Library/LaunchDaemons/com.redfin.gpu-render.plist'
+            if old_job.is_file():old_job.unlink()  # old build output only, never a root/device path
+            shutil.copy2(upstream/'LICENSE',bundle/'UPSTREAM-LICENSE')
+            with Cache(a.cache) as cache:
+                proof=audit_bundle(cache,[executable,*sorted((bundle/'lib').glob('*.dylib'))])
+            (work/'abi-check.json').write_text(json.dumps(proof,indent=2)+'\n')
+            if not proof['compatible']:raise ValueError('actual iOS graphics imports missing; see abi-check.json')
+            result['actual_abi_compatible']=True
             result.update(success=True,sdk=str(sdk),input_sha256=fingerprint,bundle=str(bundle),
                 artifacts={str(x.relative_to(bundle)):hashlib.sha256(x.read_bytes()).hexdigest()
                            for x in sorted(bundle.rglob('*')) if x.is_file()})
