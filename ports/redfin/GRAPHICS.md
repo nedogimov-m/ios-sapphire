@@ -59,6 +59,16 @@ EAGL frames with real draws. A published service, a successful host build,
 an installed bridge or a visible CPU-rendered GUI does not establish this.
 This EAGL path does not implement Metal application support.
 
+The integrated74df960d04eda813 run meets those EAGL rendering requirements:
+FD620/ES3.2, both boot-bound shader/IOSurface colors,11installed methods,
+real shared-surface compositor frames through180 and completed fences
+through at least768. No kernel panic or GPU/SMMU fault is observed. Its
+frame logs still cost about140–300ms, with substantial handing-on/waiting
+and surface-refresh time. Many wrapped-surface imports fall back to copies.
+An orderly shutdown stops the GPU before backboardd exits, causing one
+subsequent rejected submission and userland crash. These are remaining
+performance/lifecycle problems; this milestone does not establish60fps.
+
 After a graphics panic the root can have pending HFS transactions. The older
 strict RW publication gate requires a clean primary header, so it prevents
 HFS from reaching its own replay. GUI3 alone now has a separate read-only

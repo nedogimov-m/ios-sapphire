@@ -64,8 +64,13 @@ consumer progress, proving GMU DMA. The complete native GPU command chain
 now passes an authenticated hardware run: native CB0/SID0 routing, SQE,
 ME_INIT, signed PAS13 zap, exit from secure mode and four boot-bound values
 actually written by the GPU and read back uncached. GPU/SMMU faults remain
-clear. The next step is the persistent buffer/submission backend and the iOS
-graphics bridge; rendering and Metal remain unproved.
+clear. The complete GUI3 integration now proves actual Mesa/FD620 ES3.2
+shader draws, both IOSurface pixel checks and backboardd's EAGL composition
+into shared display surfaces. Authenticated fences reach at least768 and
+system frames at least180. The user observes restored shadows and fewer
+rendering artifacts. Current frame times are about140–300ms; smooth UI,
+Metal and working Phone/Photos remain unfinished. Those applications do
+execute but do not show usable UI in the latest user observation.
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

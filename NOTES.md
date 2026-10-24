@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN actual system GPU/EAGL rendering PASS; smoothness and apps remain unfinished — 2026-10-25
+
+Source8812358, native local build20261025-014040/noCI/kernel-eagl-v6;
+SHA256754c22ddaaf4ee2640afa9fb43a762ecdf1c50b2e6c02babb843183802bbe34b. Authenticated
+boot74df960d04eda813/image1d00a3a1de5b4a3497c0cff6b046c6647b6275f6bdedc695fcd24af73ccf0c0b,
+private capture logs/redfin/eagl-system-v5. Native memory admission proves
+backboardd unlimited→512MiB and gpu-render6→512MiB; the launchd job keys had
+not raised the latter's actual ledger. BO sizes are ordinary16KiB/4MiB.
+The corrected saved-path predicate inserts the loader. ActualFD620/ES3.2,
+11EAGL methods/457wrappers, paired cache UUIDs and CA uniforms validate.
+Both boot-bound shader/IOSurface pixel checksPASS:211/32/16/255 then
+16/168/64/255. Runtime fences complete through at least768; backboardd
+frames through180 contain actual draws/triangles and a shared display
+surface, zero frame errors. The user reports shadows and fewer artifacts.
+This is actual system EAGL GPU rendering; Metal remains unimplemented.
+
+User reports no improvement in smoothness and unusable Phone/Photos.
+Observed frame logs cost roughly140–300ms with large handing-on/waiting/
+surface-refresh portions; both shared imports and CPU-copy fallbacks occur.
+Do not equate GPU rendering with60fps. Native exec/launchd prove MobilePhone
+pid244 and MobileSlideShow250 execute and remain alive until shutdown.
+Phone's commcenter.xpc lookup fails; this alone does not prove its UI stall
+cause. No app crash is observed. Static dependencies are saved privately.
+GPU orderly stop precedes one final failed submit and backboarddSIGSEGV;
+no kernel panic or foreign DMA fault occurs. Clean HFSX/inconsistentfalse,
+write_count667187; all three file logs collected and verified Fastboot.
+
+Next complete batch targets surface/cache/submission overhead and shutdown
+ordering, plus actionable stalled-app evidence. Preserve this checkpoint;
+no tests between its implementation subtasks. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x74df960d04eda813 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN full exec-path/native-memory batch built and preflighted — 2026-10-25
 
 All34selected actual-exec/memory-scope/journal/RW/high-PA/ABI/AMFI/runtime/
