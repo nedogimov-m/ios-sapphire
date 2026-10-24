@@ -1,19 +1,31 @@
 diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
 --- a/bsd/dev/redfin_gpu_power.c
 +++ b/bsd/dev/redfin_gpu_power.c
-@@ -8,9 +8,11 @@
+@@ -1,4 +1,8 @@
+-/* Sole md0/UP CX-power owner. The inherited A610 backend stays disabled. */
++/* Sole native CX-power owner. All held mappings use the general kernel map:
++ * XNU's permanent io_submap is only8MiB and the composed GUI already uses it.
++ * Native ml_io_map_unmappable preserves the same Device/NC attributes without
++ * consuming that early fixed window. Mappings stay held until platform reset.
++ * The inherited A610 backend stays disabled. */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <sys/param.h>
+@@ -8,17 +12,19 @@
  #include <pexpert/pexpert.h>
  #include <pexpert/device_tree.h>
  #include <machine/machine_routines.h>
++#include <vm/pmap.h>
 +#include <arm64/redfin_gui_profile.h>
  #include "redfin_gpu_power.h"
  #include "redfin_gmu_probe.h"
  extern int redfin_spmi_return_ready(void);
+-extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
+-extern vm_offset_t ml_io_map_wcomb(vm_offset_t,vm_size_t);
 +extern int redfin_gui_cpu0(void);
- extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
- extern vm_offset_t ml_io_map_wcomb(vm_offset_t,vm_size_t);
++extern vm_offset_t ml_io_map_unmappable(vm_offset_t,vm_size_t,unsigned int);
  int redfin_gpu_power_probe(void);
-@@ -18,7 +20,7 @@
+ static bool gp_attempted;
  struct gp_context {vm_offset_t base[4],db;char args[608];unsigned bytes;};
  static struct gp_context gp;
  static struct rf_gp_report gp_report;
@@ -22,7 +34,7 @@ diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
  static bool gp_word(const char *p,unsigned n,const char *s)
  {return strlen(s)==n && !memcmp(p,s,n);}
  static bool gp_flags(const char *args,unsigned bytes)
-@@ -55,7 +57,7 @@
+@@ -55,7 +61,7 @@
   struct gp_context *c=context;const char *args=PE_boot_args();
   return c==&gp && c->bytes && args && !memcmp(args,c->args,c->bytes) &&
    __builtin_arm_rsr64("CurrentEL")==4 && !(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) &&
@@ -31,7 +43,7 @@ diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
  }
  static bool gp_held_valid(void *context)
  {
-@@ -96,7 +98,8 @@
+@@ -96,7 +102,8 @@
   if(!args)return EINVAL;
   while(bytes<sizeof(gp.args) && args[bytes])bytes++;
   if(bytes==sizeof(gp.args))return ENOTSUP;
@@ -41,6 +53,26 @@ diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
   if(!gp_gmu_mode && !gp_flags(args,bytes+1))return ENOTSUP;
   memcpy(gp.args,args,bytes+1);gp.bytes=bytes+1;
   /* Validate the complete child mode before the parent's first ARC/GDSC write. */
+@@ -107,14 +114,14 @@
+  if(!gp_valid(&gp) || !gp_prop("/chosen","dram-base",&memory_base,8) || !gp_prop("/chosen","dram-size",&memory_size,8) ||
+     !gp_prop("/redfin-gpu-power","reg",ranges,sizeof(ranges)) || !gp_prop("/redfin-gpu-power","cx-parent",parent,sizeof(parent)) ||
+     !gp_prop("/redfin-gpu-power","chip-id",&chip,4))return ENXIO;
+- gp.base[RF_GP_GCC]=ml_io_map(0x100000,0x1f0000);
++ gp.base[RF_GP_GCC]=ml_io_map_unmappable(0x100000,0x1f0000,VM_WIMG_IO);
+  if(!gp.base[RF_GP_GCC])return ENOMEM;
+  uint32_t cfg=gp_read(&gp,RF_GP_GCC,0x71004);
+  if((cfg&0x80000001u)!=1)return EAGAIN;
+- gp.base[RF_GP_GPUCC]=ml_io_map(0x3d90000,0x9000);
+- gp.base[RF_GP_RSC]=ml_io_map(0x18220000,0x10000);
+- gp.base[RF_GP_GIC]=ml_io_map(0x17a00000,0x4000);
+- gp.db=ml_io_map_wcomb(0x80860000,RF_CMDDB_BYTES);
++ gp.base[RF_GP_GPUCC]=ml_io_map_unmappable(0x3d90000,0x9000,VM_WIMG_IO);
++ gp.base[RF_GP_RSC]=ml_io_map_unmappable(0x18220000,0x10000,VM_WIMG_IO);
++ gp.base[RF_GP_GIC]=ml_io_map_unmappable(0x17a00000,0x4000,VM_WIMG_IO);
++ gp.db=ml_io_map_unmappable(0x80860000,RF_CMDDB_BYTES,VM_WIMG_WCOMB);
+  if(!gp.base[RF_GP_GPUCC] || !gp.base[RF_GP_RSC] || !gp.base[RF_GP_GIC] || !gp.db)return ENOMEM;
+  const struct rf_gp_ops ops={&gp,gp_valid,gp_read,gp_write,gp_delay,gp_table};
+  int result=rf_gp_run(&ops,&gp_report);
 diff --git a/osfmk/arm64/redfin_gui_profile.h b/osfmk/arm64/redfin_gui_profile.h
 --- a/osfmk/arm64/redfin_gui_profile.h
 +++ b/osfmk/arm64/redfin_gui_profile.h

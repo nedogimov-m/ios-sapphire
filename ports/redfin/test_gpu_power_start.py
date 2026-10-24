@@ -22,6 +22,8 @@ HARNESS = r'''
 #include <errno.h>
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
+#define VM_WIMG_IO 7
+#define VM_WIMG_WCOMB 6
 #define printf(...) ((void)0)
 typedef uintptr_t vm_offset_t;
 typedef uintptr_t vm_size_t;
@@ -45,15 +47,16 @@ static uint64_t sysreg(const char *name) {
 #define __builtin_arm_rsr64(name) sysreg(name)
 int redfin_spmi_return_ready(void) { return fault!=8; }
 static void delay(unsigned us) { (void)us; }
-vm_offset_t ml_io_map(vm_offset_t address,vm_size_t bytes) {
+vm_offset_t ml_io_map_unmappable(vm_offset_t address,vm_size_t bytes,unsigned int flags) {
  maps++;
+ if(address==0x80860000 && bytes==0x20000) {
+  if(flags!=VM_WIMG_WCOMB)bad++;return (uintptr_t)other;
+ }
+ if(flags!=VM_WIMG_IO)bad++;
  if(address==0x100000 && bytes==0x1f0000)return (uintptr_t)gcc;
  if((address==0x3d90000 && bytes==0x9000) || (address==0x18220000 && bytes==0x10000) ||
     (address==0x17a00000 && bytes==0x4000))return (uintptr_t)other;
  bad++;return 0;
-}
-vm_offset_t ml_io_map_wcomb(vm_offset_t address,vm_size_t bytes) {
- maps++;if(address!=0x80860000 || bytes!=0x20000){bad++;return 0;}return (uintptr_t)other;
 }
 static int SecureDTLookupEntry(void *parent,const char *path,DTEntry *entry) {
  if(parent)bad++;

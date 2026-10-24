@@ -1,4 +1,8 @@
-/* Sole md0/UP CX-power owner. The inherited A610 backend stays disabled. */
+/* Sole native CX-power owner. All held mappings use the general kernel map:
+ * XNU's permanent io_submap is only8MiB and the composed GUI already uses it.
+ * Native ml_io_map_unmappable preserves the same Device/NC attributes without
+ * consuming that early fixed window. Mappings stay held until platform reset.
+ * The inherited A610 backend stays disabled. */
 #include <pexpert/arm64/board_config.h>
 #if defined(ARM64_BOARD_CONFIG_SWEET)
 #include <sys/param.h>
@@ -8,13 +12,13 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
 #include <machine/machine_routines.h>
+#include <vm/pmap.h>
 #include <arm64/redfin_gui_profile.h>
 #include "redfin_gpu_power.h"
 #include "redfin_gmu_probe.h"
 extern int redfin_spmi_return_ready(void);
 extern int redfin_gui_cpu0(void);
-extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
-extern vm_offset_t ml_io_map_wcomb(vm_offset_t,vm_size_t);
+extern vm_offset_t ml_io_map_unmappable(vm_offset_t,vm_size_t,unsigned int);
 int redfin_gpu_power_probe(void);
 static bool gp_attempted;
 struct gp_context {vm_offset_t base[4],db;char args[608];unsigned bytes;};
@@ -110,14 +114,14 @@ int redfin_gpu_power_probe(void)
  if(!gp_valid(&gp) || !gp_prop("/chosen","dram-base",&memory_base,8) || !gp_prop("/chosen","dram-size",&memory_size,8) ||
     !gp_prop("/redfin-gpu-power","reg",ranges,sizeof(ranges)) || !gp_prop("/redfin-gpu-power","cx-parent",parent,sizeof(parent)) ||
     !gp_prop("/redfin-gpu-power","chip-id",&chip,4))return ENXIO;
- gp.base[RF_GP_GCC]=ml_io_map(0x100000,0x1f0000);
+ gp.base[RF_GP_GCC]=ml_io_map_unmappable(0x100000,0x1f0000,VM_WIMG_IO);
  if(!gp.base[RF_GP_GCC])return ENOMEM;
  uint32_t cfg=gp_read(&gp,RF_GP_GCC,0x71004);
  if((cfg&0x80000001u)!=1)return EAGAIN;
- gp.base[RF_GP_GPUCC]=ml_io_map(0x3d90000,0x9000);
- gp.base[RF_GP_RSC]=ml_io_map(0x18220000,0x10000);
- gp.base[RF_GP_GIC]=ml_io_map(0x17a00000,0x4000);
- gp.db=ml_io_map_wcomb(0x80860000,RF_CMDDB_BYTES);
+ gp.base[RF_GP_GPUCC]=ml_io_map_unmappable(0x3d90000,0x9000,VM_WIMG_IO);
+ gp.base[RF_GP_RSC]=ml_io_map_unmappable(0x18220000,0x10000,VM_WIMG_IO);
+ gp.base[RF_GP_GIC]=ml_io_map_unmappable(0x17a00000,0x4000,VM_WIMG_IO);
+ gp.db=ml_io_map_unmappable(0x80860000,RF_CMDDB_BYTES,VM_WIMG_WCOMB);
  if(!gp.base[RF_GP_GPUCC] || !gp.base[RF_GP_RSC] || !gp.base[RF_GP_GIC] || !gp.db)return ENOMEM;
  const struct rf_gp_ops ops={&gp,gp_valid,gp_read,gp_write,gp_delay,gp_table};
  int result=rf_gp_run(&ops,&gp_report);

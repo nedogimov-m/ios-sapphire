@@ -127,6 +127,12 @@ profile as `redfingui=3`. It adds no boot arguments to the nearly full608-byte
 field; all additional GPU ADT nodes and a separate runtime policy are mandatory.
 The original standalone parser/profiles retain their exact contracts.
 
+All GPU/GMU register and host DMA-alias maps use XNU's native
+`ml_io_map_unmappable` with unchanged Device/NC attributes and are retained
+until reset. The composed GUI exhausted the ordinary mapping API's fixed8MiB
+permanent IO VA window before CB0/1; general kernel-map DATA VA removes that
+integration limit without enlarging a global pool or exposing more registers.
+
 Only after the four real bootstrap results does the owner publish RedwoodGPU,
 the preferred Mesa bridge's msm1.7 service. Caller transactions save/restore
 CPU affinity and hold one lock on proved CPU0. The runtime reserves a private

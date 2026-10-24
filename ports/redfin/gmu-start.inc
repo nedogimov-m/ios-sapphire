@@ -306,7 +306,7 @@ static int gm_start_memory(struct gm_context *context)
         for(uintptr_t at=(uintptr_t)m->host;at<(uintptr_t)m->host+m->owned_bytes;at+=64)
             __asm__ volatile("dc civac, %0"::"r"(at):"memory");
         __asm__ volatile("dsb osh":::"memory");
-        vm_offset_t mapped=ml_io_map_wcomb(m->physical,m->owned_bytes);
+        vm_offset_t mapped=ml_io_map_unmappable(m->physical,m->owned_bytes,VM_WIMG_WCOMB);
         if(!mapped)return ENOMEM;
         if(i)gm_start.log=mapped;else gm_start.hfi=mapped;
     }
@@ -339,11 +339,11 @@ static int gm_start_run(struct gm_context *context)
         !gm_memory.ready || gm_memory.loaded!=gm_memory.firmware.payload_count ||
         gm_memory.verified!=gm_memory.firmware.payload_count)return error;
     gm_start.entered=true;gm_start.base[RF_GB_GMU]=context->base[RF_GT_GMU];
-    gm_start.base[RF_GB_RSC]=ml_io_map(0x03de0000,0x4000);
-    gm_start.base[RF_GB_PDC]=ml_io_map(0x0b290000,0x10000);
-    gm_start.base[RF_GB_SEQ]=ml_io_map(0x0b490000,0x10000);
-    gm_start.base[RF_GB_GBIF]=ml_io_map(0x03d0f000,0x1000);
-    gm_start.db=ml_io_map_wcomb(0x80860000,RF_CMDDB_BYTES);
+    gm_start.base[RF_GB_RSC]=ml_io_map_unmappable(0x03de0000,0x4000,VM_WIMG_IO);
+    gm_start.base[RF_GB_PDC]=ml_io_map_unmappable(0x0b290000,0x10000,VM_WIMG_IO);
+    gm_start.base[RF_GB_SEQ]=ml_io_map_unmappable(0x0b490000,0x10000,VM_WIMG_IO);
+    gm_start.base[RF_GB_GBIF]=ml_io_map_unmappable(0x03d0f000,0x1000,VM_WIMG_IO);
+    gm_start.db=ml_io_map_unmappable(0x80860000,RF_CMDDB_BYTES,VM_WIMG_WCOMB);
     if(!gm_start_base_valid(context))return ECANCELED;
     for(unsigned i=0;i<RF_GB_UNITS;++i)if(!gm_start.base[i])return ENOMEM;
     if(!gm_start.db)return ENOMEM;

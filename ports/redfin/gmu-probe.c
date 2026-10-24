@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MIT */
-/* Exact md0/UP adapter for the separately proved, held-CX GMU TCM leaf. */
+/* Exact standalone/GUI3 adapter for the separately proved held-CX GMU leaf.
+ * Held MMIO/NC mappings use native ml_io_map_unmappable, preserving memory
+ * attributes while leaving XNU's fixed8MiB permanent IO window to GUI/WLAN. */
 #include <pexpert/arm64/board_config.h>
 #if defined(ARM64_BOARD_CONFIG_SWEET)
 #include <sys/param.h>
@@ -31,8 +33,7 @@
 extern int redfin_spmi_return_ready(void);
 extern int redfin_gui_cpu0(void);
 extern int redfin_gpu_power_probe(void);
-extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
-extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
+extern vm_offset_t ml_io_map_unmappable(vm_offset_t,vm_size_t,unsigned int);
 static bool gm_attempted;
 
 struct gm_binding { const void *live, *expected; unsigned bytes; bool payload; };
@@ -438,7 +439,7 @@ gm_cb_run(struct gm_context *context, const struct rf_gs_snapshot *global)
         !global->stage2_contexts && gm_smmu_valid(context)) {
         printf("REDFIN GPU CONTEXT STEP: stable globals; inspect CB0/1, no table dereference\n");
         if (gm_smmu_valid(context)) {
-            context->cb = ml_io_map(RF_GS_PHYS + 0x8000, RF_GC_MAP_BYTES);
+            context->cb = ml_io_map_unmappable(RF_GS_PHYS + 0x8000, RF_GC_MAP_BYTES,VM_WIMG_IO);
             if (!context->cb) {
                 result = ENOMEM;
             } else {
@@ -473,7 +474,7 @@ gm_smmu_run(struct gm_context *context, const struct rf_gt_report *gmu)
         if (!gm_smmu_valid(context)) {
             result = ECANCELED;
         } else {
-            context->smmu = ml_io_map(RF_GS_PHYS, RF_GS_BYTES / 2);
+            context->smmu = ml_io_map_unmappable(RF_GS_PHYS, RF_GS_BYTES / 2,VM_WIMG_IO);
             if (!context->smmu) {
                 result = ENOMEM;
             } else {
@@ -533,22 +534,22 @@ redfin_gmu_probe(const char *frozen_args, unsigned args_bytes,
     context.active = true;
     if (!gm_contract(&context, context.smmu_mode) || !gm_valid(&context))
         return EPERM;
-    context.base[RF_GT_GCC] = ml_io_map(0x100000, 0x1f0000);
+    context.base[RF_GT_GCC] = ml_io_map_unmappable(0x100000, 0x1f0000,VM_WIMG_IO);
     if (!context.base[RF_GT_GCC])
         return ENOMEM;
     if (!gm_valid(&context))
         return EAGAIN;
-    context.base[RF_GT_GPUCC] = ml_io_map(0x3d90000, 0x9000);
+    context.base[RF_GT_GPUCC] = ml_io_map_unmappable(0x3d90000, 0x9000,VM_WIMG_IO);
     if (!context.base[RF_GT_GPUCC])
         return ENOMEM;
     if (!gm_valid(&context))
         return EAGAIN;
-    context.gic = ml_io_map(0x17a00000, 0x4000);
+    context.gic = ml_io_map_unmappable(0x17a00000, 0x4000,VM_WIMG_IO);
     if (!context.gic)
         return ENOMEM;
     if (!gm_valid(&context))
         return EAGAIN;
-    context.base[RF_GT_GMU] = ml_io_map(0x3d6a000, 0x30000);
+    context.base[RF_GT_GMU] = ml_io_map_unmappable(0x3d6a000, 0x30000,VM_WIMG_IO);
     if (!context.base[RF_GT_GMU])
         return ENOMEM;
     if (!gm_valid(&context))

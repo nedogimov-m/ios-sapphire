@@ -2,9 +2,11 @@ diff --git a/bsd/dev/redfin_gmu_probe.c b/bsd/dev/redfin_gmu_probe.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_probe.c
-@@ -0,0 +1,592 @@
+@@ -0,0 +1,593 @@
 +/* SPDX-License-Identifier: MIT */
-+/* Exact md0/UP adapter for the separately proved, held-CX GMU TCM leaf. */
++/* Exact standalone/GUI3 adapter for the separately proved held-CX GMU leaf.
++ * Held MMIO/NC mappings use native ml_io_map_unmappable, preserving memory
++ * attributes while leaving XNU's fixed8MiB permanent IO window to GUI/WLAN. */
 +#include <pexpert/arm64/board_config.h>
 +#if defined(ARM64_BOARD_CONFIG_SWEET)
 +#include <sys/param.h>
@@ -36,8 +38,7 @@ new file mode 100644
 +extern int redfin_spmi_return_ready(void);
 +extern int redfin_gui_cpu0(void);
 +extern int redfin_gpu_power_probe(void);
-+extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
-+extern vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
++extern vm_offset_t ml_io_map_unmappable(vm_offset_t,vm_size_t,unsigned int);
 +static bool gm_attempted;
 +
 +struct gm_binding { const void *live, *expected; unsigned bytes; bool payload; };
@@ -443,7 +444,7 @@ new file mode 100644
 +        !global->stage2_contexts && gm_smmu_valid(context)) {
 +        printf("REDFIN GPU CONTEXT STEP: stable globals; inspect CB0/1, no table dereference\n");
 +        if (gm_smmu_valid(context)) {
-+            context->cb = ml_io_map(RF_GS_PHYS + 0x8000, RF_GC_MAP_BYTES);
++            context->cb = ml_io_map_unmappable(RF_GS_PHYS + 0x8000, RF_GC_MAP_BYTES,VM_WIMG_IO);
 +            if (!context->cb) {
 +                result = ENOMEM;
 +            } else {
@@ -478,7 +479,7 @@ new file mode 100644
 +        if (!gm_smmu_valid(context)) {
 +            result = ECANCELED;
 +        } else {
-+            context->smmu = ml_io_map(RF_GS_PHYS, RF_GS_BYTES / 2);
++            context->smmu = ml_io_map_unmappable(RF_GS_PHYS, RF_GS_BYTES / 2,VM_WIMG_IO);
 +            if (!context->smmu) {
 +                result = ENOMEM;
 +            } else {
@@ -538,22 +539,22 @@ new file mode 100644
 +    context.active = true;
 +    if (!gm_contract(&context, context.smmu_mode) || !gm_valid(&context))
 +        return EPERM;
-+    context.base[RF_GT_GCC] = ml_io_map(0x100000, 0x1f0000);
++    context.base[RF_GT_GCC] = ml_io_map_unmappable(0x100000, 0x1f0000,VM_WIMG_IO);
 +    if (!context.base[RF_GT_GCC])
 +        return ENOMEM;
 +    if (!gm_valid(&context))
 +        return EAGAIN;
-+    context.base[RF_GT_GPUCC] = ml_io_map(0x3d90000, 0x9000);
++    context.base[RF_GT_GPUCC] = ml_io_map_unmappable(0x3d90000, 0x9000,VM_WIMG_IO);
 +    if (!context.base[RF_GT_GPUCC])
 +        return ENOMEM;
 +    if (!gm_valid(&context))
 +        return EAGAIN;
-+    context.gic = ml_io_map(0x17a00000, 0x4000);
++    context.gic = ml_io_map_unmappable(0x17a00000, 0x4000,VM_WIMG_IO);
 +    if (!context.gic)
 +        return ENOMEM;
 +    if (!gm_valid(&context))
 +        return EAGAIN;
-+    context.base[RF_GT_GMU] = ml_io_map(0x3d6a000, 0x30000);
++    context.base[RF_GT_GMU] = ml_io_map_unmappable(0x3d6a000, 0x30000,VM_WIMG_IO);
 +    if (!context.base[RF_GT_GMU])
 +        return ENOMEM;
 +    if (!gm_valid(&context))
@@ -3111,7 +3112,7 @@ new file mode 100644
 +        for(uintptr_t at=(uintptr_t)m->host;at<(uintptr_t)m->host+m->owned_bytes;at+=64)
 +            __asm__ volatile("dc civac, %0"::"r"(at):"memory");
 +        __asm__ volatile("dsb osh":::"memory");
-+        vm_offset_t mapped=ml_io_map_wcomb(m->physical,m->owned_bytes);
++        vm_offset_t mapped=ml_io_map_unmappable(m->physical,m->owned_bytes,VM_WIMG_WCOMB);
 +        if(!mapped)return ENOMEM;
 +        if(i)gm_start.log=mapped;else gm_start.hfi=mapped;
 +    }
@@ -3144,11 +3145,11 @@ new file mode 100644
 +        !gm_memory.ready || gm_memory.loaded!=gm_memory.firmware.payload_count ||
 +        gm_memory.verified!=gm_memory.firmware.payload_count)return error;
 +    gm_start.entered=true;gm_start.base[RF_GB_GMU]=context->base[RF_GT_GMU];
-+    gm_start.base[RF_GB_RSC]=ml_io_map(0x03de0000,0x4000);
-+    gm_start.base[RF_GB_PDC]=ml_io_map(0x0b290000,0x10000);
-+    gm_start.base[RF_GB_SEQ]=ml_io_map(0x0b490000,0x10000);
-+    gm_start.base[RF_GB_GBIF]=ml_io_map(0x03d0f000,0x1000);
-+    gm_start.db=ml_io_map_wcomb(0x80860000,RF_CMDDB_BYTES);
++    gm_start.base[RF_GB_RSC]=ml_io_map_unmappable(0x03de0000,0x4000,VM_WIMG_IO);
++    gm_start.base[RF_GB_PDC]=ml_io_map_unmappable(0x0b290000,0x10000,VM_WIMG_IO);
++    gm_start.base[RF_GB_SEQ]=ml_io_map_unmappable(0x0b490000,0x10000,VM_WIMG_IO);
++    gm_start.base[RF_GB_GBIF]=ml_io_map_unmappable(0x03d0f000,0x1000,VM_WIMG_IO);
++    gm_start.db=ml_io_map_unmappable(0x80860000,RF_CMDDB_BYTES,VM_WIMG_WCOMB);
 +    if(!gm_start_base_valid(context))return ECANCELED;
 +    for(unsigned i=0;i<RF_GB_UNITS;++i)if(!gm_start.base[i])return ENOMEM;
 +    if(!gm_start.db)return ENOMEM;
@@ -4242,7 +4243,7 @@ new file mode 100644
 +    }
 +    int error=rf_a6_perf_make(&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&gx.performance);
 +    if(!error)error=rf_a6_bw_make(gx.bcm,&gx.bcm[8],&gx.bandwidth);if(error)return error;
-+    gx.rsc=ml_io_map(0x18220000,0x10000);if(!gx.rsc)return ENOMEM;
++    gx.rsc=ml_io_map_unmappable(0x18220000,0x10000,VM_WIMG_IO);if(!gx.rsc)return ENOMEM;
 +    gx.rsc_id=gm_scalar_read(gx.rsc);gx.rsc_config=gm_scalar_read(gx.rsc+0xc);
 +    gx.rsc_irq=gm_scalar_read(gx.rsc+0xd00);gx.commands=(gx.rsc_config>>27)&31u;
 +    unsigned major=(gx.rsc_id>>16)&255u;
@@ -4421,7 +4422,7 @@ new file mode 100644
 +static int gx_core(struct gm_context *c)
 +{
 +    int error=gx_audit(c);if(error)return error;
-+    if(!gx.gpu)gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu)return ENOMEM;
++    if(!gx.gpu)gx.gpu=ml_io_map_unmappable(0x03d00000,0x40000,VM_WIMG_IO);if(!gx.gpu)return ENOMEM;
 +    printf("REDFIN GPU CORE: first powered access status=%#x ring=%#x fault=%#x\n",
 +        gm_scalar_read(gx.gpu+4*0x210),gm_scalar_read(gx.gpu+4*0x806),gm_scalar_read(gx.gpu+4*0x821));
 +    /* Fresh GX collapse/reset and the sole OOB request establish cold CP
@@ -4528,7 +4529,7 @@ new file mode 100644
 +    if(gm_scalar_read(c->base[RF_GT_GMU]+0x24c40) || gm_scalar_read(c->base[RF_GT_GMU]+0x24c4c))
 +        {error=EIO;goto done;}
 +    printf("REDFIN GPU MMIO MAP: begin\n");
-+    gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu){error=ENOMEM;goto done;}
++    gx.gpu=ml_io_map_unmappable(0x03d00000,0x40000,VM_WIMG_IO);if(!gx.gpu){error=ENOMEM;goto done;}
 +    printf("REDFIN GPU MMIO MAP: ready; first RBBM_STATUS read begins\n");
 +    uint32_t first_status=gm_scalar_read(gx.gpu+4*0x210);
 +    printf("REDFIN GPU MMIO FIRST READ: RBBM_STATUS=%#x\n",first_status);
@@ -4542,7 +4543,7 @@ new file mode 100644
 +    for(uintptr_t at=(uintptr_t)gx.data[2].host;at<(uintptr_t)gx.data[2].host+gx.data[2].owned_bytes;at+=64)
 +        __asm__ volatile("dc civac, %0"::"r"(at):"memory");
 +    __asm__ volatile("dsb osh":::"memory");
-+    gx.scratch=ml_io_map_wcomb(gx.data[2].physical,gx.data[2].owned_bytes);
++    gx.scratch=ml_io_map_unmappable(gx.data[2].physical,gx.data[2].owned_bytes,VM_WIMG_WCOMB);
 +    if(!gx.scratch){error=ENOMEM;goto done;}
 +    gx.stage=5;error=gx_core(c);if(error)goto done;
 +    gx.stage=6;

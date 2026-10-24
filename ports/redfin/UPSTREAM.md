@@ -27,6 +27,14 @@ both GL readback and the surface's CPU view; software rendering is refused.
 The system's original OpenGLES/Metal libraries are not replaced by this batch.
 Host checks and native builds pass; GUI3/rendering hardware evidence is pending.
 
+First GUI3 capture reaches the GMU/global-SMMU boundary, then native XNU
+`arm/io_map.c` exhausts its fixed8MiB permanent `io_submap` at a16KiB CB
+mapping. It panics with KERN_NO_SPACE/NOFAIL, before any GPU DMA. Reviewed
+`ml_io_map_unmappable` in `arm64/machine_routines.c`: it selects general
+kernel-map DATA VA and the caller's exact IO7/NC6 attributes. All retained
+GPU/GMU MMIO, CMD-DB and host DMA-alias mappings now use this native API;
+no VM pool size, protected-bank access or device memory attribute is weakened.
+
 ## Complete A620 GPU command-chain adaptation — 2026-10-24
 
 Re-reviewed preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`,

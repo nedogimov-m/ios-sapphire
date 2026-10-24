@@ -377,6 +377,7 @@ HARNESS = r'''
 #include "redfin_gui_profile.h"
 #define ARM64_BOARD_CONFIG_SWEET 1
 #define kSuccess 0
+#define VM_WIMG_IO 7
 int redfin_gui_cpu0(void){return 0;}
 int redfin_gpu_power_probe(void){return ENOTSUP;}
 bool redfin_gpu_ready(void){return false;}
@@ -457,7 +458,8 @@ static bool parent_valid(void *context) {
  if(scenario==2 || (fail_parent&&parent_calls>=fail_parent))parent_lost=true;
  return !parent_lost;
 }
-vm_offset_t ml_io_map(vm_offset_t address,vm_size_t size) {
+vm_offset_t ml_io_map_unmappable(vm_offset_t address,vm_size_t size,unsigned int flags) {
+ if(flags!=VM_WIMG_IO)bad++;
  maps++;
  if(scenario>=6&&scenario<=9&&maps==scenario-5)return 0;
  if(address==0x100000&&size==sizeof(gcc)){map_mask|=1;return (uintptr_t)gcc;}

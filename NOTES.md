@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full GUI3 image with normal kernel VA mappings built — 2026-10-24
+
+All82selected actual-adapter/native-start/HFI/command/runtime checksPASS20.872s,
+now requiring native Device7 for register maps and NC6 for CMD-DB. Local
+native build20261024-235430PASS, no CI run. Frozen kernel-service-v2 SHA256
+2697a6337c6ad87c98ebe3d353315b84ff5d663cc469cfed60bc31e3a9e7aa0f;
+image ports/redfin/out/gpu-gui-service-v3/redfin-xnu.img SHA256
+036286bada403e1e5b75dc78cfe1e838e2ed462aa7947a610f1a721296acd13c,
+boot020afecf22835a8c. Actual loader/liveFDT/GUI3/Image/firmware/runtime/
+compiled-shim return preflightPASS130437408bytes. Complete previously
+implemented shader/Mesa/IOSurface chain is retained. No extra root update
+is needed; v2 panic capture left the installed files clean and unchanged.
+Corrected hardware acceptance pending; device last verified fastboot.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x020afecf22835a8c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN GUI3 integration panic identified: permanent IO VA window exhausted — 2026-10-24
+
+User observed panic/stall and initially no bootloader return. The automatic
+collector subsequently recovered/authenticated exact boot48394225453568a8,
+collected the panic, primed public metadata and left verified fastboot.
+HFSXclean/inconsistentfalse/write_count623088 remains unchanged: UFS root,
+PID1 and the installed render job were not reached. CX/GMU clock/counter and
+SMMU globals pass; panic occurs mapping CB0/1, before GMU memory or CP startup.
+Observed panic: kmem_alloc(map,16384,0x100021) failed3 atvm_kern.c178.
+Frozen-kernel symbolication resolves io_map→gm_smmu_run→GPU GUI startup.
+
+Actual XNU arm/io_map.c defines an8MiB permanent io_submap; ordinary
+ml_io_map/ml_io_map_wcomb allocate there with NOFAIL|PAGEABLE|PERMANENT,
+exact observed flags100021. The combined touch/GUI plus duplicate GPU GCC
+windows exhaust that fixed VA pool. This is a CPU VA allocation failure,
+not a GPU execution fault. Full GPU/GMU parent/MMIO/HFI/scratch map sites
+now select native ml_io_map_unmappable(flagsIO7/WCOMB6), which retains the
+same attributes in kernel_map's DATA range, leaving the fixed window for
+the existing GUI/WLAN. Every new mapping remains held until platform reset.
+Host adapters now check the actual map attributes. Complete shader/Mesa/
+IOSurface/runtime chain and installed files remain selected; no feature is
+removed or extra reduced hardware test introduced. Corrected build pending.
+
 ## REDFIN shader/Mesa files installed with complete readback; integrated boot next — 2026-10-24
 
 Source68b2a3b; GPU GUI3 imagev2/kernelbuild233330 unchanged. The prepared

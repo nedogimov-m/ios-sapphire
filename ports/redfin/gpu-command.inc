@@ -255,7 +255,7 @@ static int gx_resources(struct gm_context *c)
     }
     int error=rf_a6_perf_make(&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&gx.performance);
     if(!error)error=rf_a6_bw_make(gx.bcm,&gx.bcm[8],&gx.bandwidth);if(error)return error;
-    gx.rsc=ml_io_map(0x18220000,0x10000);if(!gx.rsc)return ENOMEM;
+    gx.rsc=ml_io_map_unmappable(0x18220000,0x10000,VM_WIMG_IO);if(!gx.rsc)return ENOMEM;
     gx.rsc_id=gm_scalar_read(gx.rsc);gx.rsc_config=gm_scalar_read(gx.rsc+0xc);
     gx.rsc_irq=gm_scalar_read(gx.rsc+0xd00);gx.commands=(gx.rsc_config>>27)&31u;
     unsigned major=(gx.rsc_id>>16)&255u;
@@ -434,7 +434,7 @@ static int gx_ring_submit(struct gm_context *c,const uint32_t *words,unsigned co
 static int gx_core(struct gm_context *c)
 {
     int error=gx_audit(c);if(error)return error;
-    if(!gx.gpu)gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu)return ENOMEM;
+    if(!gx.gpu)gx.gpu=ml_io_map_unmappable(0x03d00000,0x40000,VM_WIMG_IO);if(!gx.gpu)return ENOMEM;
     printf("REDFIN GPU CORE: first powered access status=%#x ring=%#x fault=%#x\n",
         gm_scalar_read(gx.gpu+4*0x210),gm_scalar_read(gx.gpu+4*0x806),gm_scalar_read(gx.gpu+4*0x821));
     /* Fresh GX collapse/reset and the sole OOB request establish cold CP
@@ -541,7 +541,7 @@ static int gx_run(struct gm_context *c)
     if(gm_scalar_read(c->base[RF_GT_GMU]+0x24c40) || gm_scalar_read(c->base[RF_GT_GMU]+0x24c4c))
         {error=EIO;goto done;}
     printf("REDFIN GPU MMIO MAP: begin\n");
-    gx.gpu=ml_io_map(0x03d00000,0x40000);if(!gx.gpu){error=ENOMEM;goto done;}
+    gx.gpu=ml_io_map_unmappable(0x03d00000,0x40000,VM_WIMG_IO);if(!gx.gpu){error=ENOMEM;goto done;}
     printf("REDFIN GPU MMIO MAP: ready; first RBBM_STATUS read begins\n");
     uint32_t first_status=gm_scalar_read(gx.gpu+4*0x210);
     printf("REDFIN GPU MMIO FIRST READ: RBBM_STATUS=%#x\n",first_status);
@@ -555,7 +555,7 @@ static int gx_run(struct gm_context *c)
     for(uintptr_t at=(uintptr_t)gx.data[2].host;at<(uintptr_t)gx.data[2].host+gx.data[2].owned_bytes;at+=64)
         __asm__ volatile("dc civac, %0"::"r"(at):"memory");
     __asm__ volatile("dsb osh":::"memory");
-    gx.scratch=ml_io_map_wcomb(gx.data[2].physical,gx.data[2].owned_bytes);
+    gx.scratch=ml_io_map_unmappable(gx.data[2].physical,gx.data[2].owned_bytes,VM_WIMG_WCOMB);
     if(!gx.scratch){error=ENOMEM;goto done;}
     gx.stage=5;error=gx_core(c);if(error)goto done;
     gx.stage=6;
