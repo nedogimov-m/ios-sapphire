@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/errno.h>
 #define RF_GR_BASE UINT64_C(0x10000000)
 #define RF_GR_BYTES UINT64_C(0x20000000)
 #define RF_GR_GRANULE UINT64_C(0x10000)
@@ -18,7 +19,8 @@
 #define RF_GR_MEMORY_MAX (512u<<20)
 #define RF_GR_COMMANDS 128u
 #define RF_GR_FENCE_AT 0x200u
-#define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+16u)
+#define RF_GR_TIME_AT 0x210u
+#define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+24u)
 #define RF_GR_HOST_PAGE 16384u
 static const uint32_t rf_gr_policy[]={1,0x06020001,512,128,1024,128,500,0x10000,0x100000,1};
 
@@ -31,6 +33,32 @@ static inline bool rf_gr_submit_bo(uint32_t flags,uint64_t presumed,uint64_t add
 {return !(flags&~0xfu) && (!presumed || presumed==address);}
 static inline uint64_t rf_gr_page_entry(uint64_t physical,bool read_only)
 {return physical|(read_only?UINT64_C(0xec3):UINT64_C(0xe43));}
+struct rf_gr_wait_ops {
+    void *context;
+    int (*sample)(void *,bool *);
+    uint64_t (*now)(void *);
+    void (*pause)(void *,unsigned);
+};
+/* A descheduled waiter can return after its deadline with the GPU already
+ * done. Inspect the real fence first, then make one final guarded observation
+ * before declaring a timeout. Never manufacture a completed fence. */
+static inline int rf_gr_wait(const struct rf_gr_wait_ops *ops,uint64_t timeout,unsigned *polls)
+{
+    if(!ops || !ops->sample || !ops->now || !ops->pause || !timeout || !polls)return EINVAL;
+    uint64_t start=ops->now(ops->context);*polls=0;
+    for(unsigned i=0;i<5000;i++) {
+        bool complete=false;int error=ops->sample(ops->context,&complete);++*polls;
+        if(error || complete)return error;
+        uint64_t now=ops->now(ops->context);
+        if(now<start)return EINVAL;
+        if(now-start>=timeout || i==4999) {
+            complete=false;error=ops->sample(ops->context,&complete);++*polls;
+            return error?error:complete?0:ETIMEDOUT;
+        }
+        ops->pause(ops->context,100);
+    }
+    return ETIMEDOUT;
+}
 /* allocSize already includes the surface's own offset. A prepared wrapped
  * range additionally starts wrapDelta bytes into its first native page. */
 static inline bool rf_gr_surface_layout(uint64_t allocation,uint32_t offset,uint32_t delta,
@@ -106,10 +134,13 @@ static inline uint32_t rf_gr_type7(unsigned op,unsigned words)
 static inline unsigned rf_gr_submit_words(const struct rf_gr_arena *a,const uint64_t *addresses,
     const uint32_t *words,unsigned count,uint32_t fence,uint32_t *out,unsigned room)
 {
-    if(!a || !addresses || !words || !count || count>RF_GR_COMMANDS || !fence || !out || room<4*count+10)return 0;
+    if(!a || !addresses || !words || !count || count>RF_GR_COMMANDS || !fence || !out || room<4*count+18)return 0;
     for(unsigned i=0;i<count;i++)if((addresses[i]&3u) || !words[i] || words[i]>0xfffffu ||
         !rf_gr_find(a,addresses[i],(uint64_t)words[i]*4))return 0;
     unsigned n=0;
+    /* Preferred CP_REG_TO_MEM timestamp pair, of the GPU's own19.2MHz clock. */
+    out[n++]=rf_gr_type7(0x3e,3);out[n++]=0x980u|(2u<<18)|(1u<<30);
+    out[n++]=0x01200000u+RF_GR_TIME_AT;out[n++]=0;
     out[n++]=rf_gr_type7(0x46,1);out[n++]=0x18; /* Invalidate depth/color state, native a6xx_submit. */
     out[n++]=rf_gr_type7(0x46,1);out[n++]=0x19;
     for(unsigned i=0;i<count;i++) {
@@ -117,6 +148,8 @@ static inline unsigned rf_gr_submit_words(const struct rf_gr_arena *a,const uint
         out[n++]=(uint32_t)(addresses[i]>>32);out[n++]=words[i];
     }
     out[n++]=rf_gr_type7(0x26,0);
+    out[n++]=rf_gr_type7(0x3e,3);out[n++]=0x980u|(2u<<18)|(1u<<30);
+    out[n++]=0x01200000u+RF_GR_TIME_AT+8;out[n++]=0;
     out[n++]=rf_gr_type7(0x46,4);out[n++]=4;
     out[n++]=0x01200000u+RF_GR_FENCE_AT;out[n++]=0;out[n++]=fence;
     return n;

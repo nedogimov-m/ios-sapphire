@@ -82,21 +82,23 @@ class GPURuntimeTests(unittest.TestCase):
 
     def test_native_indirect_buffer_and_actual_cache_flush_fence_are_required(self):
         at=self.lib.allocate(0x4000)
-        self.assertEqual(self.lib.packet(at,16,7,64),14)
-        words=[self.lib.word(i) for i in range(14)]
+        self.assertEqual(self.lib.packet(at,16,7,64),22)
+        words=[self.lib.word(i) for i in range(22)]
         def decode(header,opcode,count):
             self.assertEqual(header>>28,7)
             self.assertEqual((header>>16)&0x7f,opcode)
             self.assertEqual(header&0x7fff,count)
             self.assertEqual(((header>>23)&1)^(opcode.bit_count()&1),1)
             self.assertEqual(((header>>15)&1)^(count.bit_count()&1),1)
-        decode(words[0],0x46,1);decode(words[2],0x46,1)
-        decode(words[4],0x3f,3);self.assertEqual(words[5:8],[at,0,16])
-        decode(words[8],0x26,0);decode(words[9],0x46,4)
-        self.assertEqual(words[10:],[4,0x1200200,0,7])
+        decode(words[0],0x3e,3);self.assertEqual(words[1:4],[0x40080980,0x1200210,0])
+        decode(words[4],0x46,1);decode(words[6],0x46,1)
+        decode(words[8],0x3f,3);self.assertEqual(words[9:12],[at,0,16])
+        decode(words[12],0x26,0);decode(words[13],0x3e,3)
+        self.assertEqual(words[14:17],[0x40080980,0x1200218,0])
+        decode(words[17],0x46,4);self.assertEqual(words[18:],[4,0x1200200,0,7])
         before=[self.lib.word(i) for i in range(32)]
         for address,count,fence,room in ((at-4,1,8,64),(at+0x4000,1,8,64),
-                (at,0,8,64),(at,0x100000,8,64),(at,1,0,64),(at,1,8,13),
+                (at,0,8,64),(at,0x100000,8,64),(at,1,0,64),(at,1,8,21),
                 (at+1,1,8,64),(0x1000000,1,8,64)):
             self.assertEqual(self.lib.packet(address,count,fence,room),0)
             self.assertEqual([self.lib.word(i) for i in range(32)],before)

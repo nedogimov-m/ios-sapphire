@@ -22,6 +22,8 @@ class TouchEventWorkerTests(unittest.TestCase):
         protocol = added_file((base / "touch.patch").read_text(), "bsd/dev/redfin_touch_protocol.h")
         header = added_file(patch, "bsd/dev/redfin_touch_events.h")
         source = added_file(patch, "bsd/dev/redfin_touch_events.c")
+        source = source.replace('#include "redfin_touch_reconnect.inc"',
+                                (base / 'touch-reconnect.inc').read_text())
         source = re.sub(r"^#include.*\n", "", source, flags=re.M)
         source = source.replace('*(volatile const uint32_t *)(base + offset)', 'model_read(base, offset)')
         source = source.replace('__asm__ volatile("dmb oshld" ::: "memory");', '(void)0;')

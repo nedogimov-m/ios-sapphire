@@ -16,6 +16,7 @@
 #include <arm64/redfin_gui_profile.h>
 #include "redfin_gpu_power.h"
 #include "redfin_gmu_probe.h"
+#include "redfin_gpu_service.h"
 extern int redfin_spmi_return_ready(void);
 extern int redfin_gui_cpu0(void);
 extern vm_offset_t ml_io_map_unmappable(vm_offset_t,vm_size_t,unsigned int);
@@ -60,8 +61,9 @@ static bool gp_valid(void *context)
 {
  struct gp_context *c=context;const char *args=PE_boot_args();
  return c==&gp && c->bytes && args && !memcmp(args,c->args,c->bytes) &&
-  __builtin_arm_rsr64("CurrentEL")==4 && !(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) &&
-  (gp_gui_mode?redfin_gui_cpu0():redfin_spmi_return_ready()==1);
+  __builtin_arm_rsr64("CurrentEL")==4 &&
+  (!(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) || (gp_gui_mode && redfin_gpu_runtime_caller())) &&
+  (gp_gui_mode?(redfin_gui_cpu0() || redfin_gpu_runtime_caller()):redfin_spmi_return_ready()==1);
 }
 static bool gp_held_valid(void *context)
 {

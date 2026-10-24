@@ -8,6 +8,7 @@ int redfin_gui_selected(void);
 int redfin_smp_verified(void);
 int redfin_gui_ready(void);
 int redfin_gui_cpu0(void);
+int redfin_gui_runtime_cpu(void);
 int redfin_gui_bind_worker(void);
 void *redfin_gui_worker_enter(void);
 void redfin_gui_worker_leave(void *);
@@ -23,6 +24,8 @@ int redfin_gui_ready(void)
 { return __atomic_load_n(&rf_gui_ready,__ATOMIC_ACQUIRE)==1; }
 int redfin_gui_cpu0(void)
 { return redfin_gui_ready() && rf_smp_local()==0; }
+int redfin_gui_runtime_cpu(void)
+{ return redfin_gui_ready() && redfin_smp_verified() && (unsigned)rf_smp_local()<8; }
 
 void redfin_smp_publish(void)
 {

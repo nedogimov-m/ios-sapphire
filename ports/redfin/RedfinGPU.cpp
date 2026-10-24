@@ -66,8 +66,8 @@ extern "C" int redfin_graphics_memory_admit(task_t);
 class GPUTransaction {
     void *previous;
 public:
-    GPUTransaction():previous(redfin_gpu_bind()){IOLockLock(gLock);}
-    ~GPUTransaction(){IOLockUnlock(gLock);redfin_gpu_unbind(previous);}
+    GPUTransaction():previous(NULL){IOLockLock(gLock);previous=redfin_gpu_bind();}
+    ~GPUTransaction(){redfin_gpu_unbind(previous);IOLockUnlock(gLock);}
 };
 static IOReturn gpuError(int error)
 {

@@ -1,28 +1,44 @@
 /* SPDX-License-Identifier: MIT */
 /* Persistent GUI3 owner. The existing startup proof remains mandatory;
  * all objects are retained if DMA completion or TLB synchronization is lost.
- * Called under the IOKit service lock, on the already verified CPU0.
+ * Startup stays on CPU0. Runtime calls hold the IOKit mutex and a single
+ * thread lease on one of the eight already verified, coherent CPUs.
  */
 #include "redfin_gpu_runtime.h"
 #include "redfin_gpu_service.h"
-extern void *redfin_gui_worker_enter(void);
-extern void redfin_gui_worker_leave(void *);
+extern int redfin_gui_runtime_cpu(void);
 static struct {
+    thread_t caller;
     struct rf_gr_arena arena;
     struct rf_gm_memory pool;
     uint64_t *l2,*leaves;
     uint64_t *dirty_first,*dirty_end;
-    uint64_t audit_ns,wait_ns,publish_ns,polls;
+    uint64_t audit_ns,wait_ns,publish_ns,gpu_ticks,polls;
     uint32_t state,fence,completed;
     bool dirty;
 } gr;
 
 bool redfin_gpu_ready(void)
 {return __atomic_load_n(&gr.state,__ATOMIC_ACQUIRE)==1;}
+/* REDFIN_GPU_THREAD_LEASE_BEGIN */
+bool redfin_gpu_runtime_caller(void)
+{
+    thread_t owner=__atomic_load_n(&gr.caller,__ATOMIC_ACQUIRE);
+    return owner && owner==current_thread() && redfin_gpu_ready() && redfin_gui_runtime_cpu();
+}
 void *redfin_gpu_bind(void)
-{return redfin_gui_worker_enter();}
+{
+    thread_t previous=__atomic_exchange_n(&gr.caller,current_thread(),__ATOMIC_ACQ_REL);
+    if(previous)redfin_gpu_poison("overlapping runtime thread lease");
+    return (void *)previous;
+}
 void redfin_gpu_unbind(void *previous)
-{redfin_gui_worker_leave(previous);}
+{
+    thread_t expected=current_thread();
+    if(!__atomic_compare_exchange_n(&gr.caller,&expected,(thread_t)previous,false,
+        __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))redfin_gpu_poison("runtime thread lease changed");
+}
+/* REDFIN_GPU_THREAD_LEASE_END */
 void redfin_gpu_poison(const char *reason)
 {
     if(__atomic_exchange_n(&gr.state,2,__ATOMIC_ACQ_REL)!=2)
@@ -53,7 +69,8 @@ void redfin_gpu_invalidate(void *address,uint64_t size)
 }
 static int gr_live(void)
 {
-    if(!redfin_gpu_ready() || !gx.context || gx.context->smmu_mode!=6 || !redfin_gui_cpu0())return ENXIO;
+    if(!redfin_gpu_ready() || !gx.context || gx.context->smmu_mode!=6 ||
+        !(redfin_gui_cpu0() || redfin_gpu_runtime_caller()))return ENXIO;
     int error=gx_check(gx.context);
     if(error)redfin_gpu_poison("power/context ownership changed");
     return error;
@@ -61,13 +78,13 @@ static int gr_live(void)
 /* Runtime snapshots remain complete, twice-read and compared to the exact
  * original foreign-state lease. Bracket the read-only snapshot with the
  * full parent/args/firmware/power guard; each nested read needs only this
- * owned, CPU0, fixed-CX epoch, rather than recursively checking all parents.
+ * serialized coherent-CPU/fixed-CX epoch, rather than all parents again.
  * No table publish, TLB store or ring doorbell uses this read-only shortcut. */
 static bool gr_snapshot_valid(void *argument)
 {
     struct gm_context *c=argument;
     return redfin_gpu_ready() && c && c==gx.context && c->smmu_mode==6 &&
-        redfin_gui_cpu0() && !gx.poisoned && gx.mapping.state.active &&
+        (redfin_gui_cpu0() || redfin_gpu_runtime_caller()) && !gx.poisoned && gx.mapping.state.active &&
         !gx.mapping.state.poisoned &&
         (gm_scalar_read(c->base[RF_GT_GPUCC]+0x1098)&0x80000001u)==1 &&
         !(gm_scalar_read(c->base[RF_GT_GMU]+0x14340)&0xc0u);
@@ -152,7 +169,8 @@ int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only)
 {
     /* This writes CPU-owned page tables only. Full live checks bracket the
      * buffer allocation and its one final cache/TLB publication. */
-    if(!redfin_gpu_ready() || !redfin_gui_cpu0() || gx.poisoned || (address&0xfffu) || (physical&0xfffu) ||
+    if(!redfin_gpu_ready() || !(redfin_gui_cpu0() || redfin_gpu_runtime_caller()) ||
+        gx.poisoned || (address&0xfffu) || (physical&0xfffu) ||
         !rf_gr_find(&gr.arena,address,4096) || physical<RF_GM_PT_RAM_BASE ||
         physical>RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-4096)return EINVAL;
     uint64_t *entry=gr_leaf(address);if(*entry)return EEXIST;
@@ -172,6 +190,21 @@ int redfin_gpu_release(uint64_t address,uint64_t size)
 bool redfin_gpu_done(uint32_t fence)
 {return !fence || (redfin_gpu_ready() && (int32_t)(gr.completed-fence)>=0);}
 uint32_t redfin_gpu_last(void){return gr.fence;}
+struct gr_wait_sample {
+    uint32_t wanted,done,rptr,status;
+};
+static int gr_wait_sample(void *argument,bool *complete)
+{
+    struct gr_wait_sample *s=argument;
+    int error=gr_live();if(error)return error;
+    uint32_t fault=gm_scalar_read(gx.gpu+4*0x821),irq=gm_scalar_read(gx.gpu+4*0x823);
+    if(fault || (irq&0xf7u))return EIO;
+    s->done=gm_scalar_read(gx.scratch+RF_GR_FENCE_AT);
+    s->rptr=gm_scalar_read(gx.gpu+4*0x806);s->status=gm_scalar_read(gx.gpu+4*0x210);
+    *complete=s->done==s->wanted && s->rptr==gx.wptr && !(s->status&~1u);return 0;
+}
+static void gr_wait_pause(void *argument,unsigned microseconds)
+{(void)argument;delay(microseconds);}
 int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence)
 {
     if(!fence || gr.fence==UINT32_MAX)return EINVAL;
@@ -195,27 +228,32 @@ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned c
     gm_memory_store(gx.gpu+4*0x807,gx.wptr);
     gr.publish_ns+=gm_time_ns(gx.context)-publish_at;
     uint64_t first=gm_time_ns(gx.context);
-    for(unsigned i=0;i<5000 && gm_time_ns(gx.context)-first<RF_A6_WAIT_NS;i++) {
-        gr.polls++;
-        if((error=gr_live()))break;
-        uint32_t fault=gm_scalar_read(gx.gpu+4*0x821),irq=gm_scalar_read(gx.gpu+4*0x823);
-        if(fault || (irq&0xf7u)){error=EIO;break;}
-        uint32_t done=gm_scalar_read(gx.scratch+RF_GR_FENCE_AT);
-        if(done==next && gm_scalar_read(gx.gpu+4*0x806)==gx.wptr &&
-            !(gm_scalar_read(gx.gpu+4*0x210)&~1u)) {
-            gr.wait_ns+=gm_time_ns(gx.context)-first;audit_at=gm_time_ns(gx.context);
-            error=redfin_gpu_audit();if(error)break;
-            gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
+    struct gr_wait_sample observed={next,0,0,0};unsigned polls=0;
+    const struct rf_gr_wait_ops ops={&observed,gr_wait_sample,gm_time_ns,gr_wait_pause};
+    error=rf_gr_wait(&ops,RF_A6_WAIT_NS,&polls);gr.polls+=polls;
+    gr.wait_ns+=gm_time_ns(gx.context)-first;
+    if(!error) {
+        audit_at=gm_time_ns(gx.context);error=redfin_gpu_audit();
+        gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
+        if(!error) {
+            uint64_t start=(uint64_t)gm_scalar_read(gx.scratch+RF_GR_TIME_AT+4)<<32 |
+                gm_scalar_read(gx.scratch+RF_GR_TIME_AT);
+            uint64_t end=(uint64_t)gm_scalar_read(gx.scratch+RF_GR_TIME_AT+12)<<32 |
+                gm_scalar_read(gx.scratch+RF_GR_TIME_AT+8);
+            if(end>=start)gr.gpu_ticks+=end-start;
             gr.completed=next;*fence=next;
             if(next<=8 || !(next%256)) {
-                printf("REDFIN GPU RUNTIME SUBMIT: fence=%u IBs=%u done=%u rptr=%u\n",next,count,done,gx.wptr);
-                printf("REDFIN GPU RUNTIME TIMING: submits=%u audit-us=%llu publish-us=%llu wait-us=%llu polls=%llu\n",
-                    next,gr.audit_ns/1000/next,gr.publish_ns/1000/next,gr.wait_ns/1000/next,gr.polls);
+                printf("REDFIN GPU RUNTIME SUBMIT: fence=%u IBs=%u done=%u rptr=%u\n",next,count,observed.done,gx.wptr);
+                printf("REDFIN GPU RUNTIME TIMING: submits=%u audit-us=%llu publish-us=%llu wait-us=%llu gpu-us=%llu polls=%llu cpu=%u\n",
+                    next,gr.audit_ns/1000/next,gr.publish_ns/1000/next,gr.wait_ns/1000/next,
+                    gr.gpu_ticks*5/96/next,gr.polls,(unsigned)cpu_number());
             }
             return 0;
         }
-        delay(100);
     }
+    printf("REDFIN GPU WAIT FAILED: wanted=%u observed=%u prior=%u rptr=%#x wptr=%#x status=%#x error=%d polls=%u elapsed-us=%llu\n",
+        next,observed.done,gr.completed,observed.rptr,gx.wptr,observed.status,error,polls,
+        (unsigned long long)((gm_time_ns(gx.context)-first)/1000));
     gx_diagnostic(gx.context);redfin_gpu_poison("submission did not complete");
     return error?error:ETIMEDOUT;
 }

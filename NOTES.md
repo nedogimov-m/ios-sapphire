@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete runtime/HID block built and preflighted — 2026-10-25
+
+All54selected late-fence/thread-lease/CPU-proof/native-packet/coherency/
+exec/memory/journal/SMP/HID/overflow checksPASS. The final-worker host fixture
+also needed its new reconnect include expanded before stripping native
+headers; after that harness-only change all6overflow worker casesPASS1.618s.
+Native local build20261025-024425PASS/noCI; exact source fingerprint verified.
+Frozen kernel-gui-performance-v3 SHA2566e5f24e8b7e5926f151d371ec60f8f83a89252a94b53a5178dcda693fab1d7c3.
+Installed userland is unchanged; no root update. Startup still usesCPU0,
+full runtime audits and source/physical fences remain enabled, and hardware
+completion is mandatory. Native GPU-written timing pairs use the preferred
+counter/packet format. No actual reconnect or performance result yet.
+
+Image ports/redfin/out/gpu-gui-performance-v3/redfin-xnu.img SHA256
+559f3a4e2246242058a02e323f98778001388018498f1c983160d4ef19e8eb7e; actual compiled loader/liveFDT/
+ADT/firmware/return/app-wait preflightPASS. One complete combined run follows.
+Current device was last verified Fastboot with clean HFSX write_count699909.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x77fdfa764956dff4 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN full runtime scheduling/fence/HID recovery batch implemented — 2026-10-25
+
+Based on1479e1a/7576b89; no intermediate device boot or test during this
+implementation batch. GPU startup and ownership claims stay on CPU0.
+Runtime IOKit requests now hold one mutex/current-thread lease on a proved
+coherent GUI CPU, avoiding forced migration to the busy firmware/input CPU.
+The original complete parent/source/power/foreign-state checks stay enabled;
+only a live scoped caller can pass their non-CPU0 branch. Overlap or caller
+change poisons the queue. A common completion-first wait helper makes a
+final guarded actual-fence read at its unchanged timeout. Faults/missing
+fences still retain DMA allocations; failure logs now name exact state.
+Preferred native CP_REG_TO_MEM timestamps bracket the IB batch, with the
+existing WAIT_FOR_IDLE and cache-flush fence. The new portable cases cover
+late real completion, missing fences, caller/CPU proof and native packets.
+
+HID consumer reconnection is implemented in one post-overlay: keep the
+same SPI/sensing/rail session, release old contact state, wait within the
+original deadline, discard stale events and permit new gestures only after
+a real consumer returns. Existing malformed/overflow recovery remains
+bounded; hardware ownership loss, controller reset and session expiry stay
+fatal. New tests exercise consumer replacement and race/timeout failures.
+Installed Mesa/EAGL files remain unchanged. Combined tests/native build and
+one complete GUI3/WLAN/app run follow. No new hardware result yet. Last
+observed build022036/boot594aed0d45d1d2dc args are in the preceding capture
+entry; device is verified Fastboot, clean HFSX write_count699909.
+
 ## REDFIN actual GPU submits restored; window-server timeout causes touch loss — 2026-10-25
 
 Source7576b89/nativebuild20261025-022036/noCI/kernel-gui-performance-v2,

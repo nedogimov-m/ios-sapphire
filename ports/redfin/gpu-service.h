@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
-/* Private kernel boundary. The caller holds the GPU lock and binds CPU0. */
+/* Private kernel boundary. Startup is CPU0; runtime callers hold the GPU
+ * mutex and its current-thread lease on a proved coherent GUI processor. */
 #ifndef REDFIN_GPU_SERVICE_H
 #define REDFIN_GPU_SERVICE_H
 #include <stdbool.h>
@@ -8,6 +9,7 @@
 extern "C" {
 #endif
 bool redfin_gpu_ready(void);
+bool redfin_gpu_runtime_caller(void);
 void *redfin_gpu_bind(void);
 void redfin_gpu_unbind(void *previous);
 int redfin_gpu_audit(void);

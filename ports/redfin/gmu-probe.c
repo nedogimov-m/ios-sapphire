@@ -175,8 +175,9 @@ gm_valid(void *argument)
         memcmp(live, context->args, context->args_bytes) ||
         memcmp(context->parent_args, context->args, context->args_bytes) ||
         __builtin_arm_rsr64("CurrentEL") != 4 ||
-        (__builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL) ||
-        (context->smmu_mode==6 ? !redfin_gui_cpu0() : redfin_spmi_return_ready()!=1) ||
+        ((__builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL) &&
+            !(context->smmu_mode==6 && redfin_gpu_runtime_caller())) ||
+        (context->smmu_mode==6 ? !(redfin_gui_cpu0() || redfin_gpu_runtime_caller()) : redfin_spmi_return_ready()!=1) ||
         !context->parent_valid(context->parent_context))
         return false;
     for (unsigned i = 0; i < context->binding_count; i++) {

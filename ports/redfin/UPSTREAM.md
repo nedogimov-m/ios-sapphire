@@ -1,5 +1,33 @@
 # HackiOS upstream review — 2026-10-22
 
+## Runtime caller ownership, final fence reads and GPU timestamps — 2026-10-25
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+RedwoodGPU synchronous mutex ownership and redwood_adreno.c ring_time/
+redwood_gpu_submit. Native runtime I/O does not migrate each caller to one
+CPU. Redfin now retains CPU0 for every hardware startup/claim, then permits
+only the GPU mutex's current-thread lease on one of the eight proved GUI
+CPUs. Parent args/power/firmware and complete foreign SMMU audits remain;
+the scoped caller lease is required for each non-CPU0 parent check. An
+unproved CPU, changed caller or overlapping lease cannot activate hardware.
+
+The previous wait loop could skip reading a completed fence after being
+descheduled beyond its wall deadline. The new common wait helper observes
+actual completion first and once again at timeout; a missing fence/fault
+still retires the queue and retains DMA memory. Failure logs now contain
+the actual fence/rptr/status/poll/time values. Preferred CP_REG_TO_MEM of
+the19.2MHz CP_ALWAYS_ON_COUNTER brackets each IB batch, with WAIT_FOR_IDLE
+before its end timestamp and the existing real cache-flush fence last.
+This separates GPU execution from host scheduling delay without a fake
+completion or GPU reset/recovery path.
+
+The observed backboardd restart also closes its HID client; the existing
+worker exited withEPIPE. Bounded reconnection retains that same verified
+SPI/hardware lease, releases old contact state, waits for a real consumer
+and discards stale queue data before new DOWNs. No sensing/rail restart is
+introduced, and the original session deadline and fatal hardware errors
+remain in force. Hardware stability/performance still needs the next run.
+
 ## msm dependency flags are distinct from page permissions — 2026-10-25
 
 The975c644bc72f03ae integrated run rejects every submit withEINVAL22;

@@ -11,7 +11,7 @@ diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
  #include <pexpert/arm64/board_config.h>
  #if defined(ARM64_BOARD_CONFIG_SWEET)
  #include <sys/param.h>
-@@ -8,17 +12,19 @@
+@@ -8,17 +12,20 @@
  #include <pexpert/pexpert.h>
  #include <pexpert/device_tree.h>
  #include <machine/machine_routines.h>
@@ -19,6 +19,7 @@ diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
 +#include <arm64/redfin_gui_profile.h>
  #include "redfin_gpu_power.h"
  #include "redfin_gmu_probe.h"
++#include "redfin_gpu_service.h"
  extern int redfin_spmi_return_ready(void);
 -extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
 -extern vm_offset_t ml_io_map_wcomb(vm_offset_t,vm_size_t);
@@ -34,16 +35,19 @@ diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
  static bool gp_word(const char *p,unsigned n,const char *s)
  {return strlen(s)==n && !memcmp(p,s,n);}
  static bool gp_flags(const char *args,unsigned bytes)
-@@ -55,7 +61,7 @@
+@@ -54,8 +61,9 @@
+ {
   struct gp_context *c=context;const char *args=PE_boot_args();
   return c==&gp && c->bytes && args && !memcmp(args,c->args,c->bytes) &&
-   __builtin_arm_rsr64("CurrentEL")==4 && !(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) &&
+-  __builtin_arm_rsr64("CurrentEL")==4 && !(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) &&
 -  redfin_spmi_return_ready()==1;
-+  (gp_gui_mode?redfin_gui_cpu0():redfin_spmi_return_ready()==1);
++  __builtin_arm_rsr64("CurrentEL")==4 &&
++  (!(__builtin_arm_rsr64("MPIDR_EL1")&0xff00ffffffULL) || (gp_gui_mode && redfin_gpu_runtime_caller())) &&
++  (gp_gui_mode?(redfin_gui_cpu0() || redfin_gpu_runtime_caller()):redfin_spmi_return_ready()==1);
  }
  static bool gp_held_valid(void *context)
  {
-@@ -96,7 +102,8 @@
+@@ -96,7 +104,8 @@
   if(!args)return EINVAL;
   while(bytes<sizeof(gp.args) && args[bytes])bytes++;
   if(bytes==sizeof(gp.args))return ENOTSUP;
@@ -53,7 +57,7 @@ diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
   if(!gp_gmu_mode && !gp_flags(args,bytes+1))return ENOTSUP;
   memcpy(gp.args,args,bytes+1);gp.bytes=bytes+1;
   /* Validate the complete child mode before the parent's first ARC/GDSC write. */
-@@ -107,14 +114,14 @@
+@@ -107,14 +116,14 @@
   if(!gp_valid(&gp) || !gp_prop("/chosen","dram-base",&memory_base,8) || !gp_prop("/chosen","dram-size",&memory_size,8) ||
      !gp_prop("/redfin-gpu-power","reg",ranges,sizeof(ranges)) || !gp_prop("/redfin-gpu-power","cx-parent",parent,sizeof(parent)) ||
      !gp_prop("/redfin-gpu-power","chip-id",&chip,4))return ENXIO;
@@ -152,16 +156,27 @@ diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
 diff --git a/osfmk/arm64/redfin_gui_runtime.h b/osfmk/arm64/redfin_gui_runtime.h
 --- a/osfmk/arm64/redfin_gui_runtime.h
 +++ b/osfmk/arm64/redfin_gui_runtime.h
-@@ -9,6 +9,8 @@
+@@ -8,7 +8,10 @@
+ int redfin_smp_verified(void);
  int redfin_gui_ready(void);
  int redfin_gui_cpu0(void);
++int redfin_gui_runtime_cpu(void);
  int redfin_gui_bind_worker(void);
 +void *redfin_gui_worker_enter(void);
 +void redfin_gui_worker_leave(void *);
  void redfin_smp_publish(void);
  void *redfin_gui_root_enter(void);
  void redfin_gui_root_leave(void *);
-@@ -70,4 +72,20 @@
+@@ -21,6 +24,8 @@
+ { return __atomic_load_n(&rf_gui_ready,__ATOMIC_ACQUIRE)==1; }
+ int redfin_gui_cpu0(void)
+ { return redfin_gui_ready() && rf_smp_local()==0; }
++int redfin_gui_runtime_cpu(void)
++{ return redfin_gui_ready() && redfin_smp_verified() && (unsigned)rf_smp_local()<8; }
+ 
+ void redfin_smp_publish(void)
+ {
+@@ -70,4 +75,20 @@
   thread_block(THREAD_CONTINUE_NULL);
   return redfin_gui_cpu0();
  }
@@ -255,8 +270,8 @@ new file mode 100644
 +class GPUTransaction {
 +    void *previous;
 +public:
-+    GPUTransaction():previous(redfin_gpu_bind()){IOLockLock(gLock);}
-+    ~GPUTransaction(){IOLockUnlock(gLock);redfin_gpu_unbind(previous);}
++    GPUTransaction():previous(NULL){IOLockLock(gLock);previous=redfin_gpu_bind();}
++    ~GPUTransaction(){redfin_gpu_unbind(previous);IOLockUnlock(gLock);}
 +};
 +static IOReturn gpuError(int error)
 +{
@@ -629,9 +644,10 @@ diff --git a/iokit/Kernel/arm/RedfinGPUService.h b/iokit/Kernel/arm/RedfinGPUSer
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinGPUService.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,33 @@
 +/* SPDX-License-Identifier: MIT */
-+/* Private kernel boundary. The caller holds the GPU lock and binds CPU0. */
++/* Private kernel boundary. Startup is CPU0; runtime callers hold the GPU
++ * mutex and its current-thread lease on a proved coherent GUI processor. */
 +#ifndef REDFIN_GPU_SERVICE_H
 +#define REDFIN_GPU_SERVICE_H
 +#include <stdbool.h>
@@ -640,6 +656,7 @@ new file mode 100644
 +extern "C" {
 +#endif
 +bool redfin_gpu_ready(void);
++bool redfin_gpu_runtime_caller(void);
 +void *redfin_gpu_bind(void);
 +void redfin_gpu_unbind(void *previous);
 +int redfin_gpu_audit(void);
@@ -665,7 +682,7 @@ diff --git a/iokit/Kernel/arm/RedfinGPURuntime.h b/iokit/Kernel/arm/RedfinGPURun
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinGPURuntime.h
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,157 @@
 +/* SPDX-License-Identifier: MIT */
 +/* A620 runtime protocol, adapted from preferred HackiOS msm-1.7 bridge.
 + * All GPU addresses belong to this allocator; the bootstrap region is absent.
@@ -676,6 +693,7 @@ new file mode 100644
 +#include <stdbool.h>
 +#include <stdint.h>
 +#include <stddef.h>
++#include <sys/errno.h>
 +#define RF_GR_BASE UINT64_C(0x10000000)
 +#define RF_GR_BYTES UINT64_C(0x20000000)
 +#define RF_GR_GRANULE UINT64_C(0x10000)
@@ -686,7 +704,8 @@ new file mode 100644
 +#define RF_GR_MEMORY_MAX (512u<<20)
 +#define RF_GR_COMMANDS 128u
 +#define RF_GR_FENCE_AT 0x200u
-+#define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+16u)
++#define RF_GR_TIME_AT 0x210u
++#define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+24u)
 +#define RF_GR_HOST_PAGE 16384u
 +static const uint32_t rf_gr_policy[]={1,0x06020001,512,128,1024,128,500,0x10000,0x100000,1};
 +
@@ -699,6 +718,32 @@ new file mode 100644
 +{return !(flags&~0xfu) && (!presumed || presumed==address);}
 +static inline uint64_t rf_gr_page_entry(uint64_t physical,bool read_only)
 +{return physical|(read_only?UINT64_C(0xec3):UINT64_C(0xe43));}
++struct rf_gr_wait_ops {
++    void *context;
++    int (*sample)(void *,bool *);
++    uint64_t (*now)(void *);
++    void (*pause)(void *,unsigned);
++};
++/* A descheduled waiter can return after its deadline with the GPU already
++ * done. Inspect the real fence first, then make one final guarded observation
++ * before declaring a timeout. Never manufacture a completed fence. */
++static inline int rf_gr_wait(const struct rf_gr_wait_ops *ops,uint64_t timeout,unsigned *polls)
++{
++    if(!ops || !ops->sample || !ops->now || !ops->pause || !timeout || !polls)return EINVAL;
++    uint64_t start=ops->now(ops->context);*polls=0;
++    for(unsigned i=0;i<5000;i++) {
++        bool complete=false;int error=ops->sample(ops->context,&complete);++*polls;
++        if(error || complete)return error;
++        uint64_t now=ops->now(ops->context);
++        if(now<start)return EINVAL;
++        if(now-start>=timeout || i==4999) {
++            complete=false;error=ops->sample(ops->context,&complete);++*polls;
++            return error?error:complete?0:ETIMEDOUT;
++        }
++        ops->pause(ops->context,100);
++    }
++    return ETIMEDOUT;
++}
 +/* allocSize already includes the surface's own offset. A prepared wrapped
 + * range additionally starts wrapDelta bytes into its first native page. */
 +static inline bool rf_gr_surface_layout(uint64_t allocation,uint32_t offset,uint32_t delta,
@@ -774,10 +819,13 @@ new file mode 100644
 +static inline unsigned rf_gr_submit_words(const struct rf_gr_arena *a,const uint64_t *addresses,
 +    const uint32_t *words,unsigned count,uint32_t fence,uint32_t *out,unsigned room)
 +{
-+    if(!a || !addresses || !words || !count || count>RF_GR_COMMANDS || !fence || !out || room<4*count+10)return 0;
++    if(!a || !addresses || !words || !count || count>RF_GR_COMMANDS || !fence || !out || room<4*count+18)return 0;
 +    for(unsigned i=0;i<count;i++)if((addresses[i]&3u) || !words[i] || words[i]>0xfffffu ||
 +        !rf_gr_find(a,addresses[i],(uint64_t)words[i]*4))return 0;
 +    unsigned n=0;
++    /* Preferred CP_REG_TO_MEM timestamp pair, of the GPU's own19.2MHz clock. */
++    out[n++]=rf_gr_type7(0x3e,3);out[n++]=0x980u|(2u<<18)|(1u<<30);
++    out[n++]=0x01200000u+RF_GR_TIME_AT;out[n++]=0;
 +    out[n++]=rf_gr_type7(0x46,1);out[n++]=0x18; /* Invalidate depth/color state, native a6xx_submit. */
 +    out[n++]=rf_gr_type7(0x46,1);out[n++]=0x19;
 +    for(unsigned i=0;i<count;i++) {
@@ -785,6 +833,8 @@ new file mode 100644
 +        out[n++]=(uint32_t)(addresses[i]>>32);out[n++]=words[i];
 +    }
 +    out[n++]=rf_gr_type7(0x26,0);
++    out[n++]=rf_gr_type7(0x3e,3);out[n++]=0x980u|(2u<<18)|(1u<<30);
++    out[n++]=0x01200000u+RF_GR_TIME_AT+8;out[n++]=0;
 +    out[n++]=rf_gr_type7(0x46,4);out[n++]=4;
 +    out[n++]=0x01200000u+RF_GR_FENCE_AT;out[n++]=0;out[n++]=fence;
 +    return n;

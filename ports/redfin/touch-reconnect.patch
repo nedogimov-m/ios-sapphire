@@ -1,0 +1,73 @@
+diff --git a/bsd/dev/redfin_touch_events.c b/bsd/dev/redfin_touch_events.c
+--- a/bsd/dev/redfin_touch_events.c
++++ b/bsd/dev/redfin_touch_events.c
+@@ -99,6 +99,8 @@
+ 	if (down && (!sweet_hid_redfin_touch_ready() || !redfin_events_owned())) { redfin_events_delivery_failed = true; return; }
+ 	sweet_hid_touch((int)finger,down,(int)x,(int)y);
+ }
++#include "redfin_touch_reconnect.inc"
++
+ static void
+ redfin_events_worker(void *arg,wait_result_t wait)
+ {
+@@ -140,7 +142,11 @@
+ 	if (!state.synchronized) { error = EBUSY; goto done; }
+ 	printf("REDFIN TOUCH EVENTS: consumer ready, synchronized, bounded %us session\n",redfin_events_seconds);
+ 	while (mach_absolute_time() < deadline) {
+-		if (!sweet_hid_redfin_touch_ready()) { error = EPIPE; break; }
++		if (!sweet_hid_redfin_touch_ready() || redfin_events_delivery_failed) {
++			error=redfin_events_reconnect(&state,&ops,deadline);
++			if(error)break;
++			continue;
++		}
+ 		if (!redfin_events_owned()) { error = EBUSY; break; }
+ 		/* SEC's native handler is level-low IRQ driven. Do not consume an
+ 		 * idle controller's event reply merely because time passed or a
+@@ -161,8 +167,11 @@
+ 				error = redfin_events_resynchronize(&state,&ops);
+ 				printf("REDFIN TOUCH OVERFLOW: resync=%d recovered=%u\n",error,state.recoveries);
+ 			}
++			if (error==EPIPE || (!error && redfin_events_delivery_failed)) {
++				error=redfin_events_reconnect(&state,&ops,deadline);
++				if(!error)continue;
++			}
+ 			if (error) break;
+-			if (redfin_events_delivery_failed) { error = EPIPE; break; }
+ 			batches++;
+ 		}
+ 		redfin_events_wait(8);
+diff --git a/bsd/dev/redfin_touch_reconnect.inc b/bsd/dev/redfin_touch_reconnect.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_touch_reconnect.inc
+@@ -0,0 +1,30 @@
++/* A window-server restart replaces the HID consumer, not the SEC controller.
++ * Keep the existing hardware session and deadline; discard old queue data
++ * after the next real consumer registers. No sensing restart or rail write.
++ */
++static int
++redfin_events_reconnect(struct redfin_events_state *state,const struct redfin_events_ops *ops,uint64_t deadline)
++{
++    redfin_events_release_all(state,redfin_events_emit_hid,NULL);
++    state->synchronized=false;state->startup_reset=false;
++    printf("REDFIN TOUCH EVENTS: HID consumer detached; retaining SPI session\n");
++    while(mach_absolute_time()<deadline) {
++        if(!redfin_events_owned())return EBUSY;
++        if(!sweet_hid_redfin_touch_ready()){redfin_events_wait(20);continue;}
++        redfin_events_delivery_failed=false;
++        int error=0;
++        for(unsigned batch=0;batch<4 && !state->synchronized;batch++) {
++            if(mach_absolute_time()>=deadline)return ETIMEDOUT;
++            error=redfin_events_batch(state,ops,false);
++            if(error==EILSEQ || error==EOVERFLOW)error=redfin_events_resynchronize(state,ops);
++            if(error)break;
++        }
++        if(error==EPIPE){redfin_events_wait(20);continue;}
++        if(error)return error;
++        if(!state->synchronized)return EBUSY;
++        if(!sweet_hid_redfin_touch_ready()){state->synchronized=false;continue;}
++        printf("REDFIN TOUCH EVENTS: HID consumer reconnected; stale contacts discarded\n");
++        return 0;
++    }
++    return ETIMEDOUT;
++}

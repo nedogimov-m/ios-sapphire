@@ -84,6 +84,15 @@ MobileSlideShow, callservicesd and photolibraryd at the existing bounded
 sampling points. Those diagnostic images exclude screen-log payloads.
 The applications' observed startup stalls are not a Metal diagnosis.
 
+Runtime callers now use the GPU mutex's thread lease on any of the eight
+proved coherent CPUs; startup/claims remain on CPU0. The wait path reads
+actual completion before testing its wall deadline and makes a final
+guarded sample at timeout. GPU-written timestamp pairs distinguish core
+execution from CPU scheduling. An actual missing fence or fault still
+retires the queue with all uncertain DMA memory held until reset.
+Touch retains its existing hardware session across an HID consumer close,
+then discards stale contacts when the replacement backboardd registers.
+
 After a graphics panic the root can have pending HFS transactions. The older
 strict RW publication gate requires a clean primary header, so it prevents
 HFS from reaching its own replay. GUI3 alone now has a separate read-only
