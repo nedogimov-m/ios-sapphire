@@ -236,7 +236,8 @@ def main(argv=None):
                                          'gmu-probe.patch', 'gmu-start.patch', 'scm-query.patch',
                                          'wifi-firmware.patch', 'wifi-fw-source.patch', 'wifi-smp2p.patch',
                                          'wifi-fw-build.patch', 'wifi-radio.patch', 'wifi-network.patch',
-                                         'wifi-network-build.patch', 'wifi-gui.patch', 'touch-response.patch', 'preinit-progress.patch'), 21):
+                                         'wifi-network-build.patch', 'wifi-gui.patch', 'touch-response.patch', 'preinit-progress.patch',
+                                         'userspace-waits.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

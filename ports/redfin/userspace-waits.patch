@@ -1,0 +1,214 @@
+diff --git a/osfmk/kern/exception.c b/osfmk/kern/exception.c
+--- a/osfmk/kern/exception.c
++++ b/osfmk/kern/exception.c
+@@ -1120,6 +1120,8 @@
+ }
+ /* REDFIN_STACK_TASK_TEST_END */
+ 
++#include <kern/redfin_userspace_waits_task.inc>
++
+ 
+ #endif /* ARM64_BOARD_CONFIG_SWEET */
+ 
+diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
+--- a/bsd/kern/kern_proc.c
++++ b/bsd/kern/kern_proc.c
+@@ -812,6 +812,9 @@
+ 	printf("RSTACK DONE\n");
+ }
+ /* REDFIN_STACK_PROC_TEST_END */
++
++#include <pexpert/device_tree.h>
++#include "redfin_userspace_waits_proc.inc"
+ #endif
+ 
+ 
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -474,6 +474,7 @@
+ extern void redfin_fb_capture_final(void);
+ extern void redfin_wifi_gui_stop(void);
+ extern void redfin_userspace_stacks(void);
++extern void redfin_userspace_waits_poll(unsigned final);
+ static uint32_t redfin_shutdown_seconds;
+ 
+ static void
+@@ -500,11 +501,13 @@
+ 	    redfin_shutdown_seconds);
+ 	while ((now = mach_absolute_time()) < deadline) {
+ 		redfin_shutdown_watchdog_tick(0);
++		redfin_userspace_waits_poll(0);
+ 		uint64_t wake = deadline - now > interval ? now + interval : deadline;
+ 		if (assert_wait_deadline((event_t)&redfin_shutdown_seconds, THREAD_UNINT, wake) == THREAD_WAITING)
+ 			thread_block(THREAD_CONTINUE_NULL);
+ 	}
+ 	redfin_shutdown_watchdog_tick(1);
++	redfin_userspace_waits_poll(1);
+ 	redfin_wifi_gui_stop();
+ 	redfin_userspace_stacks();
+ 	redfin_fb_capture_final();
+diff --git a/osfmk/kern/redfin_userspace_waits_task.inc b/osfmk/kern/redfin_userspace_waits_task.inc
+new file mode 100644
+--- /dev/null
++++ b/osfmk/kern/redfin_userspace_waits_task.inc
+@@ -0,0 +1,95 @@
++/* Opt-in GUI8 diagnostics: inspect only nonrunnable waiting threads.
++ * Hold the scheduler lock while copying their PCB and resident frames;
++ * never print, allocate, fault or wait for another lock in that section.
++ */
++#define REDFIN_WAIT_FRAMES 16
++
++/* REDFIN_WAIT_COPY_TEST_BEGIN */
++struct redfin_wait_copy {
++    uint64_t pc, lr, sp, fp, wait, continuation, callers[REDFIN_WAIT_FRAMES];
++    unsigned state, frames, stop;
++};
++
++static bool
++redfin_wait_copy(thread_t thread, vm_map_t map, uint64_t deadline,
++                 struct redfin_wait_copy *out)
++{
++    bzero(out, sizeof(*out));
++    out->stop = 1;
++    if (map == VM_MAP_NULL || mach_absolute_time() >= deadline) return false;
++    spl_t level = splsched();
++    if (!simple_lock_try(&thread->sched_lock, &thread_lck_grp)) {
++        splx(level);
++        return false;
++    }
++    bool valid = false;
++    out->state = thread->state;
++    out->stop = 2;
++    if (!(out->state & TH_WAIT) ||
++        (out->state & (TH_RUN | TH_WAKING | TH_TERMINATE | TH_TERMINATE2))) goto done;
++    out->wait = thread->wait_event;
++    out->continuation = (uint64_t)(uintptr_t)thread->continuation;
++    arm_saved_state_t *ss = find_user_regs(thread);
++    out->stop = 3;
++    if (!ss || !is_saved_state64(ss)) goto done;
++    out->pc = get_saved_state_pc(ss); out->lr = get_saved_state_lr(ss);
++    out->sp = get_saved_state_sp(ss); out->fp = get_saved_state_fp(ss);
++    valid = true;
++    uint64_t fp = out->fp, base = fp;
++    out->stop = 0;
++    while (fp && out->frames < REDFIN_WAIT_FRAMES) {
++        if (mach_absolute_time() >= deadline) { out->stop = 4; break; }
++        if ((fp & 15) || fp < base || fp - base > (8ULL << 20)) { out->stop = 5; break; }
++        uint64_t frame[2] __attribute__((aligned(16)));
++        if (!redfin_user_frame_read(vm_map_pmap(map), fp, frame)) { out->stop = 6; break; }
++        out->callers[out->frames++] = frame[1];
++        if (frame[0] && (frame[0] <= fp || frame[0] - fp > (1ULL << 20))) { out->stop = 5; break; }
++        fp = frame[0];
++    }
++    if (fp && out->frames == REDFIN_WAIT_FRAMES) out->stop = 7;
++done:
++    thread_unlock(thread);
++    splx(level);
++    return valid;
++}
++/* REDFIN_WAIT_COPY_TEST_END */
++
++void redfin_wait_task(const char *name, int pid, task_t task, uint64_t deadline);
++void
++redfin_wait_task(const char *name, int pid, task_t task, uint64_t deadline)
++{
++    thread_t threads[16];
++    unsigned count = 0;
++    vm_map_t map = VM_MAP_NULL;
++    if (task == TASK_NULL || task == kernel_task || mach_absolute_time() >= deadline) return;
++    task_reference(task);
++    if (!task_lock_try(task)) { task_deallocate(task); return; }
++    uint64_t slide = task->task_shared_region_slide, mh = task->mach_header_vm_address;
++    if (task->active && (map = get_task_map(task)) != VM_MAP_NULL) {
++        vm_map_reference(map);
++        thread_t thread;
++        queue_iterate(&task->threads, thread, thread_t, task_threads) {
++            if (count == 16) break;
++            thread_reference(thread);
++            threads[count++] = thread;
++        }
++    }
++    task_unlock(task);
++    printf("RWSTACK TASK name=%s pid=%d slide=0x%llx mh=0x%llx threads=%u\n", name, pid, slide, mh, count);
++    for (unsigned t = 0; t < count && mach_absolute_time() < deadline; ++t) {
++        struct redfin_wait_copy copy;
++        bool valid = redfin_wait_copy(threads[t], map, deadline, &copy);
++        uint64_t tid = thread_tid(threads[t]);
++        if (!valid) {
++            printf("RWSTACK SKIP name=%s pid=%d tid=0x%llx state=0x%x reason=%u\n", name, pid, tid, copy.state, copy.stop);
++            continue;
++        }
++        printf("RWSTACK THREAD name=%s pid=%d tid=0x%llx state=0x%x wait=0x%llx continuation=0x%llx pc=0x%llx lr=0x%llx sp=0x%llx fp=0x%llx frames=%u stop=%u\n",
++               name, pid, tid, copy.state, copy.wait, copy.continuation, copy.pc, copy.lr, copy.sp, copy.fp, copy.frames, copy.stop);
++        for (unsigned i = 0; i < copy.frames; ++i)
++            printf("RWSTACK FRAME name=%s pid=%d tid=0x%llx index=%u lr=0x%llx\n", name, pid, tid, i, copy.callers[i]);
++    }
++    for (unsigned t = 0; t < count; ++t) thread_deallocate(threads[t]);
++    if (map != VM_MAP_NULL) vm_map_deallocate(map);
++    task_deallocate(task);
++}
+diff --git a/bsd/kern/redfin_userspace_waits_proc.inc b/bsd/kern/redfin_userspace_waits_proc.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/redfin_userspace_waits_proc.inc
+@@ -0,0 +1,59 @@
++/* Read-only diagnostics require the existing native GUI8 policy plus an
++ * explicit chosen property. No scheduler instrumentation or thread stops.
++ */
++extern void redfin_wait_task(const char *, int, task_t, uint64_t);
++extern int redfin_gui_selected(void);
++extern int redfin_gui_ready(void);
++void redfin_userspace_waits_poll(unsigned final);
++void
++redfin_userspace_waits_poll(unsigned final)
++{
++    static uint64_t sample_at;
++    static unsigned sampled;
++    uint32_t cpus = 0, gui = 0;
++    DTEntry chosen;
++    const void *property;
++    unsigned bytes;
++    if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 8 ||
++        !PE_parse_boot_argn("redfingui", &gui, sizeof(gui)) || gui != 2 ||
++        !redfin_gui_selected() || !redfin_gui_ready() ||
++        SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
++        SecureDTGetProperty(chosen, "redfin-user-waits", &property, &bytes) != kSuccess ||
++        bytes != sizeof(uint32_t) || *(const uint32_t *)property != 1) return;
++    uint64_t now = mach_absolute_time(), interval;
++    if (!sample_at) {
++        nanoseconds_to_absolutetime(90ULL * NSEC_PER_SEC, &interval);
++        if (now > UINT64_MAX - interval) return;
++        sample_at = now + interval;
++    }
++    if (!final && (sampled || now < sample_at)) return;
++    if (sampled >= 2) return;
++    ++sampled;
++    nanoseconds_to_absolutetime(200ULL * NSEC_PER_MSEC, &interval);
++    if (now > UINT64_MAX - interval) return;
++    uint64_t deadline = now + interval;
++    const char *names[4] = { "Preferences", "wifid", "configd", "securityd" };
++    proc_t selected[4] = { PROC_NULL, PROC_NULL, PROC_NULL, PROC_NULL };
++    if (!lck_mtx_try_lock(&proc_list_mlock)) return;
++    proc_t p;
++    unsigned scanned = 0;
++    ALLPROC_FOREACH(p) {
++        if (scanned++ == 512) break;
++        for (unsigned i = 0; i < 4; ++i) {
++            if (selected[i] != PROC_NULL || strncmp(p->p_comm, names[i], sizeof(p->p_comm))) continue;
++            uint32_t bits = proc_ref_try_fast(p);
++            if (!bits) continue;
++            if (proc_ref_needs_wait_for_exec(bits)) { proc_rele(p); continue; }
++            selected[i] = p;
++        }
++    }
++    proc_list_unlock();
++    printf("RWSTACK BEGIN sample=%u final=%u processes=4 threads=16 frames=16 budget_ms=200 waiting_only=1 resident_only=1\n", sampled, final);
++    for (unsigned i = 0; i < 4; ++i) {
++        p = selected[i];
++        if (p == PROC_NULL) { printf("RWSTACK SKIP name=%s reason=not-found-or-exec\n", names[i]); continue; }
++        redfin_wait_task(names[i], proc_pid(p), proc_task(p), deadline);
++        proc_rele(p);
++    }
++    printf("RWSTACK DONE\n");
++}

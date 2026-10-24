@@ -70,6 +70,7 @@ def main():
     p.add_argument('--display-fit', choices=('full', 'cutout'), help='fit complete iPhone canvas, optionally below Pixel camera; requires --smp-gui')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
+    p.add_argument('--userspace-waits', action='store_true', help='opt-in resident snapshots of nonrunnable waiting threads; native GUI8 only')
     p.add_argument('--touch-probe', action='store_true', help='observe SEC SPI controller handoff without transactions')
     p.add_argument('--touch-rail-probe', action='store_true', help='read fixed PMIC identity and candidate LDO states without PMIC writes')
     p.add_argument('--touch-id-probe', action='store_true', help='prepare L17 and cold SEC SPI, then read ID only; RAM root and bootloader return required')
@@ -129,6 +130,8 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.userspace_waits and (not a.wifi_gui or a.capture_screen):
+        p.error('--userspace-waits requires --wifi-gui and excludes screen log payloads')
     if a.wifi_gui:
         a.smp_gui = True
         a.wifi_snoc_start = a.wifi_snoc_mission = a.wifi_snoc_observe = True
@@ -534,6 +537,9 @@ def main():
                 ('height', mkadt.u32(2340)), ('stride', mkadt.u32(a.stride))]))
             if a.display:
                 mkadt.add_linear_display(tree, fb_base, fb_size, fb_base, 1080, 2340, a.stride)
+        if a.userspace_waits:
+            chosen = next(child for child in tree.children if child.name == 'chosen')
+            chosen.props.append(('redfin-user-waits', 0, mkadt.u32(1)))
         (out / 'redfin.adt').write_bytes(adt.serialize(tree))
         command_line = ('debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 '
             'sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0')
@@ -721,6 +727,7 @@ def main():
         cpu_copy_display=bool(a.display), shutdown_seconds=a.shutdown_seconds,
         capture_screen=bool(a.capture_screen),
         userspace_stacks=bool(a.userspace_stacks),
+        userspace_waits=bool(a.userspace_waits),
         syscall_tracing=bool(a.trace_syscalls),
         splash_reservation_assumption=a.splash, stride=a.stride, seconds=a.seconds,
         linux_text_offset='0x80000', kernel_encoding='LZ4 frame + LE32 size',

@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN both Settings panes still freeze; bounded SMP waiting stacks prepared/running — 2026-10-24
+
+User confirms both About and Wi-Fi still freeze with fcdaa28's Bluetooth
+identity. Authenticated bt-identity-v1 capture matches its boot ID, has
+two Preferences execs/35 SEC contacts/releases/error0,124 healthy radio
+audits and the same10 initial wifid ioctls. HFSX clean/write_count597731;
+public metadata primed and verified fastboot restored. The source-proven
+Bluetooth fallback was not sufficient to remove the observed GUI block.
+No association/WPA2/Ethernet/DHCP has been attempted or established.
+
+Added explicit --userspace-waits (native wifi GUI only, excludes screen
+payloads) via chosen/redfin-user-waits=1. Boot args and ordinary GUI/SMP
+guards stay exact. New userspace-waits.patch takes two observational
+snapshots (90s and before WLAN shutdown) of Preferences/wifid/configd/
+securityd, at most16 threads x16 frames each,200ms total per snapshot.
+Only TH_WAIT threads without RUN/WAKING/TERMINATE are copied; scheduler
+try-lock and disabled scheduler IRQ level prevent concurrent PCB/stack
+updates. Resident pmap try-reads never fault or follow I/O; no printing,
+allocation, thread stop or waiting lock occurs while scheduler-locked.
+References and interrupt level are restored on every tested refusal.
+Normal images without the exact chosen property do not collect stacks.
+
+Actual wait-copy5 tests, existing resident-stack4 tests, GUI/SMP9 tests and
+WLAN/GUI lease4 tests PASS. Actual native local kernel build
+research/redfin-build/build-20261024-134150.log PASS; no CI run.
+Kernel SHA256ce0b4689632e68cb980914b66b2c7b7a4628842e0477c27e0f0190807f9fc604.
+Actual loader/live-FDT/Image-window/GUI8 return/DMA32/shim-guard preflight
+PASS. Image ports/redfin/out/wifi-gui8-waits-v1/redfin-xnu.img,
+SHA256349b23a91c47a9e8fcf796f67b7f4781f5d4d400c9bdb82ac3d52810739948a0;
+decompressed130217520 bytes. Collector running session75512 for
+logs/redfin/wifi-gui8-waits-v1, private output
+research/redfin-wifi-userland/device-waits-v1.txt. Do not interrupt with
+another device operation. User is asked only to enter Wi-Fi once and leave
+the frozen pane; the snapshot is automatic. Next: symbolicate actual wait
+frames, fix the concrete dependency, then manual connection/data evidence.
+No partition flash, root reinstall, modem/persist/EFS or backup change.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x522d0ab4a6ab6006 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN Settings freeze clarified; 20H392 Bluetooth identity wait corrected — 2026-10-24
 
 User clarifies Settings hangs on entering the section, as it also does in

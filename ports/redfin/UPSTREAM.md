@@ -121,6 +121,11 @@ local-unicast Bluetooth identity, without importing Apple hardware nodes or
 publishing a BT driver. The preferred upstream snapshots remain the source
 reference, but no matching 20H392 identity-wait fix was found there. This
 is a local ABI adaptation, not proof of functional Bluetooth or GUI Wi-Fi.
+The subsequent manual test still freezes both panes; the identity fallback
+is not established as their active blocker. The next local diagnostic uses
+XNU's existing resident-only frame reader and scheduler lock to copy only
+nonrunnable waiting threads, with a 200ms total budget. It does not import
+upstream's single-core sampling assumptions into the eight-core GUI.
 
 ## Five porting targets
 
