@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete EAGL system files installed/readback verified; integrated capture next — 2026-10-25
+
+Source053a1b6, kernel-eagl-v1/localbuild20261025-003048/noCI retained.
+Fresh root-update-v2 offline staging passes native readonly fsck. All25
+bounded write pieces have prior-byte backups and complete device readback;
+933888bytes changed,100new blocks,zero freed blocks. Backboardd's original
+CNID and4KiB extent stay in place; its native job and the same-size cache
+now agree on the scoped loader. New files are the EAGL/loader libraries,
+upstream license and System diagnostic job. Existing Mesa/shader hashes
+remain byte-identical. Empty journal/JIB unchanged; HFSXclean, inconsistent
+false, write_count631485. Recovery leaves verified Fastboot. No boot/recovery/
+modem/persist/EFS writes. Private backups/plans stay under root-update-v2.
+
+The unbooted v1 image is superseded by v2 with the existing final-screen
+capture enabled (all591boot-argument bytes fit). The full actual-loader/
+liveFDT/firmware/ADT/return preflight passes again. Image
+ports/redfin/out/gpu-gui-eagl-v2/redfin-xnu.img SHA256
+bd48381cd9514d513628a3e390ee10eb625e94041b6ef883c8d6a34ca9b2b4a0; bootae20ff1a7ee17b05.
+One combined system/diagnostic hardware capture is next; no drawing PASS
+claimed before it. Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xae20ff1a7ee17b05 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete EAGL/system graphics bundle built; offline install next — 2026-10-25
 
 Whole planned block implemented before validation. All22selected ABI,
