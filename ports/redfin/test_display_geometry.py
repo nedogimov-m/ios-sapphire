@@ -112,6 +112,12 @@ class AppleCLCD : public IOMobileFramebuffer {public:
  struct redfin_display_geometry fRedfinFit={};
  WORKSPACE_FIELD
  bool allocateRedfinFitWorkspace(void);
+ void freeRedfinPresenter(void){}
+ bool drawRedfinLayer(uint8_t *pixels,uint64_t length,uint32_t stride,
+     const struct redfin_display_surface *surface,const int32_t *source,
+     const int32_t *destination,uint64_t *copied){
+  return redfin_display_draw(&fRedfinFit,fRedfinFitWorkspace,pixels,length,stride,surface,source,destination,copied);
+ }
  void free(void);
  bool directPresent(const uint8_t *){return false;}
  uint8_t *backBuffer(){assert(0);return NULL;}

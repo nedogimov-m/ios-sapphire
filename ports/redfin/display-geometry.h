@@ -145,13 +145,14 @@ redfin_display_blend(uint32_t first, uint32_t second, uint32_t weight)
  * The caller serializes presentation and owns the heap-resident workspace.
  * source/destination rectangles use the existing swap-record ABI. */
 static inline bool
-redfin_display_draw(const struct redfin_display_geometry *g,
+redfin_display_draw_slice(const struct redfin_display_geometry *g,
     struct redfin_display_workspace *work, uint8_t *pixels, uint64_t length,
     uint32_t stride, const struct redfin_display_surface *s,
-    const int32_t source[4], const int32_t destination[4], uint64_t *copied)
+    const int32_t source[4], const int32_t destination[4],
+    unsigned slice, unsigned slices, uint64_t *copied)
 {
 	if (copied) *copied = 0;
-	if (!work || !source || !destination ||
+	if (!work || !source || !destination || !slices || slices > 8 || slice >= slices ||
 	    !redfin_display_target_valid(g, pixels, length, stride) ||
 	    !redfin_display_surface_valid(s)) return false;
 	int64_t sx = source[0], sy = source[1], sw = source[2], sh = source[3];
@@ -175,7 +176,12 @@ redfin_display_draw(const struct redfin_display_geometry *g,
 		work->column[x] = at >> 8;
 		work->weight[x] = work->column[x] + 1 < (uint32_t)sw ? (uint16_t)(at & 255) : 0;
 	}
-	for (int64_t y = y0; y < y1; y++) {
+	/* Private blend workspaces and disjoint complete rows keep the original
+	 * pixel arithmetic independent of the number/order of CPU workers. */
+	int64_t rows = y1 - y0;
+	int64_t first_y = y0 + rows * slice / slices;
+	int64_t last_y = y0 + rows * (slice + 1) / slices;
+	for (int64_t y = first_y; y < last_y; y++) {
 		uint32_t at = redfin_display_sample((uint64_t)(y - py0), (uint32_t)sh,
 		    (uint64_t)(py1 - py0));
 		uint32_t row = at >> 8, weight = row + 1 < (uint32_t)sh ? at & 255 : 0;
@@ -198,8 +204,18 @@ redfin_display_draw(const struct redfin_display_geometry *g,
 			    redfin_display_blend(from[c], from[c + 1], w);
 		}
 	}
-	if (copied) *copied = (uint64_t)(x1 - x0) * (uint64_t)(y1 - y0) * 4;
+	if (copied) *copied = (uint64_t)(x1 - x0) * (uint64_t)(last_y - first_y) * 4;
 	return true;
+}
+
+static inline bool
+redfin_display_draw(const struct redfin_display_geometry *g,
+    struct redfin_display_workspace *work, uint8_t *pixels, uint64_t length,
+    uint32_t stride, const struct redfin_display_surface *s,
+    const int32_t source[4], const int32_t destination[4], uint64_t *copied)
+{
+	return redfin_display_draw_slice(g, work, pixels, length, stride, s,
+	    source, destination, 0, 1, copied);
 }
 
 /* Ignore contacts beginning in margins until UP. Contacts already delivered

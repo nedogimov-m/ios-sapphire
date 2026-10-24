@@ -1,5 +1,60 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete presentation/identity block built and preflighted — 2026-10-25
+
+All 52 selected presentation/scaler/ASan/UBSan/root-identity/quiet-display/
+frame-capture/lease/fence/HID/exec/memory/app-wait/SMP checks PASS. Two new
+host fixture setup issues were corrected: use the SDK's existing __unused
+macro and inspect patch bytes before decoding unrelated binary patches.
+The remaining 42 checks passed initially; the 10 new presenter/identity cases
+then PASS in 0.695s, including real host threads, full queue preservation,
+source retention, startup failures and reverse-order gradient/thin-row slices.
+No implementation change follows those checks. Native local build
+20261025-034726 PASS / no CI; exact prepared overlays verified, actual
+SweetFramebuffer/sweet_amfi compilation and new frozen-kernel strings seen.
+
+Frozen kernel-gui-performance-v5 SHA256
+c976dd7ec18d9174a9e0ba29ba49cd447fa884fb112da08606c0cdd6c6590e90.
+Image ports/redfin/out/gpu-gui-performance-v5/redfin-xnu.img SHA256
+9c9f110ef1e9f18c67d5a7cdc928b4a07c9411a2248fe7be124f959b08292016; actual loader/live FDT/ADT/firmware/return/app-wait preflight
+PASS. Installed Mesa/EAGL and the root are unchanged. Last native root
+observation is clean/write_count728109; v6 recovery snapshot and TCC/crash
+captures were strictly read-only. One full integrated run follows; actual
+parallel presentation, permission resolution, Photos UI and improved cadence
+are not established until that run. Metal remains unimplemented.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x015400794fafd8d9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN complete presentation/process-identity block implemented — 2026-10-25
+
+Based on f7c0c98 / the stable performance-v4 capture. The whole source block
+is now implemented before any new check or iOS boot: separate framebuffer
+presenter, three private row helpers, one retained queued swap, exact source
+in-use ownership through each complete row join, serialized power-off pixel
+writes, absolute notification cadence and bounded copy/queue/interval timing.
+Original source/pixel bounds, bilinear arithmetic, cutout fit and inverse
+touch mapping remain. No new display/SMMU/scanout ownership is introduced.
+Native thread-start failures retain the complete scalar/synchronous path.
+Preferred kernel8e611870 presenter/helper implementation is re-reviewed in
+UPSTREAM.md; paired graphics userland906425b7 remains unchanged.
+
+Read-only native reports identify assetsd244's exact exception:
+"assetsd requires TCCPhotosService access". Stock XML requests Photos, but
+its native flags0x22000001/category0 lack the existing root platform policy's
+status. The new native AMFI hook also recognizes the actual pinned root
+mount, endorses restricted entitlements only after native XML hash/parse
+success under that existing root policy, and sets the native category while
+preserving other categories and non-root behavior. Scoped logs expose the
+actual effective Photos key/status. No TCC database/Apple-binary edit.
+This is a concrete metadata correction; TCC causality and Photos opening
+still need the complete run. Photos' zero-section assertion is observed,
+not bypassed. Fresh v6 remains clean/unmodified/write_count728109 in idle
+recovery; its TCC DB/WAL/SHM were captured read-only for diagnosis.
+
+Combined checks and one native build/run follow. No improved smoothness,
+Photos fix, Metal or GPU-reset recovery is claimed. Last actual build
+20261025-031425/noCI and exact boot685d1d92479c5aeb args/results remain in
+the preceding integrated-run entry.
+
 ## REDFIN integrated Photos-cache run: Phone works, Photos advances to library assertion — 2026-10-25
 
 Source 8607ee5 / native build 20261025-031425 / no CI. Authenticated boot

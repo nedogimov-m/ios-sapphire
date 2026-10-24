@@ -1,5 +1,43 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete presentation pipeline and native process identity — 2026-10-25
+
+Re-reviewed preferred kernel 8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+MiniIOMobileFramebuffer presenterMain/presenter/show, helperMain/drawRows/
+drawLayer and frame-interval reporting. Redfin adopts one separate presenter
+and three row helpers, retaining its own bounded SweetSurface descriptors,
+pixel/state separation, camera exclusion and inverse touch mapping. One
+queued swap retains its actual in-use references; a busy slot leaves the
+latest pending swap intact. Each helper has its own blend workspace and
+disjoint full rows; source lifetime extends through the complete join.
+Pixel writes, including power-off clearing, remain serialized. Source holds
+can retire after the CPU copy because Redfin's preserved panel framebuffer
+does not DMA-fetch the copied source surfaces. No upstream display/SMMU
+private layout or direct scanout is imported.
+
+The notification timer advances an absolute phase independently of the
+presenter; a late callback skips elapsed periods without accumulating copy
+time or generating a catch-up burst. Started threads retain the service for
+the boot lifetime, as the preferred persistent worker model requires. A
+failed helper/presenter start retains the complete scalar/synchronous path.
+Bounded aggregate timing distinguishes copy work, queue delay and intervals;
+none alone establishes measured hardware vblank or stable 60fps.
+
+The actual assetsd crash states "requires TCCPhotosService access", although
+its stock signature requests com.apple.private.tcc.allow/Photos. Its native
+report has flags0x22000001/category0: the current root-volume platform policy
+does not appear in that process metadata. Re-reviewed preferred miniamfi's
+signature entitlement ownership and actual8796 MAC/CS_OPS_STATUS/category
+interfaces. Redfin accepts the actual root vnode's pinned mount as well as
+MNT_ROOTFS, sets CS_ENTITLEMENTS_VALIDATED only for its existing root policy
+with a native hash-checked parsed XML object, and publishes the corresponding
+platform validation category through the native setter. Other categories,
+non-root signatures and the entitlement dictionary are preserved. Scoped
+native logs identify assetsd/Photos/tccd's effective flags and Photos key.
+No TCC database edit, invented entitlement or Apple binary patch is used.
+Whether this resolves the observed TCC denial remains a hardware question.
+Paired userland 906425b75e02b4f99eb5d7bb1ef7c9583472d772 is unchanged.
+
 ## Native MobileCheckpoint cache and bracketed snapshot reads — 2026-10-25
 
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and paired

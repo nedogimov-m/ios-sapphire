@@ -1,0 +1,46 @@
+diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -262,13 +262,41 @@
+     __unused int flags, __unused unsigned int platform,
+     __unused char **fatal_failure_desc, __unused size_t *fatal_failure_desc_len)
+ {
++	/* The root vnode pins its mount through this signature hook. HFS root
++	 * handoff need not retain MNT_ROOTFS in the public mount flags; the
++	 * actual mounted root is also authoritative for this existing policy. */
++	extern vnode_t rootvnode;
+ 	mount_t mp = vnode_mount(vp);
++	bool on_root = mp != NULL && ((vfs_flags(mp) & MNT_ROOTFS) ||
++	    (rootvnode != NULL && mp == vnode_mount(rootvnode)));
+ 	*cs_flags |= CS_SIGNED;
+-	if (mp != NULL && (vfs_flags(mp) & MNT_ROOTFS)) {
++	if (on_root) {
+ 		*cs_flags |= CS_PLATFORM_BINARY;
+ 	}
+ 	if (cs_blob != cs_blob->csb_ro_addr && cs_blob->csb_entitlements == NULL) {
+ 		sweet_amfi_attach_entitlements(cs_blob);
++	}
++	void *ent = csblob_os_entitlements_get(cs_blob);
++	/* Only the existing root-volume policy may endorse restricted keys.
++	 * An object exists only after the native XML hash and parser passed.
++	 * Merely being signed, or carrying a requested key, is insufficient. */
++	if (on_root && (cs_blob->csb_flags & CS_VALID)) {
++		if (ent != NULL) {
++			*cs_flags |= CS_ENTITLEMENTS_VALIDATED;
++		}
++		unsigned int category = csblob_get_validation_category(cs_blob);
++		if (category == CS_VALIDATION_CATEGORY_INVALID || category == CS_VALIDATION_CATEGORY_NONE) {
++			(void)csblob_set_validation_category(cs_blob, CS_VALIDATION_CATEGORY_PLATFORM);
++		}
++	}
++	const char *identity = csblob_get_identity(cs_blob);
++	if (identity && (!strcmp(identity, "com.apple.assetsd") ||
++	    !strcmp(identity, "com.apple.mobileslideshow") || !strcmp(identity, "com.apple.tccd"))) {
++		printf("REDFIN AMFI IDENTITY: name=%s root=%u mount-root=%u flags=%#x xml=%u photos=%u category=%u\n",
++		    identity, on_root, mp != NULL && (vfs_flags(mp) & MNT_ROOTFS) != 0,
++		    *cs_flags, ent != NULL,
++		    ent != NULL && sweet_entitlements_string(ent, "com.apple.private.tcc.allow", "kTCCServicePhotos"),
++		    csblob_get_validation_category(cs_blob));
+ 	}
+ 	return 0;
+ }
