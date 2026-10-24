@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN integrated Photos-cache run: Phone works, Photos advances to library assertion — 2026-10-25
+
+Source 8607ee5 / native build 20261025-031425 / no CI. Authenticated boot
+685d1d92479c5aeb, image fa43d3ddf92213cc712fbb2954dfd5537764208082932c83169af9f14ca6c2b1.
+Actual backboardd submissions exceed 5120 and shared-surface frames 1200;
+both shader pixels PASS (235/32/16/255 and 16/154/64/255), no Mesa submit
+failure, GPU retirement, kernel panic or backboardd restart. Touch completes
+107 contacts/releases, no error or overflow. User confirms Phone opens and
+works; Photos aborts and smoothness is roughly unchanged. Native GPU timing
+averages 3.746ms/batch, audit 4.444ms, wait 3.819ms at submit5120. This does
+not establish a performance gain. Warm samples with <=10 draws have median
+14.317ms, complex samples 46.454ms, but these are sparse EAGL samples, not
+panel cadence or a controlled benchmark. Wi-Fi station readiness 47.408s
+from worker start remains slow. Metal is still unimplemented.
+
+The 61,440-byte cache installation backed up all device preimages, matched
+the current allocation bitmap, wrote data before headers and verified every
+changed range. Post-boot read-only capture proves the cache still exactly
+matches the native XML dictionary/date (contentModDate3860363594, ns0,
+501:501/0644); checkpointd no longer starts in the two bounded app samples.
+Photos245/267 now SIGABRT in PXZoomableInlineHeadersDataSourceManager's
+initWithAssetsDataSourceManager, asserting numberOfSections == 1. Its former
+MobileCheckpoint wait is gone. Assetsd244 also aborts in a pre-migration
+library operation; the underlying cause still needs native report review.
+Preferences255's independent storage-plugin trap is captured too.
+
+Clean planned shutdown: HFSX consistent/not-inconsistent, write_count728109;
+all five file/cache captures complete and verified Fastboot. Fresh private
+v6 read-only metadata and four bounded crash reports are then captured in
+unmounted recovery; no root writes. Next complete block addresses the native
+photo-library bootstrap and remaining display presentation overhead. The
+existing timer currently performs scalar scaling before rearming its next
+relative tick; preferred upstream provides separate presentation/row helpers.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x685d1d92479c5aeb redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete Photos/audit block built and staged — 2026-10-25
 
 All 54 selected native-cache/timestamp/path-scope/runtime-snapshot/boundary-

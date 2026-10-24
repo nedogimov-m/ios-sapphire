@@ -70,10 +70,12 @@ into shared display surfaces. The latest complete run proves over4096
 backboardd submissions and900system frames without a window-server crash,
 plus87touch contacts/releases without errors. The user observes restored
 shadows and fewer artifacts. Simple warm frame samples reach14–26ms;
-complex samples still cost40–100ms or more. Stable60fps, Metal and working
-Phone/Photos remain unfinished. Photos' main thread is observed waiting
-for MobileCheckpoint. The latest stable GPU image is
-`ports/redfin/out/gpu-gui-performance-v3/redfin-xnu.img`.
+complex samples still cost40–100ms or more. The next run proves over5120 submissions and1200frames without a window-server
+restart. The user confirms Phone works. Seeding the native MobileCheckpoint
+cache removes Photos' synchronous service wait; its next blocker is a photo-
+library assertion. Stable60fps, Metal and working Photos remain unfinished.
+The latest stable GPU image is
+`ports/redfin/out/gpu-gui-performance-v4/redfin-xnu.img`.
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and
