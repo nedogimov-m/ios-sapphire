@@ -39,6 +39,9 @@ static int read_word(void *p,unsigned u,uint32_t a,uint32_t *v){
  *v=regs[u][a/4];
  if(u==RF_GB_GMU && a==0x24c18)*v&=0x29; /* Unimplemented mask bits may be RAZ. */
  if(u==RF_GB_GMU && a==0x1464c)*v&=7;
+ if(u==RF_GB_PDC && (a==0x55d4 || a==0x5764 ||
+    (a>0x55d4 && a<=0x5604 && (a-0x55d4)%16==0) ||
+    (a>0x5764 && a<=0x5794 && (a-0x5764)%16==0)))*v&=~255u;
  if(issue==3 && u==RF_GB_GMU && a==0x14070 && stores==report.program_count)*v=0x100;
  if(issue==9 && stores==6 && u==RF_GB_RSC && a==0x2c)*v^=1;
  return 0;
@@ -88,6 +91,7 @@ int run(unsigned mode,unsigned failure,unsigned audit_failure,unsigned vrm){
  if(mode==13)config.mx=config.cx;
  if(mode==14)config.hfi_address=0x60002000;
  if(mode==15)config.chip=0x06030500;
+ if(mode==16)regs[RF_GB_RSC][0xd14/4]=0x1000000;
  return rf_gb_run(&report,&config,&ops);
 }
 unsigned stat(unsigned i){unsigned values[]={stores,reads,audits,exchanges,bad,
@@ -142,7 +146,7 @@ class GMUStartTests(unittest.TestCase):
         self.assertEqual(self.lib.reg(0, 0x143a0), 0x2f11)
 
     def test_busy_rsc_inflight_tcs_unavailable_guard_and_bad_configs_never_write(self):
-        for mode in (1, 2, 4, 12, 13, 14, 15):
+        for mode in (1, 2, 4, 12, 13, 14, 15, 16):
             self.assertNotEqual(self.lib.run(mode, 0, 0, 1), 0)
             self.assertEqual(self.lib.stat(0), 0)
             self.assertEqual(self.lib.stat(5), 0)

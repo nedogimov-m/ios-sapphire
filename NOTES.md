@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native fixed-length PDC semantics built as start-v3 — 2026-10-24
+
+Followsae6c889 and authenticated v2 below. All8protocol cases pass0.651s
+with native PDC MSGID length RAZ and both RSC AMC control bits modeled.
+Native writes unchanged; WRITE/RESP_REQ and all data/destination/control/
+instruction verification remain. Local native build20261024-155222PASS,
+no CI run. Kernel research/redfin-gpu/kernel-start-v3 SHA256
+aefbf4fb5e1190dbb5b6a2783e6db33ec01b0cc99c0e317d1f38d3455fca6b51;
+image ports/redfin/out/gmu-start-v3/redfin-xnu.img SHA256
+bb22e5b9a458ef5c35e3e78b871037d755f9216e9c107d06ba223bc8631b5319.
+Actual loader/FDT/Image/start-policy/firmware/shim-return preflightPASS;
+hardware pending. Next integrated native startup capture. Working Wi-Fi,
+existing root and all earlier checkpoint images remain intact. No flash/
+root/config/modem/persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=4 redfinspmi=1 redfinreturn=1 redfinbootid=0xfb14546f1d4e8222`.
+
+## REDFIN RSC and PDC instruction RAM verified; fixed PDC command length readback — 2026-10-24
+
+Sourceae6c889/nativebuild154528, authenticated start-v2 matches66c3e349cf06f010.
+Complete memory/firmware prep repeatsPASS30.722s; native resources unchanged.
+All RSC hidden data/control/match registers and five sequencer instruction
+words verify. All five local PDC instruction words verify. PDC TCS1 enable7,
+wait0,control0 pass; first MSGID writes10108 and reads10100 (WRITE/RESP_REQ
+accepted,LEN byte RAZ). Whole MSGID comparison stopsEIO/stage2/stores30.
+No CM3 release/firmware/HFI request yet. AOstatus0,GFSR0,FSR400format;
+HFI aliases/table/zero indices remain valid. Native driver writes LEN8
+without requiring its readback; PDC command length is fixed. New model
+checks WRITE/RESP_REQ and keeps all command address/data/control checks.
+Also aligns RSC preflight quiescence with native AMC_ENABLEbit16/TRIGGERbit24,
+refusing either (captured controls already zero). Host model reproduces
+PDC length RAZ for every command and trigger-only refusal.
+
+Collector authenticates/public-primes/returns verified fastboot; staticPID1
+alive and HFSXclean/inconsistentfalse/write_count623088 unchanged. Kernel
+1038f9ca86e6a3da5c6f5aa6b66132d810f4b1a3b03422a88f70aabc98c3296e;
+imagead1df5914cfa3d752972b16324337a5ae71e7ba3bd2b901305ce532b5b7c1097.
+Next rebuilt integrated startup; GPU/Metal remains unfinished. No root/
+config/flash/modem/persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=4 redfinspmi=1 redfinreturn=1 redfinbootid=0x66c3e349cf06f010`.
+
 ## REDFIN corrected native RSC hidden destination semantics built as start-v2 — 2026-10-24
 
 Follows17464e8 and authenticated v1 result below. Actual source callback

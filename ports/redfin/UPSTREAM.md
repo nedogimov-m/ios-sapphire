@@ -40,6 +40,12 @@ the local protocol now preserves that behavior for the three hidden ADDR
 registers while still checking data/uCode, actual PDC resource destinations
 and control fields. No reset release or permission bypass was attempted.
 
+Start-v2 validates RSC/PDC instruction words and native RSC data/control.
+PDC MSGID10108 reads10100: command length byte is fixed/RAZ; native does
+not require its echo. The local checker now requires native WRITEbit16 and
+RESP_REQbit8, preserving all ARC destination/data and control verification.
+RSC idle preflight also uses both native AMC_ENABLE16 and TRIGGER24 bits.
+
 Project upstream preference, 2026-10-23: the user designates
 [oosexgang/hackios-xnu-kernel][kernel] and
 [oosexgang/hackios-xnu-userland][userland] as the most stable source repositories.

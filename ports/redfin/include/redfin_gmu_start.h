@@ -91,7 +91,9 @@ static inline int rf_gb_program(const struct rf_gb_config *c, struct rf_gb_repor
         uint32_t addresses[4]={c->mx,c->cx,c->xo,c->vrm?c->vrm+4:0};
         uint32_t values[4]={group?2u:1u,group?2u:0u,group?3u:0u,group?1u:0u};
         for (unsigned cmd=0;cmd<(c->vrm?4u:3u);++cmd) {
-            RF_GB_ADD(RF_GB_PDC,base+12+16*cmd,0x10108,0x3ffff);
+            /* PDC uses fixed 8-byte commands; native writes LEN8 but the
+             * length byte reads zero. WRITE/RESP_REQ must be accepted. */
+            RF_GB_ADD(RF_GB_PDC,base+12+16*cmd,0x10108,0x10100);
             RF_GB_ADD(RF_GB_PDC,base+16+16*cmd,addresses[cmd],UINT32_MAX);
             RF_GB_ADD(RF_GB_PDC,base+20+16*cmd,values[cmd],UINT32_MAX);
         }
@@ -173,7 +175,7 @@ static inline int rf_gb_run(struct rf_gb_report *s,struct rf_gb_config *c,const 
         RF_GB_TRY(rf_gb_read(s,o,RF_GB_RSC,4u*(0x346+0xa8*i),&s->tcs[i]));
         uint32_t control;
         RF_GB_TRY(rf_gb_read(s,o,RF_GB_RSC,4u*(0x346+0xa8*i)-4,&control));
-        if(control&(1u<<16)){error=EBUSY;goto done;}
+        if(control&0x1010000u){error=EBUSY;goto done;}
     }
     RF_GB_TRY(rf_gb_read(s,o,RF_GB_GMU,0x143a0,&c->rpmh));
     RF_GB_TRY(rf_gb_program(c,s));
