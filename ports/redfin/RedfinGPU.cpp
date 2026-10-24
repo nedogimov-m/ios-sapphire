@@ -58,6 +58,8 @@ static_assert(sizeof(msm_cmd)==32,"msm command ABI");
 static_assert(sizeof(redwood_surface)==40,"preferred IOSurface import ABI");
 static IOLock *gLock;
 static uint32_t gStarts;
+static uint32_t gBufferLogCount;
+extern "C" int redfin_graphics_memory_admit(task_t);
 class GPUTransaction {
     void *previous;
 public:
@@ -115,6 +117,7 @@ struct gpu_buffer {
 };
 class RedwoodGPUUserClient:public IOUserClient {
     OSDeclareDefaultStructors(RedwoodGPUUserClient);
+    task_t owner; /* Borrowed during synchronous init/start, before publication. */
     gpu_buffer *buffers;
     uint32_t nextHandle,nextQueue;
     bool closed;
@@ -135,10 +138,14 @@ public:
 };
 OSDefineMetaClassAndStructors(RedwoodGPUUserClient,IOUserClient);
 bool RedwoodGPUUserClient::initWithTask(task_t task,void *security,UInt32 type,OSDictionary *properties)
-{return type==0 && IOUserClient::initWithTask(task,security,type,properties);}
+{
+    if(type!=0 || !IOUserClient::initWithTask(task,security,type,properties))return false;
+    owner=task;return true;
+}
 bool RedwoodGPUUserClient::start(IOService *provider)
 {
     if(!redfin_gpu_ready() || !IOUserClient::start(provider))return false;
+    if(redfin_graphics_memory_admit(owner))return false;
     buffers=IONewZero(gpu_buffer,RF_GR_OBJECTS);return buffers!=NULL;
 }
 gpu_buffer *RedwoodGPUUserClient::buffer(uint32_t handle)
@@ -179,6 +186,7 @@ IOReturn RedwoodGPUUserClient::create(msm_gem_new *r)
 {
     if(!r->size || r->size>RF_GR_BUFFER_MAX || (r->flags&~0x000f0003u))return kIOReturnBadArgument;
     uint64_t size=(r->size+PAGE_MASK)&~(uint64_t)PAGE_MASK;
+    if(gBufferLogCount++<16)IOLog("REDFIN GPU BO: requested=%llu aligned=%llu flags=%#x\n",r->size,size,r->flags);
     IOBufferMemoryDescriptor *memory=IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
         kIODirectionInOut|kIOMemoryKernelUserShared|kIOMapWriteCombineCache,(vm_size_t)size,PAGE_SIZE);
     if(!memory)return kIOReturnNoMemory;

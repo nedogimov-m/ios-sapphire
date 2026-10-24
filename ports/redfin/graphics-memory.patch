@@ -1,0 +1,54 @@
+diff --git a/bsd/kern/kern_memorystatus.c b/bsd/kern/kern_memorystatus.c
+--- a/bsd/kern/kern_memorystatus.c
++++ b/bsd/kern/kern_memorystatus.c
+@@ -8709,3 +8709,7 @@
+ 	return error;
+ }
+ #endif /* DEVELOPMENT */
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include "redfin_graphics_memory.inc"
++#endif
+diff --git a/bsd/kern/redfin_graphics_memory.inc b/bsd/kern/redfin_graphics_memory.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/redfin_graphics_memory.inc
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: APSL-2.0
++ * Use native memorystatus accounting for the two GUI3 graphics processes.
++ * No jetsam bypass or global memory-policy change. Called before allocating
++ * any GPU client buffers, outside the GPU transaction lock, for the owner.
++ */
++#include <arm64/redfin_gui_profile.h>
++
++/* REDFIN_GRAPHICS_MEMORY_TEST_BEGIN */
++static bool redfin_graphics_memory_selected(const char *args,unsigned bytes,const char *name)
++{
++    return name && (!strcmp(name,"backboardd") || !strcmp(name,"gpu-render")) &&
++        redfin_gpu_gui_profile(args,bytes,NULL);
++}
++/* REDFIN_GRAPHICS_MEMORY_TEST_END */
++
++int redfin_graphics_memory_admit(task_t owner);
++int redfin_graphics_memory_admit(task_t owner)
++{
++    if(!owner || owner!=current_task())return EPERM;
++    proc_t p=current_proc();
++    const char *args=PE_boot_args();unsigned bytes=0;
++    if(!args)return EINVAL;
++    while(bytes<608 && args[bytes])bytes++;
++    if(bytes==608)return EINVAL;
++    if(!redfin_graphics_memory_selected(args,bytes+1,p->p_comm))return 0;
++    int before=-1,after=-1;
++    (void)task_get_phys_footprint_limit(owner,&before);
++    memorystatus_memlimit_properties_t limits={512,MEMORYSTATUS_MEMLIMIT_ATTR_FATAL,
++                                             512,MEMORYSTATUS_MEMLIMIT_ATTR_FATAL};
++    int result=memorystatus_set_memlimit_properties(proc_getpid(p),&limits);
++    int query=task_get_phys_footprint_limit(owner,&after);
++    proc_list_lock();
++    int active=p->p_memstat_memlimit_active,inactive=p->p_memstat_memlimit_inactive;
++    proc_list_unlock();
++    printf("REDFIN GPU MEMORY LIMIT: %s pid=%d before=%dMB active=%dMB inactive=%dMB effective=%dMB result=%d\n",
++        p->p_comm,proc_getpid(p),before,active,inactive,after,result);
++    return result?result:(!query && after==512?0:EINVAL);
++}

@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Saved exec path and bounded native graphics memory admission — 2026-10-25
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+RedwoodGPUUserClient::initWithTask and gemNew. Redfin now borrows the owning
+task during synchronous init/start in the same way; its kernel/shared/WC
+BO allocation flags already match. No change to GPU memory ownership or
+allocation accounting is inferred from the diagnostic's per-process kill.
+Actual XNU8796 exec_save_path stores executable_path= before the pathname;
+the scoped insertion predicate must consume this native prefix.
+
+Actual8796 memorystatus_set_memlimit_properties and its ledger update are
+reviewed. GUI3's two graphics clients set512MiB fatal active/inactive limits
+through that native setter and require the effective limit before allocation.
+The helper remains in the setter's translation unit, outside DEVELOPMENT,
+and cannot operate on another task. No global Jetsam bypass is introduced.
+The existing userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 stays installed.
+Hardware shader/system drawing/Metal still require actual evidence.
+
 ## Stock launchd filtering and graphics bootstrap correction — 2026-10-25
 
 Reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's

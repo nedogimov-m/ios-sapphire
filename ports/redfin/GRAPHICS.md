@@ -26,6 +26,8 @@ diagnostic job to System/Library/LaunchDaemons. Stock launchd filters DYLD
 variables from jobs. `graphics-exec.patch` therefore appends the fixed loader
 environment entry in native exec, only for the exact GUI3 and Apple's
 absolute backboardd path. Native argument/pointer bounds remain enforced.
+The comparison consumes native `exec_save_path`'s `executable_path=` prefix;
+`ip_strings` is an Apple-vector entry rather than a bare pathname.
 Both the on-disk job and launchd's binary cache must agree. Cache updates
 keep their original length; existing roots require fresh extents/preimages,
 offline staging, readonly native fsck and complete device readback.
@@ -34,6 +36,12 @@ Both graphics jobs use the actual20H392 ActiveHardMemoryLimit and
 InactiveHardMemoryLimit keys, bounded to512MiB. The older JetsamMemoryLimit
 key is deprecated by this launchd. The shader process was otherwise killed
 with JETSAM_REASON_MEMORY_PERPROCESSLIMIT before submitting work. Backboardd
+and gpu-render also apply the native memorystatus setter when opening the
+GPU in GUI3 and verify the effective512MiB ledger limit before allocating
+client buffers. This changes only those two current tasks; native fatal
+limits and all other processes' policy remain in force. The kernel records
+the previous/effective limits and the first buffer allocation sizes.
+Backboardd
 runs as mobile and cannot open the root-owned console for its spawn actions.
 Its output and the shader output go to two precreated mobile-owned files in
 `/private/var/mobile/Library/Logs/`. Collect these files with the launchd log

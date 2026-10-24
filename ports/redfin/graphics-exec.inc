@@ -8,11 +8,15 @@
 
 /* REDFIN_GRAPHICS_EXEC_TEST_BEGIN */
 static bool redfin_graphics_exec_selected(const char *args,unsigned bytes,
-    const char *path,const char *name,unsigned name_bytes)
+    const char *saved_path,const char *name,unsigned name_bytes)
 {
-    return path && name && name_bytes==sizeof("backboardd")-1 &&
+    /* exec_save_path stores EXECUTABLE_KEY before the original pathname;
+     * ip_strings itself is the full Apple-vector string, not a bare path. */
+    static const char key[]="executable_path=";
+    return saved_path && !strncmp(saved_path,key,sizeof(key)-1) &&
+        name && name_bytes==sizeof("backboardd")-1 &&
         !memcmp(name,"backboardd",sizeof("backboardd")-1) &&
-        !strcmp(path,"/usr/libexec/backboardd") &&
+        !strcmp(saved_path+sizeof(key)-1,"/usr/libexec/backboardd") &&
         redfin_gpu_gui_profile(args,bytes,NULL);
 }
 /* REDFIN_GRAPHICS_EXEC_TEST_END */

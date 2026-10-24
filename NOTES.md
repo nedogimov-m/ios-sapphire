@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full exec-path/native-memory batch built and preflighted — 2026-10-25
+
+All34selected actual-exec/memory-scope/journal/RW/high-PA/ABI/AMFI/runtime/
+startup checksPASS3.274s. Local native build20261025-014040PASS/noCI;
+complete overlay/source fingerprint verified. Frozen kernel-eagl-v6 SHA256
+754c22ddaaf4ee2640afa9fb43a762ecdf1c50b2e6c02babb843183802bbe34b. The native
+memory helper is linked; userland remains the previously verified install.
+Image ports/redfin/out/gpu-gui-eagl-v6/redfin-xnu.img SHA256
+1d00a3a1de5b4a3497c0cff6b046c6647b6275f6bdedc695fcd24af73ccf0c0b, boot74df960d04eda813. Actual compiled-loader/liveFDT/ADT/
+firmware/return preflightPASS. This retains every GUI3/WLAN/graphics feature
+and final-screen capture; no root update is needed. Next is one complete
+integrated boot and fresh authenticated RAM plus three userspace file logs.
+No actual drawing/system GPU/Metal PASS yet. Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x74df960d04eda813 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN latest full boot restores GUI; exec-path and native memory correction complete — 2026-10-25
+
+Source73e67d7, local kernel build20261025-011618/noCI, authenticated
+bootb2479df547af18cd (logs/redfin/eagl-system-v4). No kernel panic;
+backboardd executes and the framebuffer records13positive presents. Native
+GPU bootstrap/service pass, but runtime submissions remain zero. The fresh
+mobile diagnostic file contains only the boot identity and start line;
+native launchd records JETSAM_REASON_MEMORY_PERPROCESSLIMIT again. No shader
+pixel result, EAGL installation/frame, system GPU or Metal PASS follows.
+Planned shutdown leaves HFSX clean/not-inconsistent, write_count653231.
+Fresh root-update-v4 metadata/file reads leave verified offline recovery
+idle with no mounted disk filesystem; no update has been applied to it.
+
+Actual native exec_save_path prefixes ip_strings with executable_path=.
+The earlier bare-path predicate therefore never inserted the EAGL loader.
+The complete corrective batch now consumes that prefix and exercises the
+actual saved-path function. GUI3 GPU opens by backboardd/gpu-render use
+the native memorystatus setter for512MiB fatal active/inactive limits,
+verify the effective ledger limit and log before/after plus initial BO sizes.
+The adapter is outside the DEVELOPMENT guard; its owner is borrowed from
+synchronous initWithTask/start as in preferred kernel8e611870. BO allocation
+flags match that preferred implementation. The exact cause/size of the
+diagnostic's memory growth is still unproved. Combined checks/build and
+one complete integrated capture follow; no intermediate feature boot.
+The private collector now resolves fragmented launchd-log extents.
+Installed userland remains unchanged, so no root write is needed.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb2479df547af18cd redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete native exec/logging/memory bootstrap fix built and installed — 2026-10-25
 
 All31selected native-exec-scope/journal/RW/physical/ABI/AMFI/runtime/startup
