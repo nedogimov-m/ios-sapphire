@@ -15,6 +15,12 @@
 #define RF_GMM_TCR 0x00802019u /* 39-bit/4KiB, NC walks, outer-shareable, EPD1. */
 #define RF_GMM_TCR2 0x00038011u /* 36-bit PA, ASID16, upstream SEP. */
 #define RF_GMM_SCTLR 0x1027u /* M/TRE/AFE/CFRE/ASIDPNE; no stall or IRQ. */
+#define RF_GMM_ID0_ATOSNS (1u << 26) /* Native ID0_ATOSNS: ATS1* not supported. */
+
+static inline bool rf_gmm_atos_supported(const struct rf_gs_snapshot *snapshot)
+{
+    return rf_gm_snapshot_format(snapshot) && !(snapshot->id0 & RF_GMM_ID0_ATOSNS);
+}
 
 struct rf_gmm_ops {
     void *context;

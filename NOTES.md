@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full GMU context/route readback PASS; native generic ATS unavailable — 2026-10-24
+
+Sourcece9a0f8, local native build145613, authenticated memory-v5 matches
+658c4fbd98fcedd6. All16context/route stores accepted and exact final audits
+pass:CB1SCTLR27,TCR238071,TCR802019,owned root/ASID1,MAIR,zeroTTBR1,
+TLBsync,SMR84000005 and native S2CR/CBAR. First generic ATS givesPAR0 vs
+expected owned address; stopsEFAULT14/stage5, translations0, no TCM load.
+Integrated time28.292s. Native source proves why generic test is invalid:
+arm_smmu_device_cfg_probe disables SMMUv2 generic translation operations
+when ID0_ATOSNSbit26 is1; actualIDR04c017e05 sets it. QSMMUv500 uses a
+separate TBU/ECATS path. Thus context/route readback PASS; real DMA remains
+UNPROVED. No fake translation success or new TBU aperture access.
+Collector authenticated/public-prime/verified-fastboot done; staticPID1
+alive; HFSXclean/inconsistentfalse/write_count623088 unchanged.
+Kernel7efc7e563a1688ea3ed538c9effaf0cb366824e4f5a3aa72dc2095f2aa75144e;
+imageac296aab9ee97a63bc00b77cba896d08868d1562770e90943b26f6ca00ad41e6.
+
+Schema5 refuses unsupported generic ATS at adapter boundary and explicitly
+logs unavailability, then continues reset-held TCM loading. Native TCM
+word guard retains args/ADT/parent/CPU/IRQ/CX/running-core/reset/INIT/HFI;
+full PLL/source/SMMU-clock proof refreshes each256bytes/payload boundary
+instead of recursively per-word, keeping this RAM test bounded. 9targeted
+lease/ATOSNS/native-opcode/guard testsPASS in1.076s. Actual native build
+20261024-150519PASS (150218superseded), no CI run. Actual native object
+word/atomic store+barrier checksPASS. Kernel memory-v6 SHA256
+1d44d21c0afff82f752154ab26fe58c044c55a3baee985b8be6e384146e06a8d;
+image ports/redfin/out/gmu-memory-v6/redfin-xnu.img SHA256
+e78c6f7e69073f942c572e9805ff1d0d42cae1a93cc4d81e741be891a1bb6b2d.
+Actual loader/FDT/Image/firmware/hash/shim-return preflightPASS; hardware
+TCM result pending. Next all7payloads/readback then native PDC/RSC/CM3/HFI
+and real DMA proof; GPU/Metal still unfinished. No flash/root/config or
+modem/persist/EFS/backup change.
+Exact args v5: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x658c4fbd98fcedd6`.
+Exact args v6: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xa25af93c9d4f0b7c`.
+
 ## REDFIN native tables/TLB accepted; SCTLR ASIDPNE RAZ modeled in memory-v5 — 2026-10-24
 
 Source094de03, local native build145033, memory-v4 capture authenticates/

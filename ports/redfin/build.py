@@ -91,7 +91,7 @@ def main():
     p.add_argument('--gmu-tcm-probe', action='store_true', help='isolated md0/UP held-CX plus reset-held GMU clock/counter/TCM test')
     p.add_argument('--gpu-smmu-probe', action='store_true', help='GMU test followed by read-only GPU-SMMU global/route metadata')
     p.add_argument('--gpu-smmu-context-probe', action='store_true', help='GPU-SMMU snapshot then read-only CB0/1 registers; no translations or DMA')
-    p.add_argument('--gpu-smmu-memory-probe', action='store_true', help='reset-held GMU firmware/owned RAM, translated kernel stream and positive ATS checks; isolated md0 only')
+    p.add_argument('--gpu-smmu-memory-probe', action='store_true', help='reset-held GMU firmware/owned RAM and native context/route readback; ATS only when supported; isolated md0 only')
     p.add_argument('--gmu-fw-file', type=Path, help='private native A620 GMU firmware for the memory profile')
     p.add_argument('--gmu-fw-sha256', help='recorded SHA256 of that firmware')
     p.add_argument('--scm-probe', action='store_true', help='isolated md0/UP read-only TrustZone ABI/call/PAS capability queries')

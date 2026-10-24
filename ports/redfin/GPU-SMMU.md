@@ -55,7 +55,7 @@ allocations until platform reset. The total bound is 1MiB; the table pool is
 `0x28000` bytes. Schema2 constructs native 4KiB/39-bit tables, copies/verifies
 the ordinary RAM payloads and initializes the four-queue native HFI table,
 then cleans data and tables to PoC before context publication. After positive
-ATS checks it sets native `GENERAL_7=1` TCM retention and writes/verifies
+optional supported ATS checks it sets native `GENERAL_7=1` TCM retention and writes/verifies
 ITCM/DTCM. This follows upstream steps13→14 and native cold-start retention
 order. Per-payload progress and the first four mismatched words are logged;
 the whole payload's mismatch count is retained. TCM failure cannot be called
@@ -73,10 +73,12 @@ is used. Readback must confirm the installed fields; complete observed
 CBAR/S2CR words are retained to detect subsequent changes. FSR FORMAT is
 status, separately masked from the native genuine fault bits.
 
-The adapter requests positive hardware ATS translations for the first and
-last page of every owned extent and checks PAR against the independently
-known physical allocation. ATS writes are atomic 64-bit stores as required
-by native `arm-smmu.c`. Explicit scalar stores also avoid the known HYP
+When IDR0 supports ATS, the adapter requests positive hardware translations
+for the first and last page of every owned extent and checks PAR against
+the independently known physical allocation. Actual Redfin IDR0 has ATOSNS
+set, so schema5 performs no unsupported ATS requests; context readback is
+not a proof of DMA translation. ATS writes on supported hardware are atomic
+64-bit stores as required by native `arm-smmu.c`. Explicit scalar stores also avoid the known HYP
 WZR-store issue. CM3 remains reset-held and GX collapsed throughout. A
 failed or partial install never frees its backing memory or retries.
 
@@ -128,7 +130,24 @@ reads `0x27` for requested `0x1027`, with ASIDPNE bit12 RAZ on this SMMU;
 the other requested controls agree. It stops before route publication.
 Schema4 permits that observed ASIDPNE readback while checking TCR2's ASID16,
 TTBR0's actual ASID1 and TCR.A1=0 independently. The full observed SCTLR
-remains in later exact audits. New hardware mapping/ATS results are pending.
+remains in later exact audits.
+
+Authenticated memory-v5 accepts all sixteen context/route stores, including
+SMR `0x84000005`, native S2CR/CBAR and the owned root with ASID1. The
+unsupported generic ATS request returns PAR0, causing an EFAULT refusal.
+Native `arm_smmu_device_cfg_probe()` explicitly disables generic translation
+operations for SMMUv2 ID0.ATOSNS=1; the captured IDR0 `0x4c017e05` sets
+that bit. Schema5 now refuses ATS at the adapter boundary and logs explicit
+unavailability. Native QSMMUv500 uses a separate TBU/ECATS mechanism, which
+is not part of this aperture/profile. DMA remains unproved until a later
+GMU/HFI exchange or independently implemented native ECATS test.
+
+Each TCM word retains bound args/ADT/parent/CPU/IRQ/CX checks, running core
+clock and reset/INIT/HFI checks. The complete source/PLL/SMMU-clock proof
+also refreshes every256 bytes and at payload boundaries; recursively doing
+it per word exceeds the bounded diagnostic window. No clocks or master
+states are changed by the transfer. Host guard tests reject stopped clock,
+released reset, changed INIT/HFI and revoked binding/parent state.
 
 ## Native resource and access boundary
 

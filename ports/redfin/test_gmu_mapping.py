@@ -90,6 +90,10 @@ unsigned stat(unsigned i){const unsigned v[]={writes,publishes,violations,lease.
 int retry(void){struct rf_gs_snapshot g;struct rf_gc_snapshot b;memset(&g,0,sizeof(g));memset(&b,0,sizeof(b));
  const struct rf_gm_memory_owner owner={&lease,valid,owns};return rf_gmm_claim(&lease,&ops,&g,&b,&plan,&owner);}
 int fault_format(void){struct rf_gs_snapshot g;struct rf_gc_snapshot b;lost=0;int e=sample(&lease,&g,&b);return e?-1:(int)b.fault_mask;}
+int atos(unsigned mode){struct rf_gs_snapshot s=lease.expected;
+ if(mode==1)s.id0&=~RF_GMM_ID0_ATOSNS;
+ if(mode==2)s.stable=false;
+ return rf_gmm_atos_supported(mode==3?0:&s);}
 '''
 
 
@@ -152,6 +156,13 @@ class GMUMappingTests(unittest.TestCase):
             self.assertEqual(self.lib.stat(0), writes)
             self.assertEqual(self.lib.stat(3), 0)
             self.assertEqual(self.lib.stat(2), 0)
+
+    def test_actual_native_atosns_is_not_misread_as_translation_support(self):
+        self.assertEqual(self.lib.run(0, 0), 0)
+        self.assertEqual(self.lib.atos(0), 0)  # Actual IDR0=4c017e05.
+        self.assertEqual(self.lib.atos(1), 1)
+        self.assertEqual(self.lib.atos(2), 0)
+        self.assertEqual(self.lib.atos(3), 0)
 
 
 if __name__ == '__main__':

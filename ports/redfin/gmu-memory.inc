@@ -6,7 +6,7 @@ extern int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32
 /* The BSD pmap view omits this machine-private declaration. */
 extern pmap_paddr_t kvtophys(vm_offset_t);
 static const uint32_t gm_memory_policy[] = {
-    4, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
+    5, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
 };
 static struct {
     struct gm_context *context;
@@ -14,7 +14,7 @@ static struct {
     struct rf_gm_pt_plan tables;
     struct rf_gmm_lease lease;
     struct rf_gm_memory data[RF_GM_PT_MAX_EXTENTS], pool;
-    unsigned count, allocations, translations, loaded, verified;
+    unsigned count, allocations, translations, loaded, verified, atos_supported;
     uint64_t allocated;
     uint32_t bytes;
     uint8_t digest[32], image[REDFIN_GMU_MAX_FILE_BYTES];
@@ -144,6 +144,21 @@ static int gm_memory_delay(void *argument, unsigned microseconds)
     delay(1); return 0;
 }
 
+/* TCM is local MMIO, not a table walk. Each word keeps the complete bound
+ * args/ADT/parent/CPU/IRQ/CX guard, running core clock and reset/INIT/HFI
+ * checks. Refresh the full PLL/source/SMMU-clock proof every 256 bytes as
+ * well; recursively taking that full proof for each word exceeds the
+ * bounded diagnostic window. This path changes no clock or master state. */
+static bool gm_memory_tcm_valid(struct gm_context *context)
+{
+    if (!context || !gm_memory.bound || context != gm_memory.context ||
+        !context->smmu_ready || !gm_valid(context)) return false;
+    return (gm_scalar_read(context->base[RF_GT_GPUCC] + 0x1098) & 0x80000001u) == 1 &&
+        gm_scalar_read(context->base[RF_GT_GMU] + 0x14000) == 1 &&
+        gm_scalar_read(context->base[RF_GT_GMU] + 0x14070) == 0 &&
+        gm_scalar_read(context->base[RF_GT_GMU] + 0x14600) == 0;
+}
+
 static int gm_memory_transfer(struct gm_context *context, bool tcm)
 {
     for (unsigned p = 0; p < gm_memory.firmware.payload_count; ++p) {
@@ -159,13 +174,15 @@ static int gm_memory_transfer(struct gm_context *context, bool tcm)
             uint32_t mmio;
             if (redfin_gmu_tcm_mmio(region, offset, payload->bytes, &mmio)) return EINVAL;
             for (unsigned j = 0; j < payload->bytes; j += 4) {
-                if (!gm_memory_valid(context)) return ECANCELED;
+                if ((!(j & 0xffu) && !gm_memory_valid(context)) ||
+                    !gm_memory_tcm_valid(context)) return ECANCELED;
                 gm_memory_store(context->base[RF_GT_GMU] + mmio + j, redfin_gmu_read_le32(source + j));
             }
             ++gm_memory.loaded;
             unsigned mismatches = 0;
             for (unsigned j = 0; j < payload->bytes; j += 4) {
-                if (!gm_memory_valid(context)) return ECANCELED;
+                if ((!(j & 0xffu) && !gm_memory_valid(context)) ||
+                    !gm_memory_tcm_valid(context)) return ECANCELED;
                 uint32_t expected = redfin_gmu_read_le32(source + j);
                 uint32_t actual = gm_scalar_read(context->base[RF_GT_GMU] + mmio + j);
                 if (actual != expected) {
@@ -199,6 +216,7 @@ static int gm_memory_transfer(struct gm_context *context, bool tcm)
 static int gm_memory_translate(struct gm_context *context, const struct rf_gmm_ops *ops,
     uint32_t address, uint64_t physical)
 {
+    if (!rf_gmm_atos_supported(&gm_memory.lease.expected)) return ENOTSUP;
     int error = rf_gmm_verify(&gm_memory.lease, ops);
     if (error) return error;
     uint64_t request = address;
@@ -250,7 +268,11 @@ static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot
     printf("REDFIN GMU MEMORY STEP: owned RAM/HFI initialized; publish CB1 and stream5\n");
     error = rf_gmm_claim(&gm_memory.lease, &ops, global, banks, &gm_memory.tables, &owner); if (error) goto done;
     gm_memory.retained = true; stage = 5;
-    for (unsigned i = 0; i < gm_memory.tables.extent_count; ++i) {
+    gm_memory.atos_supported = rf_gmm_atos_supported(global);
+    if (!gm_memory.atos_supported)
+        printf("REDFIN GMU ATS UNAVAILABLE: IDR0=%#x ATOSNS=1; no ATS request, hardware translation not proved\n",
+            global->id0);
+    for (unsigned i = 0; gm_memory.atos_supported && i < gm_memory.tables.extent_count; ++i) {
         const struct rf_gm_pt_extent *r = &gm_memory.tables.extents[i];
         error = gm_memory_translate(context, &ops, r->memory.gmu_address, r->memory.physical); if (error) goto done;
         error = gm_memory_translate(context, &ops, r->memory.gmu_address + r->mapped_bytes - 4096,
@@ -258,7 +280,8 @@ static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot
     }
     stage = 6;
     /* Native a6xx_gmu_fw_start enables TCM retention before loading TCM.
-     * Translation/ATS is independently proved first, as upstream steps13/14.
+     * Context readback precedes TCM, as upstream steps13/14. ATS is optional
+     * on hardware that implements it; a GMU/HFI run must prove real DMA.
      * CM3 remains held; no firmware fetch or HFI execution is allowed. */
     error = gm_memory_check(context); if (error) goto done;
     printf("REDFIN GMU TCM RETENTION: before=%#x requested=1\n",
@@ -280,11 +303,12 @@ done:
             gm_memory.lease.fresh_banks.words[1][0], gm_memory.lease.fresh_banks.words[1][1],
             gm_memory.lease.fresh_banks.words[1][2], gm_memory.lease.fresh_banks.words[1][3],
             gm_memory.lease.fresh_banks.words[1][4], gm_memory.lease.fresh_banks.words[1][8]);
-    printf("REDFIN GMU MEMORY: result=%d stage=%u firmware=%u payloads=%u loaded=%u verified=%u allocations=%u bytes=%llu tables=%u pages=%u bank=1 slot=%u stores=%u translations=%u retained=%u elapsed-ns=%llu; CM3 reset held, no GX/firmware execution\n",
+    printf("REDFIN GMU MEMORY: result=%d stage=%u firmware=%u payloads=%u loaded=%u verified=%u allocations=%u bytes=%llu tables=%u pages=%u bank=1 slot=%u stores=%u atos-supported=%u translations=%u retained=%u elapsed-ns=%llu; CM3 reset held, no GX/firmware execution\n",
         error, stage, gm_memory.bytes, gm_memory.firmware.payload_count, gm_memory.loaded,
         gm_memory.verified, gm_memory.allocations,
         (unsigned long long)gm_memory.allocated, gm_memory.tables.table_count, gm_memory.tables.mapped_pages,
-        gm_memory.lease.slot, gm_memory.lease.stores, gm_memory.translations, gm_memory.allocations != 0,
+        gm_memory.lease.slot, gm_memory.lease.stores, gm_memory.atos_supported,
+        gm_memory.translations, gm_memory.allocations != 0,
         (unsigned long long)(gm_time_ns(context) - started));
     return error;
 }

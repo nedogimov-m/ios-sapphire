@@ -272,6 +272,15 @@ continues requiring TCR2.AS, TTBR0 ASID1 and TCR.A1=0. The preferred
 upstream checks SCTLR.M rather than whole-word ASIDPNE equality; the local
 fault/IRQ/stall/endian/memory-type checks remain more explicit.
 
+Memory-v5 accepts the full owned context/route sequence but generic ATS
+returns PAR0. Rechecked the native `arm_smmu_device_cfg_probe()` condition:
+SMMUv2 ID0.ATOSNS bit26 disables generic translation operations; Redfin's
+captured `0x4c017e05` sets it. Native `qsmmuv500_iova_to_phys_hard` uses
+the separate TBU ECATS path. Schema5 therefore skips unsupported generic
+ATS, preserving explicit unavailability rather than inventing a successful
+translation or accessing a new TBU debug range. DMA proof remains for
+actual CM3/HFI traffic or a separately adapted native ECATS implementation.
+
 ## Display fit and camera geometry review — 2026-10-23
 
 Rechecked both pinned HEADs in the table above. Kernel

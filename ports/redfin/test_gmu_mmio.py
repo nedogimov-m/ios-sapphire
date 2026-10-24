@@ -5,6 +5,7 @@ can compile successfully while silently omitting the stores after its barrier.
 Host register mocks cannot detect that failure.
 """
 from collections import Counter
+import ctypes
 from pathlib import Path
 import re
 import shutil
@@ -34,6 +35,49 @@ def macho_text(data):
 
 
 class GMUMMIOInstructionsTests(unittest.TestCase):
+    def test_each_tcm_word_guard_refuses_stopped_clock_master_and_binding_changes(self):
+        source = (HERE / 'gmu-memory.inc').read_text()
+        body = re.search(r'^static bool gm_memory_tcm_valid\([^\n]+\)\n\{.*?^\}',
+                         source, re.M | re.S)[0]
+        harness = r'''
+#include <stdbool.h>
+#include <stdint.h>
+enum { RF_GT_GPUCC=1, RF_GT_GMU=2 };
+struct gm_context { uintptr_t base[3]; bool smmu_ready; };
+static struct gm_context ctx;
+static struct { bool bound; struct gm_context *context; } gm_memory;
+static uint32_t regs[4];
+static bool live;
+static bool gm_valid(void *p){return p==&ctx && live;}
+static uint32_t gm_scalar_read(uintptr_t at){
+ if(at==0x101098)return regs[0];if(at==0x214000)return regs[1];
+ if(at==0x214070)return regs[2];if(at==0x214600)return regs[3];return UINT32_MAX;
+}
+''' + body + r'''
+int run(unsigned mode){
+ ctx=(struct gm_context){{0,0x100000,0x200000},true};
+ gm_memory.bound=true;gm_memory.context=&ctx;live=true;
+ regs[0]=regs[1]=1;regs[2]=regs[3]=0;
+ if(mode==1)gm_memory.bound=false;if(mode==2)gm_memory.context=0;
+ if(mode==3)ctx.smmu_ready=false;if(mode==4)live=false;
+ if(mode==5)regs[0]=0;if(mode==6)regs[0]=0x80000001;
+ if(mode==7)regs[1]=0;if(mode==8)regs[1]=3;
+ if(mode==9)regs[2]=1;if(mode==10)regs[3]=1;
+ return gm_memory_tcm_valid(mode==11?0:&ctx);
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, obj = root / 'guard.c', root / 'guard.so'
+            path.write_text(harness)
+            subprocess.run([shutil.which('cc') or 'cc', '-O2', '-shared', '-fPIC',
+                '-Wall', '-Wextra', '-Werror', '-Wno-misleading-indentation',
+                str(path), '-o', str(obj)], check=True, capture_output=True)
+            library = ctypes.CDLL(str(obj))
+            self.assertEqual(library.run(0), 1)
+            for mode in range(1, 12):
+                self.assertEqual(library.run(mode), 0, mode)
+
     def test_darwin_emits_complete_barrier_store_barrier_for_zero_and_live_values(self):
         compiler = shutil.which('clang')
         if compiler is None:
