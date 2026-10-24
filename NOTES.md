@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN manual Wi-Fi still gray; targeted wifid diagnostic running — 2026-10-24
+
+User reports the same nonworking Wi-Fi after manual launch ecb3a65.
+Authenticated/boot-ID-matched wifid-manual-v1 capture has two Preferences
+execs,1451 SEC batches/88 contacts/88 releases/error0. wifid executes and
+opens RedfinWLAN, but makes only the same10 initial driver queries before
+the180s cap; no power-set, scan or join request follows the GUI interaction.
+All124 native radio audits pass; association/Ethernet/DHCP remain absent.
+The user-visible blocker survives the now-working daemon launch. No cause
+for the later initialization wait is inferred from optional ioctl refusals.
+Recovery completed, HFSX clean/write_count576213, public RAM metadata
+primed and verified fastboot. That collector is no longer active.
+
+Added explicit --daemon-logs to wifi_userland.py, following preferred
+userland906425b's mkjobs.py: wifid alone gets OS_ACTIVITY_DT_MODE=YES and
+stdout/stderr to /dev/console. Equal plist containers share object records,
+leaving51115 padding bytes in the same795217-byte cache; decoded-tree
+equality proves all other jobs/properties unchanged. Normal fresh-root
+preparation does not enable verbose logging. All7 focused tests pass.
+Current live catalog/file were re-extracted in verified offline recovery;
+the cache had the expected97305ac3 checksum, so the prior fix persisted.
+Private original extent/file backup and full fsync/readback succeeded;
+header, allocation tail, inode/owner/mode and allocation stay unchanged.
+Diagnostic cache SHA2566b3036f143d28c9f18eff33f9dcb9a2417544cb68f7bd00708233dcca589dfca.
+Private artifacts: research/redfin-wifi-userland/current-v2/.
+
+Repacked existing station-v9 kernel, with screen log payload disabled to
+reserve RAM-log space for the daemon. No kernel build or CI run. Kernel
+source190b466, local build20261024-060104,
+SHA256390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e.
+Image ports/redfin/out/wifi-gui8-wifid-log-v1/redfin-xnu.img,
+SHA256e959f864a4c8b9efe20466363d042d7583a8ddf875d1258560f0ef95049d31b4.
+Matching manifest/GUI8 shim-return proof passed. Diagnostic collector is
+running, session79784, logs/redfin/wifi-gui8-wifid-log-v1; private output
+research/redfin-wifi-userland/device-wifid-log-v1.txt. Do not interrupt with
+another device operation. Next: actual wifid initialization diagnostics,
+then implement the evidence-backed fix as a batch. No repeated manual UI
+test requested. No partition flash, root reinstall or modem/persist/EFS/
+backup change. GPU/Metal remains after working GUI Wi-Fi.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x8219a813274bb217 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN user-requested manual GUI/Wi-Fi launch after wifid fix — 2026-10-24
 
 User requests loading the system now. Reused the validated station-v9

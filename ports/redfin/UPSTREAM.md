@@ -44,6 +44,16 @@ wifid executes once, discovers en0 and issues Apple80211 capability, power
 and channel queries before the GUI cap. Manual Settings connection and
 actual network data remain unverified.
 
+After the user reports the same gray switch, the manual capture confirms
+88 contacts/releases, two Preferences executions and the same ten initial
+wifid driver queries, without a scan/power-set/join request before shutdown.
+The next diagnostic adapts the same upstream `mkjobs.py` stdout/stderr and
+`OS_ACTIVITY_DT_MODE=YES` policy to wifid alone. It is an explicit opt-in;
+fresh-root preparation retains the normal logging policy. Equal binary
+plist containers are shared to fit the additional keys within the current
+file size, with full decoded-tree verification and preserved unrelated jobs.
+This adds evidence, not speculative replies for optional Apple80211 ioctls.
+
 Reviewed 2026-10-24: pinned Google SEC source
 `0701b191882dc408104ad8af9e2f5eb2bf34c297`, `sec_ts.c:330..430`, retries
 completed reads with bad sync/echo/checksum; `:2337..2350` clears a lost

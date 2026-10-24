@@ -88,6 +88,21 @@ class WiFiUserlandTests(unittest.TestCase):
                              (before.st_ino, before.st_uid, before.st_gid, before.st_mode, before.st_size))
             self.assertEqual(path.read_bytes(), wifi.patch_launchd_cache(original)[0])
 
+    def test_opt_in_logging_compacts_containers_and_changes_only_wifid(self):
+        cache = fixture()
+        cache["SharedContainers"] = [{"repeat": ["some repeated container value"]} for _ in range(20)]
+        expected = copy.deepcopy(cache)
+        job = expected["LaunchDaemons"]["wifi-job"]
+        del job[wifi.GATE]
+        job["EnvironmentVariables"] = {"OS_ACTIVITY_DT_MODE": "YES"}
+        job["StandardErrorPath"] = job["StandardOutPath"] = "/dev/console"
+        original = encode(cache)
+        patched, report = wifi.daemon_log_cache(original)
+        self.assertEqual(len(patched), len(original))
+        self.assertEqual(plistlib.loads(patched), expected)
+        self.assertTrue(report["daemon_console_logging"])
+        self.assertEqual(wifi.daemon_log_cache(patched)[0], patched)
+
 
 if __name__ == "__main__":
     unittest.main()
