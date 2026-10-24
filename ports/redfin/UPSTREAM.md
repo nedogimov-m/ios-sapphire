@@ -520,6 +520,13 @@ the proven USB AArch64 bypass sequence: retain all latent references,
 claim one disabled unreferenced NS bank and one invalid stream slot, then
 disable SCTLR, set CBA2R1/CBAR10000, publish TRANS and finally SIDc0/mask1.
 Each uncertain write or foreign-state change stops without retry/release.
+Reviewed again2026-10-24 after the actual WLAN refusal: native FSR
+FORMAT[10:9] reports AArch642 (`0x400`) immediately after CBA2R.RW64=1.
+The already validated `usb-context-format-status.patch` accounts for this
+read-only status. WLAN now predicts that same field only in its owned bank;
+all fault bits, other owned fields and foreign contexts remain exact. No
+FSR acknowledgement or new store is introduced. The actual-C/C++ lease
+model now emulates this hardware side effect, rather than a plain RAM bank.
 The separate16MiB DMA32 buffer has two16KiB guards; its complete proposed
 range is checked against the actual Image/DTB, XNU, all live reservations
 and retained RMTFS before the shim initializes it. RMTFS is never spare CE

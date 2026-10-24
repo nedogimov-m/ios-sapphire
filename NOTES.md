@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN station-v4 result and native WLAN FORMAT correction prepared — 2026-10-24
+
+Source `f360ed1`, native build045148, authenticated station-v4 capture
+matches boot ID9d751a3511553458. Touch sensing/consumer startup succeeds;
+its whole180s session now finishes error0 with no response faults or clears.
+Zero IRQ-triggered batches/contacts were captured, so actual touch/UI
+response is still awaiting physical input, not claimed working. HFSX is
+clean, write_count494573; public metadata primed and verified fastboot.
+
+Native firmware/BDF/FW_READY/mission/CE again succeeds in53989ms. The lease
+refusal is exactly owned CB4 FSR4058 changing0 ->400 after CBA2R1; all other
+raw snapshot fields remain equal up to that first difference. This is the
+same read-only FORMAT[10:9]=AArch642 transition already validated by USB's
+`usb-context-format-status.patch` and USB V5 hardware. The Wi-Fi adaptation
+had omitted that expected-state update. It now predicts only that field in
+the owned bank after the accepted format write. No new MMIO, fault ack,
+foreign-state relaxation or retry; genuine faults and other changes stop.
+
+All17 focused SNOC/GUI/lease tests PASS. The new actual-C/C++ model includes
+the native FORMAT side effect, real owned faults, foreign FORMAT changes,
+unexpected SCTLR and every uncertain-write/foreign-change position with no
+retry. An initial ctypes signed-return fixture mismatch was corrected;
+native behavior was unchanged. Local `build-20261024-050040.log` PASS,
+no CI run. Actual loader/live-FDT/GUI8 return/DMA32/shim guards PASS.
+Kernel `6a89a9af06e75416a890020d37b7a19790fb03f26fbd0472f53bce9cefcbad3e`;
+image `5d082822c0daabc27253851a4c8a1b5c0c5296e486f937933a79b9aceb9a1585`, Image130216768 bytes.
+Exact station-v5 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xc4cbc22785ee1a26 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Next: temporary combined station-v5 run, retain level-driven touch and
+advance the actual CE/HTC/WMI/HTT/GUI path past the FORMAT refusal. Physical
+touch, association/data/DHCP and then GPU/Metal remain unfinished. No
+partition flashing or persistent modem/EFS writes.
+
 ## REDFIN native level-driven SEC events and exact WLAN lease refusal evidence prepared — 2026-10-24
 
 Continues `5b4109d`. Touch now reads events only while native IRQ9 is low;

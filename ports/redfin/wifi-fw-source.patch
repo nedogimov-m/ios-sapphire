@@ -4364,7 +4364,7 @@ diff --git a/iokit/Kernel/arm/redfin_wifi_snoc_lease.h b/iokit/Kernel/arm/redfin
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/redfin_wifi_snoc_lease.h
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,159 @@
 +/* SPDX-License-Identifier: MIT
 + * Sole-worker APPS SMMU lease for WLANc0/mask1, adapted from the native
 + * non-static NS allocator and the proven Redfin USB AArch64 bypass context.
@@ -4502,7 +4502,15 @@ new file mode 100644
 +        if (observed != value) { error = EIO; goto failed; }
 +        switch (step) {
 +        case 0: s->expected.bank[s->bank].sctlr = value; break;
-+        case 1: s->expected.bank[s->bank].cba2r = value; break;
++        case 1:
++            s->expected.bank[s->bank].cba2r = value;
++            /* Same native transition already proved by Redfin USB:
++             * FSR.FORMAT[10:9] becomes AArch64 (2) after CBA2R.RW64=1.
++             * This is read-only format status, outside FSR fault bits.
++             * Predict exactly this owned field; never acknowledge faults
++             * or mask any other own/foreign snapshot difference. */
++            s->expected.bank[s->bank].fault = (s->expected.bank[s->bank].fault & ~0x600u) | 0x400u;
++            break;
 +        case 2: s->expected.bank[s->bank].cbar = value; break;
 +        case 3: s->expected.s2cr[s->slot] = value; break;
 +        default: s->expected.smr[s->slot] = value; break;

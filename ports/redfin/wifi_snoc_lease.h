@@ -135,7 +135,15 @@ static inline int rf_snoc_lease_claim(struct rf_snoc_lease *s, const struct rf_s
         if (observed != value) { error = EIO; goto failed; }
         switch (step) {
         case 0: s->expected.bank[s->bank].sctlr = value; break;
-        case 1: s->expected.bank[s->bank].cba2r = value; break;
+        case 1:
+            s->expected.bank[s->bank].cba2r = value;
+            /* Same native transition already proved by Redfin USB:
+             * FSR.FORMAT[10:9] becomes AArch64 (2) after CBA2R.RW64=1.
+             * This is read-only format status, outside FSR fault bits.
+             * Predict exactly this owned field; never acknowledge faults
+             * or mask any other own/foreign snapshot difference. */
+            s->expected.bank[s->bank].fault = (s->expected.bank[s->bank].fault & ~0x600u) | 0x400u;
+            break;
         case 2: s->expected.bank[s->bank].cbar = value; break;
         case 3: s->expected.s2cr[s->slot] = value; break;
         default: s->expected.smr[s->slot] = value; break;
