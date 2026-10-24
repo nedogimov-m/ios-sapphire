@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN actual GPU submits restored; window-server timeout causes touch loss — 2026-10-25
+
+Source7576b89/nativebuild20261025-022036/noCI/kernel-gui-performance-v2,
+authenticated boot594aed0d45d1d2dc/imageed15c8a0d48a3028f799cdc503bc8a17944cd4747a92a109d533ea94d8b860c0.
+Native backboardd-bound submissions complete and both shader/IOSurface
+pixel passes succeed (220/32/16/255,16/146/64/255). Full-session graphics
+acceptance fails: a later "submission did not complete" retirement precedes
+backboarddSIGSEGV; RunningBoard then terminates SpringBoard and its apps.
+The user reports this while opening Photos, followed by dead touch/graphics.
+Launchd proves Photos239 and Phone248 did spawn, but both are torn down
+before the bounded90s/final app-wait snapshots. This is not an app Metal
+failure diagnosis. No kernel panic; planned shutdown leaves clean HFSX,
+inconsistentfalse/write_count699909, all file logs and verified Fastboot.
+
+Hardware at the failed-submit diagnostic has rptr=wptr=0x198a, status1,
+CP faults/IRQ0, SMMU FSR400(format-only)/GFSR0. The exact fence word was not
+logged, so late completion/CPU starvation is a hypothesis, not a proved GPU
+hang. Existing loop tests wall deadline before its next completion read;
+early timing already shows47.827ms waits with only2polls. GPU ioctl callers,
+firmware loading and input are all forced onto CPU0. Native service timings
+show roughly4.2ms full audits plus variable scheduling/wait time, while
+surface cache maintenance averages0.2–0.6ms. Simple warm EAGL frames reach
+17–25ms; complex frames remain40–180ms or worse. No60fps claim.
+
+Touch definitively stops withEPIPE32 when backboardd's HID consumer closes:
+14contacts/14releases, no overflow. Its one-shot worker does not reconnect.
+New backboardd249 cannot open the retired GPU and falls back. Wi-Fi station
+readiness remains47.631s from worker start, firmware-ready43.605s. Next full
+batch targets serialized runtime ownership on any proved CPU, completion-
+first/final-read deadline handling, actual GPU timestamps and bounded HID
+consumer reconnection while retaining hardware leases. No device test
+between implementation subtasks. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x594aed0d45d1d2dc redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete msm compatibility correction built and preflighted — 2026-10-25
 
 All12focused actual metadata/AP-bit/affinity/cache/layout/arena/exec/memory
