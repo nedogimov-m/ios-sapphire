@@ -109,7 +109,12 @@ static int gm_memory_read(void *argument, unsigned block, uint32_t at, uint32_t 
 }
 static void gm_memory_store(vm_offset_t address, uint32_t value)
 {
-    __asm__ volatile("dmb oshst; mov w9, %w0; str w9, [%1]; dsb osh" ::
+    __asm__ volatile("dmb oshst\n\tmov w9, %w0\n\tstr w9, [%1]\n\tdsb osh" ::
+        "r"(value), "r"(address) : "x9", "memory");
+}
+static void gm_memory_store64(vm_offset_t address, uint64_t value)
+{
+    __asm__ volatile("dmb oshst\n\tmov x9, %0\n\tstr x9, [%1]\n\tdsb osh" ::
         "r"(value), "r"(address) : "x9", "memory");
 }
 static int gm_memory_write(void *argument, unsigned block, uint32_t at, uint32_t value)
@@ -198,7 +203,7 @@ static int gm_memory_translate(struct gm_context *context, const struct rf_gmm_o
     if (error) return error;
     uint64_t request = address;
     vm_offset_t ats = context->cb + 0x1000 + 0x800;
-    __asm__ volatile("dmb oshst; mov x9, %0; str x9, [%1]; dsb osh" :: "r"(request), "r"(ats) : "x9", "memory");
+    gm_memory_store64(ats, request);
     uint32_t status = 1, low, high;
     for (unsigned us = 0; us < 1000; ++us) {
         error = gm_memory_read(context, 1, 0x8f0, &status); if (error) return error;

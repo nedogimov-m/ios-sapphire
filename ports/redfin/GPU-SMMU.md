@@ -96,6 +96,18 @@ payload/word and cause were not captured. HFS stays clean at the unchanged
 write count623088; the collector returns to verified fastboot. This result
 proves allocation/construction only, not translation or firmware execution.
 
+The memory-v2 capture authenticates and repeats the two ordinary RAM payload
+copies, then reports unchanged SCTLR on the first software store attempt.
+Native-object disassembly identifies the shared software cause of v1/v2:
+Apple's assembler treats semicolons as comments, so the combined asm strings
+emitted DMB alone and omitted STR/DSB. This is not evidence of hardware/HYP
+refusal. Both word and atomic ATS helpers now separate instructions with
+newlines. [`test_gmu_mmio.py`](test_gmu_mmio.py) compiles their actual bodies
+for Darwin ARM64 and inspects Mach-O opcodes for zero/nonzero 32/64-bit
+stores between the correct barriers. The actual XNU object separately
+contains three complete word-store sites and one atomic ATS site. The
+fixed memory-v3 hardware result is pending.
+
 ## Native resource and access boundary
 
 The preferred [HackiOS kernel][hackios] at

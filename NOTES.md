@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN actual Darwin asm omission identified and fixed; memory-v3 built — 2026-10-24
+
+Sourcea92500b's memory-v2 capture authenticates and matches8b31e80485d42089.
+All earlier prerequisites pass,7allocations/393216bytes/5tables/43pages,
+both ordinary RAM payloads copy/verify (21968and920bytes). First CB1
+SCTLR0 software attempt reads back inherited1f0d4100 and stops EIO/stage4,
+attempts1/translations0. No TCM-retention/loading stage reached. StaticPID1
+alive, public RAM metadata primed, verified fastboot returned, HFSX still
+clean/inconsistentfalse/write_count623088. Kernel d7f0105fb14d9d5245ce392bfe76a0022f213845501f9dd834a306eeb76f4b7a;
+image4f074a14f33c89e619137244a47c918ef75d8debab68abc5460511e059a04d46;
+build20261024-143239. These observations alone do NOT prove HYP refusal.
+
+Actual native-object disassembly identifies the shared v1/v2 bug: Darwin
+integrated assembler treats ';' as comment, so multi-instruction inline asm
+emitted only its initial DMB, no MOV/STR/DSB. Changed word and atomic ATS
+helpers to newline-separated instructions. Existing source guards/readback
+and ownership rules remain exact. New target-assembly regression compiles
+the actual helper bodies for Darwin ARM64 and checks Mach-O opcodes for
+zero/nonzero32/64-bit GPR stores bracketed by DMBOSHST/DSBOSH:PASS. Negative
+control on a92500b's exact helper:2DMB/0STR/0DSB; fixed helper:2/2/2.
+The actual XNU object independently has3complete word-store sequences and
+1atomic ATS-store sequence. Thus omission is source/binary-proved, not a
+speculative hardware quirk. Native retention is still a required source
+step, but was not established as v1's failure cause.
+
+Local native build20261024-144025PASS; no CI run. Kernel memory-v3
+SHA256b107ecfe5b75131e454d1550904d90a879d3a6c46372d81d3548709e29674730.
+Image ports/redfin/out/gmu-memory-v3/redfin-xnu.img,
+SHA2563b91e7adf62d60cd16c0fb2283f51e9711a98d17fd78477a6457180baf20c17f.
+Actual loader/live-FDT/Image-window, exact firmware/hash and shim-UP return
+preflight PASS. New hardware capture pending. Prior62affected tests passed
+before this instruction-only fix; no unrelated suite repeated. Working
+GUI/Wi-Fi/root untouched; no flash/modem/persist/EFS/backup change. Next:
+actual installed CB1/stream5 readback, positive ATS and full TCM verification,
+then native CM3/HFI. GPU/Metal remains unfinished.
+Exact args v2: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x8b31e80485d42089`.
+Exact args v3: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xab1d41e3396dc973`.
+
 ## REDFIN native TCM retention and independent mapping/ATS batch built — 2026-10-24
 
 Source follows6de87c4. Rechecked native a6xx_gmu_fw_start: sets GENERAL_7=1

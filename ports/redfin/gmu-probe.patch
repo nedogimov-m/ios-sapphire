@@ -2365,7 +2365,7 @@ diff --git a/bsd/dev/redfin_gmu_memory.inc b/bsd/dev/redfin_gmu_memory.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gmu_memory.inc
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,288 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Reset-held A620 firmware, owned RAM and GMU kernel-stream translation.
 + * All allocations and installed state are retained until platform reset.
@@ -2477,7 +2477,12 @@ new file mode 100644
 +}
 +static void gm_memory_store(vm_offset_t address, uint32_t value)
 +{
-+    __asm__ volatile("dmb oshst; mov w9, %w0; str w9, [%1]; dsb osh" ::
++    __asm__ volatile("dmb oshst\n\tmov w9, %w0\n\tstr w9, [%1]\n\tdsb osh" ::
++        "r"(value), "r"(address) : "x9", "memory");
++}
++static void gm_memory_store64(vm_offset_t address, uint64_t value)
++{
++    __asm__ volatile("dmb oshst\n\tmov x9, %0\n\tstr x9, [%1]\n\tdsb osh" ::
 +        "r"(value), "r"(address) : "x9", "memory");
 +}
 +static int gm_memory_write(void *argument, unsigned block, uint32_t at, uint32_t value)
@@ -2566,7 +2571,7 @@ new file mode 100644
 +    if (error) return error;
 +    uint64_t request = address;
 +    vm_offset_t ats = context->cb + 0x1000 + 0x800;
-+    __asm__ volatile("dmb oshst; mov x9, %0; str x9, [%1]; dsb osh" :: "r"(request), "r"(ats) : "x9", "memory");
++    gm_memory_store64(ats, request);
 +    uint32_t status = 1, low, high;
 +    for (unsigned us = 0; us < 1000; ++us) {
 +        error = gm_memory_read(context, 1, 0x8f0, &status); if (error) return error;

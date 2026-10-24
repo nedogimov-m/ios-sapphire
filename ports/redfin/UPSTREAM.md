@@ -250,6 +250,14 @@ Upstream step16's AOP-programmed PDC must still not be copied: A620's native
 upstream's `0x80000021`. Those differences are review findings for the later
 CM3 startup, not hardware changes in this memory profile.
 
+The v1/v2 failures exposed a local adaptation error, not an upstream defect:
+`space_on()` uses a single-instruction `wr()` asm, whereas the local combined
+barrier/store string incorrectly used semicolon separators. Darwin dropped
+everything after the first semicolon. Word and atomic ATS helpers now use
+newlines; actual Darwin ARM64 opcode checks cover both widths and zero
+values, including the separate native XNU object. Readback ownership guards
+remain unchanged; no HYP permission or register-mask bypass was added.
+
 ## Display fit and camera geometry review — 2026-10-23
 
 Rechecked both pinned HEADs in the table above. Kernel
