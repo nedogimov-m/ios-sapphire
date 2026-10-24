@@ -26,6 +26,22 @@ licenses.
 
 ## Compatibility boundary
 
+Reviewed 2026-10-24: preferred userland commit
+`906425b75e02b4f99eb5d7bb1ef7c9583472d772`, `userland/mkjobs.py:287` removes
+`_LimitLoadToDeviceTree` from selected jobs, explicitly explaining wifid's
+absent `wlan` node. Redfin's real 20H392 cache retains the wifid gate
+`[wlan, marconi-wifi]`, while the validated native GUI ADT has neither node.
+The manual capture executes Preferences but never wifid; the user reports
+a gray Wi-Fi switch with working touch. `wifi_userland.py` adapts this
+upstream policy to **com.apple.wifid only**, preserves all other jobs and
+properties, validates the stock program/startup/Mach-service identity, and
+keeps the binary cache's exact length with offset-table padding. The fresh
+Redfin root builder applies it after the generic root tweaks. No invented
+Apple DT node or legacy `wifi=1`/modem path is introduced. The existing-root
+update was backed up, bounded to its freshly resolved file allocation and
+verified by full readback; daemon startup and GUI networking still require
+the subsequent device capture.
+
 Reviewed 2026-10-24: pinned Google SEC source
 `0701b191882dc408104ad8af9e2f5eb2bf34c297`, `sec_ts.c:330..430`, retries
 completed reads with bad sync/echo/checksum; `:2337..2350` clears a lost

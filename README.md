@@ -39,10 +39,14 @@ run also validates the owned WLAN context, bidirectional CE/HTC/WMI/HTT
 control traffic, en0/Apple80211 publication and three passive scans with
 25 observed access points. Radio ownership/DMA checks stay healthy for
 about125 seconds until the planned GUI shutdown. The latest SEC event
-session finishes without errors after correcting blocking SPI waits, but
-physical touch must be rechecked following the user's earlier unresponsive
-touch report. Wi-Fi association, Ethernet data/DHCP and actual Settings
-integration remain unverified. Display performance and GPU acceleration
+session finishes without errors after correcting blocking SPI waits. The
+latest manual session records 115 contacts/releases, and the user confirms
+working GUI touch. Settings' Wi-Fi switch remained gray: wifid never
+executed while its stock launchd job required absent Apple DeviceTree
+nodes. The upstream job-gate fix is now applied to Redfin's existing root
+and fresh-root builder; its runtime result is pending. Wi-Fi association,
+Ethernet data/DHCP and actual Settings integration remain unverified.
+Display performance and GPU acceleration
 are still in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

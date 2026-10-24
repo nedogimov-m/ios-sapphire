@@ -17,6 +17,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import wifi_userland
 
 ROOT = Path(__file__).resolve().parents[2]
 IMAGES = {"os": "087-86698-044.dmg", "systemos": "087-86593-047.dmg", "appos": "087-86715-047.dmg"}
@@ -343,6 +344,7 @@ class Builder:
             tweaks = importlib.util.module_from_spec(tweak_spec)
             tweak_spec.loader.exec_module(tweaks)
             tweaks.apply(target, metadata=self.metadata)
+            self.manifest["wifi_userland"] = wifi_userland.prepare_root(target)
             owners = []
             for relative, metadata in self.metadata.items():
                 destination = target / relative

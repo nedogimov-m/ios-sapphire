@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN touch confirmed; upstream wifid job-gate fix applied, GUI validation running — 2026-10-24
+
+Manual-v2 completed with authenticated/boot-ID-matched logs. Preferences
+executes; the SEC session ends error0 with2420 batches and115 contacts/115
+releases, no overflow or recovery. The user independently confirms GUI
+touch works, and reports the Wi-Fi switch remains gray. No exec wifid,
+Apple80211 client ioctl or RedfinWLAN client-open appears. HFSX header is
+clean, write_count556002; public RAM metadata was primed and verified
+fastboot restored. This is a daemon-startup blocker despite the previously
+validated native radio/scans; association/data/DHCP remain unproved.
+
+Reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772,
+userland/mkjobs.py:287: explicitly remove wifid's DeviceTree loading gate.
+Verified that the actual station-v9 ADT lacks wlan/marconi-wifi. Temporary
+verified root-ADB recovery (no disk mounts/swap) extracted the CURRENT HFS
+catalog and resolved the actual launchd cache; it contains530 jobs and the
+stock wifid restriction. New ports/redfin/wifi_userland.py removes only
+that job's _LimitLoadToDeviceTree after checking its program/startup/Mach
+services. Complete decoded-tree equality verifies every other property;
+binary offset-table padding preserves795217 bytes. Fresh Redfin root
+building applies the same fix after generic tweaks, retaining inode/owners.
+All6 focused tests pass (unrelated interned gates, idempotence, malformed
+identities, growth refusal, staging inode/mode/size); both modules compile.
+
+Saved private original file/allocation bytes, verified fresh header and
+original bytes, wrote only the existing allocation with fsync and compared
+the complete readback. File tail and volume header are unchanged; no file
+resize, catalog reallocation, root reinstall or boot/recovery/modem/EFS/
+backup write. Cache SHA256 before7b41fa308304021a90fb8dfc4ac6224e6c1841fb73e47b7f09efbdd7167c91d1,
+after97305ac3174c366c18aeaf0853004ae460509586675b3d7e26346180c5feaba8.
+Private plan/backups/readback: research/redfin-wifi-userland/current-v1/.
+
+Reused kernel source190b466, local build20261024-060104 (no new kernel
+build/CI run). Image SHA2564aa7fdee1758666f9eaaf81544f3307622140f43978214ad0c37460eac2f99d7
+was reverified; fastboot send/boot both OKAY,6.931s total. This proves image
+acceptance only. Automatic collector is running for
+logs/redfin/wifi-gui8-station-v9-wifid-v1; output stays private at
+research/redfin-wifi-userland/device-wifid-v1.txt. Do not interrupt it with
+another device operation. Next: exec wifid/Apple80211 evidence and the user's
+new Settings connection result. GPU/Metal follows working GUI Wi-Fi.
+Kernel SHA256390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x58f44527d96348f3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN manual-v1 collected; validated GUI image relaunched for manual testing — 2026-10-24
 
 Manual-v1 collector completed: authenticated/boot-ID-matched, userspace
