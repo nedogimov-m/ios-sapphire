@@ -47,12 +47,15 @@ nodes. The upstream job-gate fix is applied to Redfin's existing root and
 fresh-root builder. The next authenticated capture confirms wifid starts,
 finds en0 and reads radio capabilities, power and supported channels.
 Manual Settings freezes are traced to wifid waiting in SystemConfiguration
-for InterfaceNamer's IOKit readiness. The preferred upstream's minimal
-IONetworkStack service is now adapted; its runtime validation is pending.
-Wi-Fi association, Ethernet data/DHCP and actual Settings integration
-remain unverified.
-Display performance and GPU acceleration
-are still in progress. [Upstream assessment](ports/redfin/UPSTREAM.md).
+for InterfaceNamer's IOKit readiness. Adapting the preferred upstream's
+minimal IONetworkStack releases that wait. The user now confirms Wi-Fi
+connection from Settings and working internet; About also opens after a
+delay. The authenticated capture proves successful WPA2 authentication,
+association and four-way exchange, link-up and 14,026 received/10,712 sent
+Ethernet frames. Touch completes 103 contacts/releases without errors.
+An isolated DHCP transcript and reconnect/suspend behavior remain untested.
+The known working image is `ports/redfin/out/wifi-gui8-network-stack-v1/redfin-xnu.img`.
+GPU/Metal acceleration is the next priority. [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata

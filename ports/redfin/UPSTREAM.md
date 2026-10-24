@@ -142,7 +142,10 @@ registry translation unit. It starts before the native WLAN interface is
 published. Native BSD KPI already assigns en0, so unsupported naming writes
 are refused as in upstream; no synthetic dynamic-store ready key or
 userland binary patch bypasses the real InterfaceNamer flow. Runtime
-progress beyond the captured wait is the next validation.
+validation succeeds: configd opens the service, both waiting snapshots
+contain no IOKit-quiescence wait, wifid issues scan/join requests, and the
+native station completes WPA2 association/four-way exchange and bidirectional
+Ethernet traffic. The user confirms Settings connection and actual internet.
 
 ## Five porting targets
 

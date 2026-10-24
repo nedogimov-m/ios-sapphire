@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GUI Wi-Fi and internet WORKING; user and authenticated packets confirm — 2026-10-24
+
+User reports: About eventually opens, Wi-Fi works, and internet works.
+Source7c6cf2b's network-stack-v1 capture independently authenticates and
+matches boot ID25d251b846ccc38d. configd opens RedfinNetworkStack (root
+busy state1 at that instant); the two later wait snapshots contain NO
+__wait_for_IOKit_to_quiesce frames. wifid runs once, issues6 scan requests
+and1 join. Native station logs WPA2 auth status0/assoc status0, then the
+four-way exchange completes and station joins at60941ms; en0 link-up and
+Apple80211 join/link events are delivered. Network traffic continues through
+the planned GUI cap: final RX14026/TX10712 Ethernet frames,63 healthy joined
+reports,123 healthy radio audits overall. No earlier ownership/parser/DMA
+failure. User browses with Safari; internet success is user-observed, not
+inferred only from the frame count. A separately decoded DHCP transcript,
+reconnect and suspend/resume behavior are not yet verified.
+
+SEC ends error0 with1114 batches/103 contacts/103 releases. The planned
+180s shutdown revokes the worker lease and its final result1 is expected
+cancellation. Recovery authenticates capture, observes clean journaled
+HFSX/inconsistent false/write_count623088, primes public RAM metadata and
+leaves verified fastboot. Collector is finished; no device operation is
+running. Preserve the user's existing root/network configuration. No
+credentials/SSID/BSSID, raw log or Apple artifact are committed.
+
+Known working checkpoint: ports/redfin/out/wifi-gui8-network-stack-v1/redfin-xnu.img,
+SHA2568ea67f34007fcec3928aa2631dd54296982c851ca97c926a998cedb7d82e6f1d;
+kernel research/redfin-wifi-userland/kernel-network-stack-v1,
+SHA256014c316a51d5cfd967feeb93af016d48026c1146ee99b246516f574304479398.
+Local build20261024-135049; no CI run. Private checkpoint manifest is
+research/redfin-wifi-userland/working-wifi.json and symbolication is
+network-stack-v1-symbolicated.txt beside it. Existing cache original/
+readback backups stay private. Next priority per user: GPU/Metal. Native
+A620 prerequisites already proved CX/clocked reset-held TCM and read-only
+GPU SMMU/CB0/1; next is owned GMU memory/context, then firmware/HFI and GPU
+commands before iOS graphics integration. Keep the working Wi-Fi image
+and its source checkpoint intact. No partition flash, root reinstall or
+modem/persist/EFS/backup change.
+Exact working args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x25d251b846ccc38d redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN actual wifid/configd wait identified; preferred upstream IONetworkStack adapted — 2026-10-24
 
 Waiting-stack diagnostic79af946 succeeds on hardware: two resident-only
