@@ -65,7 +65,7 @@ a translation failure. Every check must pass before later firmware execution.
 preferred upstream's `space_on()` into a one-shot CB1 lease. Fresh snapshots
 must show no fault, active stream4/5 match, CB1 reference (including invalid
 slots), existing CBAR/CBA2R or enabled CB0/1. It changes only CB1 and one
-invalid SMR/S2CR slot. Seventeen typed stores set native NC table walks,
+invalid SMR/S2CR slot. Sixteen typed stores set native NC table walks,
 TCR `0x802019`, TCR2 `0x38011`, MAIR0 `0xf404ff44`, ASID1 and SCTLR
 `0x1027`, synchronize the TLB, then route stream5/mask `0x400`. Faults are
 recorded without interrupts/stalls; no global reset or fault acknowledgement
@@ -112,6 +112,16 @@ stores plus FSR FORMAT `0x400`. It stops on TCR2 readback `0x38071` versus
 retain `0x60`. No ATS or TCM loading is reached. The next revision must
 distinguish implemented fields from reserved readback while retaining the
 complete observed word in every subsequent snapshot audit.
+
+Schema3 implements those readback semantics: TCR2 checks PASIZE/AS/SEP,
+TCR checks T0SZ/EPD0/IRGN0/ORGN0/SH0/TG0/A1/EPD1, and SCTLR checks
+M/E/CFRE/CFIE/CFCFG/HUPCF/ASIDPNE/MTCFG. Dormant TTBR1 geometry is ignored
+while EPD1 is asserted. Native AArch64 does not use the short-descriptor
+CONTEXTIDR write, so it is omitted. Every complete observed word remains
+part of subsequent exact lease audits; later reserved-bit changes revoke
+ownership. The captured TCR2 `0x30061→0x38071` transition is covered alongside
+critical-field rejection, fault/IRQ/stall refusal, foreign changes and each
+of the sixteen failed stores. No register retry or firmware start is added.
 
 ## Native resource and access boundary
 

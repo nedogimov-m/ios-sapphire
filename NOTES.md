@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native implemented context-field model built as memory-v4 — 2026-10-24
+
+Source follows109fe3f. Memory-policy schema3 compares active TCR2 PASIZE/
+AS/SEP, TCR lower geometry/walk cacheability/A1/EPD1 and SCTLR translation/
+endian/fault/IRQ/stall/ASID/memory-type-override controls; dormant TTBR1
+geometry is ignored only with EPD1 asserted. Full observed register words,
+including reserved bits, stay in every subsequent exact audit. Captured
+TCR2reserved60 now passes while PASIZE/walk/A1/stall/MTCFG errors fail.
+Native AArch64 does not use short-descriptor CONTEXTIDR, so omitted that
+write and retained its inherited read-only value. Sequence now16stores.
+No retry, fault ack, critical-bit masking or foreign-context change.
+
+64affected adapter/mapping/ASM/return testsPASS in14.234s; final critical
+ASID/memory-type additions pass6lease tests in0.715s. Local build145033
+PASS (initial field-model build144939 superseded); no CI run. Actual native
+object still has word and atomic ATS stores with both barriers. Kernel
+research/redfin-gpu/kernel-memory-v4,
+SHA256ee03850bbc7a0ccefb3619ab46869aa75546038671778ef7e345d87b5137128d.
+Image ports/redfin/out/gmu-memory-v4/redfin-xnu.img,
+SHA25633cc7d754bf521564f57b4c1bd5441c5b09df98c52b7b22baef7a95e58bcd0c4.
+Loader/live-FDT/Image-window/firmware/hash/shim-UP-return preflightPASS.
+Hardware pending; next capture context/readback, all owned ATS translations
+and firmware TCM. GPU/Metal still unfinished, GUI/Wi-Fi/root preserved.
+No flash/modem/persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x803cd5eaf485c890`.
+
 ## REDFIN real context stores confirmed; native TCR2 reserved readback identified — 2026-10-24
 
 Source1fa7383, native local build20261024-144025, kernel/image/args below.

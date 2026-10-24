@@ -27,7 +27,7 @@ SMMU_CLOCK_POLICY = (0, 0x7100C, 0x80000001, 1,
                      1, 0x5000, 0x80000001, 1)
 SMMU_INTERRUPTS = (705, *range(710, 718))
 CONTEXT_POLICY = (1, 0x8000, 0x4000, 2, 0x1000, 12)
-MEMORY_POLICY = (2, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, 0x802019, 0x38011, 0x1027)
+MEMORY_POLICY = (3, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, 0x802019, 0x38011, 0x1027)
 
 
 def add_contract(tree, nodes, *, smmu=False, context=False, memory=False,

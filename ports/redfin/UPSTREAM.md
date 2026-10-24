@@ -258,6 +258,14 @@ newlines; actual Darwin ARM64 opcode checks cover both widths and zero
 values, including the separate native XNU object. Readback ownership guards
 remain unchanged; no HYP permission or register-mask bypass was added.
 
+Memory-v3 confirms real CB1 stores but TCR2 retains reserved bits6:5.
+Schema3 now compares native active TCR2/TCR/SCTLR fields and retains full
+observed words for later exact audits. Native `arm-smmu.c` only programs
+CONTEXTIDR for AArch32 short descriptors; that unused store is removed from
+the AArch64 sequence. The inherited snapshot value stays audited. Tests
+include the captured reserved-bit behavior and refusal of altered PASIZE,
+walk cacheability, TTBR1 ASID selection, stall and memory-type override.
+
 ## Display fit and camera geometry review — 2026-10-23
 
 Rechecked both pinned HEADs in the table above. Kernel

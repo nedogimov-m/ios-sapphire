@@ -28,6 +28,7 @@ static int sample(void *c,struct rf_gs_snapshot *g,struct rf_gc_snapshot *b){
  samples++;if(check(c))violations++;
  if(issue==8 && writes==4)regs[0xc04/4]^=0x100;
  if(issue==9 && writes==8)regs[(0x9000+0x28)/4]=0x1000;
+ if(issue==16 && writes==5)regs[(0x9000+0x10)/4]^=0x20;
  const struct rf_gs_ops go={c,valid,raw_global};const struct rf_gc_ops bo={c,valid,raw_bank};
  int e=rf_gs_snapshot_run(&go,0x06020001,g);return e?e:rf_gc_snapshot_run(&bo,g,b);
 }
@@ -43,7 +44,17 @@ static int write_word(void *c,unsigned block,uint32_t at,uint32_t v){
  unsigned eb;uint32_t ea,ev;
  if(rf_gmm_step(&lease,&plan,writes,&eb,&ea,&ev) || eb!=block || ea!=at || ev!=v)violations++;
  writes++;if(writes==fail_write)return EIO;
- regs[((block?0x9000:0)+at)/4]=v;
+ unsigned index=((block?0x9000:0)+at)/4;
+ if(block && at==0x34){violations++;return EPERM;} /* AArch32-only register. */
+ if(block && at==0x10)v=(regs[index]&~0x38017u)|(v&0x38017u);
+ if(block && at==0x30)v=(regs[index]&~0x00c0ffbfu)|(v&0x00c0ffbfu);
+ if(block && at==0 && v)v=(v&~6u); /* AFE/TRE can read as zero in AArch64. */
+ if(issue==13 && block && at==0x10)v^=1;
+ if(issue==14 && block && at==0x30)v^=0x100;
+ if(issue==15 && block && at==0 && v)v|=0x80;
+ if(issue==17 && block && at==0x30)v|=0x400000;
+ if(issue==18 && block && at==0 && v)v|=0x100000;
+ regs[index]=v;
  if(!block && at==0x1804)regs[(0x9000+0x58)/4]=0x400;
  if(issue==12 && writes==2)lost=1;
  return 0;
@@ -69,6 +80,7 @@ int run(unsigned mode,unsigned failure){
  plan.root_physical=plan.tables.physical;plan.table_count=4;plan.table_bytes=0x4000;plan.extent_count=1;
  plan.extents[0].memory=(struct rf_gm_memory){data_memory,0x180900000ULL,0x4000,1,0x4000};plan.extents[0].mapped_bytes=0x4000;
  if(issue==5)plan.root_physical+=8;
+ regs[(0x9000+0x10)/4]=0x30061; /* Captured native reserved bits6:5. */
  struct rf_gs_snapshot g;struct rf_gc_snapshot b;
  int e=sample(&lease,&g,&b);if(e)return e;
  const struct rf_gm_memory_owner owner={&lease,valid,owns};
@@ -97,10 +109,10 @@ class GMUMappingTests(unittest.TestCase):
 
     def test_exact_native_sequence_uses_owned_memory_and_format_is_not_a_fault(self):
         self.assertEqual(self.lib.run(0, 0), 0)
-        self.assertEqual([self.lib.stat(i) for i in range(7)], [17, 1, 0, 1, 0, 1, 1])
+        self.assertEqual([self.lib.stat(i) for i in range(7)], [16, 1, 0, 1, 0, 1, 1])
         self.assertEqual(self.lib.fault_format(), 0)
         self.assertEqual(self.lib.retry(), errno.EBUSY)
-        self.assertEqual(self.lib.stat(0), 17)
+        self.assertEqual(self.lib.stat(0), 16)
 
     def test_latent_foreign_context_live_stream_faults_and_invalid_root_never_write(self):
         for mode in range(1, 7):
@@ -116,14 +128,14 @@ class GMUMappingTests(unittest.TestCase):
         self.assertEqual(self.lib.stat(1), 1)
 
     def test_foreign_route_and_owned_ttbr_changes_stop_before_another_write(self):
-        for mode, writes in ((8, 4), (9, 8)):
+        for mode, writes in ((8, 4), (9, 8), (16, 5)):
             self.assertEqual(self.lib.run(mode, 0), errno.EAGAIN)
             self.assertEqual(self.lib.stat(0), writes)
             self.assertEqual(self.lib.stat(3), 0)
             self.assertEqual(self.lib.stat(2), 0)
 
     def test_every_failed_store_wrong_readback_timeout_and_revocation_stop(self):
-        for failed in range(1, 18):
+        for failed in range(1, 17):
             self.assertEqual(self.lib.run(0, failed), errno.EIO)
             self.assertEqual(self.lib.stat(0), failed)
             self.assertEqual(self.lib.stat(3), 0)
@@ -133,6 +145,13 @@ class GMUMappingTests(unittest.TestCase):
         self.assertEqual(self.lib.run(12, 0), errno.ECANCELED)
         self.assertEqual(self.lib.stat(0), 2)
         self.assertEqual(self.lib.stat(2), 0)
+
+    def test_native_reserved_readback_does_not_hide_critical_field_failures(self):
+        for mode, writes in ((13, 4), (14, 5), (15, 14), (17, 5), (18, 14)):
+            self.assertEqual(self.lib.run(mode, 0), errno.EIO)
+            self.assertEqual(self.lib.stat(0), writes)
+            self.assertEqual(self.lib.stat(3), 0)
+            self.assertEqual(self.lib.stat(2), 0)
 
 
 if __name__ == '__main__':

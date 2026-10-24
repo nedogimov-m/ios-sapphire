@@ -11,7 +11,7 @@
 #include "redfin_gmu_pagetables.h"
 
 #define RF_GMM_BANK 1u
-#define RF_GMM_STEPS 17u
+#define RF_GMM_STEPS 16u
 #define RF_GMM_TCR 0x00802019u /* 39-bit/4KiB, NC walks, outer-shareable, EPD1. */
 #define RF_GMM_TCR2 0x00038011u /* 36-bit PA, ASID16, upstream SEP. */
 #define RF_GMM_SCTLR 0x1027u /* M/TRE/AFE/CFRE/ASIDPNE; no stall or IRQ. */
@@ -80,13 +80,13 @@ static inline int rf_gmm_step(const struct rf_gmm_lease *s, const struct rf_gm_p
     case 6: *at = 0x24; *value = (uint32_t)(p->root_physical >> 32) | 0x10000; break;
     case 7: *at = 0x28; break;
     case 8: *at = 0x2c; break;
-    case 9: *at = 0x34; break;
-    case 10: *at = 0x38; *value = p->mair0; break;
-    case 11: *at = 0x3c; break;
-    case 12: *at = 0x610; *value = RF_GMM_BANK; break;
-    case 13: *at = 0x7f0; *value = 1; break;
-    case 14: *value = RF_GMM_SCTLR; break;
-    case 15: *block = 0; *at = 0xc00 + 4u*s->slot; *value = RF_GMM_BANK; break;
+    /* Native CONTEXTIDR is used only by AArch32 short descriptors. */
+    case 9: *at = 0x38; *value = p->mair0; break;
+    case 10: *at = 0x3c; break;
+    case 11: *at = 0x610; *value = RF_GMM_BANK; break;
+    case 12: *at = 0x7f0; *value = 1; break;
+    case 13: *value = RF_GMM_SCTLR; break;
+    case 14: *block = 0; *at = 0xc00 + 4u*s->slot; *value = RF_GMM_BANK; break;
     default: *block = 0; *at = 0x800 + 4u*s->slot; *value = 0x84000005; break;
     }
     return 0;
@@ -134,8 +134,8 @@ static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *
         s->requested = value; s->observed = 0;
         ++s->stores;
         error = o->write(o->context, block, at, value); if (error) goto failed;
-        if (step == 12) continue; /* command register, no readable stored value */
-        if (step == 13) {
+        if (step == 11) continue; /* command register, no readable stored value */
+        if (step == 12) {
             for (unsigned us = 0; us < 1000; ++us) {
                 error = o->check(o->context); if (error) goto failed;
                 ++s->polls; error = o->read(o->context, 1, 0x7f4, &got); if (error) goto failed;
@@ -149,10 +149,14 @@ static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *
         error = o->check(o->context); if (error) goto failed;
         error = o->read(o->context, block, at, &got); if (error) goto failed;
         s->observed = got;
-        /* The native/upstream contract tests CBAR's type and S2CR's
-         * implemented route/privilege fields. Retain the complete observed
-         * word afterwards; reserved HYP readback bits are not assumptions. */
-        uint32_t mask = step == 2 ? 0x30000u : step == 15 ? 0x030300ffu : UINT32_MAX;
+        /* Native active fields only: TCR2 PASIZE/AS/SEP; TCR T0SZ,
+         * EPD0/IRGN0/ORGN0/SH0/TG0, A1 and EPD1; SCTLR M/E/CFRE/CFIE/
+         * CFCFG/HUPCF/ASIDPNE/MTCFG. AFE/TRE are AArch32 controls. Keep every
+         * observed bit afterwards, including reserved and dormant fields,
+         * so a later unexplained change still revokes the lease. */
+        uint32_t mask = step == 2 ? 0x30000u : step == 3 ? 0x38017u :
+            step == 4 ? 0x00c0ffbfu : step == 13 ? 0x001011f1u :
+            step == 14 ? 0x030300ffu : UINT32_MAX;
         if ((got & mask) != (value & mask)) { error = EIO; goto failed; }
         if (step == 7 || step == 8) s->ttbr1_valid |= 1u << (step - 7);
         if (!block) {
@@ -160,10 +164,10 @@ static inline int rf_gmm_claim(struct rf_gmm_lease *s, const struct rf_gmm_ops *
                 s->expected.cba2r[1] = value;
                 s->banks.words[1][8] = (s->banks.words[1][8] & ~0x600u) | 0x400u;
             } else if (step == 2) s->expected.cbar[1] = got;
-            else if (step == 15) s->expected.s2cr[s->slot] = got;
+            else if (step == 14) s->expected.s2cr[s->slot] = got;
             else s->expected.smr[s->slot] = value;
         } else for (unsigned i = 0; i < RF_GC_WORDS; ++i)
-            if (rf_gc_offsets[i] == at) s->banks.words[1][i] = value;
+            if (rf_gc_offsets[i] == at) s->banks.words[1][i] = got;
     }
     error = rf_gmm_verify(s, o); if (error) goto failed;
     s->active = 1;

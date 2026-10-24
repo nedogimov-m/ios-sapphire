@@ -6,7 +6,7 @@ extern int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32
 /* The BSD pmap view omits this machine-private declaration. */
 extern pmap_paddr_t kvtophys(vm_offset_t);
 static const uint32_t gm_memory_policy[] = {
-    2, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
+    3, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
 };
 static struct {
     struct gm_context *context;
