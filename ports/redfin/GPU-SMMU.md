@@ -149,6 +149,28 @@ it per word exceeds the bounded diagnostic window. No clocks or master
 states are changed by the transfer. Host guard tests reject stopped clock,
 released reset, changed INIT/HFI and revoked binding/parent state.
 
+## Authenticated memory-v6 hardware checkpoint — 2026-10-24
+
+Source54e9dbe, local native build20261024-150519, memory-policy schema5.
+The capture matches image hash and boot ID and finishes result0/stage7:
+seven allocations/393216owned bytes, five table pages/43 mapped pages,
+sixteen context/route stores, seven loaded and verified firmware payloads.
+Native TCM retention reads1. All4601 ITCM/DTCM words match with zero
+mismatches, and both ordinary RAM payloads verify. Final full lease audit
+passes, FSR FORMAT remains400 with no genuine fault; CM3 is still reset-held
+and INIT/HFI remain zero. Ordinary ATS is explicitly unavailable and no
+request is issued. This proves preparation/readback, not real DMA.
+
+The integrated preparation takes30.703s, then staticPID1 emits5heartbeats.
+Recovery authenticates/decrypts, verifies public RAM priming, observes the
+same clean HFSX/write_count623088 and returns to verified fastboot.
+Image `ports/redfin/out/gmu-memory-v6/redfin-xnu.img`, SHA256
+`e78c6f7e69073f942c572e9805ff1d0d42cae1a93cc4d81e741be891a1bb6b2d`;
+kernel SHA256 `1d44d21c0afff82f752154ab26fe58c044c55a3baee985b8be6e384146e06a8d`.
+Private checkpoint `research/redfin-gpu/working-memory.json` retains exact
+arguments, build provenance and observations. Firmware, raw logs and keys
+remain private. Preserve the separate working GUI/Wi-Fi checkpoint.
+
 ## Native resource and access boundary
 
 The preferred [HackiOS kernel][hackios] at
@@ -421,11 +443,12 @@ cases. The private header copy also passes the actual XNU
 `DEVELOPMENT_ARM64_SWEET` BSD compiler flags with `-Werror`.
 These are CPU-memory results; no table is installed or firmware started.
 
-TCM, globals and read-only CB0/1 now have authenticated hardware results as
-recorded above and in NOTES.md. Next: collect memory-v1's firmware readback,
-native context readback and positive ATS results. Only successful hardware
-translation can support the later PDC/RSC/CM3/HFI start; GPU commands and iOS
-graphics integration follow separately.
+TCM, globals, CB0/1 observation and complete owned memory/firmware preparation
+now have authenticated results as recorded above and in NOTES.md. Next:
+adapt the native A620 PDC/RSC cold-start sequence, start CM3 with fully
+retained/published memory, then prove fresh firmware completion and HFI
+response. That exchange must supply actual DMA evidence absent generic ATS.
+GPU commands and iOS graphics integration follow separately.
 
 [hackios]: https://github.com/oosexgang/hackios-xnu-kernel/tree/8e61187098f2c26c5daee8f9f72b6416aa64b9ab
 [smmu]: https://android.googlesource.com/kernel/msm/+/500b3a2059c1eec0fec08ec56add06320ea901a8/drivers/iommu/arm-smmu.c

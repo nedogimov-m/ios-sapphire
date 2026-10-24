@@ -6,6 +6,14 @@ GMU at `0x03d6a000`. Native Linux recovery reports **Adreno620v2**, with
 275/400/500/625 MHz operating points. Sapphire's Adreno 610 GMU-wrapper
 initialization is incompatible; keep inherited `gpu=0`.
 
+Current authenticated checkpoint,2026-10-24: held CX and200MHz reset-held
+GMU work. Memory-v6 also allocates private wired RAM, builds native tables,
+configures/audits CB1 and stream5, enables TCM retention, and loads/verifies
+all seven native GMU firmware payloads. CM3 remains reset-held; no actual
+DMA, HFI execution, GPU command or Metal acceleration is proved. Native
+generic ATS is unavailable on this SMMU; see [GPU-SMMU.md](GPU-SMMU.md).
+The next hardware batch is native PDC/RSC/CM3/HFI startup.
+
 `--gpu-probe` adds `redfingpu=1` and an exact, validated `/redfin-gpu` ADT
 contract. It first reads GCC configuration/memory clocks. GPUCC is read
 only when GCC's GPU configuration AHB branch is enabled and not halted.

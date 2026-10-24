@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GMU owned memory/context and ALL firmware payloads hardware PASS — 2026-10-24
+
+Source54e9dbe, local native build20261024-150519 (no CI run). Authenticated
+memory-v6 capture logs/redfin/gmu-memory-v6 matches image and boot ID
+a25af93c9d4f0b7c. Complete preparation result0/stage7:7allocations,
+393216owned bytes,5table pages/43mapped pages,16native context/route stores,
+7loaded/7verified payloads. Native GENERAL_7 retention0→1→read1. ITCM
+payloads192/320/14092bytes verify48/80/3523words; DTCM3776/24bytes verify
+944/6words; total4601TCMwords, ZERO mismatches. RAM21968/920bytes also
+verify. HFI memory initialized, not executing. Final complete context/
+global audit passes,poisoned0,SCTLR27,TCR238071,TCR802019,owned root/ASID1,
+SMR84000005. FSR400 is format with no genuine fault; unchanged foreign
+routes/CB0 are audited. Native ATOSNS1 explicitly logs ATS unavailable,
+issues no unsupported request; real DMA translations are still UNPROVED.
+CM3 remains reset-held/INIT0/HFI0 throughout. No GPU/Metal execution claim.
+
+Measured integrated preparation30,703,181,510ns. StaticPID1 then gives
+5heartbeats. Collector finishes authenticated host decryption, verifies
+public RAM metadata priming, observes HFSXclean/journaled/inconsistentfalse/
+write_count623088 UNCHANGED, and leaves verified fastboot. No collector or
+device operation remains active. Kernel source overlay fingerprints match
+the saved build. Private full checkpoint: research/redfin-gpu/working-memory.json.
+Source, protocol/ABI changes, native readback cases, Darwin instruction
+regression and bounded TCM guard are committed. Latest9targeted tests PASS;
+earlier192firmware/table/context/adapter/return batch and later64affected
+tests passed; no unrelated full-suite repeat. The known working GUI/Wi-Fi
+image hash8ea67f34… rechecked intact; existing root/network config preserved.
+
+Kernel research/redfin-gpu/kernel-memory-v6,
+SHA2561d44d21c0afff82f752154ab26fe58c044c55a3baee985b8be6e384146e06a8d;
+image ports/redfin/out/gmu-memory-v6/redfin-xnu.img,
+SHA256e78c6f7e69073f942c572e9805ff1d0d42cae1a93cc4d81e741be891a1bb6b2d.
+Loader/live-FDT/Image-window/firmware/hash/shim-return preflightPASS.
+Next concrete batch: native A620 PDC/RSC/CMD-DB setup, uncached HFI host
+view, CM3 reset release with fresh version-dependent completion, HFI init
+and a fresh bounded version ACK. Native A620 programs its PDC (pdc_in_aop
+false),RSC hiddenTCSdata80000000; do not copy upstream642L's AOP assumption/
+80000021. Require actual firmware/HFI/DMA evidence before GPU commands or
+advertising an iOS graphics/Metal driver. No partition flash, root reinstall,
+modem/persist/EFS/backup change; raw logs/firmware/Apple artifacts stay private.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0xa25af93c9d4f0b7c`.
+
 ## REDFIN full GMU context/route readback PASS; native generic ATS unavailable — 2026-10-24
 
 Sourcece9a0f8, local native build145613, authenticated memory-v5 matches

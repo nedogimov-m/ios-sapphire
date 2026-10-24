@@ -281,6 +281,12 @@ ATS, preserving explicit unavailability rather than inventing a successful
 translation or accessing a new TBU debug range. DMA proof remains for
 actual CM3/HFI traffic or a separately adapted native ECATS implementation.
 
+Authenticated source54e9dbe/memory-v6 now passes owned memory/context/route
+and all7firmware payload readbacks with CM3 reset held. No new upstream
+commit or userland ABI was imported. The next adaptation remains native
+A620 PDC/RSC (not the AOP-programmed upstream variant), CM3 completion and
+fresh HFI traffic; readback alone is not claimed as DMA/Metal support.
+
 ## Display fit and camera geometry review — 2026-10-23
 
 Rechecked both pinned HEADs in the table above. Kernel

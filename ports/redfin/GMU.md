@@ -2,9 +2,21 @@
 
 The firmware planner and HFI codec are implemented and host tested in
 [`include/redfin_gmu_firmware.h`](include/redfin_gmu_firmware.h).
-They do not enable a GPU driver. Physical CX power, clocks, GMU execution,
-owned SMMU translations and accelerated rendering require separate tests.
+They do not enable a GPU driver. CX power, clocks, reset-held TCM and native
+owned context/route readback have authenticated hardware results. GMU
+execution, real DMA translations and accelerated rendering remain unproved.
 Keep the inherited Sapphire `gpu=0`; its A610 wrapper is incompatible.
+
+The2026-10-24 memory-v6 capture passes complete reset-held preparation:
+seven zeroed/wired allocations, five native4KiB table pages/43 mapped pages,
+CB1/stream5 readback, native TCM retention and all seven firmware payloads
+loaded/verified. All4601 ITCM/DTCM words match, with no faults or lease
+changes. HFI memory is initialized but not running. Ordinary ATS is not
+supported (ID0.ATOSNS=1), so no successful hardware translation is claimed.
+Preparation takes30.703s; staticPID1 then runs and recovery preserves the
+clean/unmodified HFS root. See [GPU-SMMU.md](GPU-SMMU.md) and NOTES.md.
+Next is one native PDC/RSC/CM3/HFI startup batch with fresh firmware/HFI
+evidence, followed by GPU command output and iOS graphics integration.
 
 The diagnostic ADT carries IRQ ownership metadata as `gic-intids`, not the
 standard `interrupts` key. XNU imports the latter through

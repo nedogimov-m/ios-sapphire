@@ -55,7 +55,11 @@ association and four-way exchange, link-up and 14,026 received/10,712 sent
 Ethernet frames. Touch completes 103 contacts/releases without errors.
 An isolated DHCP transcript and reconnect/suspend behavior remain untested.
 The known working image is `ports/redfin/out/wifi-gui8-network-stack-v1/redfin-xnu.img`.
-GPU/Metal acceleration is the next priority. [Upstream assessment](ports/redfin/UPSTREAM.md).
+GPU/Metal acceleration is the next priority. The isolated A620 memory-v6
+capture now proves owned wired RAM, native CB1/stream5 readback and all
+seven GMU firmware payloads loaded and verified, with CM3 still reset-held.
+Firmware execution, real DMA/HFI and GPU commands remain unfinished.
+[Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
