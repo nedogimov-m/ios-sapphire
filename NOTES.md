@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN shader/Mesa files installed with complete readback; integrated boot next — 2026-10-24
+
+Source68b2a3b; GPU GUI3 imagev2/kernelbuild233330 unchanged. The prepared
+root update has now been applied from verified unmounted offline recovery.
+All21bounded transfer pieces have complete device readback matching the
+staged image, after every prior target range was backed up. Existing allocated
+blocks matched the current snapshot; the full live bitmap matched as well.
+New data/cache first, catalog/allocation next, both volume headers last.
+Only16,834,560bytes inside the first16GiB userdata root changed; zero blocks
+were freed. New files: /redfin/bin/gpu-render, /redfin/lib/libOSMesa.8.dylib,
+/Library/LaunchDaemons/com.redfin.gpu-render.plist. Every original launchd
+job and the cache's exact allocation/size are retained. Empty journal is
+byte-for-byte unchanged; HFSXclean/inconsistentfalse/write_count623088.
+Backups/preimages/plans remain ignored under research/redfin-graphics/root-update-v1.
+Recovery leaves verified fastboot. No boot/recovery/modem/persist/EFS writes.
+Next operation is one temporary integrated GPU3/WLAN/GUI8 shader run using
+image88675d62529d38b794cd7ab67554687173dd092bdbbf3efd0238fc0811f7a4c6,
+boot48394225453568a8 and the exact pending args below. Rendering remains
+unproved until actual authenticated iOS output, fences and pixel checks pass.
+
 ## REDFIN GUI3 image/preflight and reversible iOS test files ready — 2026-10-24
 
 Sourcea9f0739, kernel-service-v1/localbuild233330 retained. Full GUI8/WLAN/GPU
