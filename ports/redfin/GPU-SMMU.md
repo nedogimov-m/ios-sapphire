@@ -52,9 +52,14 @@ firmware/hash/ADT contract before any parent power write.
 [`gmu-memory.inc`](gmu-memory.inc) allocates zeroed, wired, contiguous private
 RAM through XNU, verifies every 4KiB physical/host pair and retains the full
 allocations until platform reset. The total bound is 1MiB; the table pool is
-`0x28000` bytes. It constructs native 4KiB/39-bit tables, transfers and reads
-back every firmware payload in reset-held ITCM/DTCM or owned RAM, initializes
-the four-queue native HFI table, then cleans data and tables to PoC.
+`0x28000` bytes. Schema2 constructs native 4KiB/39-bit tables, copies/verifies
+the ordinary RAM payloads and initializes the four-queue native HFI table,
+then cleans data and tables to PoC before context publication. After positive
+ATS checks it sets native `GENERAL_7=1` TCM retention and writes/verifies
+ITCM/DTCM. This follows upstream steps13→14 and native cold-start retention
+order. Per-payload progress and the first four mismatched words are logged;
+the whole payload's mismatch count is retained. TCM failure cannot be called
+a translation failure. Every check must pass before later firmware execution.
 
 [`include/redfin_gmu_mapping.h`](include/redfin_gmu_mapping.h) adapts the
 preferred upstream's `space_on()` into a one-shot CB1 lease. Fresh snapshots

@@ -6,7 +6,7 @@ extern int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32
 /* The BSD pmap view omits this machine-private declaration. */
 extern pmap_paddr_t kvtophys(vm_offset_t);
 static const uint32_t gm_memory_policy[] = {
-    1, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
+    2, 1, 5, 0x400, 39, 36, 0x100000, 0x28000, RF_GMM_TCR, RF_GMM_TCR2, RF_GMM_SCTLR
 };
 static struct {
     struct gm_context *context;
@@ -14,7 +14,7 @@ static struct {
     struct rf_gm_pt_plan tables;
     struct rf_gmm_lease lease;
     struct rf_gm_memory data[RF_GM_PT_MAX_EXTENTS], pool;
-    unsigned count, allocations, translations;
+    unsigned count, allocations, translations, loaded, verified;
     uint64_t allocated;
     uint32_t bytes;
     uint8_t digest[32], image[REDFIN_GMU_MAX_FILE_BYTES];
@@ -139,14 +139,17 @@ static int gm_memory_delay(void *argument, unsigned microseconds)
     delay(1); return 0;
 }
 
-static int gm_memory_transfer(struct gm_context *context)
+static int gm_memory_transfer(struct gm_context *context, bool tcm)
 {
     for (unsigned p = 0; p < gm_memory.firmware.payload_count; ++p) {
         const struct redfin_gmu_payload *payload = &gm_memory.firmware.payloads[p];
         const struct redfin_gmu_region *region = &gm_memory.firmware.regions[payload->region];
         const uint8_t *source = gm_memory.image + payload->file_offset;
         uint32_t offset = payload->address - region->address;
+        if ((payload->region < 2) != tcm) continue;
         if (!gm_memory_valid(context)) return ECANCELED;
+        printf("REDFIN GMU LOAD: payload=%u address=%#x bytes=%u tcm=%u\n",
+            p, payload->address, payload->bytes, tcm);
         if (payload->region < 2) {
             uint32_t mmio;
             if (redfin_gmu_tcm_mmio(region, offset, payload->bytes, &mmio)) return EINVAL;
@@ -154,18 +157,33 @@ static int gm_memory_transfer(struct gm_context *context)
                 if (!gm_memory_valid(context)) return ECANCELED;
                 gm_memory_store(context->base[RF_GT_GMU] + mmio + j, redfin_gmu_read_le32(source + j));
             }
+            ++gm_memory.loaded;
+            unsigned mismatches = 0;
             for (unsigned j = 0; j < payload->bytes; j += 4) {
                 if (!gm_memory_valid(context)) return ECANCELED;
-                if (gm_scalar_read(context->base[RF_GT_GMU] + mmio + j) != redfin_gmu_read_le32(source + j)) return EIO;
+                uint32_t expected = redfin_gmu_read_le32(source + j);
+                uint32_t actual = gm_scalar_read(context->base[RF_GT_GMU] + mmio + j);
+                if (actual != expected) {
+                    if (mismatches < 4)
+                        printf("REDFIN GMU TCM MISMATCH: payload=%u address=%#x mmio=%#x expected=%#x actual=%#x\n",
+                            p, payload->address + j, mmio + j, expected, actual);
+                    ++mismatches;
+                }
             }
+            printf("REDFIN GMU TCM VERIFIED: payload=%u words=%u mismatches=%u\n",
+                p, payload->bytes / 4, mismatches);
+            if (mismatches) return EIO;
         } else {
             struct rf_gm_memory *target = &gm_memory.data[payload->region - 2];
             if (!gm_memory_owns(context, target, RF_GM_PT_DATA) || offset > target->owned_bytes ||
                 payload->bytes > target->owned_bytes - offset) return EPERM;
             memcpy((uint8_t *)target->host + offset, source, payload->bytes);
+            ++gm_memory.loaded;
             if (memcmp((uint8_t *)target->host + offset, source, payload->bytes)) return EIO;
         }
+        ++gm_memory.verified;
     }
+    if (tcm) return 0;
     for (unsigned i = 0; i < gm_memory.count; ++i)
         if (gm_memory.data[i].gmu_address == gm_memory.firmware.hfi_address)
             return redfin_gmu_hfi_init(gm_memory.data[i].host, REDFIN_GMU_HFI_MAPPED_BYTES,
@@ -218,12 +236,12 @@ static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot
     stage = 2;
     error = rf_gm_pt_build(global, gm_chip, gm_memory.image, gm_memory.bytes,
         gm_memory.data, gm_memory.count, &gm_memory.pool, &owner, &gm_memory.tables); if (error) goto done;
-    printf("REDFIN GMU MEMORY STEP: tables=%u pages=%u root=%#llx; transfer and verify firmware\n",
+    printf("REDFIN GMU MEMORY STEP: tables=%u pages=%u root=%#llx; initialize owned RAM and HFI\n",
         gm_memory.tables.table_count, gm_memory.tables.mapped_pages,
         (unsigned long long)gm_memory.tables.root_physical);
-    stage = 3; error = gm_memory_transfer(context); if (error) goto done;
+    stage = 3; error = gm_memory_transfer(context, false); if (error) goto done;
     stage = 4;
-    printf("REDFIN GMU MEMORY STEP: firmware verified and HFI initialized; publish CB1 and stream5\n");
+    printf("REDFIN GMU MEMORY STEP: owned RAM/HFI initialized; publish CB1 and stream5\n");
     error = rf_gmm_claim(&gm_memory.lease, &ops, global, banks, &gm_memory.tables, &owner); if (error) goto done;
     gm_memory.retained = true; stage = 5;
     for (unsigned i = 0; i < gm_memory.tables.extent_count; ++i) {
@@ -233,6 +251,21 @@ static int gm_memory_run(struct gm_context *context, const struct rf_gs_snapshot
             r->memory.physical + r->mapped_bytes - 4096); if (error) goto done;
     }
     stage = 6;
+    /* Native a6xx_gmu_fw_start enables TCM retention before loading TCM.
+     * Translation/ATS is independently proved first, as upstream steps13/14.
+     * CM3 remains held; no firmware fetch or HFI execution is allowed. */
+    error = gm_memory_check(context); if (error) goto done;
+    printf("REDFIN GMU TCM RETENTION: before=%#x requested=1\n",
+        gm_scalar_read(context->base[RF_GT_GMU] + 0x14730));
+    error = gm_memory_check(context); if (error) goto done;
+    gm_memory_store(context->base[RF_GT_GMU] + 0x14730, 1);
+    error = gm_memory_check(context); if (error) goto done;
+    uint32_t retention = gm_scalar_read(context->base[RF_GT_GMU] + 0x14730);
+    printf("REDFIN GMU TCM RETENTION: observed=%#x\n", retention);
+    if (retention != 1) { error = EIO; goto done; }
+    error = gm_memory_transfer(context, true); if (error) goto done;
+    error = rf_gmm_verify(&gm_memory.lease, &ops); if (error) goto done;
+    stage = 7;
 done:
     if (gm_memory.lease.attempted)
         printf("REDFIN GMU MEMORY LEASE: step=%u block=%u offset=%#x requested=%#x observed=%#x poisoned=%u; CB1 SCTLR=%#x TCR2=%#x TTBR=%#x/%#x TCR=%#x FSR=%#x\n",
@@ -241,8 +274,9 @@ done:
             gm_memory.lease.fresh_banks.words[1][0], gm_memory.lease.fresh_banks.words[1][1],
             gm_memory.lease.fresh_banks.words[1][2], gm_memory.lease.fresh_banks.words[1][3],
             gm_memory.lease.fresh_banks.words[1][4], gm_memory.lease.fresh_banks.words[1][8]);
-    printf("REDFIN GMU MEMORY: result=%d stage=%u firmware=%u payloads=%u allocations=%u bytes=%llu tables=%u pages=%u bank=1 slot=%u stores=%u translations=%u retained=%u; CM3 reset held, no GX/firmware execution\n",
-        error, stage, gm_memory.bytes, gm_memory.firmware.payload_count, gm_memory.allocations,
+    printf("REDFIN GMU MEMORY: result=%d stage=%u firmware=%u payloads=%u loaded=%u verified=%u allocations=%u bytes=%llu tables=%u pages=%u bank=1 slot=%u stores=%u translations=%u retained=%u; CM3 reset held, no GX/firmware execution\n",
+        error, stage, gm_memory.bytes, gm_memory.firmware.payload_count, gm_memory.loaded,
+        gm_memory.verified, gm_memory.allocations,
         (unsigned long long)gm_memory.allocated, gm_memory.tables.table_count, gm_memory.tables.mapped_pages,
         gm_memory.lease.slot, gm_memory.lease.stores, gm_memory.translations, gm_memory.allocations != 0);
     return error;

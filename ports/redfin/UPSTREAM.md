@@ -241,6 +241,15 @@ memory profile verifies every payload and owned ATS translation. Native
 firmware execution/HFI, GPU command output and the actual20H392 graphics
 bridge remain unfinished; see [GPU-SMMU.md](GPU-SMMU.md).
 
+After memory-v1's TCM readback refusal, rechecked native
+`adreno_a6xx_gmu.c:a6xx_gmu_fw_start`: cold boot writes `GENERAL_7=1` before
+loading TCM. Redfin schema2 includes that retained-memory prerequisite and
+keeps the preferred upstream step13 mapping/ATS before step14 TCM transfer.
+Upstream step16's AOP-programmed PDC must still not be copied: A620's native
+`pdc_in_aop` is false, and native RSC hidden TCS data is `0x80000000`, unlike
+upstream's `0x80000021`. Those differences are review findings for the later
+CM3 startup, not hardware changes in this memory profile.
+
 ## Display fit and camera geometry review — 2026-10-23
 
 Rechecked both pinned HEADs in the table above. Kernel

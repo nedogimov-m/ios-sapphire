@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native TCM retention and independent mapping/ATS batch built — 2026-10-24
+
+Source follows6de87c4. Rechecked native a6xx_gmu_fw_start: sets GENERAL_7=1
+before cold TCM load. Memory-policy schema2 now includes that source-backed
+prerequisite and keeps upstream's mapping→TCM order. Copies/verifies owned
+RAM and initializes HFI before cache/context publication; installs/audits
+CB1 and checks all12positive first/last-page ATS translations before TCM
+retention/loading. Adds per-payload loaded/verified counts, exact first4
+TCM word mismatches and total payload mismatch count. Failures still stop,
+retain allocations, keep CM3 reset-held and never retry/ack faults. No claim
+yet that retention caused v1's EIO or that translation works on hardware.
+
+62affected adapter/mapping/return tests PASS in17.354s; other unchanged
+firmware/table tests passed in the preceding192-test batch. Local native
+build20261024-143239PASS, no CI run. Kernel research/redfin-gpu/kernel-memory-v2,
+SHA256d7f0105fb14d9d5245ce392bfe76a0022f213845501f9dd834a306eeb76f4b7a.
+Image ports/redfin/out/gmu-memory-v2/redfin-xnu.img,
+SHA2564f074a14f33c89e619137244a47c918ef75d8debab68abc5460511e059a04d46.
+Actual loader/live-FDT/Image-window, exact packed native firmware and
+compiled-shim md0 return preflight PASS. Firmware remains41,548bytes and
+matches original inventory hash. Hardware capture pending. Working GUI/
+Wi-Fi checkpoint and root remain untouched; no flash or protected partition
+change. Next: authenticated context/ATS and exact TCM verification results,
+then native PDC/RSC/CM3/HFI on full success; GPU/Metal remains unfinished.
+Exact args: `debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 redfingpu=2 redfinrpmh=1 redfingpupower=1 redfingmu=1 redfinsmmu=3 redfinspmi=1 redfinreturn=1 redfinbootid=0x8b31e80485d42089`.
+
 ## REDFIN GMU allocations/tables pass; TCM transfer readback stops before context writes — 2026-10-24
 
 Source8f2924d, native local build20261024-142257 and memory-v1 image below.
