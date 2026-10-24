@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN station-v6 actual HTC/WMI/HTT, en0 and RF scan PASS; live CE ownership prepared — 2026-10-24
+
+Source `7ffef39`, native build051051, authenticated station-v6 capture
+matches boot IDb9b7975b444fd6fa. Context lease0/all5 stores; HTC READY
+credits2x2184, WMI/HTT service endpoints1/2; actual WMI READY, HTT3.96,
+255-buffer RX setup and scan start. BSD en0 and the IOKit/Apple80211 provider
+publish. Ten real APs are received on2.4/5GHz before the first one-second
+audit returns EAGAIN35 at56070ms. This proves bidirectional control/scan
+transport and kernel network publication, not association/data/DHCP or
+Settings integration. No specific audit field was printed by that version.
+Touch completes error0, one batch/zero contacts; physical input unconfirmed.
+HFSX clean/write_count513270, authenticated capture and verified fastboot.
+
+Native host_ce_config_wlan owns only one side of most CEs. The former audit
+froze every source/destination/CTRL1 word, including live firmware fields.
+The new masks protect the host's actual ring base/size and owned CTRL1
+subfields, retain live opposite-side configuration, and add host RRI checks.
+CTRL1 writes preserve fresh unowned bits. Exact SMMU/CE/RRI failure evidence
+now distinguishes the first audit refusal without new writable authority.
+SMMU/guards remain exact. Native WMI READY layout matches the parser; actual
+firmware supplies zero MAC. A valid firmware MAC is preferred, otherwise one
+local unicast address is generated per boot before vdev/ifnet publication.
+Nonzero native READY status is refused. No factory/NVM/persist MAC is changed.
+
+All29 focused CE/lease/mission/SNOC/GUI tests PASS. Native local
+`build-20261024-052255.log` PASS (no CI run). Actual loader/live-FDT/GUI8
+return/DMA32/shim guard preflight PASS; Image130216800 bytes.
+Kernel `c1097e74f9942d6ec1b6524c00834b5e59647f6e42ffb28918719aa7abfc50d2`;
+image `abcb0e071d6bfbbbbf1e83c8d1a70adb6cb553f05f4ed589ce78c40801bbae06`.
+Exact station-v7 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xfee8f49837a07418 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Next: combined station-v7 run; maintain radio/scan through the GUI session,
+then verify actual wifid/Settings discovery, touch and association/data/DHCP.
+GPU/Metal remains afterward. No partition flash, persistent EFS/firmware
+write or backup change.
+
 ## REDFIN station-v5 owned WLAN context/CE start PASS; native RX guard adaptation prepared — 2026-10-24
 
 Source `839af8b`, native build050040, authenticated station-v5 capture

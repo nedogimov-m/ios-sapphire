@@ -542,6 +542,19 @@ pointer. Upper completion control/metadata is not a new DMA pointer.
 The completion barrier precedes remaining descriptor/payload loads; rejected
 descriptors log length, raw address/flags and the expected posted address.
 
+Reviewed again2026-10-24 after real HTC/WMI/HTT, ifnet publication and scan:
+native `snoc.c:host_ce_config_wlan` distinguishes the host side of each CE
+from its live firmware side. Runtime audits now protect only the host's
+source/destination base/size and the owned CTRL1 subfields, plus the separate
+host RRI address. Firmware-owned ring configuration and indices remain live;
+CTRL1 writes must preserve the current unowned bits. Whole APPS SMMU and
+DMA guards stay exact. Refusals identify the responsible SMMU/CE/RRI field.
+Native `wmi-tlv.h:wmi_tlv_rdy_ev` confirms the24-byte ABI/MAC/status layout;
+the observed zero firmware MAC is not a private-ABI offset fix. One local
+unicast address is chosen for this boot when firmware supplies no usable
+address, consistently before vdev/station/ifnet publication. A nonzero READY
+status never grants native readiness.
+
 GUI2 composes these resources with the existing GUI8 root/display/touch
 profile. It uses the same bounded boot-argument length, frozen CPU/root
 checks and cached shim return. Touch completes its DRV2 power setup first;

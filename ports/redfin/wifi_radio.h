@@ -17,6 +17,11 @@ struct redfin_sta_channel;
  * carry address bits[34:0] separately from the upper control/metadata.
  * The CPU always uses its own posted-buffer pointer, never this field. */
 #define REDFIN_WIFI_CE_DESC_ADDRESS UINT64_C(0x7ffffffff)
+static inline bool redfin_wifi_mac_usable(const uint8_t address[6])
+{
+    return address && !(address[0] & 1u) &&
+        (address[0] | address[1] | address[2] | address[3] | address[4] | address[5]);
+}
 static inline unsigned redfin_wifi_ce_receive_check(uint64_t reported, uint64_t posted,
     unsigned bytes, unsigned capacity)
 {

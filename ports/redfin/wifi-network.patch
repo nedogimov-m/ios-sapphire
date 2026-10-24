@@ -2504,7 +2504,7 @@ diff --git a/bsd/sys/redfin_wifi_radio.h b/bsd/sys/redfin_wifi_radio.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/sys/redfin_wifi_radio.h
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,67 @@
 +/* SPDX-License-Identifier: MIT
 + * Hardware boundary for the inherited ath10k-compatible station engine.
 + * One native CPU0 worker owns all MMIO/DMA allocations. Other threads use
@@ -2524,6 +2524,11 @@ new file mode 100644
 + * carry address bits[34:0] separately from the upper control/metadata.
 + * The CPU always uses its own posted-buffer pointer, never this field. */
 +#define REDFIN_WIFI_CE_DESC_ADDRESS UINT64_C(0x7ffffffff)
++static inline bool redfin_wifi_mac_usable(const uint8_t address[6])
++{
++    return address && !(address[0] & 1u) &&
++        (address[0] | address[1] | address[2] | address[3] | address[4] | address[5]);
++}
 +static inline unsigned redfin_wifi_ce_receive_check(uint64_t reported, uint64_t posted,
 +    unsigned bytes, unsigned capacity)
 +{

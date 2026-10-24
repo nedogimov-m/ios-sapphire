@@ -21,6 +21,21 @@ struct rf_ce_ops {
     int (*check)(void *);
     int (*read)(void *, uint32_t, uint32_t *);
 };
+/* Host configuration ownership from native snoc.c host_ce_config_wlan.
+ * The opposite side of each CE remains live firmware state after HTT setup.
+ * Read/write indices and status are deliberately absent from this mask. */
+static inline uint32_t rf_ce_host_config_mask(uint32_t at, unsigned source_entries, unsigned dest_entries)
+{
+    switch (at) {
+    case 0: case 8: return source_entries ? UINT32_MAX : 0;
+    case 4: return source_entries ? 0x1fu : 0;
+    case 0x0c: case 0x14: return dest_entries ? UINT32_MAX : 0;
+    case 0x10: return dest_entries ? 0x1fu : 0;
+    case 0x18: return (1u << 19) | (source_entries ? 0xffffu | (1u << 17) : 0) |
+        (dest_entries ? 1u << 18 : 0);
+    default: return 0;
+    }
+}
 static inline bool rf_ce_read_allowed(uint32_t at)
 {
     if (at & 3u) return false;

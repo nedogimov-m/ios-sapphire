@@ -114,7 +114,12 @@ static int fw_start_packet_ce_write(void *opaque, uint32_t at, uint32_t value)
         else if (offset == 0x0c && fw_packet_dest_entries[ce]) allowed = fw_start_packet_address(context, value);
         else if (offset == 0x10 && fw_packet_dest_entries[ce]) allowed = !((value ^ context->packet_expected[ce][4]) & ~0x1fu) && !(value & 0x1fu);
         else if (offset == 0x14 && fw_packet_dest_entries[ce]) allowed = value == fw_packet_dest_entries[ce];
-        else if (offset == 0x18) allowed = !((value ^ context->packet_expected[ce][6]) & ~(0xffffu | (7u << 17)));
+        else if (offset == 0x18) {
+            uint32_t live = 0;
+            uint32_t owned = rf_ce_host_config_mask(offset, fw_packet_source_entries[ce], fw_packet_dest_entries[ce]);
+            if (fw_start_packet_ce_read(context, at, &live)) return EPERM;
+            allowed = !((value ^ live) & ~owned);
+        }
         else if (offset == 0x4c && fw_packet_source_entries[ce]) allowed = value == fw_packet_source_entries[ce];
         else if (offset == 0x50 && fw_packet_dest_entries[ce]) allowed = value == fw_packet_dest_entries[ce];
         else if (offset == 0x40 && fw_packet_dest_entries[ce] && ce != 7) allowed = value < fw_packet_dest_entries[ce];
@@ -195,14 +200,36 @@ static int fw_start_packets_poll(fw_start_context *context, uint64_t now)
     if (error) return error;
     if (now >= context->packet_audit) {
         error = rf_snoc_lease_verify(&context->packet_lease, &context->packet_lease_ops);
+        if (error) {
+            unsigned block = 0; uint32_t at = 0, expected = 0, observed = 0;
+            bool changed = rf_snoc_lease_difference(&context->packet_lease, &block, &at, &expected, &observed);
+            IOLog("REDFIN WIFI PACKETS: SMMU audit=%d changed=%u block=%u at=%#x expected=%#x observed=%#x sample=%u/%u\n",
+                error, changed, block, at, expected, observed, context->packet_lease.fresh.stage, context->packet_lease.fresh.error);
+        }
         if (!error) error = fw_start_packet_guards(context, false);
         if (!error) error = redfin_wifi_power_audit();
         for (unsigned ce = 0; !error && ce < RF_CE_COUNT; ++ce) {
             for (unsigned i = 0; i < 7; ++i) {
+                uint32_t at = rf_ce_observed_offsets[i];
+                uint32_t mask = rf_ce_host_config_mask(at, fw_packet_source_entries[ce], fw_packet_dest_entries[ce]);
+                if (!mask) continue;
                 uint32_t value = 0;
-                error = fw_start_packet_ce_read(context, 0x1000u*ce + rf_ce_observed_offsets[i], &value);
-                if (!error && value != context->packet_expected[ce][i]) error = EAGAIN;
+                error = fw_start_packet_ce_read(context, 0x1000u*ce + at, &value);
+                if (!error && ((value ^ context->packet_expected[ce][i]) & mask)) {
+                    IOLog("REDFIN WIFI PACKETS: host CE audit CE=%u at=%#x mask=%#x expected=%#x observed=%#x\n",
+                        ce, at, mask, context->packet_expected[ce][i], value);
+                    error = EAGAIN;
+                }
                 if (error) break;
+            }
+        }
+        for (unsigned i = 0; !error && i < 2; ++i) {
+            uint32_t value = 0, mask = i ? 0x1fu : UINT32_MAX;
+            error = fw_start_packet_ce_read(context, 0xc004 + 4u*i, &value);
+            if (!error && ((value ^ context->packet_rri[i]) & mask)) {
+                IOLog("REDFIN WIFI PACKETS: RRI audit at=%#x expected=%#x observed=%#x\n",
+                    0xc004 + 4u*i, context->packet_rri[i], value);
+                error = EAGAIN;
             }
         }
         if (error) return error;
