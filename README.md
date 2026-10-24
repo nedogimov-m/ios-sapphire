@@ -66,11 +66,14 @@ ME_INIT, signed PAS13 zap, exit from secure mode and four boot-bound values
 actually written by the GPU and read back uncached. GPU/SMMU faults remain
 clear. The complete GUI3 integration now proves actual Mesa/FD620 ES3.2
 shader draws, both IOSurface pixel checks and backboardd's EAGL composition
-into shared display surfaces. Authenticated fences reach at least768 and
-system frames at least180. The user observes restored shadows and fewer
-rendering artifacts. Current frame times are about140–300ms; smooth UI,
-Metal and working Phone/Photos remain unfinished. Those applications do
-execute but do not show usable UI in the latest user observation.
+into shared display surfaces. The latest complete run proves over4096
+backboardd submissions and900system frames without a window-server crash,
+plus87touch contacts/releases without errors. The user observes restored
+shadows and fewer artifacts. Simple warm frame samples reach14–26ms;
+complex samples still cost40–100ms or more. Stable60fps, Metal and working
+Phone/Photos remain unfinished. Photos' main thread is observed waiting
+for MobileCheckpoint. The latest stable GPU image is
+`ports/redfin/out/gpu-gui-performance-v3/redfin-xnu.img`.
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

@@ -93,6 +93,15 @@ retires the queue with all uncertain DMA memory held until reset.
 Touch retains its existing hardware session across an HID consumer close,
 then discards stale contacts when the replacement backboardd registers.
 
+The77fdfa764956dff4 complete run passes the stronger process-bound check:
+over4096actual backboardd completions and900frames, both shader pixel
+passes, no submission failure or window-server crash, and87clean touch
+contacts/releases. GPU timestamps average roughly3.5ms per batch, with
+another4.2ms in complete software audits. Simple warm frame samples cost
+14–26ms; complex samples still reach40–100ms or more. HID reconnection is
+host-verified; no consumer restart occurs in this successful hardware run.
+Photos remains blocked in MCCopyCheckpointValue on its main thread.
+
 After a graphics panic the root can have pending HFS transactions. The older
 strict RW publication gate requires a clean primary header, so it prevents
 HFS from reaching its own replay. GUI3 alone now has a separate read-only

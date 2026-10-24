@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete multicore GPU run PASS; Photos wait identified — 2026-10-25
+
+Source7b42b7b/nativebuild20261025-024425/noCI/kernel-gui-performance-v3,
+authenticated boot77fdfa764956dff4/image559f3a4e2246242058a02e323f98778001388018498f1c983160d4ef19e8eb7e.
+Actual backboardd-bound completed fences exceed4096 and real shared-surface
+frames exceed900. Both shader/IOSurface pixel passes succeed (244/32/16/255,
+16/159/64/255). No Mesa submit failure, runtime retirement, kernel panic or
+window-server crash occurs. Runtime timing proves execution onCPUs0..7;
+GPU counter averages3.535ms at submit4096, host audit4.198ms and wait3.609ms.
+Cache maintenance averages roughly0.1–0.3ms. Simple warm frame samples are
+14–26ms; complex sampled frames still cost40–100ms or more. The user says
+GUI remains alive while Photos does not open. No stable60fps or Metal claim.
+
+Touch completes87contacts/87releases, no overflow or error, session expiry0.
+HID consumer reconnection is host-tested but not exercised by a daemon
+restart in this stable run. Wi-Fi station readiness remains47.690s from
+worker start; no new manual Wi-Fi result. Photos256 survives both samples:
+its main thread waits in MOXPCTransportReceiveMessage → getResponseForCommand
+→ MCCopyCheckpoint → MCCopyCheckpointValue → PLImageFormat::_syncFormats.
+That supplies a concrete service/bootstrap blocker, not a Metal failure.
+Phone274's sampled main thread is in its normal UIApplication run loop;
+its remaining worker stacks and missing CommCenter service need review.
+Photolibraryd is not present in these samples. Native file/stack evidence
+is private under logs/redfin/gui-gpu-performance-v3.
+
+Planned shutdown completes cleanly, HFSX not inconsistent/write_count710362;
+collector captures all three file logs and leaves verified Fastboot.
+Preserve this new working GPU checkpoint. Next coherent block investigates
+MobileCheckpoint/Phone service bootstrap and the remaining audit/frame cost;
+keep implementing before the next combined test. Exact observed args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x77fdfa764956dff4 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete runtime/HID block built and preflighted — 2026-10-25
 
 All54selected late-fence/thread-lease/CPU-proof/native-packet/coherency/
