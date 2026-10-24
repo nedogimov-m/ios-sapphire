@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN user-requested manual GUI/Wi-Fi launch after wifid fix — 2026-10-24
+
+User requests loading the system now. Reused the validated station-v9
+image with the already-applied wifid fix3d2d76a; previous capture/result
+recorded by4331d38. No rebuild or repeated host suite. Previous collector
+completed, public RAM metadata primed, and one fastboot transport verified.
+Image SHA2564aa7fdee1758666f9eaaf81544f3307622140f43978214ad0c37460eac2f99d7
+rechecked; fastboot send/boot both OKAY,7.067s total. Acceptance is observed;
+physical GUI/Settings and connection results are pending.
+
+The existing180s GUI cap and automatic authenticated recovery collector
+remain active for logs/redfin/wifi-gui8-station-v9-wifid-manual-v1.
+Private output: research/redfin-wifi-userland/device-wifid-manual-v1.txt;
+unified exec session52738. Do not run a concurrent device operation.
+Kernel source190b466, local build20261024-060104; no new kernel/CI run.
+Kernel SHA256390d9a98a59359f8eef6d06007337a16c22cfc23263e018ea0569df94d5b350e.
+Next: user-selected Settings connection and captured association/WPA2/data/
+DHCP evidence. GPU/Metal follows working GUI Wi-Fi. No partition flash or
+modem/persist/EFS/backup change.
+Exact args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=2 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x58f44527d96348f3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN wifid starts and discovers native WLAN after userland fix — 2026-10-24
 
 Userland fix3d2d76a validated by authenticated/boot-ID-matched capture
