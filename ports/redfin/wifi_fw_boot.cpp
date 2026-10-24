@@ -23,11 +23,13 @@ extern "C" int redfin_gui_bind_worker(void);
 extern "C" int redfin_mpss_kernel_sha256(void *, const uint8_t *, size_t, uint8_t[32]);
 static_assert(sizeof(boot_args) == RF_WIFI_FW_BOOT_ARGS_BYTES, "Redfin boot-args ABI");
 
+#include "redfin_wifi_dt_cache.inc"
+
 static bool fw_property(DTEntry node, const char *key, void *out, unsigned expected)
 {
     const void *raw = NULL;
     unsigned bytes = 0;
-    if (SecureDTGetProperty(node, key, &raw, &bytes) != kSuccess || !raw || bytes != expected) return false;
+    if (fw_dt_property(node, key, &raw, &bytes) != kSuccess || !raw || bytes != expected) return false;
     memcpy(out, raw, bytes); return true;
 }
 static bool fw_identity(void)
@@ -36,8 +38,8 @@ static bool fw_identity(void)
     const char *raw = NULL;
     unsigned bytes = 0;
     bool redfin = false, lito = false;
-    if (SecureDTLookupEntry(NULL, "/", &root) != kSuccess ||
-        SecureDTGetProperty(root, "compatible", (const void **)&raw, &bytes) != kSuccess ||
+    if (fw_dt_lookup("/", &root) != kSuccess ||
+        fw_dt_property(root, "compatible", (const void **)&raw, &bytes) != kSuccess ||
         !raw || !bytes || bytes > 256 || raw[bytes - 1]) return false;
     for (unsigned at = 0; at < bytes;) {
         unsigned end = at;
@@ -78,14 +80,14 @@ static bool fw_handoff(rf_wifi_fw_blob *blob, rf_wifi_fw_layout *layout)
     DTEntry firmware, memory_map, chosen;
     if (!args || args->Revision != 2 || args->Version != 2 || args->memSizeActual != args->memSize ||
         !fw_profile(&blob->boot_id) ||
-        SecureDTLookupEntry(NULL, "/redfin-wifi-fw", &firmware) != kSuccess ||
+        fw_dt_lookup("/redfin-wifi-fw", &firmware) != kSuccess ||
         !fw_property(firmware, "reg", reg, sizeof(reg)) ||
         !fw_property(firmware, "bundle-bytes", &blob->bytes, sizeof(blob->bytes)) ||
         !fw_property(firmware, "bundle-sha256", blob->sha256, sizeof(blob->sha256)) ||
         !fw_property(firmware, "source-contract", contract, sizeof(contract)) || memcmp(contract, expected, sizeof(contract)) ||
-        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory_map) != kSuccess ||
+        fw_dt_lookup("/chosen/memory-map", &memory_map) != kSuccess ||
         !fw_property(memory_map, "RedfinWiFiFirmware", mapped, sizeof(mapped)) || memcmp(mapped, reg, sizeof(reg)) ||
-        SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
+        fw_dt_lookup("/chosen", &chosen) != kSuccess ||
         !fw_property(chosen, "dram-base", &base, sizeof(base)) || base != args->physBase ||
         !fw_property(chosen, "dram-size", &bytes, sizeof(bytes)) || bytes != args->memSize)
         return false;
@@ -104,7 +106,7 @@ static bool fw_handoff(rf_wifi_fw_blob *blob, rf_wifi_fw_layout *layout)
     layout->top = args->topOfKernelData;
     const void *raw = NULL;
     unsigned length = 0;
-    if (SecureDTGetProperty(memory_map, "RAMDisk", &raw, &length) == kSuccess) {
+    if (fw_dt_property(memory_map, "RAMDisk", &raw, &length) == kSuccess) {
         if (!raw || length != sizeof(layout->ramdisk)) return false;
         memcpy(&layout->ramdisk, raw, length);
     }
@@ -261,10 +263,10 @@ static bool fw_probe_properties(fw_probe_context *context, bool capture)
     uint32_t contract[4] = {}, expected[4] = {1, 4, REDFIN_MPSS_MAX_EXCLUSIONS, 0};
     const void *raw = NULL;
     unsigned bytes = 0;
-    if (SecureDTLookupEntry(NULL, "/redfin-wifi-fw", &node) != kSuccess ||
+    if (fw_dt_lookup("/redfin-wifi-fw", &node) != kSuccess ||
         !fw_property(node, "probe-contract", contract, sizeof(contract)) ||
         memcmp(contract, expected, sizeof(expected)) ||
-        SecureDTGetProperty(node, "probe-exclusions", &raw, &bytes) != kSuccess ||
+        fw_dt_property(node, "probe-exclusions", &raw, &bytes) != kSuccess ||
         !raw || bytes % sizeof(redfin_mpss_range) ||
         bytes < 2 * sizeof(redfin_mpss_range) || bytes > sizeof(context->excluded)) return false;
     if (!capture)

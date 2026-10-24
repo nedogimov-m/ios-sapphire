@@ -77,12 +77,15 @@ int redfin_gui_bind_worker(void)
 void *redfin_gui_worker_enter(void)
 {
  processor_t previous=thread_bind(cpu_to_processor(0));
- thread_block(THREAD_CONTINUE_NULL);
+ /* Binding to the processor we already run on needs no voluntary switch. */
+ if(rf_smp_local()!=0) thread_block(THREAD_CONTINUE_NULL);
  return (void *)previous;
 }
 void redfin_gui_worker_leave(void *previous)
 {
+ /* An unbound thread can keep running here. Only a restored binding to a
+  * different processor requires immediate migration before returning. */
  thread_bind((processor_t)previous);
- thread_block(THREAD_CONTINUE_NULL);
+ if(previous && previous!=(void *)cpu_to_processor(0)) thread_block(THREAD_CONTINUE_NULL);
 }
 #endif /* REDFIN_GUI_RUNTIME_H */

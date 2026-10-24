@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete graphics/Wi-Fi performance batch built; one integrated run next — 2026-10-25
+
+Combined relevant checks:78PASS/2optional private-bundle checksSKIP
+(80cases total). The native-boot fixture initially omitted the newly included
+cache helper; expanding that exact include and resetting its fixture epoch
+resolves the harness-only unused-helper error, and all10native-adapter cases
+then complete (9PASS/1SKIP). No kernel source change follows the build.
+Local native build20261025-020736PASS/noCI, exact overlay fingerprint verified.
+Frozen kernel-gui-performance-v1 SHA256e3255ce4598ee4a5729393410f715507537fc9fa585ab50cf62bf9bea0a3f363.
+Image ports/redfin/out/gpu-gui-performance-v1/redfin-xnu.img SHA256
+fe027e5b374559d01ee89bd858b3491ee208101cf0c845e7d886f6886127a3dc; boot975c644bc72f03ae.
+Actual loader/liveFDT/ADT/firmware/return preflightPASS. Bounded GUI3 app-wait
+property is verified; optional screen logging is off, all system graphics,
+shader, WLAN, touch and8CPUs remain selected. Installed userland byte hashes
+are unchanged; no root update is required. The device was last verified in
+Fastboot with clean HFSX write_count667187. Only the complete integrated
+run will establish new timing/coherency/boot results; Metal and app UI remain
+unfinished. Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x975c644bc72f03ae redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN complete performance/Wi-Fi boot/app-wait batch implemented — 2026-10-25
+
+Based on15bf575/8812358 and the authenticated74df960d04eda813 EAGL PASS.
+User additionally reports roughly a minute before Wi-Fi becomes usable.
+Source now contains the whole corrective batch before any new test:
+conditional affinity migration, batched page-table/ring cache publication,
+complete twice-read SMMU snapshots with bracketed read-only callbacks,
+preferred seed/4ms surface pushes, write-only post-fence invalidation,
+prepared wrapped-surface imports with exact page delta/read-only protection,
+GPU shutdown after normal process exit, aggregate native GPU timing,
+GUI3 Phone/Photos/callservicesd/photolibraryd resident wait snapshots, and
+owner-scoped immutable-ADT traversal caching plus Wi-Fi phase timestamps.
+Native firmware readback and authentication remain unchanged. The previous
+capture measures20243ms for copying4478firmware/BSS chunks; that does not
+account for the entire user-observed Wi-Fi delay. Live property values and
+all original owner/CPU/epoch/power/source checks remain enforced.
+
+No new device boot, firmware/root write or test has occurred during these
+implementation subtasks. The installed Mesa/EAGL files are unchanged, so
+this remains a native-only update. Combined relevant checks/native build
+and one integrated run follow. The next image selects bounded app-wait
+snapshots in place of optional screen logging, retaining all GUI3/WLAN and
+shader/compositor features. No improved timing, wrapped import, app startup,
+60fps or Metal result is claimed before that run. Current device remains
+verified Fastboot; clean HFSX write_count667187. Last observed args remain
+exactly those in the preceding EAGL hardware milestone (boot74df960d04eda813).
+
 ## REDFIN actual system GPU/EAGL rendering PASS; smoothness and apps remain unfinished — 2026-10-25
 
 Source8812358, native local build20261025-014040/noCI/kernel-eagl-v6;

@@ -19,10 +19,35 @@
 #define RF_GR_COMMANDS 128u
 #define RF_GR_FENCE_AT 0x200u
 #define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+16u)
+#define RF_GR_HOST_PAGE 16384u
 static const uint32_t rf_gr_policy[]={1,0x06020001,512,128,1024,128,500,0x10000,0x100000,1};
 
 struct rf_gr_object {uint64_t address,size,span;};
 struct rf_gr_arena {struct rf_gr_object objects[RF_GR_OBJECTS];uint64_t bytes;};
+/* allocSize already includes the surface's own offset. A prepared wrapped
+ * range additionally starts wrapDelta bytes into its first native page. */
+static inline bool rf_gr_surface_layout(uint64_t allocation,uint32_t offset,uint32_t delta,
+    uint64_t descriptor,uint64_t *size,uint32_t *pixels)
+{
+    if(!size || !pixels || !allocation || allocation>RF_GR_BUFFER_MAX || offset>=allocation ||
+        delta>=RF_GR_HOST_PAGE)return false;
+    uint64_t length=(allocation+delta+RF_GR_HOST_PAGE-1)&~(uint64_t)(RF_GR_HOST_PAGE-1);
+    uint64_t start=(uint64_t)offset+delta;
+    if(length>RF_GR_BUFFER_MAX || descriptor<length || start>=length || start>UINT32_MAX)return false;
+    *size=length;*pixels=(uint32_t)start;return true;
+}
+/* Preferred RedwoodGPU's seed/4ms fallback. A client-mapped surface must
+ * still be pushed on every submission; not every CPU writer bumps a seed. */
+struct rf_gr_surface_cache {uint64_t pushed;uint32_t seed;bool initialized;};
+static inline bool rf_gr_surface_push(struct rf_gr_surface_cache *cache,uint32_t seed,
+    uint64_t now,uint64_t interval,bool client_mapped)
+{
+    if(!cache || !interval)return true;
+    if(cache->initialized && !client_mapped && seed==cache->seed && now>=cache->pushed &&
+        now-cache->pushed<interval)return false;
+    cache->pushed=now;cache->seed=seed;cache->initialized=true;return true;
+}
+
 static inline bool rf_gr_span(uint64_t size,uint64_t *span)
 {
     if(!size || size>RF_GR_BUFFER_MAX)return false;

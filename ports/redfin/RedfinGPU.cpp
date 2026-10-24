@@ -56,6 +56,7 @@ struct redwood_show {uint64_t pixels;uint32_t width,height,rowBytes,pad;};
 static_assert(sizeof(msm_submit)==72,"msm DRM 1.7 submission ABI");
 static_assert(sizeof(msm_cmd)==32,"msm command ABI");
 static_assert(sizeof(redwood_surface)==40,"preferred IOSurface import ABI");
+static_assert(PAGE_SIZE==RF_GR_HOST_PAGE,"native prepared IOSurface page granule");
 static IOLock *gLock;
 static uint32_t gStarts;
 static uint32_t gBufferLogCount;
@@ -114,7 +115,28 @@ struct gpu_buffer {
     uint8_t *kernel;
     uint64_t address,size;
     uint32_t flags,fence;
+    rf_gr_surface_cache cache;
+    bool clientMapped;
 };
+static struct {
+    uint64_t since,allocating,cleaning,submitting,invalidating,cleaned,invalidated;
+    uint32_t allocations,submissions,skipped;
+} gTiming;
+static uint64_t gpuNow(void)
+{
+    uint64_t nanos;absolutetime_to_nanoseconds(mach_absolute_time(),&nanos);return nanos;
+}
+static void gpuTiming(void)
+{
+    uint64_t now=gpuNow();if(!gTiming.since)gTiming.since=now;
+    if(now-gTiming.since<5ULL*NSEC_PER_SEC)return;
+    unsigned n=gTiming.submissions?gTiming.submissions:1;
+    IOLog("REDFIN GPU SERVICE TIMING: submits=%u allocations=%u alloc-us=%llu clean-us=%llu submit-us=%llu invalidate-us=%llu clean-KiB=%llu invalidate-KiB=%llu skipped=%u\n",
+        gTiming.submissions,gTiming.allocations,gTiming.allocating/1000,
+        gTiming.cleaning/1000/n,gTiming.submitting/1000/n,gTiming.invalidating/1000/n,
+        gTiming.cleaned/1024/n,gTiming.invalidated/1024/n,gTiming.skipped);
+    gTiming={};gTiming.since=now;
+}
 class RedwoodGPUUserClient:public IOUserClient {
     OSDeclareDefaultStructors(RedwoodGPUUserClient);
     task_t owner; /* Borrowed during synchronous init/start, before publication. */
@@ -179,7 +201,8 @@ IOReturn RedwoodGPUUserClient::mapDescriptor(IOMemoryDescriptor *memory,uint8_t 
         }
         return gpuError(error);
     }
-    gpu_buffer *b=&buffers[slot];*b=(gpu_buffer){memory,surface,kernel,address,size,flags,0};
+    gpu_buffer *b=&buffers[slot];*b={};
+    b->memory=memory;b->surface=surface;b->kernel=kernel;b->address=address;b->size=size;b->flags=flags;
     nextHandle=slot+1;*handle=slot+1;return kIOReturnSuccess;
 }
 IOReturn RedwoodGPUUserClient::create(msm_gem_new *r)
@@ -187,28 +210,33 @@ IOReturn RedwoodGPUUserClient::create(msm_gem_new *r)
     if(!r->size || r->size>RF_GR_BUFFER_MAX || (r->flags&~0x000f0003u))return kIOReturnBadArgument;
     uint64_t size=(r->size+PAGE_MASK)&~(uint64_t)PAGE_MASK;
     if(gBufferLogCount++<16)IOLog("REDFIN GPU BO: requested=%llu aligned=%llu flags=%#x\n",r->size,size,r->flags);
+    uint64_t began=gpuNow();
     IOBufferMemoryDescriptor *memory=IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
         kIODirectionInOut|kIOMemoryKernelUserShared|kIOMapWriteCombineCache,(vm_size_t)size,PAGE_SIZE);
     if(!memory)return kIOReturnNoMemory;
     IOReturn result=mapDescriptor(memory,(uint8_t *)memory->getBytesNoCopy(),NULL,size,r->flags,&r->handle);
-    if(result!=kIOReturnSuccess)memory->release();return result;
+    if(result!=kIOReturnSuccess)memory->release();
+    gTiming.allocations++;gTiming.allocating+=gpuNow()-began;return result;
 }
 IOReturn RedwoodGPUUserClient::importSurface(redwood_surface *r)
 {
     SweetSurface *s=sweet_surface_copy(r->surface);if(!s)return kIOReturnNotFound;
-    uint64_t size=((uint64_t)s->allocSize+PAGE_MASK)&~(uint64_t)PAGE_MASK;
+    uint64_t size=0;uint32_t offset=0;
     /* This port keeps state and pixels in separate descriptors. There is no
-     * upstream PAGE_SIZE prefix to skip. Wrapped client ranges are deferred. */
-    if(s->wrapped || !s->memory || s->planeCount>1 || !size || size>RF_GR_BUFFER_MAX ||
-        s->memory->getLength()<size || !s->kernelAddress()) {s->release();return kIOReturnUnsupported;}
-    r->size=size;r->offset=s->offset;r->rowBytes=s->bytesPerRow;r->width=s->width;
+     * upstream PAGE_SIZE prefix. Wrapped ranges are already prepared by
+     * SweetSurface; retain that surface and include its leading page delta. */
+    if(!s->memory || s->planeCount>1 ||
+        !rf_gr_surface_layout(s->allocSize,s->offset,s->wrapped?s->wrapDelta:0,
+            s->memory->getLength(),&size,&offset) || !s->kernelAddress()) {s->release();return kIOReturnUnsupported;}
+    r->size=size;r->offset=offset;r->rowBytes=s->bytesPerRow;r->width=s->width;
     r->height=s->height;r->pixelFormat=s->pixelFormat;r->planes=s->planeCount;
     if(r->handle==UINT32_MAX){r->handle=0;s->release();return kIOReturnSuccess;}
     for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(buffers[i].memory && buffers[i].surface==s) {
         r->handle=i+1;s->release();return kIOReturnSuccess;
     }
     s->memory->retain();
-    IOReturn result=mapDescriptor(s->memory,(uint8_t *)s->kernelAddress(),s,size,0,&r->handle);
+    uint32_t flags=(s->memory->getDirection()&kIODirectionIn)?0:2u;
+    IOReturn result=mapDescriptor(s->memory,(uint8_t *)s->kernelAddress(),s,size,flags,&r->handle);
     if(result!=kIOReturnSuccess){s->memory->release();s->release();}return result;
 }
 IOReturn RedwoodGPUUserClient::drop(uint32_t handle)
@@ -257,6 +285,7 @@ IOReturn RedwoodGPUUserClient::clientMemoryForType(UInt32 type,IOOptionBits *opt
     if(!options || !memory || !gLock)return kIOReturnBadArgument;
     GPUTransaction transaction;gpu_buffer *b=buffer(type);
     if(!b || !redfin_gpu_ready())return kIOReturnNotFound;
+    b->clientMapped=true;
     *memory=b->memory;(*memory)->retain();
     *options=b->surface?b->surface->mapCache:kIOMapWriteCombineCache;return kIOReturnSuccess;
 }
@@ -267,13 +296,15 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
         r->pad || r->queue>nextQueue)return kIOReturnBadArgument;
     msm_bo *bos=IONew(msm_bo,r->nr_bos);msm_cmd *commands=IONew(msm_cmd,r->nr_cmds);
     uint64_t addresses[RF_GR_COMMANDS];uint32_t words[RF_GR_COMMANDS],count=0;
+    uint64_t began=0,again=0;
     IOReturn result=kIOReturnBadArgument;
     if(!bos || !commands){result=kIOReturnNoMemory;goto done;}
     if(copyin((user_addr_t)r->bos,bos,r->nr_bos*sizeof(*bos)) ||
         copyin((user_addr_t)r->cmds,commands,r->nr_cmds*sizeof(*commands))){result=kIOReturnVMError;goto done;}
     for(unsigned i=0;i<r->nr_bos;i++) {
         gpu_buffer *b=buffer(bos[i].handle);
-        if(!b || (bos[i].flags&~0xfu) || (bos[i].presumed && bos[i].presumed!=b->address))goto done;
+        if(!b || (bos[i].flags&~0xfu) || ((b->flags&2u) && (bos[i].flags&2u)) ||
+            (bos[i].presumed && bos[i].presumed!=b->address))goto done;
     }
     for(unsigned i=0;i<r->nr_cmds;i++) {
         const msm_cmd *cmd=&commands[i];
@@ -284,16 +315,29 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
         addresses[count]=b->address+cmd->offset;words[count++]=cmd->size/4;
     }
     if(!count)goto done;
+    began=gpuNow();again=4ULL*NSEC_PER_MSEC;
     for(unsigned i=0;i<r->nr_bos;i++) {
         gpu_buffer *b=buffer(bos[i].handle);
-        if(b->surface)redfin_gpu_sync(b->kernel,b->size,true);
+        if(!b->surface)continue;
+        /* Native SweetSurface state seed is at+0xc; pixels are separate. */
+        uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
+        if(rf_gr_surface_push(&b->cache,seed,began,again,b->clientMapped)) {
+            redfin_gpu_sync(b->kernel,b->size,true);gTiming.cleaned+=b->size;
+        } else gTiming.skipped++;
     }
     redfin_gpu_sync(NULL,0,false);
+    gTiming.cleaning+=gpuNow()-began;began=gpuNow();
     result=gpuError(redfin_gpu_submit(addresses,words,count,&r->fence));
+    gTiming.submitting+=gpuNow()-began;began=gpuNow();gTiming.submissions++;
     if(result==kIOReturnSuccess)for(unsigned i=0;i<r->nr_bos;i++) {
         gpu_buffer *b=buffer(bos[i].handle);b->fence=r->fence;
-        if(b->surface)redfin_gpu_sync(b->kernel,b->size,true);
+        if(b->surface && (bos[i].flags&2u)) {
+            /* The GPU has completed. Do not clean stale CPU data over its
+             * pixels; only invalidate surfaces that this submission writes. */
+            redfin_gpu_invalidate(b->kernel,b->size);gTiming.invalidated+=b->size;
+        }
     }
+    gTiming.invalidating+=gpuNow()-began;gpuTiming();
 done:
     if(bos)IODelete(bos,msm_bo,r->nr_bos);
     if(commands)IODelete(commands,msm_cmd,r->nr_cmds);

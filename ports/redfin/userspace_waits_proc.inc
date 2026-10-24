@@ -15,7 +15,7 @@ redfin_userspace_waits_poll(unsigned final)
     const void *property;
     unsigned bytes;
     if (!PE_parse_boot_argn("cpus", &cpus, sizeof(cpus)) || cpus != 8 ||
-        !PE_parse_boot_argn("redfingui", &gui, sizeof(gui)) || gui != 2 ||
+        !PE_parse_boot_argn("redfingui", &gui, sizeof(gui)) || (gui != 2 && gui != 3) ||
         !redfin_gui_selected() || !redfin_gui_ready() ||
         SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
         SecureDTGetProperty(chosen, "redfin-user-waits", &property, &bytes) != kSuccess ||
@@ -32,7 +32,9 @@ redfin_userspace_waits_poll(unsigned final)
     nanoseconds_to_absolutetime(200ULL * NSEC_PER_MSEC, &interval);
     if (now > UINT64_MAX - interval) return;
     uint64_t deadline = now + interval;
-    const char *names[4] = { "Preferences", "wifid", "configd", "securityd" };
+    const char *wifi_names[4] = { "Preferences", "wifid", "configd", "securityd" };
+    const char *graphics_names[4] = { "MobilePhone", "MobileSlideShow", "callservicesd", "photolibraryd" };
+    const char *const *names = gui == 3 ? graphics_names : wifi_names;
     proc_t selected[4] = { PROC_NULL, PROC_NULL, PROC_NULL, PROC_NULL };
     if (!lck_mtx_try_lock(&proc_list_mlock)) return;
     proc_t p;

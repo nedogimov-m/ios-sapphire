@@ -19,6 +19,7 @@ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned c
 bool redfin_gpu_done(uint32_t fence);
 uint32_t redfin_gpu_last(void);
 void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);
+void redfin_gpu_invalidate(void *address,uint64_t size);
 void redfin_gpu_poison(const char *reason);
 void redfin_gpu_stop(void);
 void redfin_gpu_gui_start(void);

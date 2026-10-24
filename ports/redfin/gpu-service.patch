@@ -161,7 +161,7 @@ diff --git a/osfmk/arm64/redfin_gui_runtime.h b/osfmk/arm64/redfin_gui_runtime.h
  void redfin_smp_publish(void);
  void *redfin_gui_root_enter(void);
  void redfin_gui_root_leave(void *);
-@@ -70,4 +72,17 @@
+@@ -70,4 +72,20 @@
   thread_block(THREAD_CONTINUE_NULL);
   return redfin_gui_cpu0();
  }
@@ -170,20 +170,23 @@ diff --git a/osfmk/arm64/redfin_gui_runtime.h b/osfmk/arm64/redfin_gui_runtime.h
 +void *redfin_gui_worker_enter(void)
 +{
 + processor_t previous=thread_bind(cpu_to_processor(0));
-+ thread_block(THREAD_CONTINUE_NULL);
++ /* Binding to the processor we already run on needs no voluntary switch. */
++ if(rf_smp_local()!=0) thread_block(THREAD_CONTINUE_NULL);
 + return (void *)previous;
 +}
 +void redfin_gui_worker_leave(void *previous)
 +{
++ /* An unbound thread can keep running here. Only a restored binding to a
++  * different processor requires immediate migration before returning. */
 + thread_bind((processor_t)previous);
-+ thread_block(THREAD_CONTINUE_NULL);
++ if(previous && previous!=(void *)cpu_to_processor(0)) thread_block(THREAD_CONTINUE_NULL);
 +}
  #endif /* REDFIN_GUI_RUNTIME_H */
 diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinGPU.cpp
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,425 @@
 +/*
 + * A620 adaptation of the preferred HackiOS RedwoodGPU / msm DRM 1.7 bridge:
 + * oosexgang/hackios-xnu-kernel 8e611870, iokit/Kernel/RedwoodGPU.cpp.
@@ -242,6 +245,7 @@ new file mode 100644
 +static_assert(sizeof(msm_submit)==72,"msm DRM 1.7 submission ABI");
 +static_assert(sizeof(msm_cmd)==32,"msm command ABI");
 +static_assert(sizeof(redwood_surface)==40,"preferred IOSurface import ABI");
++static_assert(PAGE_SIZE==RF_GR_HOST_PAGE,"native prepared IOSurface page granule");
 +static IOLock *gLock;
 +static uint32_t gStarts;
 +static uint32_t gBufferLogCount;
@@ -300,7 +304,28 @@ new file mode 100644
 +    uint8_t *kernel;
 +    uint64_t address,size;
 +    uint32_t flags,fence;
++    rf_gr_surface_cache cache;
++    bool clientMapped;
 +};
++static struct {
++    uint64_t since,allocating,cleaning,submitting,invalidating,cleaned,invalidated;
++    uint32_t allocations,submissions,skipped;
++} gTiming;
++static uint64_t gpuNow(void)
++{
++    uint64_t nanos;absolutetime_to_nanoseconds(mach_absolute_time(),&nanos);return nanos;
++}
++static void gpuTiming(void)
++{
++    uint64_t now=gpuNow();if(!gTiming.since)gTiming.since=now;
++    if(now-gTiming.since<5ULL*NSEC_PER_SEC)return;
++    unsigned n=gTiming.submissions?gTiming.submissions:1;
++    IOLog("REDFIN GPU SERVICE TIMING: submits=%u allocations=%u alloc-us=%llu clean-us=%llu submit-us=%llu invalidate-us=%llu clean-KiB=%llu invalidate-KiB=%llu skipped=%u\n",
++        gTiming.submissions,gTiming.allocations,gTiming.allocating/1000,
++        gTiming.cleaning/1000/n,gTiming.submitting/1000/n,gTiming.invalidating/1000/n,
++        gTiming.cleaned/1024/n,gTiming.invalidated/1024/n,gTiming.skipped);
++    gTiming={};gTiming.since=now;
++}
 +class RedwoodGPUUserClient:public IOUserClient {
 +    OSDeclareDefaultStructors(RedwoodGPUUserClient);
 +    task_t owner; /* Borrowed during synchronous init/start, before publication. */
@@ -365,7 +390,8 @@ new file mode 100644
 +        }
 +        return gpuError(error);
 +    }
-+    gpu_buffer *b=&buffers[slot];*b=(gpu_buffer){memory,surface,kernel,address,size,flags,0};
++    gpu_buffer *b=&buffers[slot];*b={};
++    b->memory=memory;b->surface=surface;b->kernel=kernel;b->address=address;b->size=size;b->flags=flags;
 +    nextHandle=slot+1;*handle=slot+1;return kIOReturnSuccess;
 +}
 +IOReturn RedwoodGPUUserClient::create(msm_gem_new *r)
@@ -373,28 +399,33 @@ new file mode 100644
 +    if(!r->size || r->size>RF_GR_BUFFER_MAX || (r->flags&~0x000f0003u))return kIOReturnBadArgument;
 +    uint64_t size=(r->size+PAGE_MASK)&~(uint64_t)PAGE_MASK;
 +    if(gBufferLogCount++<16)IOLog("REDFIN GPU BO: requested=%llu aligned=%llu flags=%#x\n",r->size,size,r->flags);
++    uint64_t began=gpuNow();
 +    IOBufferMemoryDescriptor *memory=IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
 +        kIODirectionInOut|kIOMemoryKernelUserShared|kIOMapWriteCombineCache,(vm_size_t)size,PAGE_SIZE);
 +    if(!memory)return kIOReturnNoMemory;
 +    IOReturn result=mapDescriptor(memory,(uint8_t *)memory->getBytesNoCopy(),NULL,size,r->flags,&r->handle);
-+    if(result!=kIOReturnSuccess)memory->release();return result;
++    if(result!=kIOReturnSuccess)memory->release();
++    gTiming.allocations++;gTiming.allocating+=gpuNow()-began;return result;
 +}
 +IOReturn RedwoodGPUUserClient::importSurface(redwood_surface *r)
 +{
 +    SweetSurface *s=sweet_surface_copy(r->surface);if(!s)return kIOReturnNotFound;
-+    uint64_t size=((uint64_t)s->allocSize+PAGE_MASK)&~(uint64_t)PAGE_MASK;
++    uint64_t size=0;uint32_t offset=0;
 +    /* This port keeps state and pixels in separate descriptors. There is no
-+     * upstream PAGE_SIZE prefix to skip. Wrapped client ranges are deferred. */
-+    if(s->wrapped || !s->memory || s->planeCount>1 || !size || size>RF_GR_BUFFER_MAX ||
-+        s->memory->getLength()<size || !s->kernelAddress()) {s->release();return kIOReturnUnsupported;}
-+    r->size=size;r->offset=s->offset;r->rowBytes=s->bytesPerRow;r->width=s->width;
++     * upstream PAGE_SIZE prefix. Wrapped ranges are already prepared by
++     * SweetSurface; retain that surface and include its leading page delta. */
++    if(!s->memory || s->planeCount>1 ||
++        !rf_gr_surface_layout(s->allocSize,s->offset,s->wrapped?s->wrapDelta:0,
++            s->memory->getLength(),&size,&offset) || !s->kernelAddress()) {s->release();return kIOReturnUnsupported;}
++    r->size=size;r->offset=offset;r->rowBytes=s->bytesPerRow;r->width=s->width;
 +    r->height=s->height;r->pixelFormat=s->pixelFormat;r->planes=s->planeCount;
 +    if(r->handle==UINT32_MAX){r->handle=0;s->release();return kIOReturnSuccess;}
 +    for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(buffers[i].memory && buffers[i].surface==s) {
 +        r->handle=i+1;s->release();return kIOReturnSuccess;
 +    }
 +    s->memory->retain();
-+    IOReturn result=mapDescriptor(s->memory,(uint8_t *)s->kernelAddress(),s,size,0,&r->handle);
++    uint32_t flags=(s->memory->getDirection()&kIODirectionIn)?0:2u;
++    IOReturn result=mapDescriptor(s->memory,(uint8_t *)s->kernelAddress(),s,size,flags,&r->handle);
 +    if(result!=kIOReturnSuccess){s->memory->release();s->release();}return result;
 +}
 +IOReturn RedwoodGPUUserClient::drop(uint32_t handle)
@@ -443,6 +474,7 @@ new file mode 100644
 +    if(!options || !memory || !gLock)return kIOReturnBadArgument;
 +    GPUTransaction transaction;gpu_buffer *b=buffer(type);
 +    if(!b || !redfin_gpu_ready())return kIOReturnNotFound;
++    b->clientMapped=true;
 +    *memory=b->memory;(*memory)->retain();
 +    *options=b->surface?b->surface->mapCache:kIOMapWriteCombineCache;return kIOReturnSuccess;
 +}
@@ -453,13 +485,15 @@ new file mode 100644
 +        r->pad || r->queue>nextQueue)return kIOReturnBadArgument;
 +    msm_bo *bos=IONew(msm_bo,r->nr_bos);msm_cmd *commands=IONew(msm_cmd,r->nr_cmds);
 +    uint64_t addresses[RF_GR_COMMANDS];uint32_t words[RF_GR_COMMANDS],count=0;
++    uint64_t began=0,again=0;
 +    IOReturn result=kIOReturnBadArgument;
 +    if(!bos || !commands){result=kIOReturnNoMemory;goto done;}
 +    if(copyin((user_addr_t)r->bos,bos,r->nr_bos*sizeof(*bos)) ||
 +        copyin((user_addr_t)r->cmds,commands,r->nr_cmds*sizeof(*commands))){result=kIOReturnVMError;goto done;}
 +    for(unsigned i=0;i<r->nr_bos;i++) {
 +        gpu_buffer *b=buffer(bos[i].handle);
-+        if(!b || (bos[i].flags&~0xfu) || (bos[i].presumed && bos[i].presumed!=b->address))goto done;
++        if(!b || (bos[i].flags&~0xfu) || ((b->flags&2u) && (bos[i].flags&2u)) ||
++            (bos[i].presumed && bos[i].presumed!=b->address))goto done;
 +    }
 +    for(unsigned i=0;i<r->nr_cmds;i++) {
 +        const msm_cmd *cmd=&commands[i];
@@ -470,16 +504,29 @@ new file mode 100644
 +        addresses[count]=b->address+cmd->offset;words[count++]=cmd->size/4;
 +    }
 +    if(!count)goto done;
++    began=gpuNow();again=4ULL*NSEC_PER_MSEC;
 +    for(unsigned i=0;i<r->nr_bos;i++) {
 +        gpu_buffer *b=buffer(bos[i].handle);
-+        if(b->surface)redfin_gpu_sync(b->kernel,b->size,true);
++        if(!b->surface)continue;
++        /* Native SweetSurface state seed is at+0xc; pixels are separate. */
++        uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
++        if(rf_gr_surface_push(&b->cache,seed,began,again,b->clientMapped)) {
++            redfin_gpu_sync(b->kernel,b->size,true);gTiming.cleaned+=b->size;
++        } else gTiming.skipped++;
 +    }
 +    redfin_gpu_sync(NULL,0,false);
++    gTiming.cleaning+=gpuNow()-began;began=gpuNow();
 +    result=gpuError(redfin_gpu_submit(addresses,words,count,&r->fence));
++    gTiming.submitting+=gpuNow()-began;began=gpuNow();gTiming.submissions++;
 +    if(result==kIOReturnSuccess)for(unsigned i=0;i<r->nr_bos;i++) {
 +        gpu_buffer *b=buffer(bos[i].handle);b->fence=r->fence;
-+        if(b->surface)redfin_gpu_sync(b->kernel,b->size,true);
++        if(b->surface && (bos[i].flags&2u)) {
++            /* The GPU has completed. Do not clean stale CPU data over its
++             * pixels; only invalidate surfaces that this submission writes. */
++            redfin_gpu_invalidate(b->kernel,b->size);gTiming.invalidated+=b->size;
++        }
 +    }
++    gTiming.invalidating+=gpuNow()-began;gpuTiming();
 +done:
 +    if(bos)IODelete(bos,msm_bo,r->nr_bos);
 +    if(commands)IODelete(commands,msm_cmd,r->nr_cmds);
@@ -569,7 +616,7 @@ diff --git a/iokit/Kernel/arm/RedfinGPUService.h b/iokit/Kernel/arm/RedfinGPUSer
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinGPUService.h
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,31 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Private kernel boundary. The caller holds the GPU lock and binds CPU0. */
 +#ifndef REDFIN_GPU_SERVICE_H
@@ -591,6 +638,7 @@ new file mode 100644
 +bool redfin_gpu_done(uint32_t fence);
 +uint32_t redfin_gpu_last(void);
 +void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);
++void redfin_gpu_invalidate(void *address,uint64_t size);
 +void redfin_gpu_poison(const char *reason);
 +void redfin_gpu_stop(void);
 +void redfin_gpu_gui_start(void);
@@ -604,7 +652,7 @@ diff --git a/iokit/Kernel/arm/RedfinGPURuntime.h b/iokit/Kernel/arm/RedfinGPURun
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinGPURuntime.h
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,117 @@
 +/* SPDX-License-Identifier: MIT */
 +/* A620 runtime protocol, adapted from preferred HackiOS msm-1.7 bridge.
 + * All GPU addresses belong to this allocator; the bootstrap region is absent.
@@ -626,10 +674,35 @@ new file mode 100644
 +#define RF_GR_COMMANDS 128u
 +#define RF_GR_FENCE_AT 0x200u
 +#define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+16u)
++#define RF_GR_HOST_PAGE 16384u
 +static const uint32_t rf_gr_policy[]={1,0x06020001,512,128,1024,128,500,0x10000,0x100000,1};
 +
 +struct rf_gr_object {uint64_t address,size,span;};
 +struct rf_gr_arena {struct rf_gr_object objects[RF_GR_OBJECTS];uint64_t bytes;};
++/* allocSize already includes the surface's own offset. A prepared wrapped
++ * range additionally starts wrapDelta bytes into its first native page. */
++static inline bool rf_gr_surface_layout(uint64_t allocation,uint32_t offset,uint32_t delta,
++    uint64_t descriptor,uint64_t *size,uint32_t *pixels)
++{
++    if(!size || !pixels || !allocation || allocation>RF_GR_BUFFER_MAX || offset>=allocation ||
++        delta>=RF_GR_HOST_PAGE)return false;
++    uint64_t length=(allocation+delta+RF_GR_HOST_PAGE-1)&~(uint64_t)(RF_GR_HOST_PAGE-1);
++    uint64_t start=(uint64_t)offset+delta;
++    if(length>RF_GR_BUFFER_MAX || descriptor<length || start>=length || start>UINT32_MAX)return false;
++    *size=length;*pixels=(uint32_t)start;return true;
++}
++/* Preferred RedwoodGPU's seed/4ms fallback. A client-mapped surface must
++ * still be pushed on every submission; not every CPU writer bumps a seed. */
++struct rf_gr_surface_cache {uint64_t pushed;uint32_t seed;bool initialized;};
++static inline bool rf_gr_surface_push(struct rf_gr_surface_cache *cache,uint32_t seed,
++    uint64_t now,uint64_t interval,bool client_mapped)
++{
++    if(!cache || !interval)return true;
++    if(cache->initialized && !client_mapped && seed==cache->seed && now>=cache->pushed &&
++        now-cache->pushed<interval)return false;
++    cache->pushed=now;cache->seed=seed;cache->initialized=true;return true;
++}
++
 +static inline bool rf_gr_span(uint64_t size,uint64_t *span)
 +{
 +    if(!size || size>RF_GR_BUFFER_MAX)return false;

@@ -166,6 +166,9 @@ static int policy_check(void *context,uint64_t id) {
  return context==&boot && policy_live && id==nonce ? 0 : -91;
 }
 extern "C" void native_reset(void) {
+ /* The extracted adapter excludes the worker include; reset its cache
+  * between fixture epochs and leave standalone checks uncached. */
+ fw_dt_begin();__atomic_store_n(&fw_dt_owner,NULL,__ATOMIC_RELEASE);
  memset(&boot,0,sizeof(boot));memset(&args,0,sizeof(args));
  memset(&fw_probe,0,sizeof(fw_probe));fw_probe_attempted=0;
  memset(probe_output,0,sizeof(probe_output));probe_output_used=return_calls=lose_return=0;
@@ -241,7 +244,9 @@ class NativeWifiFirmwareBootTests(unittest.TestCase):
         core = directory / 'core.o'
         subprocess.run([c_compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-fPIC', '-I', str(HERE),
                         '-c', str(HERE / 'wifi_fw_source.c'), '-o', str(core)], check=True, capture_output=True)
-        actual = '\n'.join(line for line in (HERE / 'wifi_fw_boot.cpp').read_text().splitlines() if not line.startswith('#include'))
+        actual = (HERE / 'wifi_fw_boot.cpp').read_text().replace(
+            '#include "redfin_wifi_dt_cache.inc"',(HERE / 'wifi_dt_cache.inc').read_text())
+        actual = '\n'.join(line for line in actual.splitlines() if not line.startswith('#include'))
         native = directory / 'native.cpp'; native.write_text(HARNESS.replace('ACTUAL', actual))
         library = directory / 'native.so'
         result = subprocess.run([cpp_compiler, '-std=c++17', '-O2', '-Wall', '-Wextra', '-Werror', '-shared', '-fPIC',

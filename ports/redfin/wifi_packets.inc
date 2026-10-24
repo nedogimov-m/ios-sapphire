@@ -197,6 +197,10 @@ static int fw_start_packets_poll(fw_start_context *context, uint64_t now)
     if (fw_start_packet_bus_check(context)) return EPERM;
     int error = redfin_wifi_radio_poll((uint32_t)((now - context->packet_epoch) / 1000000u));
     if (error) return error;
+    if(!context->interface_timed) {
+        struct redfin_wifi_radio_state state={};redfin_wifi_radio_state(&state);
+        if(state.ready){context->interface_timed=true;fw_start_timing(context,"station-ready");}
+    }
     if (now >= context->packet_audit) {
         error = rf_snoc_lease_verify(&context->packet_lease, &context->packet_lease_ops);
         if (error) {

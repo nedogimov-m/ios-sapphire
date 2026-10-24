@@ -1,0 +1,24 @@
+diff --git a/bsd/kern/kern_shutdown.c b/bsd/kern/kern_shutdown.c
+--- a/bsd/kern/kern_shutdown.c
++++ b/bsd/kern/kern_shutdown.c
+@@ -179,7 +179,6 @@
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ 	extern void redfin_wifi_gui_stop(void);
+ 	extern void RedfinGPUStop(void);
+-	RedfinGPUStop();
+ 	redfin_wifi_gui_stop();
+ #endif
+ 	int hostboot_option = 0;
+@@ -335,6 +334,12 @@
+ 	if (!OSCompareAndSwap(0, 1, &final_shutdown_stage)) {
+ 		return EBUSY;
+ 	}
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/* Normal process exit precedes GPU retirement; late backboardd frames
++	 * must not be submitted to an already stopped runtime. */
++	RedfinGPUStop();
++#endif
+ 
+ 	if (howto & RB_HALT) {
+ 		hostboot_option = HOST_REBOOT_HALT;

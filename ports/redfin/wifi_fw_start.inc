@@ -43,6 +43,8 @@ static const uint64_t fw_start_ranges[8] = {
     0x408000, 0x1000, 0x8c000000, 0x11800000};
 struct fw_start_map { IOMemoryDescriptor *memory; IOMemoryMap *map; uintptr_t base; };
 struct fw_start_context {
+    uint64_t boot_started_ns;
+    bool interface_timed;
     fw_start_map mapping[FW_START_MAPS];
     rf_wifi_smp2p_session smp2p;
     rf_wifi_smp2p_ops smp_ops;
@@ -98,6 +100,7 @@ struct fw_start_context {
     uint32_t packet_rri[2];
 };
 static fw_start_context fw_start;
+static void fw_start_timing(fw_start_context *,const char *);
 static const uint8_t fw_start_bdf_digest[32] = {
     0x7b, 0x0a, 0xdd, 0x4f, 0x46, 0x9d, 0xf3, 0x9c, 0x0b, 0x26, 0x16, 0x75, 0x13, 0xda, 0x89, 0x31,
     0x41, 0x9e, 0x91, 0x7a, 0x4d, 0x90, 0x58, 0x25, 0x2c, 0x05, 0xe0, 0xf5, 0xcf, 0xfe, 0x7b, 0x90};
@@ -106,7 +109,7 @@ static bool fw_start_glink_contract(void)
 {
     const uint32_t expected[10] = {1, 4, 1, 478, 479, 480, 16384, 0x20000, 3, 1};
     uint32_t witness[10] = {}; char name[7] = {}; DTEntry node;
-    bool valid = SecureDTLookupEntry(NULL, "/redfin-wifi-glink", &node) == kSuccess &&
+    bool valid = fw_dt_lookup("/redfin-wifi-glink", &node) == kSuccess &&
         fw_property(node, "source-contract", witness, sizeof(witness)) && !memcmp(witness, expected, sizeof(witness)) &&
         fw_property(node, "channel", name, sizeof(name)) && !memcmp(name, "IPCRTR", sizeof(name));
     if (valid && fw_start.host_mode) {
@@ -122,11 +125,11 @@ static bool fw_start_assets_contract(fw_start_context *context, bool capture)
     DTEntry node, memory;
     const uint32_t required[4] = {1, 16, 128, 16384};
     uint32_t witness[4] = {}; uint64_t reg[2] = {}, mapped[2] = {}, bytes = 0; uint8_t digest[32] = {};
-    if (SecureDTLookupEntry(NULL, "/redfin-wifi-assets", &node) != kSuccess ||
+    if (fw_dt_lookup("/redfin-wifi-assets", &node) != kSuccess ||
         !fw_property(node, "source-contract", witness, sizeof(witness)) || memcmp(witness, required, sizeof(witness)) ||
         !fw_property(node, "reg", reg, sizeof(reg)) || !fw_property(node, "bundle-bytes", &bytes, sizeof(bytes)) ||
         !fw_property(node, "bundle-sha256", digest, sizeof(digest)) ||
-        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory) != kSuccess ||
+        fw_dt_lookup("/chosen/memory-map", &memory) != kSuccess ||
         !fw_property(memory, "RedfinWiFiAssets", mapped, sizeof(mapped)) || memcmp(reg, mapped, sizeof(reg)) ||
         bytes < 64 || bytes > 16u * 1024u * 1024u || reg[1] != ((bytes + 16383u) & ~UINT64_C(16383)) ||
         reg[0] < UINT64_C(0x180000000) || reg[0] > UINT64_C(0x200000000) - reg[1] || (reg[0] & 16383u) ||
@@ -143,9 +146,9 @@ static bool fw_start_metadata_contract(fw_start_context *context, bool capture)
 {
     DTEntry source, memory;
     uint64_t reg[2] = {}, mapped[2] = {};
-    if (SecureDTLookupEntry(NULL, "/redfin-wifi-fw", &source) != kSuccess ||
+    if (fw_dt_lookup("/redfin-wifi-fw", &source) != kSuccess ||
         !fw_property(source, "metadata-reg", reg, sizeof(reg)) ||
-        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory) != kSuccess ||
+        fw_dt_lookup("/chosen/memory-map", &memory) != kSuccess ||
         !fw_property(memory, "RedfinWiFiMetadata", mapped, sizeof(mapped)) || memcmp(reg, mapped, sizeof(reg)) ||
         reg[0] < UINT64_C(0x180000000) || reg[0] > UINT64_C(0x200000000) - RF_WIFI_FW_PAGE ||
         (reg[0] & (RF_WIFI_FW_PAGE - 1u)) || reg[1] != RF_WIFI_FW_PAGE) return false;
@@ -160,7 +163,7 @@ static bool fw_start_rmtfs_contract(fw_start_context *context, bool capture)
     uint32_t actual[10] = {}, owned = 0;
     uint64_t snapshot[2] = {}, scratch[2] = {}, pool[2] = {}, shared[2] = {}, mapped[2] = {}, bytes = 0;
     uint8_t digest[32] = {};
-    if (!context->host_mode || SecureDTLookupEntry(NULL, "/redfin-rmtfs", &node) != kSuccess ||
+    if (!context->host_mode || fw_dt_lookup("/redfin-rmtfs", &node) != kSuccess ||
         !fw_property(node, "source-contract", actual, sizeof(actual)) || memcmp(actual, expected, sizeof(actual)) ||
         !fw_property(node, "shim-owned", &owned, sizeof(owned)) || owned != 1 ||
         !fw_property(node, "snapshot-reg", snapshot, sizeof(snapshot)) ||
@@ -175,7 +178,7 @@ static bool fw_start_rmtfs_contract(fw_start_context *context, bool capture)
         scratch[0] + scratch[1] != context->assets_reg[0] ||
         pool[0] < UINT64_C(0x80000000) || pool[0] > UINT64_C(0x100000000) - 0x288000u ||
         pool[1] != 0x288000u || (pool[0] & 16383u) || shared[0] != pool[0] + 16384u || shared[1] != RF_RM_SHARED ||
-        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory) != kSuccess ||
+        fw_dt_lookup("/chosen/memory-map", &memory) != kSuccess ||
         !fw_property(memory, "RedfinRMTFSSnapshot", mapped, sizeof(mapped)) || memcmp(mapped, snapshot, sizeof(mapped)) ||
         !fw_property(memory, "RedfinRMTFSScratch", mapped, sizeof(mapped)) || memcmp(mapped, scratch, sizeof(mapped)) ||
         !fw_property(memory, "RedfinRMTFSPool", mapped, sizeof(mapped)) || memcmp(mapped, pool, sizeof(mapped))) return false;
@@ -205,7 +208,7 @@ static bool fw_start_wlfw_contract(void)
     const uint64_t expected_reg[2] = {RF_WLFW_MSA_BASE, RF_WLFW_MSA_BYTES};
     uint32_t actual[10] = {}, verified = 0; uint64_t reg[2] = {};
     return fw_start.host_mode && fw_start.rmtfs_mode && fw_start.wlfw_mode &&
-        SecureDTLookupEntry(NULL, "/redfin-wifi-wlfw", &node) == kSuccess &&
+        fw_dt_lookup("/redfin-wifi-wlfw", &node) == kSuccess &&
         fw_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
         fw_property(node, "reg", reg, sizeof(reg)) && !memcmp(reg, expected_reg, sizeof(reg)) &&
         fw_property(node, "shim-verified", &verified, sizeof(verified)) && verified == 1;
@@ -218,7 +221,7 @@ static bool fw_start_wlan_contract(void)
     const uint8_t expected_names[5][8] = {"ldoa1", "ldoa14", "ldoc2", "ldoc11", "ldoc10"};
     uint32_t actual[10] = {}, observe = 0; uint8_t names[40] = {};
     bool valid = fw_start.wlfw_mode && fw_start.wlan_observe_mode &&
-        SecureDTLookupEntry(NULL, "/redfin-wifi-wlan", &node) == kSuccess &&
+        fw_dt_lookup("/redfin-wifi-wlan", &node) == kSuccess &&
         fw_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
         fw_property(node, "resource-names", names, sizeof(names)) && !memcmp(names, expected_names, sizeof(names)) &&
         fw_property(node, "observe-only", &observe, sizeof(observe)) && observe == (fw_start.wlan_power_mode ? 0u : 1u);
@@ -261,7 +264,7 @@ static bool fw_start_snoc_contract(void)
     const uint64_t expected_wlan[2] = {0x18800000, 0x800000};
     const uint64_t expected_iova[2] = {0xa0000000, 0x10000000};
     bool valid = fw_start.snoc_mode && fw_start.wlan_bdf_mode && fw_start.wlan_power_mode &&
-        SecureDTLookupEntry(NULL, "/redfin-wifi-snoc", &node) == kSuccess &&
+        fw_dt_lookup("/redfin-wifi-snoc", &node) == kSuccess &&
         fw_property(node, "source-contract", actual, sizeof(actual)) && !memcmp(actual, expected, sizeof(actual)) &&
         fw_property(node, "ce-intids", irqs, sizeof(irqs)) && !memcmp(irqs, expected_irqs, sizeof(irqs)) &&
         fw_property(node, "reg", smmu, sizeof(smmu)) && !memcmp(smmu, expected_smmu, sizeof(smmu)) &&
@@ -289,11 +292,11 @@ static bool fw_start_packet_contract(fw_start_context *context, bool capture)
     uint32_t actual[10] = {}, owned = 0;
     uint64_t pool[2] = {}, buffer[2] = {}, mapped[2] = {};
     if (!context->packets_mode || !context->mission_mode ||
-        SecureDTLookupEntry(NULL, "/redfin-wifi-dma", &node) != kSuccess ||
+        fw_dt_lookup("/redfin-wifi-dma", &node) != kSuccess ||
         !fw_property(node, "source-contract", actual, sizeof(actual)) || memcmp(actual, expected, sizeof(actual)) ||
         !fw_property(node, "reg", pool, sizeof(pool)) || !fw_property(node, "buffer-reg", buffer, sizeof(buffer)) ||
         !fw_property(node, "shim-owned", &owned, sizeof(owned)) || owned != 1 ||
-        SecureDTLookupEntry(NULL, "/chosen/memory-map", &memory) != kSuccess ||
+        fw_dt_lookup("/chosen/memory-map", &memory) != kSuccess ||
         !fw_property(memory, "RedfinWiFiDMA", mapped, sizeof(mapped)) || memcmp(mapped, pool, sizeof(pool)) ||
         pool[0] < 0x80000000 || pool[0] > UINT64_C(0x100000000) - 0x1008000 || pool[1] != 0x1008000 ||
         (pool[0] & 16383u) || buffer[0] != pool[0] + 16384u || buffer[1] != 0x1000000 ||
@@ -362,6 +365,14 @@ static uint64_t fw_start_ns(void *opaque)
     uint64_t ns = 0;
     absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
     return ns;
+}
+static void fw_start_timing(fw_start_context *context,const char *stage)
+{
+    uint64_t now=fw_start_ns(context);
+    IOLog("REDFIN WIFI TIMING: stage=%s uptime-ms=%llu worker-ms=%llu DT-hits=%llu DT-misses=%llu\n",
+        stage,(unsigned long long)(now/1000000u),
+        (unsigned long long)((now-context->boot_started_ns)/1000000u),
+        (unsigned long long)fw_dt_hits,(unsigned long long)fw_dt_misses);
 }
 static void fw_start_scm_delay(void *opaque, unsigned microseconds)
 {
@@ -1039,6 +1050,7 @@ static int fw_start_transport_run(fw_start_context *context)
                         (!context->bdf.attempted && context->wlfw_setup.fw_ready);
                     if (bdf_done && (context->wlfw_setup.fw_ready || context->bdf.fw_ready)) {
                         if (!context->wlan_ready_observed) {
+                            fw_start_timing(context,"firmware-ready");
                             error = context->wlan_pmic_mode ?
                                 redfin_wifi_wlan_pmic_observe(2, context, fw_start_wlan_pmic_policy) : 0;
                             if (!error && context->snoc_mode) error = fw_start_snoc_observe(context);
@@ -1166,6 +1178,7 @@ static int fw_start_run(fw_start_context *context)
             (unsigned long long)context->assets_bytes);
     }
     IOLog("REDFIN WIFI START: resident source verified; native PIL begins\n");
+    fw_start_timing(context,"source-verified");
     context->phase = FW_START_POWER;
     error = redfin_wifi_power_start();
     if (error) return error;
@@ -1227,6 +1240,7 @@ static int fw_start_run(fw_start_context *context)
     IOLog("REDFIN WIFI START: segment copy result=%d chunks=%u elapsed_ms=%llu\n", error, context->copies,
         (unsigned long long)((fw_start_ns(context) - copy_started_ns) / 1000000u));
     if (error) return error;
+    fw_start_timing(context,"segments-copied");
     error = rf_wifi_smp2p_auth_begin(&context->smp2p, &context->smp_ops);
     if (error) return error;
     context->phase = FW_START_AUTH;
@@ -1239,6 +1253,7 @@ static int fw_start_run(fw_start_context *context)
     error = rf_wifi_smp2p_wait_ready(&context->smp2p, &context->smp_ops, RF_WIFI_SMP2P_MAX_READY_MS);
     IOLog("REDFIN WIFI START: SMP2P ready=%d stage=%u state=%#x handover=%u\n",
         error, context->smp2p.stage, context->smp2p.last_state, context->smp2p.handover);
+    if(!error)fw_start_timing(context,"modem-ready");
     if (!error && context->transport_mode) error = fw_start_transport_run(context);
     return error;
 }
@@ -1254,40 +1269,40 @@ static void fw_start_worker(void *, wait_result_t)
     }
     bool mode_valid = gui ? ((mode = 4), true) : PE_parse_boot_argn("redfinwififw", &mode, sizeof(mode)) && mode >= 2 && mode <= 4;
     DTEntry rmtfs_node;
-    bool rmtfs_present = SecureDTLookupEntry(NULL, "/redfin-rmtfs", &rmtfs_node) == kSuccess;
+    bool rmtfs_present = fw_dt_lookup("/redfin-rmtfs", &rmtfs_node) == kSuccess;
     fw_start.transport_mode = mode >= 3; fw_start.host_mode = mode == 4;
     fw_start.rmtfs_mode = rmtfs_present && mode == 4;
     DTEntry wlfw_node;
-    bool wlfw_present = SecureDTLookupEntry(NULL, "/redfin-wifi-wlfw", &wlfw_node) == kSuccess;
+    bool wlfw_present = fw_dt_lookup("/redfin-wifi-wlfw", &wlfw_node) == kSuccess;
     fw_start.wlfw_mode = wlfw_present && mode == 4 && rmtfs_present;
     DTEntry wlan_node;
-    bool wlan_present = SecureDTLookupEntry(NULL, "/redfin-wifi-wlan", &wlan_node) == kSuccess;
+    bool wlan_present = fw_dt_lookup("/redfin-wifi-wlan", &wlan_node) == kSuccess;
     fw_start.wlan_observe_mode = wlan_present && fw_start.wlfw_mode;
     uint32_t observe = 2;
     fw_start.wlan_power_mode = wlan_present && fw_property(wlan_node, "observe-only", &observe, sizeof(observe)) && !observe;
     const void *pmic_property = NULL;
     unsigned pmic_bytes = 0;
-    bool pmic_present = wlan_present && SecureDTGetProperty(wlan_node, "pmic-observe", &pmic_property, &pmic_bytes) == kSuccess;
+    bool pmic_present = wlan_present && fw_dt_property(wlan_node, "pmic-observe", &pmic_property, &pmic_bytes) == kSuccess;
     uint32_t pmic_enabled = 0;
     fw_start.wlan_pmic_mode = pmic_present && fw_property(wlan_node, "pmic-observe", &pmic_enabled, sizeof(pmic_enabled)) && pmic_enabled == 1;
     const void *hang_property = NULL;
     unsigned hang_bytes = 0;
-    bool hang_present = wlan_present && SecureDTGetProperty(wlan_node, "msa-hang-observe", &hang_property, &hang_bytes) == kSuccess;
+    bool hang_present = wlan_present && fw_dt_property(wlan_node, "msa-hang-observe", &hang_property, &hang_bytes) == kSuccess;
     uint32_t hang_enabled = 0;
     fw_start.wlan_hang_mode = hang_present && fw_property(wlan_node, "msa-hang-observe", &hang_enabled, sizeof(hang_enabled)) && hang_enabled == 1;
     const void *bdf_property = NULL;
     unsigned bdf_bytes = 0;
-    bool bdf_present = wlan_present && SecureDTGetProperty(wlan_node, "bdf-download", &bdf_property, &bdf_bytes) == kSuccess;
+    bool bdf_present = wlan_present && fw_dt_property(wlan_node, "bdf-download", &bdf_property, &bdf_bytes) == kSuccess;
     uint32_t bdf_enabled = 0;
     fw_start.wlan_bdf_mode = bdf_present && fw_property(wlan_node, "bdf-download", &bdf_enabled, sizeof(bdf_enabled)) && bdf_enabled == 1;
     DTEntry snoc_node;
-    bool snoc_present = SecureDTLookupEntry(NULL, "/redfin-wifi-snoc", &snoc_node) == kSuccess;
+    bool snoc_present = fw_dt_lookup("/redfin-wifi-snoc", &snoc_node) == kSuccess;
     fw_start.snoc_mode = snoc_present && fw_start.wlan_bdf_mode;
     const void *mission_property = NULL; unsigned mission_bytes = 0; uint32_t mission_enabled = 0;
-    bool mission_present = snoc_present && SecureDTGetProperty(snoc_node, "mission-enable", &mission_property, &mission_bytes) == kSuccess;
+    bool mission_present = snoc_present && fw_dt_property(snoc_node, "mission-enable", &mission_property, &mission_bytes) == kSuccess;
     fw_start.mission_mode = mission_present && fw_property(snoc_node, "mission-enable", &mission_enabled, sizeof(mission_enabled)) && mission_enabled == 1;
     const void *packets_property = NULL; unsigned packets_bytes = 0; uint32_t packets_enabled = 0;
-    bool packets_present = snoc_present && SecureDTGetProperty(snoc_node, "packets-enable", &packets_property, &packets_bytes) == kSuccess;
+    bool packets_present = snoc_present && fw_dt_property(snoc_node, "packets-enable", &packets_property, &packets_bytes) == kSuccess;
     fw_start.packets_mode = packets_present && fw_property(snoc_node, "packets-enable", &packets_enabled, sizeof(packets_enabled)) && packets_enabled == 1;
     if (args) while (bytes < sizeof(fw_probe.args) && args[bytes]) ++bytes;
     if (!args || bytes == sizeof(fw_probe.args) ||
@@ -1308,8 +1323,10 @@ static void fw_start_worker(void *, wait_result_t)
     }
     memcpy(fw_probe.args, args, bytes + 1); fw_probe.bytes = bytes + 1;
     fw_probe.owner = current_thread(); fw_probe.active = true; fw_start.active = true;
+    if(gui)fw_dt_begin();
     IOLog("REDFIN WIFI START: serialized CPU0 worker interrupts=%u\n", (unsigned)ml_get_interrupts_enabled());
     uint64_t started_ns = fw_start_ns(&fw_start);
+    fw_start.boot_started_ns=started_ns;fw_start_timing(&fw_start,"worker");
     int error = fw_start_run(&fw_start);
     if (error && fw_start.packets_started) {
         struct redfin_wifi_radio_state state = {};
@@ -1332,6 +1349,7 @@ static void fw_start_worker(void *, wait_result_t)
     /* This bounded diagnostic never frees remote-visible state or retries.
      * The shim/PMIC watchdog resets the complete platform back to fastboot. */
     if (error) fw_start.poisoned = true;
+    __atomic_store_n(&fw_dt_owner,THREAD_NULL,__ATOMIC_RELEASE);
     fw_start.active = false;
     fw_probe.active = false;
     thread_terminate_self();

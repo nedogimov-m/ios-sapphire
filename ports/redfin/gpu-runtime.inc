@@ -11,6 +11,8 @@ static struct {
     struct rf_gr_arena arena;
     struct rf_gm_memory pool;
     uint64_t *l2,*leaves;
+    uint64_t *dirty_first,*dirty_end;
+    uint64_t audit_ns,wait_ns,publish_ns,polls;
     uint32_t state,fence,completed;
     bool dirty;
 } gr;
@@ -41,6 +43,14 @@ void redfin_gpu_sync(void *address,uint64_t size,bool invalidate)
     }
     __asm__ volatile("dsb sy":::"memory");
 }
+void redfin_gpu_invalidate(void *address,uint64_t size)
+{
+    uintptr_t at=(uintptr_t)address;
+    if(!at || !size || size>RF_GR_BUFFER_MAX || (at&63u) || (size&63u) || at>UINTPTR_MAX-size)return;
+    for(uintptr_t p=at;p<at+size;p+=64)
+        __asm__ volatile("dc ivac, %0"::"r"(p):"memory");
+    __asm__ volatile("dsb sy":::"memory");
+}
 static int gr_live(void)
 {
     if(!redfin_gpu_ready() || !gx.context || gx.context->smmu_mode!=6 || !redfin_gui_cpu0())return ENXIO;
@@ -48,20 +58,86 @@ static int gr_live(void)
     if(error)redfin_gpu_poison("power/context ownership changed");
     return error;
 }
+/* Runtime snapshots remain complete, twice-read and compared to the exact
+ * original foreign-state lease. Bracket the read-only snapshot with the
+ * full parent/args/firmware/power guard; each nested read needs only this
+ * owned, CPU0, fixed-CX epoch, rather than recursively checking all parents.
+ * No table publish, TLB store or ring doorbell uses this read-only shortcut. */
+static bool gr_snapshot_valid(void *argument)
+{
+    struct gm_context *c=argument;
+    return redfin_gpu_ready() && c && c==gx.context && c->smmu_mode==6 &&
+        redfin_gui_cpu0() && !gx.poisoned && gx.mapping.state.active &&
+        !gx.mapping.state.poisoned &&
+        (gm_scalar_read(c->base[RF_GT_GPUCC]+0x1098)&0x80000001u)==1 &&
+        !(gm_scalar_read(c->base[RF_GT_GMU]+0x14340)&0xc0u);
+}
+static int gr_snapshot_global(void *argument,uint32_t at,uint32_t *value)
+{
+    struct gm_context *c=argument;
+    if(!value || !rf_gs_read_allowed(at,&gx.mapping.state.expected) || !gr_snapshot_valid(c))return EPERM;
+    *value=gm_scalar_read(c->smmu+at);return 0;
+}
+static int gr_snapshot_bank(void *argument,unsigned bank,uint32_t at,uint32_t *value)
+{
+    struct gm_context *c=argument;
+    if(!value || !rf_gc_allowed(bank,at) || !gr_snapshot_valid(c))return EPERM;
+    *value=gm_scalar_read(c->cb+4096*bank+at);return 0;
+}
+static int gr_snapshot(void *argument,struct rf_gs_snapshot *global,struct rf_gc_snapshot *banks)
+{
+    int error=gr_live();if(error || !gm_payloads_valid(argument))return error?error:ECANCELED;
+    const struct rf_gs_ops go={argument,gr_snapshot_valid,gr_snapshot_global};
+    const struct rf_gc_ops bo={argument,gr_snapshot_valid,gr_snapshot_bank};
+    error=rf_gs_snapshot_run(&go,gm_chip,global);
+    if(!error)error=rf_gc_snapshot_run(&bo,global,banks);
+    if(!error)error=gr_live();
+    return error?error:gm_payloads_valid(argument)?0:ECANCELED;
+}
+static int gr_snapshot_read(void *argument,unsigned block,uint32_t at,uint32_t *value)
+{
+    struct gm_context *c=argument;
+    if(!block)return gr_snapshot_global(c,at,value);
+    if(block!=1 || !value || !gr_snapshot_valid(c) ||
+        (!rf_gc_allowed(0,at) && at!=0x28 && at!=0x2c && at!=0x7f4))return EPERM;
+    *value=gm_scalar_read(c->cb+at);return 0;
+}
 int redfin_gpu_audit(void)
 {
-    int error=gr_live();if(!error)error=gx_audit(gx.context);
+    struct gm_context *c=gx.context;
+    int error=gr_live();
+    struct rf_gt_report clock={0};const struct rf_gt_ops source={.context=c,.valid=gm_valid,.read=gm_read};
+    if(!error)error=rf_gt_source_live_power(&source,&clock,true,c->gx_requested);
+    for(unsigned i=0;!error && i<sizeof(gm_smmu_clocks)/sizeof(gm_smmu_clocks[0]);++i) {
+        const uint32_t *w=gm_smmu_clocks[i];
+        if((gm_scalar_read(c->base[w[0]]+w[1])&w[2])!=w[3])error=EAGAIN;
+    }
+    struct rf_gmm_ops o=gx_mapping_ops;o.context=c;o.sample=gr_snapshot;o.read=gr_snapshot_read;
+    if(!error)error=rf_a6_map_verify(&gx.mapping,&o);
+    if(!error)for(unsigned bank=0;bank<2;bank++)
+        if(gm_scalar_read(c->cb+4096*bank+0x28) || gm_scalar_read(c->cb+4096*bank+0x2c))error=EAGAIN;
     if(error)redfin_gpu_poison("complete SMMU/foreign-state audit failed");
     return error;
 }
+static void gr_dirty(uint64_t *first,uint64_t *end)
+{
+    if(!gr.dirty_first || first<gr.dirty_first)gr.dirty_first=first;
+    if(!gr.dirty_end || end>gr.dirty_end)gr.dirty_end=end;
+    gr.dirty=true;
+}
 static int gr_tlb(void)
 {
+    if(gr_live())return ENXIO;
+    if(gr.dirty_first && gr.dirty_end)
+        redfin_gpu_sync(gr.dirty_first,(uint64_t)(gr.dirty_end-gr.dirty_first)*8,false);
     if(gr_live())return ENXIO;
     gm_memory_store(gx.context->cb+0x610,0); /* Owned ASID0 only. */
     gm_memory_store(gx.context->cb+0x7f0,1);
     for(unsigned i=0;i<1000;i++) {
         if(gr_live())return ECANCELED;
-        if(!(gm_scalar_read(gx.context->cb+0x7f4)&1u)){gr.dirty=false;return 0;}
+        if(!(gm_scalar_read(gx.context->cb+0x7f4)&1u)) {
+            gr.dirty=false;gr.dirty_first=gr.dirty_end=NULL;return 0;
+        }
         delay(1);
     }
     redfin_gpu_poison("owned TLB synchronization timeout");return ETIMEDOUT;
@@ -74,12 +150,14 @@ static uint64_t *gr_leaf(uint64_t address)
 {return gr.leaves+((address-RF_GR_BASE)>>12);}
 int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only)
 {
-    if(gr_live() || (address&0xfffu) || (physical&0xfffu) ||
+    /* This writes CPU-owned page tables only. Full live checks bracket the
+     * buffer allocation and its one final cache/TLB publication. */
+    if(!redfin_gpu_ready() || !redfin_gui_cpu0() || gx.poisoned || (address&0xfffu) || (physical&0xfffu) ||
         !rf_gr_find(&gr.arena,address,4096) || physical<RF_GM_PT_RAM_BASE ||
         physical>RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-4096)return EINVAL;
     uint64_t *entry=gr_leaf(address);if(*entry)return EEXIST;
     *entry=physical|(read_only?0xec3u:0xe43u);
-    redfin_gpu_sync(entry,8,false);gr.dirty=true;return 0;
+    gr_dirty(entry,entry+1);return 0;
 }
 int redfin_gpu_release(uint64_t address,uint64_t size)
 {
@@ -87,7 +165,7 @@ int redfin_gpu_release(uint64_t address,uint64_t size)
     if(gr_live() || !object || object->address!=address || object->size!=size ||
         gr.completed!=gr.fence)return EBUSY;
     for(uint64_t at=address;at<address+size;at+=4096)*gr_leaf(at)=0;
-    redfin_gpu_sync(gr_leaf(address),size/512,false);gr.dirty=true;
+    gr_dirty(gr_leaf(address),gr_leaf(address+size));
     int error=gr_tlb();if(error)return error;
     return rf_gr_release(&gr.arena,address,size)?0:EINVAL;
 }
@@ -97,29 +175,43 @@ uint32_t redfin_gpu_last(void){return gr.fence;}
 int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence)
 {
     if(!fence || gr.fence==UINT32_MAX)return EINVAL;
+    uint64_t audit_at=gm_time_ns(gx.context);
     int error=redfin_gpu_audit();if(error)return error;
+    gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
     error=redfin_gpu_mapped();if(error)return error;
     uint32_t packets[RF_GR_PACKET_WORDS],next=gr.fence+1;
     unsigned n=rf_gr_submit_words(&gr.arena,addresses,words,count,next,packets,RF_GR_PACKET_WORDS);
     if(!n)return EINVAL;
     uint32_t rptr=gm_scalar_read(gx.gpu+4*0x806),ring_words=RF_A6_RING_BYTES/4;
     if(rptr!=gx.wptr || n>=ring_words){redfin_gpu_poison("ring was not idle");return EBUSY;}
+    uint64_t publish_at=gm_time_ns(gx.context);
     uint32_t *ring=gx.data[0].host;
     for(unsigned i=0;i<n;i++)ring[(gx.wptr+i)%ring_words]=packets[i];
-    gm_memory_clean(&gx.data[0]);gr.fence=next;gx.wptr=(gx.wptr+n)%ring_words;
+    unsigned first_words=n<ring_words-gx.wptr?n:ring_words-gx.wptr;
+    redfin_gpu_sync(ring+gx.wptr,4*first_words,false);
+    if(first_words<n)redfin_gpu_sync(ring,4*(n-first_words),false);
+    if(gr_live())return ECANCELED;
+    gr.fence=next;gx.wptr=(gx.wptr+n)%ring_words;
     gm_memory_store(gx.gpu+4*0x807,gx.wptr);
+    gr.publish_ns+=gm_time_ns(gx.context)-publish_at;
     uint64_t first=gm_time_ns(gx.context);
     for(unsigned i=0;i<5000 && gm_time_ns(gx.context)-first<RF_A6_WAIT_NS;i++) {
+        gr.polls++;
         if((error=gr_live()))break;
         uint32_t fault=gm_scalar_read(gx.gpu+4*0x821),irq=gm_scalar_read(gx.gpu+4*0x823);
         if(fault || (irq&0xf7u)){error=EIO;break;}
         uint32_t done=gm_scalar_read(gx.scratch+RF_GR_FENCE_AT);
         if(done==next && gm_scalar_read(gx.gpu+4*0x806)==gx.wptr &&
             !(gm_scalar_read(gx.gpu+4*0x210)&~1u)) {
+            gr.wait_ns+=gm_time_ns(gx.context)-first;audit_at=gm_time_ns(gx.context);
             error=redfin_gpu_audit();if(error)break;
+            gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
             gr.completed=next;*fence=next;
-            if(next<=8 || !(next%256))printf("REDFIN GPU RUNTIME SUBMIT: fence=%u IBs=%u done=%u rptr=%u\n",
-                next,count,done,gx.wptr);
+            if(next<=8 || !(next%256)) {
+                printf("REDFIN GPU RUNTIME SUBMIT: fence=%u IBs=%u done=%u rptr=%u\n",next,count,done,gx.wptr);
+                printf("REDFIN GPU RUNTIME TIMING: submits=%u audit-us=%llu publish-us=%llu wait-us=%llu polls=%llu\n",
+                    next,gr.audit_ns/1000/next,gr.publish_ns/1000/next,gr.wait_ns/1000/next,gr.polls);
+            }
             return 0;
         }
         delay(100);

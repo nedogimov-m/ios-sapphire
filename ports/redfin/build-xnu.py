@@ -237,7 +237,7 @@ def main(argv=None):
                                          'wifi-firmware.patch', 'wifi-fw-source.patch', 'wifi-smp2p.patch',
                                          'wifi-fw-build.patch', 'wifi-radio.patch', 'wifi-network.patch',
                                          'wifi-network-build.patch', 'wifi-gui.patch', 'touch-response.patch', 'preinit-progress.patch',
-                                         'userspace-waits.patch', 'gpu-service.patch', 'graphics-eagl.patch', 'graphics-physical.patch', 'graphics-journal.patch', 'graphics-exec.patch', 'graphics-memory.patch'), 21):
+                                         'userspace-waits.patch', 'gpu-service.patch', 'graphics-eagl.patch', 'graphics-physical.patch', 'graphics-journal.patch', 'graphics-exec.patch', 'graphics-memory.patch', 'graphics-lifecycle.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

@@ -1,5 +1,35 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete graphics/boot performance batch — 2026-10-25
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+RedwoodGPU::submit seed/4ms surface-cache policy, client-mapping treatment
+and prepared surface retention. Redfin adopts that push policy, invalidates
+only GPU-written surfaces after real synchronous completion, and permits
+native prepared wrapped ranges with SweetSurface's wrapDelta rather than
+MiniIOSurface's leading state page. Read-only wrapped pages retain read-only
+GPU permissions and cannot be submitted as write buffers. No asynchronous
+completion or foreign fault recovery is introduced.
+
+The runtime still makes complete stable global/CB0/CB1 snapshots before and
+after each submission and compares every foreign word. Their read-only
+callbacks use a bracketed CPU0/fixed-power epoch to avoid recursively
+revalidating every parent on each register read. Table construction batches
+cache-line publication before the same native ASID0 TLB synchronization;
+ring publication cleans only the changed spans. Hardware writes keep their
+full guards. CPU affinity switches occur only when actual migration is
+required. GPU retirement moves after normal process exit.
+
+The latest native capture's firmware copy alone costs20243ms. Redfin's
+serialized GUI firmware worker now caches traversal of its pinned immutable
+boot ADT; the existing value comparisons and source/owner/CPU/epoch guards
+still run against live bytes. A bounded cache miss uses the original native
+lookup. Native PAS4/MPSS copy/readback/GLINK/WLFW ordering and all aperture
+fences stay unchanged. New phase timestamps make firmware/station delay
+measurable. Hardware timing, wrapped-surface results and60fps remain pending
+the complete combined run. Paired userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+remains byte-identical.
+
 ## Saved exec path and bounded native graphics memory admission — 2026-10-25
 
 Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's

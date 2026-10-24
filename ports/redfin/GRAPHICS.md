@@ -69,6 +69,20 @@ An orderly shutdown stops the GPU before backboardd exits, causing one
 subsequent rejected submission and userland crash. These are remaining
 performance/lifecycle problems; this milestone does not establish60fps.
 
+The next complete performance batch avoids redundant affinity switches,
+publishes dirty page-table/ring ranges as batches, retains complete stable
+SMMU audits through read-only snapshot callbacks and uses the preferred
+seed/4ms surface-push policy. Post-fence cache invalidation applies only to
+GPU-written surfaces. Prepared wrapped surfaces include their native page
+delta and keep the prepared descriptor/surface alive; read-only imports
+cannot be submitted for GPU writes. Normal shutdown retires the GPU after
+process exit. Aggregate native phase timings measure the remaining cost.
+
+An image with `--userspace-waits` uses GUI3 to inspect MobilePhone,
+MobileSlideShow, callservicesd and photolibraryd at the existing bounded
+sampling points. Those diagnostic images exclude screen-log payloads.
+The applications' observed startup stalls are not a Metal diagnosis.
+
 After a graphics panic the root can have pending HFS transactions. The older
 strict RW publication gate requires a clean primary header, so it prevents
 HFS from reaching its own replay. GUI3 alone now has a separate read-only
