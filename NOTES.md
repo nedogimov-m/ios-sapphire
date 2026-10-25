@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V17 no runtime GPU stop, but real GUI corruption confirmed — 2026-10-25
+
+Sourced2964b6, local20261025-134128/noCI7fadbcd8..., V17 image
+21dc02563ca8ee897d20a14820fba4995765b1fd77b34bf9909b5bb738bba791, nonce580355475702a8ce. V19 applied once:
+178ranges/23650304bytes/zero new/zero freed blocks; all preimages/readbacks/
+signed files/native readonly fsck PASS. V19 is now applied/stale. Authenticated
+capture leaves clean consistent HFSX/write_count917356 and verified Fastboot.
+Native Metal192compute/pixels/guards/dependency/short-surface still PASS,5GMEM/
+1sysmem. Phone254 and Photos255 survive5/17s; SpringBoard26/backboardd62 stay
+alive through capture; no runtime GPU fault/stop recorded. HFI exchanges pass
+sequence64; host9000-case proof covers both old limits and12-bit rollover.
+Actual six-layer clip142GPU presentations/10.000462s=14.199fps,601callbacks/
+60Hz. No performance improvement or graphical correctness is established.
+
+User photo and authenticated frame521 show actual large red checkerboard,
+cyan rectangles, ghosted text/home-screen contents. These are NOT the six
+36-point rounded test squares; the initial explanation to the user was wrong
+and was corrected after seeing the photo. Simple pixel probes/process survival
+are insufficient evidence of correct system composition. Prioritize this visible
+rendering defect, keep the complete broader goal active and defer sensor work.
+
+Source review finds silently ignored Metal scissor, limited viewport/raster
+state, pass clears restricted to attachment0, and imports refused for real
+480/4512-byte row pitches. Need complete raster/pass semantics, preserve real
+producer/completion ordering and support actual IOSurface layouts. The native
+visual overlay is being removed; future passive presentation counts must not
+be described as an animation FPS benchmark. Four new FastRPC sources in the
+working tree are partial/unbuilt/uninstalled; no sensor success is claimed.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x580355475702a8ce redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native HFI lifetime/Metal queue/attachment block built; fresh V19 staged — 2026-10-25
 
 Source base63b4fe4 plus this complete block. Remove inherited64sent/128received
