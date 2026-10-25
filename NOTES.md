@@ -1,5 +1,54 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native external-buffer/completion/tail block built; fresh V25 staged — 2026-10-25
+
+Source base7577403 plus this complete related block. Allocate real native
+dword padding and include only that actual tail in R32 SSBO descriptors while
+preserving Metal's logical length and transfer bounds. Add page-backed no-copy
+buffers through existing SweetSurface IOSurfaceAddress/prepared-descriptor GPU
+import: original CPU pointer/pages, real retained surface/device and deallocator
+after native BO/pin release. No CPU copy substitutes for sharing. Report known
+buffer aliases; unserved buffer-backed textures remain explicit.
+
+Correct a second concrete asynchronous contract: upstream buffer/texture
+isComplete=YES and waitUntilComplete=no-op depended on synchronous commit.
+Native per-resource groups now enter once per actual submitted command and
+leave after its final fence/resolve or refused-command cleanup. Cover duplicate
+references, overlapping users, blocked waiters and early commands_begin failure.
+This implementation is not yet evidence that early reuse caused the checkerboard.
+
+Extend opt-in real-draw capture to256draws/48images/512readback attempts.
+Private tiled2D inputs/attachments read through actual A6xx blits into real
+linear staging; no generic CPU fallback. Deduplicate images and record sampled-
+black metadata so blank Apple-logo draws do not consume the useful image budget.
+Native checks add eight short-tail lengths and actual cached external-page GPU
+read/write, outside guards and deallocator retention after caller release before
+commit. The invalid-range callback check now waits its actual asynchronous event.
+
+36 combined host cases PASS/no skips, including actual adapted ObjC/GCD resource
+and command methods, final end failure and early begin refusal. Full fresh
+Mesa/AIR/native Metal/checker/shader/actual20H392 API/signature build PASS:
+research/redfin-metal-buffers-v1, final local20261025-164824/noCI, source pairing
+005fdb9409f3138accbc5d6708b673ea5cd6886c904b7b159d537c25120bd47d.
+Host-only intermediate SDK/header-order/checker compilation errors were corrected
+before installation; native checks use public aligned allocation for real pages.
+Kernel unchanged/reused local20261025-134128/noCI,
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V22 image4ad178244c2f21ed5c512955a6e02ddeec32fd1fc8842ba78ad4f676e7221ee1,
+nonce81b8c1387c02a459; complete native loader/ADT/liveFDT/firmware/platform/DVFS/
+return/source-window preflight PASS.
+
+Fresh V25 starts clean consistent HFSX/write_count958871:177ranges/
+23842816bytes/5new/zero freed blocks. Complete signed-file/seal/readback,
+preimages and native readonly fsck PASS. Both app-launch jobs remain disabled;
+explicit compositor observer remains enabled for this run only. UI/identities/
+credentials/existing logs are preserved. V25 is PREPARED, NOT APPLIED; V24 and
+older applied stages are stale. V22 root stage is still failed HOST-ONLY/do not
+apply (distinct from the fresh V22 boot image). Next apply V25 once and collect
+one combined run. Actual external sharing/tails/resource readiness and correct
+GUI remain to be observed. Stable60/90FPS and broader Wi-Fi/power/thermal/sensors/
+Apple authorization remain open. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x81b8c1387c02a459 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V21 genuine roundtrips PASS; checkerboard remains; bounded draw readback works — 2026-10-25
 
 Source2cc0a37, graphics local20261025-161528/noCI, unchanged kernel

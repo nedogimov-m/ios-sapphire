@@ -43,7 +43,7 @@ class MetalBlitTests(unittest.TestCase):
 #include <stdlib.h>
 #include <string.h>
 enum pipe_format {PIPE_FORMAT_NONE,PIPE_FORMAT_R8_UINT,PIPE_FORMAT_Z32_FLOAT_S8X24_UINT,PIPE_FORMAT_Z24X8_UNORM};
-enum {PIPE_BUFFER,PIPE_BIND_SHADER_BUFFER,PIPE_USAGE_DEFAULT};
+enum {PIPE_BUFFER,PIPE_BIND_SHADER_BUFFER=1,PIPE_BIND_CONSTANT_BUFFER=2,PIPE_BIND_INDEX_BUFFER=4,PIPE_BIND_VERTEX_BUFFER=8,PIPE_USAGE_DEFAULT=0};
 struct u_transfer_helper;
 struct pipe_screen {struct u_transfer_helper *transfer_helper;};
 struct pipe_resource {struct pipe_screen *screen;enum pipe_format format;unsigned target,width0,height0,depth0,array_size,bind,usage,nr_samples;};
@@ -95,6 +95,21 @@ int main(void){
  assert(!rwa_blit_range(UINT32_MAX,1,UINT64_MAX));
  assert(!rwa_blit_range(0,UINT64_MAX,UINT64_MAX));
  assert(rwa_blit_range(UINT32_MAX-1,1,UINT32_MAX));
+ return 0;
+}
+''')
+
+    def test_real_allocation_extent_keeps_every_logical_tail_in_a_complete_native_dword(self):
+        self.native('#include <assert.h>\n#include "metal-buffer-import.h"\n'+r'''
+int main(void){
+ uint32_t physical=0;
+ for(size_t n=1;n<131072;++n){
+  assert(redfin_buffer_extent(n,&physical));assert(physical>=n&&physical-n<=3&&!(physical&3));
+  assert(((n-1)/4)<physical/4); /* actual R32 descriptor's final addressable texel */
+ }
+ assert(redfin_buffer_extent(128u<<20,&physical)&&physical==(128u<<20));
+ assert(!redfin_buffer_extent(0,&physical));assert(!redfin_buffer_extent(1,NULL));
+ assert(!redfin_buffer_extent(UINT32_MAX,&physical));assert(!redfin_buffer_extent(SIZE_MAX,&physical));
  return 0;
 }
 ''')

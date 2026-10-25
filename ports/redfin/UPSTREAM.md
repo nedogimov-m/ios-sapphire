@@ -1,5 +1,42 @@
 # HackiOS upstream review — 2026-10-22
 
+## Real external pages, complete dword tails and asynchronous resource readiness — 2026-10-25
+
+Preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and kernel
+8e61187098f2c26c5daee8f9f72b6416aa64b9ab remain reviewed pins. V21 confirms
+two genuine GPU blit roundtrips, but not correct system rendering. Its mip
+download exposes the final partial dword: Mesa25.0.7 fd6_ssbo_descriptor uses
+R32_UINT and fdl6_buffer_view_init floors bytes/4. Allocate actual dword padding
+in native Metal buffers and include only that real tail in SSBO bindings;
+preserve the public length and every logical transfer bound. Narrow stores
+still use the upstream subdword-atomic lowering and preserve neighboring bytes.
+
+Re-reviewed upstream Metal resources' isComplete/waitUntilComplete stubs: their
+comments depend on synchronous commit, while Redfin's adapted commit is now
+asynchronous. A native per-resource GCD group now enters once per submitted
+command and leaves after the actual final fence/resolve or refused-command
+cleanup. Deduplicate each command's references and cover overlapping users,
+waiters and early errors. This corrects a real contract; whether early resource
+reuse explains the checkerboard still needs native evidence.
+
+Re-reviewed preferred MiniIOSurface external memory and the actual Redfin
+SweetSurface IOSurfaceAddress/prepare/complete/wrapDelta path. Redfin's existing
+GPU import already retains that prepared descriptor and maps its real pages.
+Implement no-copy Metal buffers through that path, retaining the actual surface,
+original CPU pointer, caller deallocator and device. Require real zero-offset
+native backing, validate page/length/options, preserve cache-mode declarations,
+and release GPU references/pins before the caller's deallocator. Do not substitute
+a CPU copy. Native probes exercise GPU reads/writes of those original cached
+pages, outside guards and releasing the caller's object before commit.
+
+Broaden explicitly enabled compositor capture through256real draws/48images/
+512readback attempts. Read private tiled textures through actual A6xx blits into
+genuine linear staging, then map the correctly typed raw alias. Reject native
+refusals; never enter a CPU pixel-transfer fallback. Deduplicate equal images
+and record sampled-black metadata without exhausting the image budget on blank
+boot frames. Diagnostic drains/readbacks still change timing and cannot prove
+ordinary FPS; the default launch policy keeps this observer disabled.
+
 ## Actual ordered Metal blits and raw-alias transfer metadata — 2026-10-25
 
 Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and

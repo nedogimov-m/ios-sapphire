@@ -6,8 +6,8 @@
 static struct {
    bool checked,enabled;
    char boot[17];
-   unsigned draws,images,seen_count;
-   struct {const struct rwa_texture *texture;uint32_t crc,alpha_crc;} seen[64];
+   unsigned draws,images,attempts,seen_count;
+   struct {const struct rwa_texture *texture;uint32_t crc,alpha_crc;unsigned role;} seen[128];
 } redfin_composition_trace;
 
 static bool
@@ -40,29 +40,42 @@ rwa_redfin_trace_crc(const uint8_t *bytes,size_t count)
 static void
 rwa_redfin_trace_texture(struct rwa_texture *texture,const char *role,unsigned slot,unsigned draw)
 {
-   if(!texture||redfin_composition_trace.images>=48)return;
+   if(!texture||redfin_composition_trace.images>=48||redfin_composition_trace.attempts>=512)return;
    struct rwa_device *device=texture->device;struct pipe_resource *resource=texture->res;
    enum pipe_format format=resource->format;
    if(format_is_depth_stencil(format)||util_format_get_blockwidth(format)!=1||
-      util_format_get_blockheight(format)!=1||resource->nr_samples>1)return;
+      util_format_get_blockheight(format)!=1||resource->nr_samples>1||resource->target!=PIPE_TEXTURE_2D)return;
+   ++redfin_composition_trace.attempts;
    unsigned pitch=0,offset=0;
+   struct pipe_resource *stage=NULL;
    struct pipe_resource *buffer=redfin_freedreno_buffer_alias(device->screen,resource,&pitch,&offset);
    if(!buffer) {
-      fprintf(stderr,"REDFIN METAL DRAW IMAGE SKIP: boot=%s draw=%u role=%s slot=%u surface=%u reason=not-linear\n",
-         redfin_composition_trace.boot,draw,role,slot,texture->redfin_surface);return;
+      const struct pipe_resource shape={.target=PIPE_TEXTURE_2D,.format=format,
+         .width0=resource->width0,.height0=resource->height0,.depth0=1,.array_size=1,
+         .bind=PIPE_BIND_SAMPLER_VIEW|PIPE_BIND_RENDER_TARGET|PIPE_BIND_LINEAR,.usage=PIPE_USAGE_STAGING};
+      const uint64_t modifier=DRM_FORMAT_MOD_LINEAR;
+      stage=device->screen->resource_create_with_modifiers(device->screen,&shape,&modifier,1);
+      struct pipe_box box={.width=resource->width0,.height=resource->height0,.depth=1};char why[192]={0};
+      if(stage&&!rwa_blit_native(device,resource,0,&box,stage,0,&box,PIPE_TEX_FILTER_NEAREST,why,sizeof(why)))
+         buffer=redfin_freedreno_buffer_alias(device->screen,stage,&pitch,&offset);
+      if(!buffer) {
+         fprintf(stderr,"REDFIN METAL DRAW IMAGE SKIP: boot=%s draw=%u role=%s slot=%u surface=%u reason=native-readback-refused detail=%s\n",
+            redfin_composition_trace.boot,draw,role,slot,texture->redfin_surface,why);
+         pipe_resource_reference(&stage,NULL);return;
+      }
    }
    unsigned width=resource->width0,height=resource->height0,cpp=util_format_get_blocksize(format);
    if(!width||!height||offset>buffer->width0||
       (uint64_t)(height-1)*pitch+(uint64_t)width*cpp>buffer->width0-offset) {
-      pipe_resource_reference(&buffer,NULL);return;
+      pipe_resource_reference(&buffer,NULL);pipe_resource_reference(&stage,NULL);return;
    }
    unsigned w=MIN2(width,80),h=MIN2(MAX2(1,(uint64_t)height*w/width),174);
    size_t raw=(size_t)w*h*3;
    uint8_t *rgb=malloc(raw),*alpha=malloc((size_t)w*h);char *line=malloc(512+raw*4/3+2);
    struct pipe_transfer *transfer=NULL;
    const uint8_t *pixels=rgb&&alpha&&line?pipe_buffer_map(device->pipe,buffer,PIPE_MAP_READ,&transfer):NULL;
-   if(!pixels) {free(rgb);free(alpha);free(line);pipe_resource_reference(&buffer,NULL);return;}
-   unsigned min_alpha=255,max_alpha=0,zero_alpha=0,opaque=0,invalid_premult=0,zero_nonblack=0;
+   if(!pixels) {free(rgb);free(alpha);free(line);pipe_resource_reference(&buffer,NULL);pipe_resource_reference(&stage,NULL);return;}
+   unsigned min_alpha=255,max_alpha=0,zero_alpha=0,opaque=0,invalid_premult=0,zero_nonblack=0,colored=0;
    for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x) {
       unsigned sx=(uint64_t)x*width/w,sy=(uint64_t)y*height/h;uint8_t rgba[4];
       util_format_read_4ub(format,rgba,4,pixels+offset+(uint64_t)sy*pitch+(uint64_t)sx*cpp,cpp,0,0,1,1);
@@ -71,21 +84,30 @@ rwa_redfin_trace_texture(struct rwa_texture *texture,const char *role,unsigned s
       zero_alpha+=rgba[3]==0;opaque+=rgba[3]==255;
       invalid_premult+=rgba[0]>rgba[3]+1||rgba[1]>rgba[3]+1||rgba[2]>rgba[3]+1;
       zero_nonblack+=rgba[3]==0&&(rgba[0]||rgba[1]||rgba[2]);
+      colored+=rgba[0]||rgba[1]||rgba[2];
    }
-   pipe_buffer_unmap(device->pipe,transfer);pipe_resource_reference(&buffer,NULL);
+   pipe_buffer_unmap(device->pipe,transfer);pipe_resource_reference(&buffer,NULL);pipe_resource_reference(&stage,NULL);
    uint32_t crc=rwa_redfin_trace_crc(rgb,raw);
    uint32_t alpha_crc=rwa_redfin_trace_crc(alpha,(size_t)w*h);
-   if(strcmp(role,"OUTPUT")) {
+   if(!colored) {
+      fprintf(stderr,"REDFIN METAL DRAW SAMPLED-BLACK: boot=%s draw=%u role=%s slot=%u surface=%u samples=%u min-alpha=%u max-alpha=%u alpha-crc32=%08x\n",
+         redfin_composition_trace.boot,draw,role,slot,texture->redfin_surface,w*h,min_alpha,max_alpha,alpha_crc);
+      free(rgb);free(alpha);free(line);return;
+   }
+   {
+      unsigned kind=!strcmp(role,"OUTPUT");
       unsigned i=0;
-      for(;i<redfin_composition_trace.seen_count;++i)if(redfin_composition_trace.seen[i].texture==texture)break;
+      for(;i<redfin_composition_trace.seen_count;++i)
+         if(redfin_composition_trace.seen[i].texture==texture&&redfin_composition_trace.seen[i].role==kind)break;
       if(i<redfin_composition_trace.seen_count&&redfin_composition_trace.seen[i].crc==crc&&
          redfin_composition_trace.seen[i].alpha_crc==alpha_crc) {
          free(rgb);free(alpha);free(line);return;
       }
-      if(i<64) {
+      if(i<128) {
          if(i==redfin_composition_trace.seen_count)++redfin_composition_trace.seen_count;
          redfin_composition_trace.seen[i].texture=texture;redfin_composition_trace.seen[i].crc=crc;
          redfin_composition_trace.seen[i].alpha_crc=alpha_crc;
+         redfin_composition_trace.seen[i].role=kind;
       }
    }
    unsigned frame=redfin_composition_trace.images+1;
@@ -137,7 +159,7 @@ rwa_redfin_trace_stage(struct rwa_render *render,const struct air_shader_info *i
 static int
 rwa_redfin_trace_draw(struct rwa_render *render,const struct rwa_draw *draw,char *why,size_t why_size)
 {
-   if(!rwa_redfin_trace_selected()||redfin_composition_trace.draws>=32||redfin_composition_trace.images>=48)return 0;
+   if(!rwa_redfin_trace_selected()||redfin_composition_trace.draws>=256||redfin_composition_trace.images>=48)return 0;
    struct rwa_device *device=render->device;
    if(redfin_metal_scope_drain(&device->command_scope,command_scope_finish,device,why,why_size))return -1;
    unsigned number=++redfin_composition_trace.draws;

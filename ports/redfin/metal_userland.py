@@ -402,6 +402,10 @@ def adapt_driver(text):
     text = adapt_resources(text)
     from ports.redfin.metal_blit_userland import adapt as adapt_blit
     text = adapt_blit(text)
+    from ports.redfin.metal_buffer_userland import adapt as adapt_buffers
+    text = adapt_buffers(text)
+    from ports.redfin.metal_completion_userland import adapt as adapt_completion
+    text = adapt_completion(text)
     text += '''
 /* Private readonly evidence for the paired native pixel checker. */
 int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)
@@ -567,6 +571,8 @@ def prepare(upstream, out, cache_path, pairing):
     (out / 'metal-abi.h').write_text(header(abi, pairing))
     shutil.copy2(Path(__file__).with_name('metal-raster.h'),out/'redfin_metal_raster.h')
     shutil.copy2(Path(__file__).with_name('metal-blit.h'),out/'redfin_metal_blit.h')
+    shutil.copy2(Path(__file__).with_name('metal-buffer-import.h'),out/'redfin_metal_buffer_import.h')
+    shutil.copy2(Path(__file__).with_name('iosurface-abi.h'),out/'iosurface-abi.h')
     (out / 'redwoodmetal.m').write_text(adapt_driver((src / 'redwoodmetal.m').read_text()))
     (out / 'redwooddrawable.m').write_text(adapt_drawable((src / 'redwooddrawable.m').read_text()))
     shutil.copy2(src / 'redwood_drawable.h', out / 'redwood_drawable.h')

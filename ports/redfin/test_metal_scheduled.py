@@ -48,8 +48,8 @@ class MetalScheduledTests(unittest.TestCase):
 #include <mach/mach_time.h>
 enum {RW_CB_COMMITTED=2,RW_CB_SCHEDULED=3,RW_CB_COMPLETED=4,RW_CB_ERROR=5};
 static dispatch_semaphore_t entered,release_fence;
-static unsigned fail_fence,visible;
-static int begin(void *d,char *why,size_t n){(void)d;(void)why;(void)n;return 0;}
+static unsigned fail_fence,fail_begin,visible;
+static int begin(void *d,char *why,size_t n){(void)d;if(fail_begin){snprintf(why,n,"native begin refusal");return -7;}return 0;}
 static int end(void *d,char *why,size_t n){
  (void)d;dispatch_semaphore_signal(entered);
  assert(!dispatch_semaphore_wait(release_fence,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
@@ -83,6 +83,7 @@ static void redfin_metal_io_completed(const uint64_t *a,const uint64_t *b){(void
  @public _Atomic(NSUInteger) _status;_Atomic(BOOL) _redfinFinalized;
  dispatch_group_t _redfinExecution;uint64_t _redfinQueuedTicks;
  TestQueue *_queue;NSMutableArray *_work;NSError *_error;
+ BOOL _testResourceActive;
 }
 - (void)commit;
 - (void)redfinExecute;
@@ -91,14 +92,18 @@ static void redfin_metal_io_completed(const uint64_t *a,const uint64_t *b){(void
 - (void)failWith:(const char *)reason;
 - (void)redwoodReturnSlot;
 - (void)redwoodDeliverHandlers;
+- (BOOL)redfinMarkResources;
+- (void)redfinFinishResources;
 @end
 @implementation TestCommand
 - (instancetype)init {
  if((self=[super init])){_queue=[TestQueue new];_work=[NSMutableArray new];_status=1;_redfinExecution=dispatch_group_create();}return self;
 }
 - (void)dealloc {[_queue release];[_work release];[_error release];dispatch_release(_redfinExecution);[super dealloc];}
-- (void)redwoodReturnSlot {assert(_redfinFinalized);}
+- (void)redwoodReturnSlot {assert(_redfinFinalized&&!_testResourceActive);}
 - (void)redwoodDeliverHandlers {assert(_redfinFinalized);}
+- (BOOL)redfinMarkResources {assert(!_testResourceActive);_testResourceActive=YES;return YES;}
+- (void)redfinFinishResources {assert(_testResourceActive);_testResourceActive=NO;}
 '''+methods+r'''
 @end
 int main(void) {
@@ -107,17 +112,19 @@ int main(void) {
   for(unsigned trial=0;trial<2;++trial) {
    fail_fence=trial;visible=0;TestCommand *command=[TestCommand new];[command commit];
    assert(!dispatch_semaphore_wait(entered,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
-   assert(command->_status==RW_CB_COMMITTED && !command->_redfinFinalized && !visible);
+   assert(command->_status==RW_CB_COMMITTED && !command->_redfinFinalized && command->_testResourceActive && !visible);
    dispatch_group_t waiter=dispatch_group_create();
    dispatch_group_async(waiter,dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{[command waitUntilScheduled];});
    assert(dispatch_group_wait(waiter,dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC))!=0);
    dispatch_semaphore_signal(release_fence);
    assert(!dispatch_group_wait(waiter,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
    [command waitUntilCompleted];
-   assert(command->_redfinFinalized && command->_status==(trial?RW_CB_ERROR:RW_CB_COMPLETED));
+   assert(command->_redfinFinalized && !command->_testResourceActive && command->_status==(trial?RW_CB_ERROR:RW_CB_COMPLETED));
    assert(trial?!visible:visible==42);
    dispatch_release(waiter);[command release];
   }
+  fail_begin=1;TestCommand *refused=[TestCommand new];[refused commit];[refused waitUntilCompleted];
+  assert(refused->_redfinFinalized&&refused->_status==RW_CB_ERROR&&!refused->_testResourceActive);[refused release];
   dispatch_release(entered);dispatch_release(release_fence);
  }
  return 0;

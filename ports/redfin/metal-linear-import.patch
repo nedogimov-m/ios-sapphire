@@ -22,7 +22,7 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
 +   if(!size){if(bo)fd_bo_del(bo);return NULL;}
 +   const struct pipe_resource shape={.target=PIPE_BUFFER,.format=PIPE_FORMAT_R8_UINT,
 +      .width0=size,.height0=1,.depth0=1,.array_size=1,
-+      .bind=PIPE_BIND_SHADER_BUFFER,.usage=PIPE_USAGE_DEFAULT};
++      .bind=PIPE_BIND_SHADER_BUFFER|PIPE_BIND_CONSTANT_BUFFER|PIPE_BIND_INDEX_BUFFER|PIPE_BIND_VERTEX_BUFFER,.usage=PIPE_USAGE_DEFAULT};
 +   struct fd_resource *rsc=alloc_resource_struct(screen,&shape);
 +   if(!rsc){fd_bo_del(bo);return NULL;}
 +   rsc->internal_format=PIPE_FORMAT_R8_UINT;

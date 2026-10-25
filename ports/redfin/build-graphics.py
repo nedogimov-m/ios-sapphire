@@ -82,7 +82,7 @@ def main():
                        ROOT/'ports/redfin/gmem-bounds.h',ROOT/'ports/redfin/drm-profile.h']
             if a.metal:
                 inputs+=sorted((upstream/'tools/mesa/air').iterdir())
-                inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch',ROOT/'ports/redfin/metal-submission-profile.patch',ROOT/'ports/redfin/metal-attachment-cache.patch',ROOT/'ports/redfin/metal-raster.patch',ROOT/'ports/redfin/metal-raster.h',ROOT/'ports/redfin/metal-raster.inc',ROOT/'ports/redfin/metal-linear-import.patch',ROOT/'ports/redfin/metal-linear-import.h',ROOT/'ports/redfin/metal-linear-copy.patch',ROOT/'ports/redfin/metal-linear-copy.inc',ROOT/'ports/redfin/metal-composition-trace.patch',ROOT/'ports/redfin/metal-composition-trace.inc',ROOT/'ports/redfin/metal-blit.patch',ROOT/'ports/redfin/metal-blit.h',ROOT/'ports/redfin/metal-blit.inc']
+                inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch',ROOT/'ports/redfin/metal-submission-profile.patch',ROOT/'ports/redfin/metal-attachment-cache.patch',ROOT/'ports/redfin/metal-raster.patch',ROOT/'ports/redfin/metal-raster.h',ROOT/'ports/redfin/metal-raster.inc',ROOT/'ports/redfin/metal-linear-import.patch',ROOT/'ports/redfin/metal-linear-import.h',ROOT/'ports/redfin/metal-linear-copy.patch',ROOT/'ports/redfin/metal-linear-copy.inc',ROOT/'ports/redfin/metal-composition-trace.patch',ROOT/'ports/redfin/metal-composition-trace.inc',ROOT/'ports/redfin/metal-blit.patch',ROOT/'ports/redfin/metal-blit.h',ROOT/'ports/redfin/metal-blit.inc',ROOT/'ports/redfin/metal-buffer-import.patch',ROOT/'ports/redfin/metal-buffer-import.h',ROOT/'ports/redfin/metal-buffer-import.inc']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -115,6 +115,9 @@ def main():
                     shutil.copy2(ROOT/'ports/redfin/metal-blit.h',source/'src/compiler/air/redfin_metal_blit.h')
                     shutil.copy2(ROOT/'ports/redfin/metal-blit.inc',source/'src/compiler/air/redfin_metal_blit.inc')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-blit.patch'],source)
+                    shutil.copy2(ROOT/'ports/redfin/metal-buffer-import.h',source/'src/compiler/air/redfin_metal_buffer_import.h')
+                    shutil.copy2(ROOT/'ports/redfin/metal-buffer-import.inc',source/'src/compiler/air/redfin_metal_buffer_import.inc')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-buffer-import.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -195,7 +198,7 @@ def main():
                 metal_sources=[upstream/'userland/src'/name for name in
                                ('redwoodmetal.m','redwooddrawable.m','redwood_drawable.h')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in
-                                  ('metal_userland.py','metal_raster_userland.py','metal_resource_userland.py','metal_blit_userland.py','metal-blit-encoder.inc','metal-raster.h','metal-guard.m','metal-check.m','metal-raster-check.inc','metal-vertex-check.inc','metal-blit-check.inc','metal-check.metal')]
+                                  ('metal_userland.py','metal_raster_userland.py','metal_resource_userland.py','metal_blit_userland.py','metal_buffer_userland.py','metal_completion_userland.py','metal-resource-completion.inc','metal-buffer-object.inc','iosurface-abi.h','metal-blit-encoder.inc','metal-raster.h','metal-guard.m','metal-check.m','metal-raster-check.inc','metal-vertex-check.inc','metal-blit-check.inc','metal-buffer-check.inc','metal-check.metal')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)
@@ -221,7 +224,7 @@ def main():
                     '-Werror=incompatible-pointer-types','-Werror=incompatible-function-pointer-types',
                     '-I'+str(metal),metal/'redwoodmetal.m',metal/'redwooddrawable.m',
                     ROOT/'ports/redfin/metal-guard.m','-framework','Foundation',
-                    '-framework','CoreFoundation','-framework','IOKit','-framework','Metal','-lobjc','-o',binary])
+                    '-framework','CoreFoundation','-framework','IOKit','-framework','Metal','-framework','IOSurface','-lobjc','-o',binary])
                 import plistlib
                 (plugin/'Info.plist').write_bytes(plistlib.dumps(dict(
                     CFBundleIdentifier='com.redfin.metal',CFBundleName='RedfinMetal',

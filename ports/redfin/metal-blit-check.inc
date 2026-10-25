@@ -43,13 +43,17 @@ static BOOL blit_bytes(id<MTLDevice> device,uint32_t seed)
         id<MTLCommandBuffer> command=[queue commandBuffer];
         id<MTLBlitCommandEncoder> encoder=[command blitCommandEncoder];valid=command&&encoder;
         __block BOOL called=NO;
+        BOOL callbackDone=NO,callbackRegistered=valid;
+        dispatch_semaphore_t callback=dispatch_semaphore_create(0);
         if(valid) {
-            [command addCompletedHandler:^(id<MTLCommandBuffer> done){called=done.status==MTLCommandBufferStatusError&&done.error!=nil;}];
+            [command addCompletedHandler:^(id<MTLCommandBuffer> done){called=done.status==MTLCommandBufferStatusError&&done.error!=nil;dispatch_semaphore_signal(callback);}];
             [encoder fillBuffer:destination range:NSMakeRange(length-1,2) value:0];[encoder endEncoding];
             [command commit];[command waitUntilCompleted];
-            valid=called&&command.status==MTLCommandBufferStatusError&&command.error&&
+            callbackDone=!dispatch_semaphore_wait(callback,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC));
+            valid=callbackDone&&called&&command.status==MTLCommandBufferStatusError&&command.error&&
                 !memcmp(destination.contents,expected,length);
         }
+        if(callbackDone||!callbackRegistered)dispatch_release(callback); /* retain a timed-out callback's semaphore */
         command=[queue commandBuffer];encoder=[command blitCommandEncoder];valid=valid&&command&&encoder;
         if(encoder) {
             [encoder fillBuffer:destination range:NSMakeRange(length-3,1) value:0x94];[encoder endEncoding];

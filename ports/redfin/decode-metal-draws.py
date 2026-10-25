@@ -32,7 +32,7 @@ def decode(data,boot):
         if not match:raise ValueError('malformed native Metal draw record')
         _,frame,draw,role,slot,surface,fmt,sw,sh,width,height,raw,crc,encoded=match.groups()
         frame,draw,slot,surface,fmt,sw,sh,width,height,raw=map(int,(frame,draw,slot,surface,fmt,sw,sh,width,height,raw))
-        if not(frame==len(records)+1<=48 and 1<=draw<=32 and slot<32 and surface<2**32 and fmt<2**32 and
+        if not(frame==len(records)+1<=48 and 1<=draw<=256 and slot<32 and surface<2**32 and fmt<2**32 and
             1<=sw<=16384 and 1<=sh<=16384 and 1<=width<=80 and 1<=height<=174 and raw==width*height*3):
             raise ValueError('native Metal draw bounds/sequence mismatch')
         rgb=base64.b64decode(encoded,validate=True)

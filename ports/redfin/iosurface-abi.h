@@ -13,6 +13,7 @@ extern const CFStringRef kIOSurfaceBytesPerElement,kIOSurfaceAllocSize,kIOSurfac
 extern IOSurfaceRef IOSurfaceCreate(CFDictionaryRef);
 extern uint32_t IOSurfaceGetID(IOSurfaceRef);
 extern void *IOSurfaceGetBaseAddress(IOSurfaceRef);
+extern size_t IOSurfaceGetAllocSize(IOSurfaceRef);
 extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef);
 extern size_t IOSurfaceGetWidth(IOSurfaceRef);
 extern size_t IOSurfaceGetHeight(IOSurfaceRef);

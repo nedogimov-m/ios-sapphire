@@ -66,7 +66,7 @@ rwa_blit_rows(struct rwa_device *device,struct pipe_resource *source,struct pipe
    struct pipe_constant_buffer constants={.user_buffer=&plan,.buffer_size=sizeof(plan)};
    pipe->bind_compute_state(pipe,shader);pipe->set_constant_buffer(pipe,PIPE_SHADER_COMPUTE,0,false,&constants);
    pipe->set_shader_buffers(pipe,PIPE_SHADER_COMPUTE,0,2,buffers,2);
-   const struct pipe_grid_info grid={.work_dim=2,.block={64,1,1},.grid={(plan.words+63)/64,plan.rows,1}};
+   const struct pipe_grid_info grid={.work_dim=2,.block={64,1,1},.grid={((uint64_t)plan.words+63)/64,plan.rows,1}};
    pipe->launch_grid(pipe,&grid);int result=rwa_blit_finish(device,why,bytes);
    pipe->set_shader_buffers(pipe,PIPE_SHADER_COMPUTE,0,2,NULL,0);pipe->set_constant_buffer(pipe,PIPE_SHADER_COMPUTE,0,false,NULL);
    pipe->bind_compute_state(pipe,NULL);
@@ -113,7 +113,13 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
          uint64_t source=request->source_offset;
          if(!source_buffer||!rwa_blit_range(source,count,source_buffer->size))goto invalid;
          if(!count)return 0;
-         if(source_buffer==destination_buffer&&source<destination+count&&destination<source+count)
+         uintptr_t sa=(uintptr_t)source_buffer->map,da=(uintptr_t)destination_buffer->map;
+         bool shared=source_buffer->res==destination_buffer->res||
+            (source_buffer->external_surface&&source_buffer->external_surface==destination_buffer->external_surface);
+         bool overlap=shared&&source<destination+count&&destination<source+count;
+         if(sa&&da&&sa<=UINTPTR_MAX-source_buffer->size&&da<=UINTPTR_MAX-destination_buffer->size)
+            overlap|=sa+source<da+destination+count&&da+destination<sa+source+count;
+         if(overlap)
             return rwa_blit_fail(why,bytes,"overlapping Metal buffer copy");
          result=rwa_blit_rows(device,source_buffer->res,destination_buffer->res,source,destination,count,count,count,1,why,bytes);
       }

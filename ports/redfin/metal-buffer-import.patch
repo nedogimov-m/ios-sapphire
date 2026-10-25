@@ -1,0 +1,67 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -79,6 +79,7 @@
+ #include "redfin_metal_raster.h"
+ #include "redfin_metal_linear_import.h"
+ #include "redfin_metal_blit.h"
++#include "redfin_metal_buffer_import.h"
+ extern void redfin_freedreno_raster_stats(struct pipe_context *,uint64_t[2]);
+ extern int redfin_drm_profile_read(uint64_t *,size_t);
+ 
+@@ -187,6 +188,7 @@
+    struct rwa_argbuf_encoding *encodings;
+    struct rwa_buffer *next_encoded;
+    bool listed;
++   unsigned external_surface;
+ };
+ 
+ /* A texture, with the shape Metal asked for kept as it was given rather than as it was
+@@ -649,7 +651,8 @@
+ struct rwa_buffer *
+ rwa_buffer_create(struct rwa_device *device, size_t size, char *why, size_t why_size)
+ {
+-   if (size == 0 || size > UINT32_MAX) {
++   uint32_t native_bytes=0;
++   if (!redfin_buffer_extent(size,&native_bytes)) {
+       say(why, why_size, "a buffer of %zu bytes: Gallium sizes a buffer in 32 bits and "
+                          "zero is not a buffer", size);
+       return NULL;
+@@ -682,8 +685,8 @@
+     */
+    buffer->res = pipe_buffer_create(device->screen,
+                                     PIPE_BIND_SHADER_BUFFER | PIPE_BIND_CONSTANT_BUFFER |
+-                                    PIPE_BIND_INDEX_BUFFER,
+-                                    PIPE_USAGE_STAGING, size);
++                                    PIPE_BIND_INDEX_BUFFER | PIPE_BIND_VERTEX_BUFFER,
++                                    PIPE_USAGE_STAGING, native_bytes);
+    if (!buffer->res) {
+       say(why, why_size, "the GPU driver would not allocate %zu bytes. After a few dozen "
+                          "allocations in one boot this driver starts refusing outright "
+@@ -738,10 +741,12 @@
+     */
+    argbuf_scrub(buffer->device, buffer, NULL, NULL);
+    argbuf_forget_all(buffer);
+-   pipe_buffer_unmap(buffer->device->pipe, buffer->xfer);
++   if(buffer->xfer)pipe_buffer_unmap(buffer->device->pipe, buffer->xfer);
+    pipe_resource_reference(&buffer->res, NULL);
+    free(buffer);
+ }
++
++#include "redfin_metal_buffer_import.inc"
+ 
+ /* Metal's own numbers, which the contract hands over raw (air_metal.h) and which this
+  * file is the only one to have to know. Spelled out rather than compared as literals,
+@@ -3743,7 +3748,11 @@
+           * past its binding rather than into the next one.
+           */
+          sb[r->index].buffer_offset = (unsigned)boffset;
+-         sb[r->index].buffer_size = b->size - MIN2(b->size, boffset);
++         size_t remaining=b->size-MIN2(b->size,boffset);
++         sb[r->index].buffer_size=(unsigned)((remaining+3)&~(size_t)3);
++         if(boffset>b->res->width0||sb[r->index].buffer_size>b->res->width0-boffset) {
++            say(why,why_size,"SSBO descriptor would exceed the actual allocated dword tail");return -1;
++         }
+          num_ssbo = MAX2(num_ssbo, r->index + 1);
+          if (r->write)
+             writable |= 1u << r->index;
