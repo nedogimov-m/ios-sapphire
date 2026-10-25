@@ -57,3 +57,22 @@ vertex RedfinStreamOutput redfin_stream_vertex(RedfinStreamInput input [[stage_i
 fragment float4 redfin_stream_fragment(RedfinStreamOutput input [[stage_in]],
     texture2d<float> source [[texture(0)]],sampler state [[sampler(0)]])
 { return source.sample(state,input.uv)*input.tint*input.mask; }
+
+constant uint redfin_fc_seed [[function_constant(37)]];
+constant float4 redfin_fc_vector [[function_constant(41)]];
+constant uchar3 redfin_fc_opcodes [[function_constant(58)]];
+constant uint redfin_fc_optional [[function_constant(59)]];
+struct redfin_fc_arguments {device uint *output [[id(0)]];};
+kernel void redfin_constants(constant redfin_fc_arguments &arguments [[buffer(0)]],uint id [[thread_position_in_grid]])
+{
+    if(id>=16)return;
+    uint option=is_function_constant_defined(redfin_fc_optional)?redfin_fc_optional+0x4321u:0x1234u;
+    uint packed=uint(redfin_fc_opcodes.x)|(uint(redfin_fc_opcodes.y)<<8)|(uint(redfin_fc_opcodes.z)<<16);
+    arguments.output[id]=redfin_fc_seed^as_type<uint>(redfin_fc_vector[id&3])^packed^option^(id*1664525u);
+}
+vertex float4 redfin_constants_vertex(uint id [[vertex_id]])
+{
+    constexpr float2 points[6]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(-1,1),float2(1,-1),float2(1,1)};
+    return float4(points[id]*redfin_fc_vector.xy,0,1);
+}
+fragment float4 redfin_constants_fragment() {return redfin_fc_vector;}

@@ -87,7 +87,21 @@ METHODS = {
     '_MTLDepthStencilState': ('-initWithDevice:depthStencilDescriptor:',),
     '_MTLSamplerState': ('-initWithDevice:samplerDescriptor:',),
     '_MTLFunction': ('-bitcodeData', '-newArgumentEncoderWithBufferIndex:',
-                     '-newArgumentEncoderWithBufferIndex:reflection:'),
+                     '-newArgumentEncoderWithBufferIndex:reflection:',
+                     '-initWithName:type:libraryData:device:', '-functionConstantsDictionary'),
+    'MTLFunctionConstantValuesInternal': ('-constantValueWithFunctionConstant:',),
+    '_MTLLibrary': ('-newFunctionWithNameInternal:', '-libraryData', '-device',
+        '-newFunctionWithName:constantValues:error:',
+        '-newFunctionWithName:constantValues:functionCache:error:',
+        '-newFunctionWithName:constantValues:pipelineLibrary:error:',
+        '-newFunctionWithName:constantValues:functionCache:specializedName:error:',
+        '-newFunctionWithDescriptor:error:', '-newFunctionWithDescriptor:destinationArchive:error:',
+        '-newSpecializedFunctionWithDescriptorInternal:destinationArchive:functionCache:error:',
+        '-newFunctionWithName:constantValues:completionHandler:',
+        '-newFunctionWithName:constantValues:functionCache:specializedName:completionHandler:',
+        '-newFunctionWithName:constantValues:pipelineLibrary:completionHandler:',
+        '-newFunctionWithDescriptor:completionHandler:',
+        '-newFunctionWithDescriptor:destinationArchive:functionCache:completionHandler:'),
 }
 
 
@@ -131,12 +145,17 @@ def derive(cache):
         require(ivar and ivar['size'] == size and ivar['types'][0] == ('B' if size == 1 else '@'),
                 'unreviewed native Metal lifetime ivar: ' + cls + '.' + name)
         result['ivars'].setdefault(cls, {})[name] = ivar
+    value_hash=native_ivars(cache,image,'_MTLFunction').get('_functionConstantSpecializationHash')
+    require(value_hash and value_hash['size']==32 and value_hash['types']=='{?="key"[32C]}',
+            'unreviewed actual Metal function specialization hash')
+    result['ivars'].setdefault('_MTLFunction',{})['_functionConstantSpecializationHash']=value_hash
     return result
 
 
 def header(abi, pairing):
     rows = ['/* Generated from the installed cache; no upstream instruction addresses. */',
             '#include <stdint.h>', '#define REDFIN_METAL_PAIRING ' + json.dumps(pairing),
+            '#define REDFIN_METAL_FUNCTION_HASH_OFFSET '+str(abi['ivars']['_MTLFunction']['_functionConstantSpecializationHash']['offset']),
             'static const uint8_t redfin_metal_uuid[16]={' +
             ','.join('0x' + abi['uuid'][i:i+2] for i in range(0, 32, 2)) + '};',
             'struct redfin_metal_method {const char *cls,*name,*types;};',
@@ -408,6 +427,8 @@ def adapt_driver(text):
     text = adapt_completion(text)
     from ports.redfin.metal_buffer_texture_userland import adapt as adapt_buffer_textures
     text = adapt_buffer_textures(text)
+    from ports.redfin.metal_function_constants_userland import adapt as adapt_constants
+    text = adapt_constants(text)
     text += '''
 /* Private readonly evidence for the paired native pixel checker. */
 int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)
@@ -575,6 +596,7 @@ def prepare(upstream, out, cache_path, pairing):
     shutil.copy2(Path(__file__).with_name('metal-raster.h'),out/'redfin_metal_raster.h')
     shutil.copy2(Path(__file__).with_name('metal-blit.h'),out/'redfin_metal_blit.h')
     shutil.copy2(Path(__file__).with_name('metal-buffer-import.h'),out/'redfin_metal_buffer_import.h')
+    shutil.copy2(Path(__file__).with_name('metal-function-constants.h'),out/'redfin_metal_function_constants.h')
     shutil.copy2(Path(__file__).with_name('iosurface-abi.h'),out/'iosurface-abi.h')
     (out / 'redwoodmetal.m').write_text(adapt_driver((src / 'redwoodmetal.m').read_text()))
     (out / 'redwooddrawable.m').write_text(adapt_drawable((src / 'redwooddrawable.m').read_text()))

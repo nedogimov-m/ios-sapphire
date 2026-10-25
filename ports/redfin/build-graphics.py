@@ -85,6 +85,7 @@ def main():
                 inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch',ROOT/'ports/redfin/metal-submission-profile.patch',ROOT/'ports/redfin/metal-attachment-cache.patch',ROOT/'ports/redfin/metal-raster.patch',ROOT/'ports/redfin/metal-raster.h',ROOT/'ports/redfin/metal-raster.inc',ROOT/'ports/redfin/metal-linear-import.patch',ROOT/'ports/redfin/metal-linear-import.h',ROOT/'ports/redfin/metal-linear-copy.patch',ROOT/'ports/redfin/metal-linear-copy.inc',ROOT/'ports/redfin/metal-composition-trace.patch',ROOT/'ports/redfin/metal-composition-trace.inc',ROOT/'ports/redfin/metal-blit.patch',ROOT/'ports/redfin/metal-blit.h',ROOT/'ports/redfin/metal-blit.inc',ROOT/'ports/redfin/metal-buffer-import.patch',ROOT/'ports/redfin/metal-buffer-import.h',ROOT/'ports/redfin/metal-buffer-import.inc']
                 inputs += [ROOT/'ports/redfin/metal-buffer-texture.patch',ROOT/'ports/redfin/metal-buffer-texture.inc']
                 inputs += [ROOT/'ports/redfin/metal-buffer-native-view.patch',ROOT/'ports/redfin/metal-composition-final.patch']
+                inputs += [ROOT/'ports/redfin/metal-function-constants.patch',ROOT/'ports/redfin/metal-function-constants.h',ROOT/'ports/redfin/metal-function-constants.inc']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -124,6 +125,9 @@ def main():
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-buffer-texture.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-buffer-native-view.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-composition-final.patch'],source)
+                    shutil.copy2(ROOT/'ports/redfin/metal-function-constants.h',source/'src/compiler/air/redfin_metal_function_constants.h')
+                    shutil.copy2(ROOT/'ports/redfin/metal-function-constants.inc',source/'src/compiler/air/redfin_metal_function_constants.inc')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-function-constants.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -205,6 +209,7 @@ def main():
                                ('redwoodmetal.m','redwooddrawable.m','redwood_drawable.h')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal_userland.py','metal_raster_userland.py','metal_resource_userland.py','metal_blit_userland.py','metal_buffer_userland.py','metal_completion_userland.py','metal_buffer_texture_userland.py','metal-buffer-view-object.inc','metal-resource-completion.inc','metal-buffer-object.inc','iosurface-abi.h','metal-blit-encoder.inc','metal-raster.h','metal-guard.m','metal-check.m','metal-raster-check.inc','metal-vertex-check.inc','metal-blit-check.inc','metal-buffer-check.inc','metal-buffer-texture-check.inc','metal-alpha-check.inc','metal-check.metal')]
+                metal_sources += [ROOT/'ports/redfin'/name for name in ('metal_function_constants_userland.py','metal-function-constants-object.inc','metal-function-constants.h','metal-function-constants-check.inc')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)

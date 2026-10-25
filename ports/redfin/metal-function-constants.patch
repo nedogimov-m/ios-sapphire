@@ -1,0 +1,226 @@
+diff --git a/src/compiler/air/nir_air.h b/src/compiler/air/nir_air.h
+--- a/src/compiler/air/nir_air.h
++++ b/src/compiler/air/nir_air.h
+@@ -329,7 +329,8 @@
+ 
+ struct air_constant_value {
+    unsigned index;     /* the function constant's index */
+-   uint64_t bits;      /* its value, as the bits of its type */
++   union {uint64_t bits;uint64_t words[4];}; /* scalar or tightly packed vector */
++   bool undefined; /* no value was supplied; a zero remains a defined value */
+ };
+ 
+ struct air_to_nir_options {
+diff --git a/src/compiler/air/air_to_nir.c b/src/compiler/air/air_to_nir.c
+--- a/src/compiler/air/air_to_nir.c
++++ b/src/compiler/air/air_to_nir.c
+@@ -554,14 +554,12 @@
+        * first thing that would tell a wrong packing from a right one is a
+        * pipeline that sets one of these two constants.
+        */
+-      if (comps * bits > 64)
+-         return air_error(c, "interface: a function constant of %u components of %u bits, "
+-                             "which does not fit the one word air_constant_value carries",
+-                          comps, bits), NULL;
++      if (comps > 4 || comps * bits > 256)
++         return air_error(c, "interface: function constant exceeds four native scalar components"), NULL;
+       nir_def *fields[NIR_MAX_VEC_COMPONENTS];
+       for (unsigned i = 0; i < comps; i++) {
+          uint64_t mask = bits >= 64 ? ~0ull : (1ull << bits) - 1;
+-         fields[i] = nir_imm_intN_t(&c->b, (v->bits >> (i * bits)) & mask,
++         fields[i] = nir_imm_intN_t(&c->b, (v->words[(i * bits) / 64] >> ((i * bits) % 64)) & mask,
+                                     as_bool ? 8 : bits);
+       }
+       res = nir_vec(&c->b, fields, comps);
+diff --git a/src/compiler/air/air_intrinsics.c b/src/compiler/air/air_intrinsics.c
+--- a/src/compiler/air/air_intrinsics.c
++++ b/src/compiler/air/air_intrinsics.c
+@@ -627,7 +627,7 @@
+                           "that is not a function constant");
+    bool defined = false;
+    for (unsigned i = 0; c->options && i < c->options->num_constants; i++)
+-      if (c->options->constants[i].index == p->ptr.binding)
++      if (c->options->constants[i].index == p->ptr.binding && !c->options->constants[i].undefined)
+          defined = true;
+    air_set(c, &in->base, air_val_ssa(c, nir_imm_bool(&c->b, defined)));
+    return true;
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -31,6 +31,7 @@
+ #include <string.h>
+ 
+ #include "air_metal.h"
++#include "redfin_metal_function_constants.h"
+ 
+ #include "nir.h"
+ #include "nir_builder.h"
+@@ -2874,10 +2875,12 @@
+    }
+ }
+ 
+-struct rwa_compute *
+-rwa_compute_create(struct rwa_device *device, const void *bitcode, size_t size,
++#include "redfin_metal_function_constants.inc"
++
++static struct rwa_compute *
++rwa_compute_create_impl(struct rwa_device *device, const void *bitcode, size_t size,
+                    const char *entry, struct rwa_compute_info *info,
+-                   char *why, size_t why_size)
++                   const struct redfin_metal_constants *constant_values, char *why, size_t why_size)
+ {
+    if (!bitcode || size < 4) {
+       say(why, why_size, "%zu bytes is not a shader module", size);
+@@ -2899,8 +2902,8 @@
+     * real values will say so -- the translator refuses what it cannot fold.
+     */
+    struct air_constant_value *constants;
+-   unsigned num_constants =
+-      air_module_function_constants(compute->mem_ctx, bitcode, size, &constants);
++   int num_constants=rwa_redfin_constants_for_module(compute->mem_ctx,bitcode,size,constant_values,&constants,why,why_size);
++   if(num_constants<0)goto fail;
+ 
+    /* library_wrapper is false, unlike air_run --library: a wrapped air.visible function
+     * is a shader made up to be measurable, not a pipeline anyone can dispatch. Metal
+@@ -3031,6 +3034,22 @@
+    ralloc_free(compute->mem_ctx);
+    free(compute);
+    return NULL;
++}
++
++struct rwa_compute *
++rwa_compute_create(struct rwa_device *device, const void *bitcode, size_t size,
++                   const char *entry, struct rwa_compute_info *info,
++                   char *why, size_t why_size)
++{
++   return rwa_compute_create_impl(device,bitcode,size,entry,info,NULL,why,why_size);
++}
++
++struct rwa_compute *
++rwa_redfin_compute_create(struct rwa_device *device, const void *bitcode, size_t size,
++                   const char *entry, struct rwa_compute_info *info,
++                   const struct redfin_metal_constants *constant_values, char *why, size_t why_size)
++{
++   return rwa_compute_create_impl(device,bitcode,size,entry,info,constant_values,why,why_size);
+ }
+ 
+ /* Unbound before it is deleted, always. A Gallium context keeps a pointer to the state
+@@ -4480,10 +4499,10 @@
+  * longer than its member count says. SPIRV-Cross numbers densely and every set in reach
+  * is dense, so this refuses rather than guesses which of the two readings was meant.
+  */
+-int
+-rwa_module_argbufs(struct rwa_device *device, const void *bitcode, size_t size,
++static int
++rwa_module_argbufs_impl(struct rwa_device *device, const void *bitcode, size_t size,
+                    const char *entry, struct rwa_argbuf_layout *out, unsigned max,
+-                   unsigned *count, char *why, size_t why_size)
++                   unsigned *count, const struct redfin_metal_constants *constant_values, char *why, size_t why_size)
+ {
+    if (count)
+       *count = 0;
+@@ -4510,8 +4529,8 @@
+     * there is nothing to take them from, and the translator refuses what it cannot fold.
+     */
+    struct air_constant_value *constants;
+-   unsigned num_constants =
+-      air_module_function_constants(mem_ctx, bitcode, size, &constants);
++   int num_constants=rwa_redfin_constants_for_module(mem_ctx,bitcode,size,constant_values,&constants,why,why_size);
++   if(num_constants<0){ralloc_free(mem_ctx);return -1;}
+    const struct air_to_nir_options options = {
+       .constants = constants,
+       .num_constants = num_constants,
+@@ -4624,6 +4643,22 @@
+       *count = n;
+    ralloc_free(mem_ctx);
+    return 0;
++}
++
++int
++rwa_module_argbufs(struct rwa_device *device, const void *bitcode, size_t size,
++                   const char *entry, struct rwa_argbuf_layout *out, unsigned max,
++                   unsigned *count, char *why, size_t why_size)
++{
++   return rwa_module_argbufs_impl(device,bitcode,size,entry,out,max,count,NULL,why,why_size);
++}
++
++int
++rwa_redfin_module_argbufs(struct rwa_device *device, const void *bitcode, size_t size,
++                   const char *entry, struct rwa_argbuf_layout *out, unsigned max,
++                   unsigned *count, const struct redfin_metal_constants *constant_values, char *why, size_t why_size)
++{
++   return rwa_module_argbufs_impl(device,bitcode,size,entry,out,max,count,constant_values,why,why_size);
+ }
+ 
+ /*
+@@ -6016,14 +6051,14 @@
+    return true;
+ }
+ 
+-struct rwa_render *
+-rwa_render_create(struct rwa_device *device,
++static struct rwa_render *
++rwa_render_create_impl(struct rwa_device *device,
+                   const void *vertex_bitcode, size_t vertex_size,
+                   const char *vertex_entry,
+                   const void *fragment_bitcode, size_t fragment_size,
+                   const char *fragment_entry,
+                   const struct rwa_render_shape *shape,
+-                  struct rwa_render_info *info, char *why, size_t why_size)
++                  struct rwa_render_info *info, const struct redfin_metal_constants *vertex_values,const struct redfin_metal_constants *fragment_values, char *why, size_t why_size)
+ {
+    if (!shape) {
+       say(why, why_size, "a render pipeline with no attachment description");
+@@ -6184,8 +6219,8 @@
+     * links at draw time (ir3_cache_lookup), so the two belong to two different calls.
+     */
+    struct air_constant_value *ffc;
+-   unsigned num_ffc =
+-      air_module_function_constants(render->mem_ctx, fragment_bitcode, fragment_size, &ffc);
++   int num_ffc=rwa_redfin_constants_for_module(render->mem_ctx,fragment_bitcode,fragment_size,fragment_values,&ffc,why,why_size);
++   if(num_ffc<0)goto fail;
+    const struct air_to_nir_options fopts = { .constants = ffc, .num_constants = num_ffc };
+    const char *error;
+    nir_shader *fs = air_to_nir(render->mem_ctx, fragment_bitcode, fragment_size,
+@@ -6239,8 +6274,8 @@
+          goto fail;
+       }
+       struct air_constant_value *vfc;
+-      unsigned num_vfc =
+-         air_module_function_constants(render->mem_ctx, vertex_bitcode, vertex_size, &vfc);
++      int num_vfc=rwa_redfin_constants_for_module(render->mem_ctx,vertex_bitcode,vertex_size,vertex_values,&vfc,why,why_size);
++      if(num_vfc<0)goto fail;
+       const struct air_to_nir_options vopts = { .constants = vfc, .num_constants = num_vfc };
+       vs = air_to_nir(render->mem_ctx, vertex_bitcode, vertex_size, vertex_entry, &vopts,
+                       device->nir_options, &render->vinfo, &error);
+@@ -6512,6 +6547,30 @@
+ fail:
+    rwa_render_destroy(render);
+    return NULL;
++}
++
++struct rwa_render *
++rwa_render_create(struct rwa_device *device,
++                  const void *vertex_bitcode, size_t vertex_size,
++                  const char *vertex_entry,
++                  const void *fragment_bitcode, size_t fragment_size,
++                  const char *fragment_entry,
++                  const struct rwa_render_shape *shape,
++                  struct rwa_render_info *info, char *why, size_t why_size)
++{
++   return rwa_render_create_impl(device,vertex_bitcode,vertex_size,vertex_entry,fragment_bitcode,fragment_size,fragment_entry,shape,info,NULL,NULL,why,why_size);
++}
++
++struct rwa_render *
++rwa_redfin_render_create(struct rwa_device *device,
++                  const void *vertex_bitcode, size_t vertex_size,
++                  const char *vertex_entry,
++                  const void *fragment_bitcode, size_t fragment_size,
++                  const char *fragment_entry,
++                  const struct rwa_render_shape *shape,
++                  struct rwa_render_info *info, const struct redfin_metal_constants *vertex_values,const struct redfin_metal_constants *fragment_values, char *why, size_t why_size)
++{
++   return rwa_render_create_impl(device,vertex_bitcode,vertex_size,vertex_entry,fragment_bitcode,fragment_size,fragment_entry,shape,info,vertex_values,fragment_values,why,why_size);
+ }
+ 
+ void

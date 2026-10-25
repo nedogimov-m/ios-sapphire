@@ -67,6 +67,6 @@ static BOOL buffer_alpha_case(id<MTLDevice> device,id<MTLLibrary> library,uint64
 static BOOL buffer_alpha_native(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce)
 {
     BOOL original=buffer_alpha_case(device,library,nonce,640,640,229376);
-    BOOL actual=buffer_alpha_case(device,library,nonce^0x729f630bu,549,576,212992);
+    BOOL actual=buffer_alpha_case(device,library,nonce,549,576,212992);
     return original&&actual;
 }

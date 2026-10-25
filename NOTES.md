@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native function-constant block built; fresh V29 staged — 2026-10-25
+
+Source based253f1a plus this complete related block. Implement Redfin-only native
+Metal library specialization factories, immutable per-function scalar/vector
+snapshots, required-value errors and actual distinct native specialization
+hashes. ABI constructors/methods/hash layout are verified against installed20H392;
+other devices forward to original methods. Named/index/range values use native
+Metal storage/metadata. Sync/async/cache/descriptor paths share the same factory;
+compiler-only descriptor options refuse explicitly, specialized aliases are
+labels while AIR entry names remain original. Argument layout and both render
+stages/compute receive actual per-function values. Distinguish an absent
+constant from a provided zero, support vectors up to4components/256bits, and
+keep legacy AIR harness exports compatible. Correct the549 A8 probe's boot
+label to the actual nonce. Current stock compiler is confirmed nil; preferred
+AIR's old forced-zero policy is concrete code evidence, not yet a proven full
+explanation for the observed cyan/black composition.
+
+40 combined host cases PASS/no skips. Native checker adds missing-required,
+distinct-hash, immutable float4/uchar3/optional-zero, argument-buffer compute,
+async/descriptor factory and separate vertex/fragment pixel/guard checks.
+Full fresh Mesa/AIR/native Metal/checker/shader/actualABI/signature build PASS:
+research/redfin-metal-constants-v1, final local20261025-185235/noCI,
+pairing9b84c868526f932304ee881ddae3f3ebefa79236751b0508ccab03bc2938fc17.
+Host-only include-anchor and ObjC type-ambiguity failures were corrected before
+installation; no native source fingerprint was bypassed. Kernel unchanged/reused
+local20261025-134128/noCI7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V26 imagecb8fff0e00849033a0c6eaf21ae0f7c9304830031fd596c808dcb7e28e991417, nonce4a3883580f8e40a5;
+complete native loader/ADT/liveFDT/firmware/power/DVFS/source-window/return
+preflight PASS. Fresh V29 from clean consistent HFSX/write_count1017523:
+183ranges/23904256bytes/4new/zero freed. Complete staged files/signatures/
+seal/readback/native readonly fsck PASS. V29 is PREPARED, NOT APPLIED; older
+applied stages are stale. App-launch jobs remain disabled. Next apply once
+with full live preimages/readback and collect one combined V26 run. Actual
+native specialization and correct GUI remain unproven; no FPS claim. Broader
+goal remains open. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x4a3883580f8e40a5 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V25 original-page freshness PASS; real post-logo damage localized — 2026-10-25
 
 Source1a9bcc0; graphics local20261025-182124/noCI, pairing60fbb633a9fdb781ac599d1c8b41b62df54b5f6674069d9060c34d10592e4d77.

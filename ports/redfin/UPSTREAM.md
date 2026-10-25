@@ -1,5 +1,33 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native Metal function constants and AIR specialization — 2026-10-25
+
+Preferred graphics pins remain userland906425b7/kernel8e611870. Reviewing the
+actual20H392 Metal cache confirms _MTLDevice.compiler returns nil. Preferred
+AIR consequently invents zero-valued function constants for its harness; that
+is unsuitable for a Metal pipeline whose caller supplied real values. The
+installed CoreAnimation uber-shader uses dozens of these parameters, including
+packed uchar3 combiners, framebuffer access and texture/dither configuration.
+This code evidence does not yet establish which parameter causes the GUI damage.
+
+Adapt the actual _MTLLibrary synchronous/asynchronous/cache/descriptor factories
+for Redfin's device only, forwarding original IMPs for other devices. Use the
+native constant-value lookup/metadata and a fresh, ABI-verified _MTLFunction
+constructor; retain immutable per-function values and distinguish specializations
+in its actual32-byte native hash. Preserve original AIR entry names; a requested
+specialized alias is a label. Compiler-only descriptor options remain explicit
+refusals. No private C++ constant-storage layout is copied or guessed.
+
+Paired native compiler/argument-layout entry points consume explicit value sets.
+Preserve "absent" independently from a supplied zero for is_function_constant_defined;
+undefined loads may hold zero bits but never acquire a defined predicate. Handle
+four tightly packed scalar components up to256bits, including float4 and uchar3,
+instead of the old64-bit-only vector limit. Preserve legacy AIR exports/harness
+defaults separately. Required-value validation happens before a function is returned.
+Host ownership/bounds/value tests plus native required-refusal/hash/immutable
+compute/argument-buffer/async/descriptor and separate vertex/fragment pixel probes
+cover the complete block. Correct system composition still requires observation.
+
 ## Fresh upstream tips reviewed without changing graphics pins — 2026-10-25
 
 Fetched/read userland tipa79ff0772a3454fd1ef127e181e5b3bce6c9ce18 and kernel
