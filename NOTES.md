@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V29 active binding contract PASS; undefined packed state blocks GUI — 2026-10-25
+
+Sourceb69ad85; graphics local20261025-204746/noCI,
+pairingd88eb59e9e22e3a1d51e1c4404e7e6529e791dec7391d3791293418be45304a0.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V29 image9cfacbbffb51b570c79a17c58a114b6ddb58457b729958bf28a7113adf2b22c9, nonce93fc731f67a2c21e.
+V32 applied once:172ranges/23961600bytes/1new/zero freed; complete live
+preimages/readback/signatures/staged readonly fsck PASS. V32 is applied/stale;
+never reuse. Collector returns clean consistent HFSX/write_count1073175 and
+verified Fastboot. Current launchd log records an ordinary complete system
+shutdown, matching the intended timed test. User photo20.58.19 still shows
+large blue/purple checkerboard tiles, then screen off; this is not a working GUI.
+Phone/Photos app jobs remain disabled.
+
+All prior native probes PASS. Enhanced FD620 resource contract passes32rounds,
+inactive requirements, active missing-binding refusal before execution and actual
+high buffer7/texture9/sampler5 pixels/guards. Actual CoreAnimation now passes
+buffer0 checks and produces87draw metadata records/four image records across
+several backboardd processes, then rejects unbound attachment textures1/2.
+The4image records restart sequence per process; the strict single-process
+decoder correctly refuses their concatenation. No correct final GUI is proved.
+New fragment binding diagnostics confirm real buffer2 offsets are provided.
+No-copy failures after restarts report lookup=-1/offset0/span0/need32768;
+retain the actual page checks rather than copy or fake this mapping.
+
+Exact offline actual-value NIR reveals the next concrete cause: partial-byte
+constructor stores into undefined scratch words leave expressions such as
+`((undef &255)|256)&0xffffff00` before byte loads. Those defined bytes are
+constant, but our early optimization never chooses/folds the undefined padding;
+false framebuffer-fetch/attachment branches remain in pipeline requirements.
+The real shader's framebuffer_fetch is1 and has_attachment1/2 are0. Finish
+ordinary undefined-value/packed-state lowering before resource analysis, and
+extend the native contract with adjacent defined bytes in undefined words and
+explicit native bool values. Do not weaken missing-resource checks on a guess.
+
+RAM tail authenticates but again lacks startup/boot-ID markers; result remains
+logs-collected, not full exact-image/startup proof. Current file logs contain the
+expected nonce. No panic is reported in retained bytes. Correct rendering/FPS
+and the broader goal remain open.
+Exact image args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x93fc731f67a2c21e redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN executable pipeline bindings/attributes complete; V32 staged for V29 — 2026-10-25
 
 Source base380306b plus this coherent block. Pipeline-only requirements now
