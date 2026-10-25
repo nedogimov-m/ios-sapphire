@@ -1,0 +1,46 @@
+diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/drivers/freedreno/freedreno_resource.c
+--- a/src/gallium/drivers/freedreno/freedreno_resource.c
++++ b/src/gallium/drivers/freedreno/freedreno_resource.c
+@@ -26,6 +26,7 @@
+ #include "freedreno_fence.h"
+ #include "freedreno_query_hw.h"
+ #include "freedreno_resource.h"
++#include "redfin_metal_linear_import.h"
+ #include "freedreno_screen.h"
+ #include "freedreno_surface.h"
+ #include "freedreno_util.h"
+@@ -1552,6 +1553,20 @@
+    else
+       rsc->layout.pitchalign = MAX2(rsc->layout.pitchalign, 5);
+ 
++   /* Opt-in from paired AIR only. A6xx's sampler has an explicit byte
++    * pitch, while its render/resolve paths need 64-byte alignment. */
++   if (usage & REDFIN_LINEAR_SAMPLER_USAGE) {
++      if (!is_a6xx(screen) || usage!=REDFIN_LINEAR_SAMPLER_USAGE ||
++          handle->modifier!=DRM_FORMAT_MOD_LINEAR || tmpl->target!=PIPE_TEXTURE_2D ||
++          tmpl->last_level || tmpl->array_size!=1 || tmpl->nr_samples>1 ||
++          (tmpl->bind&(PIPE_BIND_RENDER_TARGET|PIPE_BIND_DEPTH_STENCIL|PIPE_BIND_SHADER_IMAGE)) ||
++          util_format_get_blockwidth(tmpl->format)!=1 || util_format_get_blockheight(tmpl->format)!=1 ||
++          !redfin_linear_sampler_fits(prsc->width0,prsc->height0,rsc->layout.cpp,
++             handle->stride,handle->offset,fd_bo_size(rsc->bo)))
++         goto fail;
++      rsc->layout.pitchalign=0;
++   }
++
+    if (rsc->layout.pitch0 < (prsc->width0 * rsc->layout.cpp) ||
+        fd_resource_pitch(rsc, 0) != rsc->layout.pitch0)
+       goto fail;
+diff --git a/src/freedreno/fdl/fd6_view.c b/src/freedreno/fdl/fd6_view.c
+--- a/src/freedreno/fdl/fd6_view.c
++++ b/src/freedreno/fdl/fd6_view.c
+@@ -241,7 +241,9 @@
+       A6XX_TEX_CONST_1_WIDTH(width) | A6XX_TEX_CONST_1_HEIGHT(height) |
+       COND(is_mutable, A6XX_TEX_CONST_1_MUTABLEEN);
+    view->descriptor[2] =
+-      A6XX_TEX_CONST_2_PITCHALIGN(layout->pitchalign - 6) |
++      /* Single-level linear sampler imports retain a byte pitch. The
++       * implicit mip alignment is unused there; do not underflow it. */
++      A6XX_TEX_CONST_2_PITCHALIGN(layout->pitchalign>=6?layout->pitchalign-6:0) |
+       A6XX_TEX_CONST_2_PITCH(pitch) |
+       A6XX_TEX_CONST_2_TYPE(fdl6_tex_type(args->type, false));
+    view->descriptor[3] = A6XX_TEX_CONST_3_ARRAY_PITCH(layer_size);

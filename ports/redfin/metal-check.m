@@ -21,6 +21,8 @@
 - (id)newTextureWithDescriptor:(MTLTextureDescriptor *)descriptor iosurface:(IOSurfaceRef)surface plane:(NSUInteger)plane;
 @end
 
+#include "metal-raster-check.inc"
+
 extern int memorystatus_control(uint32_t,int32_t,uint32_t,void *,size_t);
 struct metal_limits {int32_t active;uint32_t active_attributes;int32_t inactive;uint32_t inactive_attributes;};
 static int memory_limit(void)
@@ -309,12 +311,17 @@ int main(void)
             BOOL short_bounds=dependencies&&native_gmem_statistics(device,before_short)&&
                 render(device,library,NO,NO,YES)&&native_gmem_statistics(device,after_short)&&
                 after_short[0]==before_short[0]&&after_short[1]>before_short[1];
+            BOOL raster=short_bounds&&render_raster_passes(device,library);
+            BOOL pitch480=short_bounds&&render_byte_pitch(device,library,(uint32_t)nonce,120,32,480,512,16384,32768);
+            BOOL pitch4512=short_bounds&&render_byte_pitch(device,library,(uint32_t)(nonce>>32),1125,9,4512,4544,65536,65536);
             uint64_t routes[2]={0};BOOL gmem=dependencies&&native_gmem_statistics(device,routes);
             printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u batch-pixels-and-guards=%u dependency-pixels-and-guards=%u short-surface-pixels-guards-and-sysmem=%u actual-gmem=%u gmem-batches=%llu sysmem-batches=%llu\n",
                 (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels,(unsigned)masks,(unsigned)batches,(unsigned)dependencies,(unsigned)short_bounds,(unsigned)gmem,
                 (unsigned long long)routes[0],(unsigned long long)routes[1]);
+            printf("REDFIN METAL COMPOSITION RESULT: boot=%016llx clear-only-mrt-scissor-viewport-fetch-pixels-guards=%u pitch480-two-seeds-pixels-guards=%u pitch4512-two-seeds-pixels-guards=%u visible-overlay=0\n",
+                (unsigned long long)nonce,raster,pitch480,pitch4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
-            return gmem&&short_bounds ? 0 : 1;
+            return gmem&&short_bounds&&raster&&pitch480&&pitch4512 ? 0 : 1;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
             return 1;

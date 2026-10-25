@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
-/* Bounded unattended native UIKit animation. Separately records callbacks
- * and the framebuffer's actually completed presentations over the same run. */
+/* Bounded passive observation of native GUI presentations. This observer
+ * creates no visible layers and does not alter the user's screen contents. */
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #include <IOKit/IOKitLib.h>
@@ -18,7 +18,6 @@
 @interface RedfinDisplayProbe : NSObject
 @property(nonatomic,strong) UIWindow *window;
 @property(nonatomic,strong) CADisplayLink *link;
-@property(nonatomic,strong) NSArray<CALayer *> *squares;
 @property(nonatomic) io_connect_t framebuffer;
 @property(nonatomic) uint64_t nonce;
 @property(nonatomic) struct redfin_display_statistics first;
@@ -75,14 +74,6 @@ static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_stat
         if (interval>0 && interval<=0.035) self.under35++;
     }
     if (self.began) self.callbacks++;
-    [CATransaction begin];[CATransaction setDisableActions:YES];
-    double t=now-self.origin;
-    for (unsigned i=0;i<self.squares.count;++i) {
-        CALayer *square=self.squares[i];
-        square.position=CGPointMake(187.5+120*sin(t*2.0+i),140+i*74+24*cos(t*3.0+i));
-        square.transform=CATransform3DMakeRotation(t+i*0.25,0,0,1);
-    }
-    [CATransaction commit];
     if (self.began && now-self.began>=10) [self finish:NO];
 }
 - (void)finish:(BOOL)timedOut
@@ -98,12 +89,12 @@ static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_stat
     uint64_t presents=valid ? final.presents-self.first.presents : 0;
     uint64_t gpu=valid ? final.gpu_presents-self.first.gpu_presents : 0;
     double elapsed=self.last-self.began;
-    probe_log(self.nonce,"result stats-valid=%u timed-out=%u panel-hz=%u seconds=%.6f completed-presents=%llu gpu-presents=%llu present-fps=%.3f callbacks=%u callback-fps=%.3f under12=%u under18=%u under35=%u max-interval-ms=%.3f",
+    probe_log(self.nonce,"result passive=1 animation=none stats-valid=%u timed-out=%u panel-hz=%u seconds=%.6f completed-presents=%llu gpu-presents=%llu observed-present-fps=%.3f callbacks=%u callback-fps=%.3f under12=%u under18=%u under35=%u max-interval-ms=%.3f",
         valid,timedOut,valid ? final.panel_hz : 0,seconds,(unsigned long long)presents,(unsigned long long)gpu,
         seconds>0 ? presents/seconds : 0,self.callbacks,elapsed>0 ? (self.callbacks-1)/elapsed : 0,
         self.under12,self.under18,self.under35,self.maximum*1000);
     if (self.framebuffer) IOServiceClose(self.framebuffer);
-    self.framebuffer=0;self.window.hidden=YES;self.window=nil;self.squares=nil;
+    self.framebuffer=0;self.window=nil;
     active_probe=nil;
 }
 @end
@@ -130,24 +121,11 @@ void redfin_display_probe_schedule(UIWindow *host,uint64_t nonce)
         }
         RedfinDisplayProbe *probe=[RedfinDisplayProbe new];
         probe.framebuffer=client;probe.nonce=nonce;probe.first=start;
-        UIWindow *window=parent.windowScene ? [[UIWindow alloc] initWithWindowScene:parent.windowScene] :
-            [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-        window.frame=UIScreen.mainScreen.bounds;window.backgroundColor=UIColor.clearColor;
-        window.opaque=NO;window.userInteractionEnabled=NO;window.windowLevel=UIWindowLevelNormal+1;
-        UIViewController *controller=[UIViewController new];controller.view.backgroundColor=UIColor.clearColor;
-        window.rootViewController=controller;
-        NSMutableArray *squares=[NSMutableArray array];
-        for (unsigned i=0;i<6;++i) {
-            CALayer *square=[CALayer layer];square.bounds=CGRectMake(0,0,36,36);square.cornerRadius=8;
-            square.backgroundColor=[UIColor colorWithHue:i/6.0 saturation:0.8 brightness:0.9 alpha:0.85].CGColor;
-            [controller.view.layer addSublayer:square];[squares addObject:square];
-        }
-        probe.squares=squares;probe.window=window;active_probe=probe;
-        window.hidden=NO;
+        probe.window=parent;active_probe=probe;
         CADisplayLink *link=[CADisplayLink displayLinkWithTarget:probe selector:@selector(tick:)];
         link.preferredFrameRateRange=CAFrameRateRangeMake(start.panel_hz,start.panel_hz,start.panel_hz);
         probe.link=link;[link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
-        probe_log(nonce,"start native-UIKit=1 seconds=10 layers=6 panel-hz=%u begin-presents=%llu begin-gpu=%llu",
+        probe_log(nonce,"start passive=1 animation=none seconds=10 panel-hz=%u begin-presents=%llu begin-gpu=%llu",
             start.panel_hz,(unsigned long long)start.presents,(unsigned long long)start.gpu_presents);
         __weak RedfinDisplayProbe *weak=probe;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,25*NSEC_PER_SEC),dispatch_get_main_queue(),^{[weak finish:YES];});

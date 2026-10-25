@@ -396,6 +396,8 @@ def adapt_driver(text):
         '\tredfin_native_argument_encoder_reflection=method_getImplementation(class_getInstanceMethod(fn,sel_getUid("newArgumentEncoderWithBufferIndex:reflection:")));\n'
         '\tinstalled = YES;\n\tclass_replaceMethod(fn,')
     text = adapt_execution(text)
+    from ports.redfin.metal_raster_userland import adapt as adapt_raster
+    text = adapt_raster(text)
     text += '''
 /* Private readonly evidence for the paired native pixel checker. */
 int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)
@@ -510,6 +512,14 @@ def adapt_execution(text):
 
 
 def adapt_drawable(text):
+    # Rendering needs a 64-byte pitch; source sampling does not. AIR and
+    # freedreno separately bound and restrict these imports to shader reads.
+    first=text.index('\t/*\n\t * a6xx\'s minimum pitchalign is 6')
+    last=text.index('\tuint64_t least;',first)
+    text=text[:first]+text[last:]
+    first=text.index('\tif (surface->rowBytes % align != 0) {')
+    last=text.index('\n\tif (surface->size <',first)
+    text=text[:first]+text[last:]
     text = replace_once(text, '#include "redwood_drawable.h"',
         '#include "redwood_drawable.h"\nextern void redfin_metal_lock(void);\nextern void redfin_metal_unlock(void);\n'
         'static int redfin_surface_enter(void){redfin_metal_lock();return 1;}\n'
@@ -542,6 +552,7 @@ def prepare(upstream, out, cache_path, pairing):
     with Cache(cache_path) as cache:
         abi = derive(cache)
     (out / 'metal-abi.h').write_text(header(abi, pairing))
+    shutil.copy2(Path(__file__).with_name('metal-raster.h'),out/'redfin_metal_raster.h')
     (out / 'redwoodmetal.m').write_text(adapt_driver((src / 'redwoodmetal.m').read_text()))
     (out / 'redwooddrawable.m').write_text(adapt_drawable((src / 'redwooddrawable.m').read_text()))
     shutil.copy2(src / 'redwood_drawable.h', out / 'redwood_drawable.h')

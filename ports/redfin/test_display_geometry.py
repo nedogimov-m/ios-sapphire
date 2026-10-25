@@ -112,7 +112,7 @@ class AppleCLCD : public IOMobileFramebuffer {public:
  uint32_t fScanPhys=0,fBootSrc=0,fBootStride=4320;
  uint32_t fWidth=1080,fHeight=2340,fRowBytes=4320,fLogicalW=1125,fLogicalH=2436;
  int fOffX=20,fOffY=48;uintptr_t fPixels=0;const uint8_t *fLastVA=NULL;
- SweetSurface *fSurface=NULL;uint64_t fRedfinFrames=0;
+ SweetSurface *fSurface=NULL;uint64_t fRedfinFrames=0,fRedfinGPUFrames=0;
  struct redfin_display_geometry fRedfinFit={};
  WORKSPACE_FIELD
  bool allocateRedfinFitWorkspace(void);

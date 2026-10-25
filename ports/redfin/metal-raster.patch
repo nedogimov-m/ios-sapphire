@@ -1,0 +1,143 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -76,6 +76,8 @@
+ #define RWA_MAX_TEXTURES 16
+ 
+ #include "redfin_metal_command_scope.h"
++#include "redfin_metal_raster.h"
++#include "redfin_metal_linear_import.h"
+ extern void redfin_freedreno_raster_stats(struct pipe_context *,uint64_t[2]);
+ extern int redfin_drm_profile_read(uint64_t *,size_t);
+ 
+@@ -203,6 +205,7 @@
+     * lenient one.
+     */
+    bool shader_read, shader_write;
++   bool redfin_sampler_only; /* imported byte pitch cannot be an RB destination */
+ };
+ 
+ /* A sampler is a Gallium state object and nothing more. The state it was built from is
+@@ -1422,14 +1425,17 @@
+          free(texture);
+          return NULL;
+       }
+-      if (import->row_bytes % 64 != 0) {
+-         say(why, why_size, "IOSurface %d has %u bytes a row, which is not a multiple of "
+-                            "64: this GPU lays out a row aligned to that and its import "
+-                            "refuses a pitch it would have to change (the kernel's own "
+-                            "surfaces are aligned to 64 already)", import->id,
+-             import->row_bytes);
+-         free(texture);
+-         return NULL;
++      texture->redfin_sampler_only=(import->row_bytes%64)!=0;
++      if(texture->redfin_sampler_only) {
++         if(write||depth_stencil||
++            !redfin_linear_sampler_fits(width,height,texel,import->row_bytes,import->offset,UINT64_MAX)) {
++            say(why,why_size,"IOSurface %d byte pitch %u cannot be imported for storage writes or depth, or has an invalid sampler layout",
++                import->id,import->row_bytes);free(texture);return NULL;
++         }
++         /* Descriptors may advertise render usage for every client surface.
++          * Keep the actual unaligned allocation sampler-only: the RB pitch
++          * register cannot represent it, unlike TEX_CONST_2's byte pitch. */
++         templ.bind&=~(PIPE_BIND_RENDER_TARGET|PIPE_BIND_DEPTH_STENCIL|PIPE_BIND_SHADER_IMAGE);
+       }
+ 
+       /*
+@@ -1454,7 +1460,7 @@
+       }
+ 
+       texture->res = device->screen->resource_from_handle(device->screen, &templ, &whandle,
+-                                                          PIPE_HANDLE_USAGE_FRAMEBUFFER_WRITE);
++         texture->redfin_sampler_only?REDFIN_LINEAR_SAMPLER_USAGE:PIPE_HANDLE_USAGE_FRAMEBUFFER_WRITE);
+       if (!texture->res) {
+          /*
+           * Everything this side could check has been checked, so no reason is invented
+@@ -5185,6 +5191,7 @@
+     */
+    void *vs_cso, *fs_cso;
+    void *blend, *dsa, *rast, *velem;
++   struct pipe_rasterizer_state redfin_raster_state;
+    struct pipe_resource *vbuf;        /* the full-screen quad, for the generated stage */
+ 
+    /* What the vertex descriptor was turned into, empty for a stage that fetches no
+@@ -6485,6 +6492,10 @@
+ attachment_shape_fits(const struct rwa_texture *t, unsigned samples, const char *what,
+                       char *why, size_t why_size)
+ {
++   if(t->redfin_sampler_only) {
++      say(why,why_size,"%s has an unaligned IOSurface byte pitch and is sampler-only; RB_MRT_PITCH cannot represent it",what);
++      return false;
++   }
+    unsigned want_type = samples > 1 ? RWA_TYPE_2D_MULTISAMPLE : RWA_TYPE_2D;
+    if (t->shape.type != want_type) {
+       say(why, why_size, "%s is a %s and a pass of %u sample%s per pixel renders into a %s",
+@@ -6514,6 +6525,8 @@
+          texture->res,&(struct pipe_surface){.format=texture->res->format});
+    return texture->render_surface;
+ }
++
++#include "redfin_metal_raster.inc"
+ 
+ int
+ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
+@@ -6851,30 +6864,10 @@
+    }
+    pipe->set_framebuffer_state(pipe, &fb);
+ 
+-   /* The viewport, and now its z as well. Gallium's window depth is
+-    * clip_z/w * scale[2] + translate[2], and with clip_halfz (the rasterizer state
+-    * above) the depth range [znear, zfar] is scale = zfar - znear, translate = znear --
+-    * which is what util_viewport_zmin_zmax reads back out of it (util/u_viewport.h, and
+-    * freedreno hands exactly that to GRAS_CL_Z_CLAMP). The default is { 0, 1 }, the
+-    * identity, which is the 1.0/0.0 every draw before depth existed used.
+-    */
+-   float znear = draw->depth_range ? draw->depth_range[0] : 0.0f;
+-   float zfar = draw->depth_range ? draw->depth_range[1] : 1.0f;
+-   pipe->set_viewport_states(pipe, 0, 1, &(struct pipe_viewport_state){
+-      /* The y scale is NEGATIVE, and that is Metal's rule rather than a convention picked
+-       * here. Metal's render-target origin is the top left and its NDC y points up, so clip
+-       * y = +1 belongs in memory row 0; a positive y scale puts clip y = -1 there, which is
+-       * OpenGL's drawable rule and what this code did until now (docs/metal.md 10.28). Mesa
+-       * negates y in exactly this place, for exactly this reason, when it draws to a window.
+-       *
+-       * It is landed only now because until the varying was fixed (10.32) nothing could see
+-       * it: every draw of the corpus either writes a constant or samples one fixed texel, and
+-       * over a constant an orientation is invisible. The sixteen-pixel grid of 10.32 is what
+-       * it is landed against -- it must turn from (100+x, 200+y, ...) into
+-       * (100+x, 200+(3-y), ...), the texture mirrored vertically, on both back ends.
+-       */
+-      .scale = { w / 2.0f, -(h / 2.0f), zfar - znear },
+-      .translate = { w / 2.0f, h / 2.0f, znear } });
++   if(rwa_redfin_apply_raster(render,draw,w,h,why,why_size)) {
++      for(unsigned i=0;i<draw->color_count;++i)pipe_surface_reference(&surf[i],NULL);
++      pipe_surface_reference(&zsurf,NULL);return -1;
++   }
+ 
+    pipe->bind_blend_state(pipe, render->blend);
+    /* The caller's depth/stencil state, or the pipeline's zeroed one, which is Metal's
+diff --git a/src/compiler/air/air_metal.h b/src/compiler/air/air_metal.h
+--- a/src/compiler/air/air_metal.h
++++ b/src/compiler/air/air_metal.h
+@@ -1211,6 +1211,8 @@
+ 	size_t offset;               /* bytes, Metal's own `offset:` argument */
+ };
+ 
++#include "redfin_metal_raster.h"
++
+ struct rwa_draw {
+ 	struct rwa_texture *const *color;
+ 	unsigned color_count;
+@@ -1310,7 +1312,11 @@
+ 	unsigned vertex_buffer_table_count;
+ 	const struct rwa_buffer_bind *fragment_buffer_table;
+ 	unsigned fragment_buffer_table_count;
+-};
++	const struct redfin_metal_raster_state *redfin_raster;
++};
++
++int rwa_redfin_clear_pass(struct rwa_device *,struct rwa_texture *const *,unsigned,unsigned,
++    const float[8][4],struct rwa_texture *,const float *,const unsigned *,char *,size_t);
+ 
+ int rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
+ 		    char *why, size_t why_size);

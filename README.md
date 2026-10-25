@@ -93,6 +93,12 @@ three CPU domains now reach their native normal frequencies with observed
 thermal throttling/restoration; Photos still fails in its native assetsd/TCC
 path. Physical90Hz and credential persistence are independently observed.
 
+The latest V17 capture keeps the GPU and window server alive, but the user's
+photo and authenticated screen capture prove large checkerboard/ghosting defects
+in system Metal composition. Correct rendering is the current priority. The
+complete raster/pass/texture-pitch fix is built with offscreen pixel probes;
+hardware validation remains pending. Stable60/90render FPS is not established.
+
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
 have complete, independently verified local backups. Android userdata has

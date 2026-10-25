@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native raster/pass/byte-pitch block built; fresh V20 staged — 2026-10-25
+
+Source base7878cc2 plus this completed block. Re-reviewed preferred userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 raster/pass/load actions and A6xx Mesa25.0.7
+import/view registers. Each recorded Metal draw now snapshots actual viewport,
+scissor, blend constants, cull/winding/fill/depth clip/bias. Clear load actions
+are separate ordered work, independent per attachment and valid with no draws.
+The paired AIR keeps native attachment references and actual completion scopes.
+Single-level linear source imports with non64-byte pitches are explicitly
+sampler-only, bounded by the actual BO/allocation/offset; ordinary frontends
+retain their import constraints. RB/storage destinations remain forbidden for
+those pitches. No DMA widening or CPU rasterization is introduced.
+
+Remove the six-layer visible test window. The native display observer now
+creates no window/layer and reports passive presentation counts, not a measured
+controlled animation rate. Add offscreen real-pixel/guard probes for empty-pass
+MRT clears, per-draw scissor/viewport snapshots, attachment1 framebuffer fetch,
+and exact480/4512-byte source pitches updated twice through the same import.
+These are implementations; the previously observed GUI corruption is not yet
+claimed corrected on hardware.
+
+49 combined host cases PASS/no skips; full fresh Mesa/AIR/native Metal/shader/
+signature/actual20H392 API audit PASS. UI/refresh actual20H392 import/signature
+builds PASS. Graphics research/redfin-metal-raster-v1/local20261025-141716/noCI;
+UI research/redfin-ui-raster-v1. Kernel reused unchanged from d2964b6:
+local20261025-134128/noCI,
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V18 image 0951b55778818fd7199851349397e72f4339f073315af80cac731bfed09d07c0; native
+loader/ADT/liveFDT/firmware/power/DVFS/source-window/return preflight PASS.
+
+Fresh V20 starts from clean consistent HFSX/write_count917356. Paired graphics,
+Metal and UI/refresh libraries are inventoried with complete signed-file bytes;
+all identities, credentials and existing logs are preserved. Staging has 155
+ranges/24952832bytes/3new/zero freed blocks; complete preimages, readbacks,
+signed-file/seal and native readonly fsck PASS. V20 is PREPARED, NOT APPLIED;
+V19 and older are applied/stale. Next apply V20 once, capture one combined V18
+run, inspect actual GUI thumbnails plus native probes, errors and app survival.
+Sustained60/90render FPS and broader sensor/network/power/Apple authorization
+work remain unfinished. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x8eaaaa749d0ca3fc redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V17 no runtime GPU stop, but real GUI corruption confirmed — 2026-10-25
 
 Sourced2964b6, local20261025-134128/noCI7fadbcd8..., V17 image

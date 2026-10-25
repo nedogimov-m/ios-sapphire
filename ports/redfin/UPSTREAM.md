@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native Metal raster/load actions and byte-pitch sources — 2026-10-25
+
+Re-reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772:
+redwoodmetal.m render encoder and tools/mesa/air/air_metal.c native draw,
+attachment and framebuffer-fetch paths. Kernel remains unchanged at preferred
+8e61187098f2c26c5daee8f9f72b6416aa64b9ab plus the documented Redfin overlays.
+The upstream ignores scissor and most viewport/raster state and records only
+attachment0 clears, at the first draw. Adapt the complete paired draw ABI and
+ordered clear work so empty passes and each attachment keep their actual load
+actions. Pipeline/surface references and real command fences remain native.
+
+Mesa25.0.7 generated A6XX_TEX_CONST_2_PITCH carries the byte pitch; RB_MRT_PITCH
+shifts it right6. Real CA480/4512-byte imports previously fail before sampling.
+An explicit paired opt-in admits only bounded single-level linear A6xx sampler
+imports, preserves actual pitch and avoids unsigned PITCHALIGN underflow.
+Unaligned attachments/storage writes are refused explicitly. Other import paths
+retain their requirements. Hardware suitability/correctness is pending the
+new offscreen two-seed exact-pitch pixel/guard probes, not inferred from register
+shape alone. Separate native MRT-clear/scissor/viewport/fetch probes and actual
+GUI captures are required; earlier simple pixel probes do not prove system
+composition. The native display observer creates no visible content and its
+passive presentation counts are not a controlled animation benchmark.
+
 ## Preserve native failure causes and measure actual Metal stages — 2026-10-25
 
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and paired

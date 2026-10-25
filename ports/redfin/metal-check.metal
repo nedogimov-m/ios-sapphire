@@ -20,3 +20,12 @@ fragment float4 redfin_batch_fragment(constant float4 &color [[buffer(0)]])
 { return color; }
 fragment float4 redfin_dependency_fragment(texture2d<float,access::read> source [[texture(0)]])
 { return source.read(uint2(0,0)); }
+
+struct RedfinMRT {float4 first [[color(0)]];float4 second [[color(1)]];};
+fragment RedfinMRT redfin_mrt_fragment()
+{ RedfinMRT value;value.first=float4(1);value.second=float4(1,1,0,1);return value; }
+fragment float4 redfin_fetch_other_fragment(float4 other [[color(1)]])
+{ return other; }
+fragment float4 redfin_position_sample_fragment(float4 position [[position]],
+    texture2d<float,access::read> source [[texture(0)]])
+{ return source.read(uint2(position.xy)); }
