@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V18 native raster/MRT/fetch PASS; unaligned sampling is wrong on hardware — 2026-10-25
+
+Source86e313d, reused local20261025-134128/noCI7fadbcd8..., V18 image
+0951b55778818fd7199851349397e72f4339f073315af80cac731bfed09d07c0,
+nonce8eaaaa749d0ca3fc. V20 applied once:155ranges/24952832bytes/3new/
+zero freed blocks; full preimages, signed-file/seal/readback/native readonly
+fsck PASS. V20 is now applied/stale; never reuse it. Authenticated capture
+leaves clean consistent HFSX/write_count926210 and verified Fastboot.
+
+Native empty-pass independent MRT clears, per-draw scissor/viewport snapshots
+and attachment1 framebuffer fetch all pass actual pixels and guards. Prior
+192compute/BGRA/RG8/blend/dependency/short-surface still PASS,10GMEM/1sysmem.
+The new exact480/4512 source-pitch probes FAIL at x0/y1: the actual pixel is
+precisely x8/y1 of the original pattern in both cases, a32-byte row shift.
+Therefore byte fields alone did NOT establish arbitrary-pitch sampler support;
+the attempted direct source-import policy is not correct on A620. Do not
+claim it fixed. Replace it with real bounded GPU row-layout conversion into
+properly aligned resources, including output resolve if used as attachments.
+
+Authenticated screen39 still shows real large checkerboard/incorrect fills.
+No GPU fault/stop or SpringBoard/backboardd restart observed in this capture.
+Phone253 and Photos254 survive5/17s, SpringBoard26 stable. The passive observer
+has0presents during its idle10s interval and601callbacks/60Hz; this is NOT a
+rendering FPS benchmark. No smoothness improvement claimed. Wi-Fi/SSC broader
+work remains pending; the sensor fatal reason repeats. Exact observed args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x8eaaaa749d0ca3fc redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete native raster/pass/byte-pitch block built; fresh V20 staged — 2026-10-25
 
 Source base7878cc2 plus this completed block. Re-reviewed preferred userland
