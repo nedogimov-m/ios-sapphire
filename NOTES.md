@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V33 ordinary path verified; user still reports near-stalled UI — 2026-10-25
+
+Source2770106; graphics local20261025-223758/noCI,
+pairing5790509423ce258da37021d8158e36b0fe303631c092c470fce9831b92482092.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V33 imaged8127d0172a3097b8f6f32ff890c78f5ba8c4317b66d3a2aa70ed5d54e44a2ef,
+nonce1b680e86c7e16828. V36 applied once:23ranges/778240bytes/zero new/zero
+freed; complete live preimages/file readback/signatures/native readonly fsck
+PASS. V36 applied/stale, never reuse. Authenticated exact current boot reports
+userspace-alive/no panic, clean consistent HFSX/write_count1122410 and verified
+Fastboot. Next fresh rootV37/imageV34. Broader goal remains active.
+
+Ordinary startup policy is proved in the actual run: zero current draw images/
+metadata, zero fragment-binding/constant snapshots and no current boot nonce in
+metal-check/gpu-render logs. No kernel screen capture requested. Only actual
+backboardd61 is observed; no window-server restart is reported. The user answers
+that the interface still almost stands still. Removing capture alone therefore
+does not solve the performance problem; do not call this a measured zero FPS.
+
+New pipeline-call observations expose0.437..1.255seconds for fixed_frag_lph_cph
+variants, versus roughly1.7..9.2ms for simple pipelines. This is end-to-end API
+call time, including compiler-gate waiting, not labelled pure compiler CPU.
+The first3-draw command costs469923us, with13allocations/451740us allocation
+I/O. A37-draw sample has8submits/229775us total (including118217us queue wait),
+while a later25-draw sample has1submit/28945us total. These are command groups,
+not display FPS. Native GPU DVFS reaches its real625MHz maximum and reduces
+at a real70.2C thermal sample; preserve that protection. Actual presentation
+averages7..8ms and one fallback is reported.5strict original-page no-copy
+refusals remain; do not copy or bypass their ownership checks.
+
+Next profile the frontend's actual captured variants, accelerate shader/pipeline
+preparation and reuse where semantically identical, then test the complete block.
+Retain correct colours/half ABI and bounded memory. Ordinary performance is still
+unfinished. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x1b680e86c7e16828 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN ordinary-composition profile built; fresh V36 prepared for V33 — 2026-10-25
 
 Source base84db72b plus this coherent performance-observation block. Add explicit

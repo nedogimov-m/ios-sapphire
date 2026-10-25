@@ -20,8 +20,12 @@ for the shared compiler gate and is not labelled pure compiler CPU time.
 42combined policy/migration/reversal/fence/graphics cases and full native actual-
 cache ABI/signatures pass. The Mesa/compiler fingerprint remains identical to
 V32. Fresh V36 ordinary jobs/cache stage passes complete readback and native
-readonly fsck. One ordinary native run remains pending. No FPS claim follows
-from disabling diagnostics alone; no kernel source changes.
+readonly fsck. V33 proves all image/binding/parameter capture absent and both
+probe jobs inactive, with one live backboardd and no panic. The user still
+reports near-stalled UI. Pipeline calls for fixed_frag_lph_cph take0.437..1.255s,
+and the first13allocations account for451740us. Profile and optimize those real
+costs next; disabling diagnostics alone does not solve performance. No kernel
+source changes, and no sustained FPS claim.
 
 ## Full-register raster varying transport for logical half values — 2026-10-25
 
