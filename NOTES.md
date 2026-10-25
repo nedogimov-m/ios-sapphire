@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V19 real row copies partly pass; system checkerboard persists; app checks retired — 2026-10-25
+
+Sourced17ecc1, unchanged local20261025-134128/noCI7fadbcd8..., V19 image
+ed5c11cb2213273a4a28ed050c15a412b8b9e46c5d5c41fd27aa13ad8cc4bc96,
+nonceb1c75bbb3addb0a7. V21 applied once:156ranges/24932352bytes/5new/
+zero freed blocks; complete preimages/native signed-file/seal/readback/readonly
+fsck PASS. V21 is now applied/stale. Capture leaves clean consistent HFSX/
+write_count936296 and verified Fastboot. No runtime GPU fault/stop observed.
+
+Native MRT/scissor/viewport/attachment1-fetch and prior192compute/short surface
+probes still PASS. Both480-byte import/refresh rounds and unaligned output/
+second-wrapper same-command dependency pass actual original pixels/guards.
+The4512-byte import/output probes run real GPU copies using an actually4608-byte
+aligned texture. Their pixel loop emits no mismatch, but the subsequent padding/
+tail validation fails without an offset in the current checker. Native routes
+26GMEM/1sysmem. Need guard diagnostics and respect imported slice extent, not
+assume all extra BO padding is a declared render target. Native window-server
+copy logs prove real230x186/RG8 sources and1125x2436/4512-byte output resolves.
+
+Actual authenticated frame196 and the user still show large checkerboard/bad
+fills: row-copy implementation is not sufficient proof of correct system
+composition. Next capture the genuine compositor inputs/outputs per draw and
+check real vertex-buffer/instance/varying/sampling paths and missing entry calls.
+No performance improvement is claimed; physical90Hz remains distinct from FPS.
+
+The user confirms Phone and Photos now work normally and explicitly requests
+stopping their repeated test launches. Retire automatic com.redfin.gui-check
+startup in source/default fresh roots, accepting migration only from our exact
+previous job. That disabled cache/plist must join the NEXT fresh root package;
+the installed V21 still has the old job. Preserve user foreground apps during
+all subsequent runs. Broader Wi-Fi/power/thermal/sensor/Apple authorization and
+smooth system rendering remain unfinished. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb1c75bbb3addb0a7 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN actual GPU row-conversion/resolve/alias block built; fresh V21 staged — 2026-10-25
 
 Source base6d4844e plus this complete related block. Remove the disproved

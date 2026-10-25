@@ -1,4 +1,4 @@
-"""Build/provision unattended native app checks for explicit capture boots."""
+"""Keep the native app-check utility available with automatic startup disabled."""
 import argparse
 import copy
 import hashlib
@@ -29,7 +29,9 @@ ENTITLEMENTS={'application-identifier':LABEL,'platform-application':True,
 
 
 def job():
-    return dict(Label=LABEL,ProgramArguments=[PROGRAM],RunAtLoad=True,KeepAlive=False,
+    # Phone and Photos were confirmed working by the user. Ordinary graphics
+    # captures must leave the foreground application and the user's screen alone.
+    return dict(Label=LABEL,ProgramArguments=[PROGRAM],RunAtLoad=False,Disabled=True,KeepAlive=False,
         UserName='mobile',ProcessType='Background',StandardOutPath=LOG_PATH,StandardErrorPath=LOG_PATH)
 
 
@@ -40,7 +42,9 @@ def patch_launchd_cache(original):
     jobs=value.get('LaunchDaemons') if isinstance(value,dict) else None
     if not isinstance(jobs,dict):raise ValueError('native LaunchDaemons required')
     found=[(k,v) for k,v in jobs.items() if isinstance(v,dict) and v.get('Label')==LABEL]
-    if found and found!=[(JOB_PATH,job())]:raise ValueError('conflicting native GUI check job')
+    previous=job();previous.pop('Disabled');previous['RunAtLoad']=True
+    if found and (len(found)!=1 or found[0][0]!=JOB_PATH or found[0][1] not in (job(),previous)):
+        raise ValueError('conflicting native GUI check job')
     if JOB_PATH in jobs and not found:raise ValueError('GUI check path occupied')
     expected=copy.deepcopy(value);expected['LaunchDaemons'][JOB_PATH]=job()
     if expected==value:return original,dict(changed=False)
@@ -84,9 +88,9 @@ def build(out,cache_path=None):
         abi=audit_bundle(cache,[executable])
     if not abi['compatible']:raise ValueError('native app check imports unavailable on20H392')
     (out/'job.plist').write_bytes(plistlib.dumps(job(),fmt=plistlib.FMT_BINARY,sort_keys=False))
-    (out/'log-initial').write_bytes(b'REDFIN opt-in native Phone/Photos app checks.\n')
+    (out/'log-initial').write_bytes(b'REDFIN manual native app-check utility; automatic startup disabled.\n')
     report=dict(success=True,uuid=uuid,methods=METHODS,callback_signature=CALLBACK_SIGNATURE,
-        native_option_keys=OPTION_KEYS,abi=abi,capture_opt_in=True,
+        native_option_keys=OPTION_KEYS,abi=abi,capture_opt_in=True,automatic_app_opens=False,
         sha256={n:hashlib.sha256((out/n).read_bytes()).hexdigest() for n in ['gui-check','job.plist','log-initial']})
     (out/'build.json').write_text(json.dumps(report,indent=2)+'\n');return report
 
@@ -95,6 +99,8 @@ def prepare_root(root,metadata,bundle):
     bundle=Path(bundle);report=json.loads((bundle/'build.json').read_text())
     if not report.get('success') or not report.get('capture_opt_in') or not report.get('abi',{}).get('compatible'):
         raise ValueError('verified opt-in GUI checker required')
+    if plistlib.loads((bundle/'job.plist').read_bytes())!=job():
+        raise ValueError('GUI check bundle must disable automatic app launching')
     prepare(root,metadata,[(bundle/name,target,uid,mode,report['sha256'][name],preserve)
         for name,target,uid,mode,preserve in [('gui-check',PROGRAM,0,0o755,False),
             ('job.plist',JOB_PATH,0,0o644,False),('log-initial',LOG_PATH,501,0o644,True)]])
