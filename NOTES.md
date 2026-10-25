@@ -1,5 +1,27 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete90Hz bridge/Photos/app-check follow-up staged — 2026-10-25
+
+Source based on f241ad4; kernel remains local20261025-062535/noCI,
+SHA2564c26d9c20147ea4d15e5d18a0692e83346ac57ce64eaf48fa70a36c33a30dc4e.
+Both graphics adapters now compile against the canonical full-panel90Hz
+profile; the build records the profile/source digests and logs a runtime
+profile refusal. Actual20H392 native instance URL/create-or-upgrade Photos
+methods and LaunchServices asynchronous completion/unlock options are
+reviewed and ABI-checked. Native system Media identifier0 is retained and
+never passed to the well-known-library API. No manual user checks required.
+
+Complete paired build succeeds: Mesa/eagl457wrappers plus signed PhotosV3
+and app-checkV2, actual import compatibilityPASS; all24selected follow-up
+host casesPASS. Fresh V9 stage passes native readonly fsck and complete
+signed-file/extent/allocation verification:25ranges/83blocks/339968bytes,
+one newly allocated block, zero freed. Recovery remains idle/unmounted;
+no V9 device writes or new iOS boot yet. Never reuse V8 or an applied V9.
+Next: backed-up V9 apply and one combined authenticated persistence boot.
+The last observed exact boot args and results remain in the next entry.
+Metal, Wi-Fi reconnect/startup, power/charging, thermals and all actual
+sensors remain required; actual smooth60/90fps and Photos UI are unproved.
+
 ## REDFIN descriptor fix and native Keychain/model/full-panel90Hz verified — 2026-10-25
 
 Source f5bd72e/local build20261025-062535/noCI, kernel

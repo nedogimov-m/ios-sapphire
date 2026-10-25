@@ -38,6 +38,13 @@ method_matches(Class cls, const char *name, const char *types)
     return method && !strcmp(method_getTypeEncoding(method),types);
 }
 
+static BOOL
+instance_method_matches(Class cls,const char *name,const char *types)
+{
+    Method method=cls ? class_getInstanceMethod(cls,sel_registerName(name)) : NULL;
+    return method && !strcmp(method_getTypeEncoding(method),types);
+}
+
 static void
 identity_proof(const char *nonce)
 {
@@ -136,6 +143,8 @@ int main(void)
             if (!method_matches(photo,"systemPhotoLibraryURL","@16@0:8") ||
                 !method_matches(photo,"createOrUpgradePhotoLibraryWithWellKnownIdentifier:error:","B32@0:8q16^@24") ||
                 !method_matches(photo,"openPhotoLibraryWithWellKnownIdentifier:error:","@32@0:8q16^@24") ||
+                !instance_method_matches(photo,"initWithPhotoLibraryURL:","@24@0:8@16") ||
+                !instance_method_matches(photo,"createOrUpgradeLibraryUsingOptions:error:","B32@0:8@16^@24") ||
                 !method_matches(manager,"isSystemPhotoLibraryURL:","B24@0:8@16") ||
                 !method_matches(manager,"wellKnownPhotoLibraryIdentifierForURL:","q24@0:8@16")) {
                 printf("REDFIN PHOTO INIT REFUSED: actual native method ABI differs\n"); return 5;
@@ -173,15 +182,29 @@ int main(void)
             for (NSString *candidate in candidates) if ([files fileExistsAtPath:candidate]) existing=YES;
             printf("REDFIN PHOTO INIT LIBRARY: id=%ld existing=%u path=%s\n",(long)identifier,existing,path.UTF8String);
             NSError *error=nil;
-            if (!existing) {
+            id library=nil;
+            if (identifier==0) {
+                /* The system Media library is an ordinary URL library, not a
+                 * named well-known library. Native identifier0 is intentional;
+                 * passing it to the class well-known API is an API misuse.
+                 * The instance path creates/opens/upgrades using Apple's own
+                 * options/error handling, including an already-existing store. */
+                library=((id (*)(id,SEL,id))objc_msgSend)([photo alloc],
+                    sel_registerName("initWithPhotoLibraryURL:"),url);
+                BOOL ready=library && ((BOOL (*)(id,SEL,id,NSError **))objc_msgSend)(library,
+                    sel_registerName("createOrUpgradeLibraryUsingOptions:error:"),nil,&error);
+                printf("REDFIN PHOTO INIT SYSTEM URL: ready=%u native-instance=1 error=%s\n",
+                    ready,error ? error.description.UTF8String : "none");
+                if (!ready) return 8;
+            } else if (!existing) {
                 BOOL created=((BOOL (*)(id,SEL,NSInteger,NSError **))objc_msgSend)(photo,
                     sel_registerName("createOrUpgradePhotoLibraryWithWellKnownIdentifier:error:"),identifier,&error);
                 printf("REDFIN PHOTO INIT CREATE: success=%u error=%s\n",created,error ? error.description.UTF8String : "none");
                 if (!created) return 8;
             }
             error=nil;
-            id library=((id (*)(id,SEL,NSInteger,NSError **))objc_msgSend)(photo,
-                sel_registerName("openPhotoLibraryWithWellKnownIdentifier:error:"),identifier,&error);
+            if (!library) library=((id (*)(id,SEL,NSInteger,NSError **))objc_msgSend)(photo,
+                    sel_registerName("openPhotoLibraryWithWellKnownIdentifier:error:"),identifier,&error);
             if (!library) {
                 printf("REDFIN PHOTO INIT OPEN: success=0 error=%s\n",error ? error.description.UTF8String : "none"); return 9;
             }

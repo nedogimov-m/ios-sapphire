@@ -166,6 +166,9 @@ def main():
             if not proof['compatible']:raise ValueError('actual iOS graphics imports missing; see abi-check.json')
             result['actual_abi_compatible']=True
             result.update(success=True,sdk=str(sdk),input_sha256=fingerprint,bundle=str(bundle),
+                gui_profile_sha256=hashlib.sha256((ROOT/'ports/redfin/gui-profile.h').read_bytes()).hexdigest(),
+                gui_sources_sha256={name:hashlib.sha256((ROOT/'ports/redfin'/name).read_bytes()).hexdigest()
+                    for name in ('graphics-loader.c','eagl-guard.c','eagl_userland.py')},
                 artifacts={str(x.relative_to(bundle)):hashlib.sha256(x.read_bytes()).hexdigest()
                            for x in sorted(bundle.rglob('*')) if x.is_file()})
         except (subprocess.CalledProcessError,ValueError,OSError) as e:

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <mach/mach_time.h>
 #include "gui-profile.h"
 
 static pid_t process(const char *name)
@@ -33,6 +34,56 @@ static BOOL abi(Class cls,const char *selector,const char *types,BOOL meta)
         class_getInstanceMethod(cls,sel_registerName(selector));
     return method && !strcmp(method_getTypeEncoding(method),types);
 }
+
+static uint64_t monotonic_ns(void)
+{
+    mach_timebase_info_data_t scale={0};mach_timebase_info(&scale);
+    uint64_t ticks=mach_absolute_time();
+    return scale.denom ? (ticks/scale.denom)*scale.numer+(ticks%scale.denom)*scale.numer/scale.denom : 0;
+}
+static NSString *native_key(void *handle,const char *name)
+{
+    NSString **value=handle ? (NSString **)dlsym(handle,name) : NULL;
+    return value && [*value isKindOfClass:NSString.class] ? *value : nil;
+}
+
+/* Actual20H392 completion block is v20@?0B8@"NSError"12. Run the main loop
+ * while awaiting it; the legacy boolean wrapper hides the native error.
+ * Unlock options request the ordinary no-passcode transition. A passcode or
+ * authorization error is retained as a failed check, never bypassed. */
+static BOOL open_application(id workspace,Class configuration,void *frontboard,NSString *bundle,const char *nonce)
+{
+    NSString *unlock=native_key(frontboard,"FBSOpenApplicationOptionKeyUnlockDevice");
+    NSString *background=native_key(frontboard,"FBSOpenApplicationOptionKeyActivateSuspended");
+    NSString *prompt=native_key(frontboard,"FBSOpenApplicationOptionKeyPromptUnlockDevice");
+    if (!unlock || !background || !prompt) {
+        printf("REDFIN GUI CHECK OPEN: boot=%s bundle=%s refused native foreground options absent\n",nonce,bundle.UTF8String);
+        return NO;
+    }
+    id options=[configuration new];
+    ((void (*)(id,SEL,id))objc_msgSend)(options,sel_registerName("setFrontBoardOptions:"),
+        @{unlock:@YES,background:@NO,prompt:@NO});
+    __block BOOL finished=NO,success=NO;
+    __block NSString *error_domain=nil;
+    __block NSInteger error_code=0;
+    void (^reply)(BOOL,NSError *)=^(BOOL opened,NSError *error) {
+        success=opened;error_domain=[error.domain copy];error_code=error.code;
+        __atomic_store_n(&finished,YES,__ATOMIC_RELEASE);
+    };
+    ((void (*)(id,SEL,id,id,id))objc_msgSend)(workspace,
+        sel_registerName("openApplicationWithBundleIdentifier:usingConfiguration:completionHandler:"),bundle,options,reply);
+    uint64_t began=monotonic_ns();
+    while (!__atomic_load_n(&finished,__ATOMIC_ACQUIRE) && monotonic_ns()-began<15000000000ULL) {
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        usleep(5000);
+    }
+    BOOL completed=__atomic_load_n(&finished,__ATOMIC_ACQUIRE);
+    printf("REDFIN GUI CHECK OPEN: boot=%s bundle=%s accepted=%u completed=%u error-domain=%s error-code=%ld foreground=1 unlock-request=1\n",
+        nonce,bundle.UTF8String,completed && success,completed,
+        completed && error_domain ? error_domain.UTF8String : "none",completed ? (long)error_code : 0);
+    if (completed) [error_domain release];
+    [options release];return completed && success;
+}
 int main(void)
 {
     setvbuf(stdout,NULL,_IOLBF,0);setvbuf(stderr,NULL,_IOLBF,0);
@@ -52,8 +103,11 @@ int main(void)
     @autoreleasepool {
         dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices",RTLD_NOW|RTLD_LOCAL);
         Class cls=objc_getClass("LSApplicationWorkspace");
+        Class configuration=objc_getClass("_LSOpenConfiguration");
         if (!abi(cls,"defaultWorkspace","@16@0:8",YES) ||
-            !abi(cls,"openApplicationWithBundleID:","B24@0:8@16",NO)) {
+            !abi(cls,"openApplicationWithBundleIdentifier:usingConfiguration:completionHandler:","v40@0:8@16@24@?32",NO) ||
+            !abi(configuration,"init","@16@0:8",NO) ||
+            !abi(configuration,"setFrontBoardOptions:","v24@0:8@16",NO)) {
             printf("REDFIN GUI CHECK: boot=%s refused native LS ABI differs\n",nonce);return 3;
         }
         printf("REDFIN GUI CHECK: boot=%s opt-in=1 mobile=1 preparing native Phone/Photos opens\n",nonce);
@@ -61,14 +115,12 @@ int main(void)
         pid_t spring=process("SpringBoard");
         if (spring<=0) {printf("REDFIN GUI CHECK: boot=%s SpringBoard-not-ready pid=%d\n",nonce,spring);return 4;}
         id workspace=((id (*)(id,SEL))objc_msgSend)(cls,sel_registerName("defaultWorkspace"));
+        void *frontboard=dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices",RTLD_NOW|RTLD_LOCAL);
         NSArray *bundles=@[@"com.apple.mobilephone",@"com.apple.mobileslideshow"];
         const char *names[]={"MobilePhone","MobileSlideShow"};
         for (unsigned i=0;i<bundles.count;++i) {
             @try {
-                BOOL opened=((BOOL (*)(id,SEL,id))objc_msgSend)(workspace,
-                    sel_registerName("openApplicationWithBundleID:"),bundles[i]);
-                printf("REDFIN GUI CHECK OPEN: boot=%s bundle=%s accepted=%u spring-before=%d\n",
-                    nonce,[bundles[i] UTF8String],opened,process("SpringBoard"));
+                (void)open_application(workspace,configuration,frontboard,bundles[i],nonce);
                 sleep(5);pid_t early=process(names[i]);sleep(12);pid_t late=process(names[i]),current=process("SpringBoard");
                 printf("REDFIN GUI CHECK RESULT: boot=%s bundle=%s pid-5s=%d pid-17s=%d survived=%u spring-stable=%u spring=%d\n",
                     nonce,[bundles[i] UTF8String],early,late,early>0 && early==late,current==spring,current);

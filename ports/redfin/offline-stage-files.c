@@ -17,6 +17,8 @@ static const struct target targets[]={
     {"/redfin/bin/photos-init",0,0755},
     {"/redfin/bin/gui-check",0,0755},
     {"/redfin/lib/libredfin-ui.dylib",0,0644},
+    {"/redfin/lib/libredfin-graphics.dylib",0,0644},
+    {"/redfin/lib/libredfin-eagl.dylib",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.photos-init.plist",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.gui-check.plist",0,0644},
     {"/private/var/mobile/Library/Logs/redfin-ui.log",501,0600},

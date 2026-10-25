@@ -84,8 +84,11 @@ int redfin_eagl_validate(void)
     char args[608]={0};size_t size=sizeof(args);
     const char *program=getprogname();
     if(!program || strcmp(program,"backboardd") ||
-       sysctlbyname("kern.bootargs",args,&size,NULL,0) || size>sizeof(args) ||
-       !redfin_gpu_gui_profile(args,(unsigned)size,&boot_nonce))return 0;
+       sysctlbyname("kern.bootargs",args,&size,NULL,0) || size>sizeof(args))return 0;
+    if(!redfin_gpu_gui_profile(args,(unsigned)size,&boot_nonce)) {
+        dprintf(2,"REDFIN EAGL ABI: profile refused bytes=%zu current-profile-rates=10/30/60/90 full-panel=1\n",size);
+        return 0;
+    }
     const struct mach_header_64 *image=native_image(REDFIN_EAGL_IMAGE);
     const struct mach_header_64 *quartz=native_image(REDFIN_CA_IMAGE);
     if(!image_uuid(image,redfin_eagl_uuid) || !image_uuid(quartz,redfin_ca_uuid))goto refuse;

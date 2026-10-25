@@ -33,7 +33,9 @@ METHODS = {
     '/System/Library/Frameworks/Photos.framework/Photos': ('PHPhotoLibrary', {
         '+systemPhotoLibraryURL': '@16@0:8',
         '+createOrUpgradePhotoLibraryWithWellKnownIdentifier:error:': 'B32@0:8q16^@24',
-        '+openPhotoLibraryWithWellKnownIdentifier:error:': '@32@0:8q16^@24'}),
+        '+openPhotoLibraryWithWellKnownIdentifier:error:': '@32@0:8q16^@24',
+        '-initWithPhotoLibraryURL:':'@24@0:8@16',
+        '-createOrUpgradeLibraryUsingOptions:error:':'B32@0:8@16^@24'}),
     '/System/Library/PrivateFrameworks/PhotoLibraryServicesCore.framework/PhotoLibraryServicesCore':
         ('PLPhotoLibraryPathManager', {'+isSystemPhotoLibraryURL:': 'B24@0:8@16',
             '+wellKnownPhotoLibraryIdentifierForURL:': 'q24@0:8@16'})}

@@ -17,7 +17,13 @@ PROGRAM='/redfin/bin/gui-check'
 JOB_PATH='/System/Library/LaunchDaemons/'+LABEL+'.plist'
 LOG_PATH='/private/var/mobile/Library/Logs/redfin-gui-check.log'
 LIBRARY='/System/Library/Frameworks/CoreServices.framework/CoreServices'
-METHODS={'+defaultWorkspace':'@16@0:8','-openApplicationWithBundleID:':'B24@0:8@16'}
+METHODS={'LSApplicationWorkspace':{'+defaultWorkspace':'@16@0:8',
+    '-openApplicationWithBundleIdentifier:usingConfiguration:completionHandler:':'v40@0:8@16@24@?32'},
+    '_LSOpenConfiguration':{'-init':'@16@0:8','-setFrontBoardOptions:':'v24@0:8@16'}}
+CALLBACK_SIGNATURE='v20@?0B8@"NSError"12'
+FRONTBOARD='/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices'
+OPTION_KEYS=['_FBSOpenApplicationOptionKeyUnlockDevice','_FBSOpenApplicationOptionKeyActivateSuspended',
+    '_FBSOpenApplicationOptionKeyPromptUnlockDevice']
 ENTITLEMENTS={'application-identifier':LABEL,'platform-application':True,
     'com.apple.frontboard.launchapplications':True,'com.apple.springboard.launchapplications':True}
 
@@ -50,9 +56,18 @@ def build(out,cache_path=None):
     if (ROOT/'research').resolve() not in out.parents:raise ValueError('private research output required')
     out.mkdir(parents=True,exist_ok=False)
     with (Cache(cache_path) if cache_path else Cache()) as cache:
-        image=cache.image(LIBRARY);methods=image.objc_methods('LSApplicationWorkspace')
-        if any(k not in methods or methods[k]['types']!=v for k,v in METHODS.items()):
-            raise ValueError('actual native LS ABI differs')
+        image=cache.image(LIBRARY)
+        for name,wanted in METHODS.items():
+            methods=image.objc_methods(name)
+            if any(k not in methods or methods[k]['types']!=v for k,v in wanted.items()):
+                raise ValueError('actual native LS ABI differs: '+name)
+        # Reviewed internal native completion-forwarding descriptor in the
+        # paired20H392 CoreServices image; runtime calls remain selector-based.
+        if image.uuid!='8d42103dbd59308d9d2c2082b39738e7' or cache.string(cache.pointer(0x1d5a22c98+16))!=CALLBACK_SIGNATURE:
+            raise ValueError('native LaunchServices completion block ABI differs')
+        options,_=cache.image(FRONTBOARD).exports()
+        if any(not options.get(name) for name in OPTION_KEYS):
+            raise ValueError('native foreground/unlock option ABI differs')
         uuid=image.uuid
     sdk=subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()
     executable=out/'gui-check'
@@ -70,7 +85,8 @@ def build(out,cache_path=None):
     if not abi['compatible']:raise ValueError('native app check imports unavailable on20H392')
     (out/'job.plist').write_bytes(plistlib.dumps(job(),fmt=plistlib.FMT_BINARY,sort_keys=False))
     (out/'log-initial').write_bytes(b'REDFIN opt-in native Phone/Photos app checks.\n')
-    report=dict(success=True,uuid=uuid,methods=METHODS,abi=abi,capture_opt_in=True,
+    report=dict(success=True,uuid=uuid,methods=METHODS,callback_signature=CALLBACK_SIGNATURE,
+        native_option_keys=OPTION_KEYS,abi=abi,capture_opt_in=True,
         sha256={n:hashlib.sha256((out/n).read_bytes()).hexdigest() for n in ['gui-check','job.plist','log-initial']})
     (out/'build.json').write_text(json.dumps(report,indent=2)+'\n');return report
 

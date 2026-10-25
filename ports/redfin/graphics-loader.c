@@ -31,8 +31,11 @@ __attribute__((constructor)) static void redfin_graphics_load(void)
     const char *name=getprogname();
     if(!name || strcmp(name,"backboardd"))return;
     char args[608]={0};size_t size=sizeof(args);uint64_t nonce=0;
-    if(sysctlbyname("kern.bootargs",args,&size,NULL,0) || size>sizeof(args) ||
-       !redfin_gpu_gui_profile(args,(unsigned)size,&nonce))return;
+    if(sysctlbyname("kern.bootargs",args,&size,NULL,0) || size>sizeof(args))return;
+    if(!redfin_gpu_gui_profile(args,(unsigned)size,&nonce)) {
+        dprintf(2,"REDFIN EAGL LOADER: profile refused bytes=%zu current-profile-rates=10/30/60/90 full-panel=1\n",size);
+        return;
+    }
     io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("RedwoodGPU"));
     bool valid=service && property(service,"chip-id",0x06020001) &&
         property(service,"RedfinRuntimeABI",1);

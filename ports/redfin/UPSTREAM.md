@@ -1254,3 +1254,23 @@ retains the established votes and services GLINK/RMTFS and packet rings
 throughout the GUI run. Other CPUs submit queued station/frame requests.
 The existing ordinary GUI1 and diagnostic profiles keep their own gates.
 No GPU/Metal work is moved ahead of working GUI Wi-Fi.
+## Native90Hz bridge pairing and system-library API correction — 2026-10-25
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain pinned. Rebuild both
+Redfin loader/EAGL adapters with the current shared GUI-profile header;
+store its digest and adapter-source digests with the verified Mesa bundle.
+An old profile rejects90Hz before insertion even when the kernel/panel pass.
+
+Actual20H392 Photos initWithPhotoLibraryURL: and
+createOrUpgradeLibraryUsingOptions:error: supply the ordinary system Media
+library's native creation/upgrade path. Its native well-known identifier0
+is intentional and cannot be used in the named-library class methods.
+Retain the native URL/canonical path guards and propagate native failures.
+CoreServices8d42103dbd59308d9d2c2082b39738e7 supplies the async LS launch
+selector/configuration and BOOL/NSError completion ABI; FrontBoardServices
+exports the native foreground/unlock option keys. Unattended captures
+request the ordinary no-passcode transition and preserve authorization or
+lock failures in the result. No passcode bypass, schema synthesis or
+account operation is added. App/window-server survival still needs a real run.
+
