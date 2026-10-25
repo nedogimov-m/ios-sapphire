@@ -1,5 +1,52 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full-register half varying block built; fresh V35 prepared for V32 — 2026-10-25
+
+Source basee72b66a plus this complete block. Actual old fixed_vert_lph_spc
+compiles color to hr0.x/VARYING_SLOT_VAR4, but fd6's VS/VPC linkage copies only
+the full register number and has no half selector. Transport logical half
+values through float32 VS-output/FS-input variables, widening after the half
+computation and narrowing immediately after the interpolated/flat input load.
+Preserve names, slots, qualifiers and logical half arithmetic/storage. Half
+fragment colour export retains its real fd6 HALF_PRECISION support. No
+software renderer, resource substitute, page-check or kernel change.
+
+Add native half constant colour, packed half3/scalar/packed_half3 UBO layout,
+half MRT and attachment1 fetch, half vertex formats and smooth/flat/noperspective
+textured varying probes. Two rounds alter the original vertex input, and every
+output/guard plus every read-only input is checked. These native pixels are
+pending; successful instruction compilation alone does not establish them.
+34host cases PASS/no skips. Six authored half modules/seven actual installed
+QuartzCore modules/one AIR resource module validate and compile to A620
+(14total), plus all19real parameter variants PASS. All4actual vertex variants
+now export full registers (representative color r1.x); the authored half vertex
+does likewise, while true half fragment MRT still exports hr0.z/hr1.z.
+
+Fresh native Mesa/AIR/Metal/checker/shader and actual20H392 ABI/signatures PASS:
+research/redfin-metal-varyings-v2, final local20261025-221735/noCI,
+pairing4935a088d00890c92e54a945a3f07dec5618c99ec4cfd2ff76147047920170a6.
+The final driver-only asset-version rebuild reuses identical verified Mesa
+inputs; no fingerprint bypass. Earlier failed host/native work remains private.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V32 image9a154758c9ed139f949ed7dbdc56cc1a05b676f25a08fa5b822c8d1e8249bad6,
+noncef255a6948cbb09a7; complete loader/ADT/liveFDT/firmware/power/DVFS/source-
+window/return preflight PASS.
+
+Fresh V35 from clean consistent HFSX/write_count1101928:239ranges/23261184bytes/
+24new/zero freed; full staged files/signatures/seal/readback/native readonly
+fsck PASS. Its first private clone refused growing the old shader library past
+its eight inline extents; the host HFS overflow ABI is already known unsafe.
+No device writes occurred. Preserve that refused clone, retain the original
+read epoch and immutable old shader, and install the larger authored checks at
+the exact reviewed redfin-check-v2.metallib name with a complete free run.
+Checker path/inventory/allowlist agree; complete native fsck verifies the restage.
+V35 PREPARED, NOT APPLIED; every older applied stage remains stale. Automatic
+app launches stay disabled. Next apply once and collect one combined V32.
+V31's remaining wrong colours/checkerboard and sustained FPS are not yet fixed
+by observation; broader goal remains open.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xf255a6948cbb09a7 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V31 shader memory fix survives full run; system pixels remain wrong — 2026-10-25
 
 Source818a049; graphics local20261025-214502/noCI,

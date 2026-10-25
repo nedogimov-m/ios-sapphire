@@ -25,6 +25,7 @@
 
 #include "metal-raster-check.inc"
 #include "metal-vertex-check.inc"
+#include "metal-half-check.inc"
 #include "metal-blit-check.inc"
 #include "metal-buffer-check.inc"
 #include "metal-buffer-texture-check.inc"
@@ -299,7 +300,7 @@ int main(void)
                 printf("REDFIN METAL CHECK: native A620 device/bounds absent\n");return 1;
             }
             NSError *error=nil;
-            id<MTLLibrary> library=[device newLibraryWithFile:@"/redfin/lib/redfin-check.metallib" error:&error];
+            id<MTLLibrary> library=[device newLibraryWithFile:@"/redfin/lib/redfin-check-v2.metallib" error:&error];
             id<MTLFunction> function=[library newFunctionWithName:@"redfin_affine"];
             id<MTLComputePipelineState> pipeline=function ? [device newComputePipelineStateWithFunction:function error:&error] : nil;
             if (!library || !pipeline || error) {
@@ -324,6 +325,7 @@ int main(void)
                 after_short[0]==before_short[0]&&after_short[1]>before_short[1];
             BOOL raster=short_bounds&&render_raster_passes(device,library);
             BOOL vertices=short_bounds&&render_vertex_streams(device,library);
+            BOOL halfRaster=short_bounds&&half_raster_native(device,library,nonce);
             BOOL pitch480=short_bounds&&render_byte_pitch(device,library,(uint32_t)nonce,120,32,480,512,16384,32768);
             BOOL pitch4512=short_bounds&&render_byte_pitch(device,library,(uint32_t)(nonce>>32),1125,9,4512,4544,65536,65536);
             BOOL resolve480=short_bounds&&render_byte_pitch(device,library,(uint32_t)nonce^0xabcdecadu,120,32,480,480,16384,16384);
@@ -342,7 +344,7 @@ int main(void)
                 (unsigned long long)nonce,raster,vertices,pitch480,pitch4512,resolve480,resolve4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
             redfin_graphics_memory_report("checker-after",0);
-            return gmem&&short_bounds&&raster&&vertices&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&resourceReferences ? 0 : 1;
+            return gmem&&short_bounds&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&resourceReferences ? 0 : 1;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
             return 1;

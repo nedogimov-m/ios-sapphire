@@ -58,6 +58,45 @@ fragment float4 redfin_stream_fragment(RedfinStreamOutput input [[stage_in]],
     texture2d<float> source [[texture(0)]],sampler state [[sampler(0)]])
 { return source.sample(state,input.uv)*input.tint*input.mask; }
 
+// Real half arithmetic/storage with full-register transport between stages.
+// Separate MRT and constant-only paths distinguish varying transport from
+// native half colour export and packed UBO loads.
+fragment half4 redfin_half_constant()
+{ return half4(0.125h,0.375h,0.625h,0.875h); }
+
+struct RedfinHalfPacking {half3 vector;half scalar;packed_half3 packed;half tail;};
+fragment half4 redfin_half_uniform(constant RedfinHalfPacking &value [[buffer(1)]])
+{ return half4(value.vector.x,value.scalar,value.packed.z,value.tail); }
+
+struct RedfinHalfMRT {half4 first [[color(0)]];half4 second [[color(1)]];};
+fragment RedfinHalfMRT redfin_half_mrt(constant half4 &color [[buffer(1)]])
+{ RedfinHalfMRT out;out.first=color;out.second=color.zyxw;return out; }
+fragment half4 redfin_half_fetch(half4 other [[color(1)]],constant half4 &scale [[buffer(1)]])
+{ return other*scale; }
+
+struct RedfinHalfInput {
+    float2 position [[attribute(0)]];
+    half2 uv [[attribute(1)]];
+    half4 tint [[attribute(2)]];
+    half4 flatTint [[attribute(3)]];
+    half mask [[attribute(4)]];
+};
+struct RedfinHalfOutput {
+    float4 position [[position]];
+    half2 uv [[user(locn0)]];
+    half4 tint [[user(locn1)]];
+    half4 flatTint [[user(locn2),flat]];
+    half mask [[user(locn3),center_no_perspective]];
+};
+vertex RedfinHalfOutput redfin_half_vertex(RedfinHalfInput input [[stage_in]])
+{
+    RedfinHalfOutput out;out.position=float4(input.position,0,1);out.uv=input.uv;
+    out.tint=input.tint;out.flatTint=input.flatTint;out.mask=input.mask;return out;
+}
+fragment half4 redfin_half_stream_fragment(RedfinHalfOutput input [[stage_in]],
+    texture2d<half> source [[texture(0)]],sampler state [[sampler(0)]])
+{ return source.sample(state,float2(input.uv))*input.tint*input.flatTint*input.mask; }
+
 constant uint redfin_fc_seed [[function_constant(37)]];
 constant float4 redfin_fc_vector [[function_constant(41)]];
 constant uchar3 redfin_fc_opcodes [[function_constant(58)]];

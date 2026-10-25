@@ -1,0 +1,73 @@
+--- a/src/compiler/air/air_to_nir.c
++++ b/src/compiler/air/air_to_nir.c
+@@ -1001,6 +1001,18 @@
+    const struct glsl_type *gt;
+    unsigned comps = air_nir_components(t);
+    unsigned bits = air_nir_bit_size(c, t);
++   /* fd6's VS -> VPC linkage carries a full register number and no half
++    * selector (ir3_link_shaders/ir3_shader_linkage.var). Actual CA color
++    * outputs otherwise compile to hrN while linkage exports rN. Keep the
++    * logical AIR half value, but transport it through a full-width varying.
++    * Flat FS loads likewise need a full-width interface before narrowing.
++    * Fragment render-target outputs have a real HALF_PRECISION flag and
++    * retain their original width; storage loads/ALU are also unchanged.
++    */
++   bool varying = (mode == nir_var_shader_out && c->nir->info.stage == MESA_SHADER_VERTEX) ||
++                  (mode == nir_var_shader_in && c->nir->info.stage == MESA_SHADER_FRAGMENT);
++   if (varying && bits == 16 && air_type_is_float(air_type_scalar(t)))
++      bits = 32;
+    if (air_type_is_float(air_type_scalar(t)))
+       gt = bits == 16 ? glsl_f16vec_type(comps) : glsl_vec_type(comps);
+    else
+@@ -1994,7 +2006,12 @@
+       var->data.sample = md_key(node, "air.sample") >= 0;
+       if (c->nir->info.stage == MESA_SHADER_FRAGMENT)
+          add_varying(c, name, slot, air_nir_components(t), node);
+-      c->params[param] = air_val_ssa(c, nir_load_var(&c->b, var));
++      nir_def *value = nir_load_var(&c->b, var);
++      unsigned logical_bits = air_nir_bit_size(c, t);
++      if (value->bit_size != logical_bits)
++         value = air_type_is_float(air_type_scalar(t)) ?
++            nir_f2fN(&c->b, value, logical_bits) : nir_u2uN(&c->b, value, logical_bits);
++      c->params[param] = air_val_ssa(c, value);
+       return true;
+    }
+ 
+@@ -2839,6 +2856,18 @@
+    return n;
+ }
+ 
++static void
++store_raster_output(struct air_ctx *c, nir_variable *var, nir_def *value)
++{
++   unsigned transport_bits = glsl_get_bit_size(var->type);
++   if (value->bit_size != transport_bits) {
++      enum glsl_base_type base = glsl_get_base_type(var->type);
++      value = (base == GLSL_TYPE_FLOAT || base == GLSL_TYPE_FLOAT16) ?
++         nir_f2fN(&c->b, value, transport_bits) : nir_u2uN(&c->b, value, transport_bits);
++   }
++   nir_store_var(&c->b, var, value, BITFIELD_MASK(value->num_components));
++}
++
+ static bool
+ emit_return(struct air_ctx *c, const struct air_inst *in)
+ {
+@@ -2894,8 +2923,7 @@
+             return air_error(c, "interface: field %u of the result has no output", i);
+          if (!v->elems[i] || v->elems[i]->kind != AIR_VAL_SSA)
+             continue; /* a field left undef is a target nothing writes */
+-         nir_store_var(&c->b, c->outputs[i].var, v->elems[i]->def,
+-                       BITFIELD_MASK(v->elems[i]->def->num_components));
++         store_raster_output(c, c->outputs[i].var, v->elems[i]->def);
+       }
+       return true;
+    }
+@@ -2903,7 +2931,7 @@
+       return air_error(c, "instruction: a returned value that is not a number");
+    if (!c->num_outputs || !c->outputs[0].var)
+       return air_error(c, "interface: a returned value with no output");
+-   nir_store_var(&c->b, c->outputs[0].var, v->def, BITFIELD_MASK(v->def->num_components));
++   store_raster_output(c, c->outputs[0].var, v->def);
+    return true;
+ }
+ 

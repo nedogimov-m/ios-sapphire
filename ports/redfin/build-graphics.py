@@ -90,6 +90,7 @@ def main():
                 inputs += [ROOT/'ports/redfin/metal-active-resources.patch',ROOT/'ports/redfin/metal-active-resources.inc']
                 inputs += [ROOT/'ports/redfin/metal-defined-state.patch']
                 inputs += [ROOT/'ports/redfin/metal-memory-lifetime.patch']
+                inputs += [ROOT/'ports/redfin/metal-raster-io.patch']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -137,6 +138,7 @@ def main():
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-active-resources.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-defined-state.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-memory-lifetime.patch'],source)
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-raster-io.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -221,6 +223,7 @@ def main():
                 metal_sources += [ROOT/'ports/redfin'/name for name in ('metal_function_constants_userland.py','metal-function-constants-object.inc','metal-function-constants.h','metal-function-constants-check.inc')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in ('metal-resource-check.c','metal-resource-check.ll')]
                 metal_sources += [ROOT/'ports/redfin/graphics-memory-report.h']
+                metal_sources += [ROOT/'ports/redfin/metal-half-check.inc']
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)
@@ -281,7 +284,9 @@ def main():
                 run(['codesign','--force','--sign','-','--timestamp=none','--identifier','com.redfin.metal-check',
                     '--entitlements',checker_entitlements,checker])
                 run(['codesign','--verify','--strict',checker])
-                shader=bundle/'lib/redfin-check.metallib'
+                # Keep the old device allocation intact: its eight inline HFS
+                # extents cannot grow through this host library's overflow ABI.
+                shader=bundle/'lib/redfin-check-v2.metallib'
                 run(['xcrun','--sdk','iphoneos','metal','-target','air64-apple-ios16.0',
                     '-std=ios-metal2.4','-c',ROOT/'ports/redfin/metal-check.metal','-o',metal/'check.air'])
                 run(['xcrun','--sdk','iphoneos','metallib',metal/'check.air','-o',shader])

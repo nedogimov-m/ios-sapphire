@@ -1,5 +1,33 @@
 # HackiOS upstream review — 2026-10-22
 
+## Full-register raster varying transport for logical half values — 2026-10-25
+
+Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab. Review actual V31 CoreAnimation
+vertex output compiled by the paired Mesa25.0.7 ir3: fixed_vert_lph_spc exports
+its color at hr0.x/VARYING_SLOT_VAR4. ir3_link_shaders copies only
+vs->outputs[k].regid into ir3_shader_linkage.var; the latter has no half selector,
+and fd6 VPC programming consumes that full-register number. Fragment render-
+target export is different: fd6 explicitly programs HALF_PRECISION there.
+The native published tests used float32 stage interfaces and did not cover this.
+
+Transport logical half varyings through float32 VS-output/FS-input variables,
+widening only after the original half computation and narrowing immediately
+after the interpolated/flat load. Keep names, indices, interpolation/centroid/
+sample flags and logical AIR arithmetic. Preserve true half storage, texture
+sample results and fragment colour export. This addresses the actual missing
+register-bank selection rather than replacing rendering or changing colours.
+Add native half constant/MRT/fetch, packed half3/scalar/packed_half3 UBO,
+half vertex formats and smooth/flat/noperspective textured two-round probes,
+with read-only original inputs and complete output guards. All14authored/system
+modules compile and validate, plus all19actual parameter sets. All4actual vertex
+variants export full registers after the change; genuine half fragment colour
+exports remain half. Native actual-cache ABI/signatures and34host cases pass.
+The larger authored checker library is a versioned exact asset: preserve the
+old device file's eight inline extents and avoid the known host HFS overflow
+writer, with full new-file readback and native readonly fsck. A combined A620
+run is still pending; compilation does not prove correct GUI pixels/FPS.
+
 ## Native shader lifetime and memory accounting — 2026-10-25
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's
