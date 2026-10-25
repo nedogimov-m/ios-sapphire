@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V16 short-surface GPU probe PASS; later HFI lifetime cap found — 2026-10-25
+
+Source7550587; kernel local20261025-132529/noCI cd481eed...; image
+51146b6e60908851e4c0b18409e693fd580e85502ab0cbfc8efda1e0a39ec606,
+nonceac28cc9debc84626. V18 applied once:159ranges/25325568bytes/zero new/
+zero freed blocks; complete preimages, device readback and signed-file/native
+readonly fsck PASS. V18 is applied/stale; never reuse it. The authenticated
+capture leaves clean consistent HFSX/write_count906598 and verified Fastboot.
+
+Actual native Metal192compute, BGRA/RG8/blend/dependency/guards PASS. Exact
+1065x282/BPR4288/1212416 short IOSurface has correct pixels and tail guards,
+zero additional GMEM and positive sysmem route; total5GMEM/1sysmem. The old
+unmapped write does not recur. Both Phone249 and Photos250 survive5/17s with
+SpringBoard26 stable during those app checks. Later stability is NOT proven:
+backboardd crashes afterGPU fence2048 and SpringBoard restarts305.
+
+The later stop is a deterministic inherited software lifetime limit, not an
+observed missing firmware ACK:64actual HFI exchanges completed successfully,
+then gm_start_command refuses the65th before sending because of sent>=64.
+gm_start_receive has a second128-message lifetime cap. Replace startup-only
+lifetime caps with native12-bit sequence rollover and bounded per-exchange
+work, preserving actual ACK/fence/error handling. Warm native clip174completed
+GPU presents/10.001991s=17.397fps;601callbacks/60Hz. No60/90render FPS claim.
+Measured50draw command:84405us encoding,8625us final fence,5actual submits/
+30852us blocked submit I/O and7allocations/8162us allocation I/O. Later command
+queue waits reach2.7s; encoding includes I/O and other work, not pureCPU time.
+
+Explicit CPU0 WLAN handoff starts again, native interface/running are observed;
+actual saved credential/autojoin/internet remains unproved (online0). ADSP
+passes all native PAS/copy/ready phases in8033ms and advertises SSC400/v1.
+Actual readonly SMEM423 now yields a fresh reason:
+`err_qdi.c:1045:EF:sensor_process:0x1::0x102:sar.cc:27:chre_utils fatal`.
+Registry remains pending, no HID/CoreMotion sample published. This fatal reason
+alone does not prove the separate source-confirmed FastRPC/file dependency
+caused the crash. Native FastRPC/registry host services/directVD6281, stable
+GPU/FPS/latency, actual credentials/cable/motion and Apple authorization remain
+unfinished. Next complete block fixes native HFI lifetime, bounds render
+backlog and reduces repeated frontend attachment work before one combined test.
+Exact V16 observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xac28cc9debc84626 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN imported GMEM bounds/CPU0 WLAN/native I/O block built; fresh V18 staged — 2026-10-25
 
 Source base f01af55 plus this complete block. Mesa now checks the actual
