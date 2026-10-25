@@ -226,6 +226,19 @@ diff --git a/src/freedreno/drm/freedreno_pipe.c b/src/freedreno/drm/freedreno_pi
  }
  
  uint32_t
+@@ -276,6 +306,12 @@
+ void
+ fd_fence_flush(struct fd_fence *f)
+ {
++#ifdef __APPLE__
++   /* A published fence is immutable. Its completion thread must not read
++    * sp_flush's mutable last_submit/last_enqueue fields while the frontend
++    * encodes another command on this same pipe. */
++   if(util_queue_fence_is_signalled(&f->ready))return;
++#endif
+    MESA_TRACE_FUNC();
+    /*
+     * TODO we could simplify this to remove the flush_sync part of
 diff --git a/src/freedreno/drm/freedreno_bo.c b/src/freedreno/drm/freedreno_bo.c
 --- a/src/freedreno/drm/freedreno_bo.c
 +++ b/src/freedreno/drm/freedreno_bo.c

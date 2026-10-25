@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN queued CI kernel + paired V43 ready for one hardware cycle — 2026-10-26
+
+Kernel GitHub Actions40236406228/run1/source ddda9d2 native build PASS; artifact
+downloaded while post-build caches upload. Exact queued/runtime/lifecycle source
+hashes match, ccache enabled, kernel SHA256
+84fe1c5b05e3798f9f0cfe08172e77be641b1c0f6f105036e8f7396229634567.
+Final source also avoids sp_flush's mutable timeline on an already-published
+Darwin fence; off-thread waits now touch only immutable fence/native wait state.
+47host contracts PASS, including that actual published/unpublished helper path.
+
+Final native graphics local20261026-024432/noCI in research/redfin-metal-queued-v5:
+full paired build/actual20H392 ABI/signatures PASS, compiler input
+166c42ffbba2bca3ce8fa5f732008f8033530f42b1fb2c6728c547f3f9e7f166,
+pairing9f39511750f973acad3d69e85a1384feb9bb263cdd340fc3dee8de5472fcc101.
+V46 was NEVER applied and is explicitly superseded/apply-forbidden. V47 reuses
+its unchanged fresh read (zero iOS boots/zero userdata writes since1200036),
+restages25743360bytes/zero new/freed blocks, full file/signature audits/native
+readonly fsck PASS. Live preimages and CI-source pairing are still required at
+apply. Device remains in temporary Linux recovery; V47 apply and hardware
+results PENDING. Earlier V45 remains applied/stale and must never be reused.
+
+V43 imagef4b731061e8ecba660f63b73a6c2b26009739a719d9aacfcebaba2fb19ce25ad,
+nonce001188b905dbaff2,130589584decompressed bytes, complete actual payload/ADT/
+liveFDT/firmware/display/power/DVFS/source-window/return/CI queued ABI preflight
+PASS. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x001188b905dbaff2 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Correctness jobs on for this combined cycle; heavy captures/app opens off.
+Actual A620 correctness and ordinary system FPS remain unproved for this block.
+
 ## REDFIN queued native bundle and fresh V46 staged; CI kernel running — 2026-10-26
 
 Source9410426 plusddda9d2. Full paired native graphics build

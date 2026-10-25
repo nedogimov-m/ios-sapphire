@@ -1,6 +1,7 @@
 """Actual ticket/epoch code and native queue admission/retirement contracts."""
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 
@@ -60,6 +61,39 @@ int main(void) {
         for owned,native in [('include/redfin_gpu_queue.h','RedfinGPUQueue.h'),
                              ('gpu-queued-submission.inc','RedfinGPUQueue.inc')]:
             self.assertEqual((HERE/owned).read_text(),added_file(patch,'iokit/Kernel/arm/'+native))
+
+    def test_published_fence_wait_never_touches_the_mutable_encoder_flush_path(self):
+        name='src/freedreno/drm/freedreno_pipe.c'
+        baseline=HERE.parents[1]/'research/redfin-metal-bindings-v1/mesa-25.0.7'/name
+        if not baseline.is_file():self.skipTest('private reviewed Mesa baseline is absent')
+        with tempfile.TemporaryDirectory() as directory:
+            target=Path(directory)/name;target.parent.mkdir(parents=True);shutil.copy2(baseline,target)
+            applied=subprocess.run(['git','apply','--include='+name,str(HERE/'metal-queued-submission.patch')],
+                                   cwd=directory,capture_output=True)
+            self.assertEqual(applied.returncode,0,applied.stderr.decode(errors='replace'))
+            source=target.read_text();first=source.index('void\nfd_fence_flush(');last=source.index('\n}\n',first)+3
+            function=source[first:last]
+        self.run_c(r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+struct fd_pipe {unsigned mutable_encoder_state;};
+struct util_queue_fence {bool ready;};
+struct fd_fence {struct fd_pipe *pipe;uint32_t ufence;struct util_queue_fence ready;};
+static unsigned flushes,waits;static struct fd_fence *admitted;
+static bool util_queue_fence_is_signalled(struct util_queue_fence *f){return f->ready;}
+static void util_queue_fence_wait(struct util_queue_fence *f){++waits;assert(f->ready);}
+static void fd_pipe_flush(struct fd_pipe *p,uint32_t f){assert(p&&f);++p->mutable_encoder_state;++flushes;admitted->ready.ready=true;}
+#define MESA_TRACE_FUNC() ((void)0)
+'''+function+r'''
+int main(void) {
+ struct fd_pipe pipe={0};struct fd_fence f={&pipe,1,{true}};admitted=&f;
+ fd_fence_flush(&f);assert(!flushes&&!waits&&!pipe.mutable_encoder_state);
+ f.ready.ready=false;fd_fence_flush(&f);assert(flushes==1&&waits==1&&pipe.mutable_encoder_state==1);
+ fd_fence_flush(&f);assert(flushes==1&&waits==1&&pipe.mutable_encoder_state==1);
+ return 0;
+}
+''')
 
     def test_real_ticket_wait_once_epochs_cpu_visibility_error_and_close(self):
         self.run_c(r'''
