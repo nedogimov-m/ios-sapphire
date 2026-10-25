@@ -1,5 +1,56 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V6 preserved proof/native Wi-Fi reboot persistence; Metal jetsam/TCC cause — 2026-10-25
+
+Source2f54200; kernel local20261025-081227/noCI,
+2d00781838236f4182fa35ab99b71f021d5e0c299433b475debdc045f8ce055f.
+V11 applied once: all matched preimages saved, complete file/signed-bundle
+readback, native readonly fsckPASS,10919936bytes/2505new blocks/zero freed.
+Never reuse applied V11. Fresh gui-platform-v6 imagee99afc1f.../nonce
+3355dc3b077fe229 returns automatically. Authenticated preserved prefix now
+passes exact image/nonce/launchd proof; status userspace-alive/exit0. Full
+14file logs captured, clean HFSX/not inconsistent/write_count801955 and
+verified Fastboot. Native EAGL/shader/IOSurface/fencesPASS, no GPU retirement,
+Mesa submit failure, panic or SpringBoard restart. Idle frames are not a
+sustained rendering-rate measurement. Full panel/verified90Hz repeats.
+
+Native MobileWiFi existing1/write-accepted1/exact1 proves its synthetic
+unjoined credential through a real reboot; SecItem existing1 also repeats.
+Real password re-entry/autojoin still needs an actual saved user credential.
+En0 appears28.4s after checker start; no IPv4. Preserved trace gives native
+firmware copy12676ms/4478chunks, firmware source verification2180ms and
+5.7million cached DT guard hits. Do not remove ownership/fence guards on an
+assumed performance diagnosis. Phone245survives5/17s, SpringBoard26 stable.
+
+SMB5 raw1=45/raw2=2a/raw5=98/raw7=0, FV4450000uV/measured4441227uV:
+Google's measured40mV rule correctly reports no hard fault/full1/charging0.
+No repeated artificial pause. Through211samples there are zero read errors;
+real battery33.9..34.9C and hottest43.4..56.8C, calendar/thermal notify valid.
+Little OSM domain6cores reaches1804.8MHz. Gold/Prime tables are not selected:
+our assumption1 is wrong. Actual DT freq-domain second argument is2 for
+both; Google passes that max_cores to the LUT, separately from membership
+6/1/1. Bind/verify6/2/2 and retain ordinary row/foreign/thermal safeguards.
+
+Metal native UUID/selectors/ivar checksPASS and opens RedwoodGPU. It is then
+killed by JETSAM_REASON_MEMORY_PERPROCESSLIMIT before device_open completes;
+no Metal shader/result exists, so system discovery remains disabled. Its job
+JetsamProperties did not set the actual limit. Use the already-proved native
+own-PID512MiB memorystatus set/get with the signed dedicated entitlement,
+not a jetsam bypass. Photos still fails all six native XPC attempts; assetsd
+restarts/aborts. SecTask identity/entitlement read succeed but validated0.
+Exact20H392 SecTaskEntitlementsValidated code requires VALID|KILL|ENT_VALIDATED
+(4201), or DEBUGGED|ENT_VALIDATED; current flags26004001 lack KILL. Do not set
+DEBUGGED or replace TCC. Correct native invalid-page kill/enforcement policy
+for the existing hash-validated root entitlement condition and verify actual
+native Security/TCC answers. Root TCC DB remains unchanged.
+
+Next coherent fix block combines that native enforcement, Metal own-PID
+memory and actual OSM max_cores before one integrated check. Sensor inventory
+confirms ADSP sensor_pd/PAS1/remote2 and direct VD6281 I2C; its firmware/config
+are being inventoried, not implemented yet. Actual account authorization and
+human cable/motion/smoothness checks stay deferred.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3355dc3b077fe229 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete Metal/AIR and platform-readiness block built/staged — 2026-10-25
 
 Source base3b646c3; complete implementation precedes combined validation/new

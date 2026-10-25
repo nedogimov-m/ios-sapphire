@@ -138,3 +138,15 @@ not applied yet. Fresh gui-platform-v6/3355dc3b077fe229 preflightPASS. Next:
 apply V11 once, integrated hardware probe, then system Metal after actual
 compute/render success. Never infer full Metal feature support from its host
 build. Sensors and real account authorization remain required.
+
+V11 is now applied and stale; V6/3355dc3b077fe229 succeeds with preserved
+image/boot/launchd proof, GPU EAGL/shader/fences and clean root801955/Fastboot.
+Native MobileWiFi synthetic existing1/exact1 proves reboot persistence.
+SMB5 now correctly observes full1/no hard fault; actual charge/cable changes
+remain unverified while full. Metal ABI/port open passes, then native jetsam
+kills its helper before a result. Add actual native own-PID512MiB admission.
+Photos still fails: native Security validated0 because flags lack CS_KILL;
+correct native kill/enforcement, retaining TCC. Fix OSM max_cores6/2/2 from
+actual DT (domain CPU membership remains6/1/1). Implement this complete fix
+block before combined validation. Full Metal/UI, faster Wi-Fi, actual sensors
+and real Apple account authorization remain unfinished.
