@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native model and next userland ABI observations — 2026-10-25
+
+Verified offline recovery reports physical SKU G5NZ6/model Pixel5. Exact
+20H392 UIKitCore UUID1242978a2c2c37818d6c9777edce2804 contains native
+_UIStatusBar avoidance-frame/region/layout methods and _UIStatusBarTimeItem
+view/update methods. Their types/RVAs, plus current Photos/PathManager URL
+methods, are saved privately for the complete full-screen/cutout adaptation.
+No private UIKit hook or physical90Hz switch is implemented yet.
+
+The user authorized independent implementation/tests for every feature;
+human-only checks are deferred. Active goal and GOAL.md retain all requests.
+Next coherent block covers remaining GPU costs, Photos native path guard,
+native Keychain wrap/unwrap persistence, actual model publication, full-screen
+camera/status-bar layout and physical90Hz. Power, charging, thermals and all
+sensors remain required subsequent work. Device is still verified unmounted
+recovery; V8 is clean/write_count761257/empty journal, no stage/apply/new boot.
+Last actual build20261025-050146/noCI and exact boot026ce38e14155367 args/
+results remain recorded below; source checkpoint13e151f/results7938e0b.
+
 ## REDFIN independent implementation and testing explicitly authorized — 2026-10-25
 
 User: do and test everything possible independently; phone remains connected.

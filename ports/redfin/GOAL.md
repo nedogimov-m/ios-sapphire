@@ -61,6 +61,10 @@ thermal/sensor support and credential persistence remain unfinished.
   actual20H392 PHPhotoLibrary/PLPhotoLibraryPathManager URL semantics; do not
   invent a library ID/schema or bypass the Photos UI assertion. Fresh V8
   crash reports and directory metadata still need collecting read-only.
+- Actual recovery reports this unit's hardware SKU as G5NZ6 and model Pixel5,
+  saved privately in V8/physical-model-evidence.json. Use the actual model
+  number; retain the separate iPhone10,3 compatibility identity required by
+  the installed userland. A model number is not an Apple factory part number.
 - Actual securityd asks AppleKeyStore selector10 with2scalars/32input bytes,
   expecting1scalar/40output bytes, and receives Unsupported0xe00002c7.
   SweetKeyStore implements neither key wrapping nor unwrapping. Preferred
@@ -80,6 +84,12 @@ thermal/sensor support and credential persistence remain unfinished.
   override. Review current UIKit20H392 class/selector ABI before implementing
   the clock/status-bar adaptation. Keep the native logical1125x2436 canvas
   while using the full1080x2340panel and matching inverse touch geometry.
+  Actual UIKitCore1242978a2c2c37818d6c9777edce2804 has _UIStatusBar
+  setAvoidanceFrame:, setAvoidanceFrame:animationSettings:options:,
+  layoutSubviews and native region/layout APIs; _UIStatusBarTimeItem has
+  timeView/shortTimeView/pillTimeView/viewForIdentifier:/applyUpdate. Exact
+  types/RVAs are in research/redfin-photos/native-path-and-statusbar-methods.json.
+  Investigate the native avoidance/layout mechanism before moving leaf views.
 - Exact Google panel DTS is downloaded privately under
   `research/redfin-display/panel90-source/`, commit
   500b3a2059c1eec0fec08ec56add06320ea901a8, SHA256
