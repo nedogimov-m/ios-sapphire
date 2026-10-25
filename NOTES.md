@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full user objective registered and next clean snapshot captured — 2026-10-25
+
+The user explicitly requested `/goal`: the active objective now includes
+the whole graphics/Metal/Photos/Phone/Wi-Fi/identity list, persistent Wi-Fi
+credentials, a full physical screen with correct time/status-bar cutout
+placement, actual90Hz, power/battery/charging, thermald/thermalmonitord and
+all actual Redfin sensors. The user then went to sleep; no pause/stop was
+requested. Continue independent work and automated verification. Preserve
+the instruction to implement complete blocks before combined testing.
+The concrete scope/checkpoint/next actions are in ports/redfin/GOAL.md.
+
+Fresh V8 snapshot is read-only, clean/consistent/write_count761257, with an
+empty native journal. Device remains idle in verified unmounted recovery,
+return timer stopped. No V8 stage/apply and no new iOS boot. Actual securityd
+selector10 receives Unsupported0xe00002c7 for the native32->40byte wrapping
+request; existing SweetKeyStore lacks wrap/unwrap. Preferred upstream's
+matching ABI and portable AES adapter are reviewed for the complete fix.
+Known-network prefs, keychain DB/WAL/SHM and system bag are captured privately.
+
+Google's exact pinned Redfin panel DTS confirms60/90Hz modes at the same
+554MHz DSI clock, with separate timing-switch commands. This is source
+evidence, not a successful panel switch. Correct current DSI/SDE source
+paths and actual UIKit cutout ABI still need review. No additional hardware
+feature is claimed. Last actual kernel build20261025-050146/noCI, source
+13e151f/results7938e0b; exact observed args/nonce026ce38e14155367 and results
+remain in the following entry.
+
 ## REDFIN native GPU panel output proved; remaining cadence and userland work — 2026-10-25
 
 Source13e151f / local native build20261025-050146/noCI. Authenticated boot
