@@ -15,7 +15,8 @@ static struct {
     vm_offset_t base[RF_GB_UNITS], db, hfi, log;
     struct rf_gm_memory *hfi_memory, *log_memory;
     struct rf_cmddb_resource resources[4];
-    unsigned phase, audited, messages, sent, received;
+    unsigned phase, audited;
+    uint64_t messages, sent, received;
     bool bound, entered;
 } gm_start;
 
@@ -192,7 +193,8 @@ static int gm_start_receive(void *argument,unsigned q,uint32_t request,
     uint32_t at=0xe0+4096*q;
     uint32_t first=gm_start_hfi_word(at+4*read),count=(first>>8)&255u;
     uint32_t available=(write+1024-read)%1024,padded=(count+3u)&~3u;
-    if(!count || padded>available || padded>=1024 || gm_start.messages>=128)return EPROTO;
+    if(!count || padded>available || padded>=1024)return EPROTO;
+    if(gm_start.messages==UINT64_MAX)return EOVERFLOW;
     uint32_t words[255];
     for(unsigned i=0;i<count;++i)words[i]=gm_start_hfi_word(at+4*((read+i)%1024));
     ++gm_start.messages;
@@ -212,8 +214,8 @@ static int gm_start_receive(void *argument,unsigned q,uint32_t request,
 static int gm_start_command(void *argument,unsigned id,uint32_t *command,unsigned count,
     uint32_t reply[255],unsigned *reply_count)
 {
-    if(!command || !reply || !reply_count || !count || count>255 ||
-        gm_start.sent>=64 || id>255)return EINVAL;
+    if(!command || !reply || !reply_count || !count || count>255 || id>255)return EINVAL;
+    if(gm_start.sent==UINT64_MAX || gm_start.received==UINT64_MAX)return EOVERFLOW;
     int error=gm_start_hfi_shape(argument);if(error)return error;
     if(!gm_payloads_valid(argument))return EAGAIN;
     uint32_t read=gm_start_hfi_word(64),write=gm_start_hfi_word(68);
@@ -230,7 +232,12 @@ static int gm_start_command(void *argument,unsigned id,uint32_t *command,unsigne
         if(i==15)return EPROTO;
     }
     uint32_t request;
-    error=redfin_gmu_hfi_command_header(id,count,gm_start.sent+1,&request);if(error)return error;
+    /* Native HFI has a 12-bit wire sequence, not a 64-message boot lifetime.
+     * Only one request is outstanding; both response queues were drained
+     * above and its exact echoed header must complete before another send.
+     * Keep zero reserved locally and wrap 4095 -> 1 without reusing a fence. */
+    uint32_t sequence=(uint32_t)(gm_start.sent%4095u)+1;
+    error=redfin_gmu_hfi_command_header(id,count,sequence,&request);if(error)return error;
     command[0]=request;
     uint32_t padded=(count+3u)&~3u,end=(write+padded)%1024;
     if(padded>=1024)return EINVAL;
@@ -244,8 +251,9 @@ static int gm_start_command(void *argument,unsigned id,uint32_t *command,unsigne
     ++gm_start.sent;
     error=gm_start_guard(argument,RF_GB_HFI_LIVE);if(error)return error;
     gm_memory_store(gm_start.base[RF_GB_GMU]+0x14650,1);
-    printf("REDFIN GMU HFI SENT: request=%#x id=%u count=%u sequence=%u end=%u\n",
-        request,id,count,gm_start.sent,end);
+    if(gm_start.sent<=8 || !(gm_start.sent%64) || sequence==1)
+        printf("REDFIN GMU HFI SENT: request=%#x id=%u count=%u sequence=%u sent=%llu end=%u\n",
+            request,id,count,sequence,gm_start.sent,end);
     uint64_t first=gm_time_ns(argument);
     for(unsigned i=0;i<5000 && gm_time_ns(argument)-first<RF_GB_WAIT_NS;++i) {
         error=gm_start_receive(argument,1,request,reply,reply_count);

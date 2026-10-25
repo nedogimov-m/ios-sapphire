@@ -16,7 +16,7 @@ PREFIX = r'''
 typedef uintptr_t vm_offset_t;
 static uint32_t memory[0x5000/4],registers[0x30000/4];
 static struct {struct rf_gb_config config;vm_offset_t hfi,base[RF_GB_UNITS];
- unsigned messages,sent,received;} gm_start;
+ uint64_t messages,sent,received;} gm_start;
 static unsigned bad,problem,commands,padding_checks,payload_checks;
 static uint64_t now;
 static int gm_start_guard(void *p,unsigned phase){
@@ -29,7 +29,7 @@ static uint32_t gm_scalar_read(vm_offset_t at){return *(uint32_t *)at;}
 static void respond(void){
  uint32_t read=memory[64/4],write=memory[68/4];
  uint32_t request=memory[0xe0/4+read],count=(request>>8)&255u,padded=(count+3u)&~3u;
- if(write!=(read+padded)%1024 || (request>>20)!=gm_start.sent)bad++;
+ if(write!=(read+padded)%1024 || (request>>20)!=(gm_start.sent-1)%4095u+1)bad++;
  for(unsigned i=count;i<padded;i++){
   padding_checks++;if(memory[0xe0/4+(read+i)%1024]!=0xfafafafa)bad++;
  }
@@ -39,6 +39,7 @@ static void respond(void){
  uint32_t q=24+48,start=memory[(q+44)/4];unsigned words=(request&255u)==1?4:3;
  uint32_t reply[4]={126u|(words<<8)|(1u<<16),request,problem==3?UINT32_MAX:0,0x20010008};
  if(problem==2)reply[1]^=1u<<20;
+ if(problem==11 && gm_start.sent==4096)reply[1]^=1u<<20;
  if(problem==4)reply[0]^=1u<<8;
  if(problem==5)memory[64/4]=(write+4)%1024;
  if(problem==6)reply[0]=100u|(4u<<8);
@@ -98,6 +99,17 @@ class GMUHFIQueueTests(unittest.TestCase):
     def test_full_native_gpu_tables_repeated_messages_wrap_without_losing_binding(self):
         self.assertEqual(self.lib.run(0, 24), 0)
         self.assertEqual([self.lib.stat(i) for i in range(7)], [0, 25, 2, 25, 25, 772, 772])
+
+    def test_runtime_exceeds_both_old_lifetime_caps_and_wraps_native_sequences_twice(self):
+        repeat=9000
+        self.assertEqual(self.lib.run(0, repeat), 0)
+        self.assertEqual(self.lib.stat(0), 0)
+        self.assertEqual([self.lib.stat(i) for i in (1,3,4)], [repeat+1]*3)
+        self.assertEqual([self.lib.stat(i) for i in (5,6)], [(4+repeat*160)%1024]*2)
+
+    def test_wrong_echo_is_still_refused_after_native_sequence_rollover(self):
+        self.assertEqual(self.lib.run(11, 9000), errno.EPROTO)
+        self.assertEqual([self.lib.stat(i) for i in (0,1,3,4)], [0,4096,4096,4095])
 
     def test_timeout_wrong_echo_firmware_error_malformed_ack_and_wrong_consumer_stop(self):
         for problem, error in ((1, errno.ETIMEDOUT), (2, errno.EPROTO), (3, errno.EIO),

@@ -182,17 +182,31 @@ EXECUTION = r'''
 #include <dispatch/dispatch.h>
 static pthread_once_t redfin_execution_once=PTHREAD_ONCE_INIT;
 static dispatch_queue_t redfin_execution_queue;
+static dispatch_semaphore_t redfin_execution_slots;
 static void redfin_execution_init(void)
 {
     dispatch_queue_attr_t attr=dispatch_queue_attr_make_with_qos_class(
         DISPATCH_QUEUE_SERIAL,QOS_CLASS_USER_INTERACTIVE,0);
     redfin_execution_queue=dispatch_queue_create("com.redfin.metal.commands",attr);
-    if (!redfin_execution_queue) abort();
+    /* One executing and one queued command. Apply backpressure at commit,
+     * while preserving the native queue's requested allocation capacity.
+     * Never discard a command or signal a completion before its real fence. */
+    redfin_execution_slots=dispatch_semaphore_create(2);
+    if (!redfin_execution_queue || !redfin_execution_slots) abort();
 }
 static void redfin_metal_schedule(dispatch_group_t group,dispatch_block_t work)
 {
+    /* The caller entered the completion group before publishing Committed.
+     * A concurrent waiter must also cover time spent awaiting admission. */
     if (!group || !work || pthread_once(&redfin_execution_once,redfin_execution_init)) abort();
-    dispatch_group_async(group,redfin_execution_queue,work);
+    dispatch_semaphore_wait(redfin_execution_slots,DISPATCH_TIME_FOREVER);
+    dispatch_async(redfin_execution_queue,^{
+        @try {work();}
+        @finally {
+            dispatch_semaphore_signal(redfin_execution_slots);
+            dispatch_group_leave(group);
+        }
+    });
 }
 '''
 
@@ -430,7 +444,8 @@ def adapt_execution(text):
     text=replace_once(text,'\tif (_status>=RW_CB_COMMITTED) return;\n','')
     text=replace_once(text,'- (void)commit\n{\n\tREDFIN_MESA_SCOPE;',
         '- (void)commit\n{\n\t@synchronized(self) {\n'
-        '\t\tif (_status>=RW_CB_COMMITTED) return;\n\t\t_status=RW_CB_COMMITTED;\n'
+        '\t\tif (_status>=RW_CB_COMMITTED) return;\n'
+        '\t\tdispatch_group_enter(_redfinExecution);\n\t\t_status=RW_CB_COMMITTED;\n'
         '\t\t_redfinQueuedTicks=mach_absolute_time();\n'
         '\t\tredfin_metal_schedule(_redfinExecution,^{\n'
         '\t\t\t@autoreleasepool {[self redfinExecute];}\n\t\t});\n\t}\n}\n\n'

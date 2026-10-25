@@ -1596,3 +1596,30 @@ native Metal checker exercises the observed 1065x282/BPR4288/1212416-byte
 shape and requires actual pixels, retained tail guards and counter-proven
 sysmem routing. Matching the previous fault to this old surface's BO remains
 a hypothesis until actual runtime evidence establishes it.
+
+
+## Native HFI lifetime and Metal backlog/attachment state — 2026-10-25
+
+Re-reviewed preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab`
+and userland `906425b75e02b4f99eb5d7bb1ef7c9583472d772` against the
+observed V16 failure. Native HFI carries a 12-bit request sequence; its ring
+indices and every exchange remain bounded. Redfin's diagnostic sent>=64 and
+messages>=128 guards incorrectly imposed a boot lifetime on runtime DVFS.
+Use independent64-bit observation totals and a 1..4095 sequence cycle with
+one outstanding request, bounded stale-queue drain and exact native echoed
+header/consumer checks. An actual refusal is logged as such rather than
+reported as an absent ACK. No failed request is retried or falsely completed.
+
+The paired AIR base-level attachment contract is unchanged. Cache its native
+pipe_surface with the texture, preserving actual resource/reference lifetime
+through command completion and dropping local references on partial creation
+failure. Mesa25.0.7 freedreno_state.c:fd_set_framebuffer_state dirties all
+framebuffer/draw state when those surface identities change; an identical
+render target need not recreate that state at every draw.
+
+Keep the real Metal superclass's requested command-buffer allocation capacity.
+Bound only the executor's admitted work to one running plus one queued
+command, applying backpressure at commit. Enter its completion group before
+publishing Committed, covering admission waits as well as the real GPU fence;
+return admission only after execution exits. Preserve native queue ordering,
+work/resources and completion callbacks; never drop an old queued frame.

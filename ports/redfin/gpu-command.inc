@@ -322,8 +322,11 @@ static int gx_hfi(struct gm_context *c,unsigned id,uint32_t *words,unsigned coun
     int error=gx_check(c);if(error)return error;
     uint32_t reply[255];unsigned received=0;
     error=gm_start_command(c,id,words,count,reply,&received);
-    if(!error)printf("REDFIN GPU HFI ACK: id=%u sequence=%u count=%u result=%#x\n",
-        id,gm_start.sent,received,reply[2]);
+    if(!error && (gm_start.sent<=8 || !(gm_start.sent%64) || !((gm_start.sent-1)%4095u)))
+        printf("REDFIN GPU HFI ACK: id=%u sequence=%u sent=%llu count=%u result=%#x\n",
+            id,words[0]>>20,gm_start.sent,received,reply[2]);
+    if(error)printf("REDFIN GPU HFI REFUSED: id=%u error=%d sent=%llu received=%llu messages=%llu no-retry=1\n",
+        id,error,gm_start.sent,gm_start.received,gm_start.messages);
     return error;
 }
 static int gx_power(struct gm_context *c)

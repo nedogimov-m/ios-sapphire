@@ -54,9 +54,9 @@ int main(void){
             subprocess.run([str(p/'profile')],check=True,timeout=10,capture_output=True)
 
     def test_real_dispatch_worker_returns_before_gpu_wait_and_preserves_queue_order(self):
-        # Use the same GCD executor compiled into the driver. A stalled first
-        # fence must not stall submission, and another queue must not overtake
-        # the first command or expose its output before actual completion.
+        # Use the actual native GCD executor. Two admitted commands retain
+        # order, a third applies backpressure, and concurrent waiters cover
+        # admission as well as execution. No fake fence can free a slot.
         source=r'''
 #include <assert.h>
 #include <pthread.h>
@@ -64,9 +64,11 @@ int main(void){
 #include <dispatch/dispatch.h>
 '''+metal_userland.EXECUTION+r'''
 int main(void) {
- dispatch_group_t first=dispatch_group_create(),second=dispatch_group_create();
+ dispatch_group_t first=dispatch_group_create(),second=dispatch_group_create(),third=dispatch_group_create();
  dispatch_semaphore_t started=dispatch_semaphore_create(0),release=dispatch_semaphore_create(0);
+ dispatch_semaphore_t submitted=dispatch_semaphore_create(0);
  __block unsigned output=0;
+ dispatch_group_enter(first);
  redfin_metal_schedule(first,^{
   dispatch_semaphore_signal(started);
   assert(!dispatch_semaphore_wait(release,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
@@ -74,19 +76,34 @@ int main(void) {
  });
  assert(!dispatch_semaphore_wait(started,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
  assert(dispatch_group_wait(first,DISPATCH_TIME_NOW)!=0 && !output);
+ dispatch_group_enter(second);
  redfin_metal_schedule(second,^{assert(output==41);++output;});
  assert(dispatch_group_wait(second,DISPATCH_TIME_NOW)!=0);
+ dispatch_group_enter(third);
+ dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE,0),^{
+  redfin_metal_schedule(third,^{assert(output==42);++output;});
+  dispatch_semaphore_signal(submitted);
+ });
+ assert(dispatch_semaphore_wait(submitted,dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC))!=0);
+ assert(dispatch_group_wait(third,DISPATCH_TIME_NOW)!=0 && !output);
  dispatch_semaphore_signal(release);
+ assert(!dispatch_semaphore_wait(submitted,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
+ assert(!dispatch_group_wait(third,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
  assert(!dispatch_group_wait(second,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
- assert(!dispatch_group_wait(first,DISPATCH_TIME_NOW) && output==42);
- dispatch_release(first);dispatch_release(second);dispatch_release(started);dispatch_release(release);
+ assert(!dispatch_group_wait(first,DISPATCH_TIME_NOW) && output==43);
+ for(unsigned i=0;i<200;++i) {
+  dispatch_group_enter(first);redfin_metal_schedule(first,^{});
+  assert(!dispatch_group_wait(first,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
+ }
+ dispatch_release(first);dispatch_release(second);dispatch_release(third);
+ dispatch_release(started);dispatch_release(release);dispatch_release(submitted);
  return 0;
 }
 '''
         with tempfile.TemporaryDirectory() as d:
-            p=Path(d);(p/'execution.c').write_text(source)
+            p=Path(d);(p/'execution.m').write_text(source)
             compiled=subprocess.run(['cc','-std=gnu11','-fblocks','-O2','-pthread','-Wall','-Wextra','-Werror',
-                str(p/'execution.c'),'-o',str(p/'execution')],capture_output=True)
+                str(p/'execution.m'),'-framework','Foundation','-o',str(p/'execution')],capture_output=True)
             self.assertEqual(compiled.returncode,0,compiled.stderr.decode(errors='replace'))
             subprocess.run([str(p/'execution')],timeout=15,check=True,capture_output=True)
 

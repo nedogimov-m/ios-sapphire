@@ -1,0 +1,83 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -191,6 +191,7 @@
+ struct rwa_texture {
+    struct rwa_device *device;
+    struct pipe_resource *res;
++   struct pipe_surface *render_surface; /* stable base-level attachment, owned reference */
+    struct pipe_sampler_view *view;  /* made when a dispatch first samples it, then kept */
+    struct rwa_texture_shape shape;
+    const char *format_name;         /* the MTLPixelFormat, spelled out */
+@@ -1522,6 +1523,7 @@
+    if (!texture)
+       return;
+    argbuf_scrub(texture->device, NULL, texture, NULL);
++   pipe_surface_reference(&texture->render_surface,NULL);
+    /* The view first: it holds a reference of its own on the resource. Nothing has to
+     * be unbound here, because rwa_dispatch unbinds every texture it bound once its
+     * fence has come back -- a context left holding this would be holding freed memory
+@@ -6499,6 +6501,20 @@
+    return true;
+ }
+ 
++/* This API renders the base level/layer only, as before. Keep its surface
++ * identity with the texture, just as the sampler view is already cached.
++ * Recreating it at every draw makes Gallium dirty the entire framebuffer and
++ * all FD6 draw state even when the actual render target did not change.
++ * Commands and the framebuffer retain their own references through the fence. */
++static struct pipe_surface *
++rwa_render_surface(struct rwa_texture *texture)
++{
++   if (!texture->render_surface)
++      texture->render_surface=texture->device->pipe->create_surface(texture->device->pipe,
++         texture->res,&(struct pipe_surface){.format=texture->res->format});
++   return texture->render_surface;
++}
++
+ int
+ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
+                 char *why, size_t why_size)
+@@ -6798,10 +6814,8 @@
+          return -1;
+    }
+ 
+-   /* The framebuffer, from the caller's own textures. create_surface wants a context,
+-    * so it is a draw-time cost and not a pipeline one, and it is released again below
+-    * before the caller may destroy the textures under it.
+-    */
++   /* Borrow the textures' stable base-level surfaces, retaining one reference
++    * for this draw and one for Gallium's framebuffer/dependency lifetime. */
+    struct pipe_surface *surf[PIPE_MAX_COLOR_BUFS] = { 0 };
+    struct pipe_surface *zsurf = NULL;
+    /* pipe_framebuffer_state.samples is filled in although nothing here reads it: both
+@@ -6814,25 +6828,23 @@
+                                         .nr_cbufs = draw->color_count,
+                                         .samples = samples };
+    for (unsigned i = 0; i < draw->color_count; i++) {
+-      surf[i] = pipe->create_surface(pipe, draw->color[i]->res,
+-         &(struct pipe_surface){ .format = draw->color[i]->res->format });
++      pipe_surface_reference(&surf[i],rwa_render_surface(draw->color[i]));
+       if (!surf[i]) {
+          say(why, why_size, "%s would not make a render surface of colour attachment %u",
+              rwa_device_name(device), i);
+          for (unsigned j = 0; j < i; j++)
+-            pipe->surface_destroy(pipe, surf[j]);
++            pipe_surface_reference(&surf[j],NULL);
+          return -1;
+       }
+       fb.cbufs[i] = surf[i];
+    }
+    if (draw->depth) {
+-      zsurf = pipe->create_surface(pipe, draw->depth->res,
+-         &(struct pipe_surface){ .format = draw->depth->res->format });
++      pipe_surface_reference(&zsurf,rwa_render_surface(draw->depth));
+       if (!zsurf) {
+          say(why, why_size, "%s would not make a render surface of the depth attachment",
+              rwa_device_name(device));
+          for (unsigned j = 0; j < draw->color_count; j++)
+-            pipe->surface_destroy(pipe, surf[j]);
++            pipe_surface_reference(&surf[j],NULL);
+          return -1;
+       }
+       fb.zsbuf = zsurf;

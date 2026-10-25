@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native HFI lifetime/Metal queue/attachment block built; fresh V19 staged — 2026-10-25
+
+Source base63b4fe4 plus this complete block. Remove inherited64sent/128received
+boot-lifetime limits from native HFI, retaining bounded per-exchange work and
+exact ACK/consumer verification. Independent64-bit totals pair with12-bit
+wire rollover1..4095; no retries or manufactured completion. Actual refusal
+now records its error before retiring. Metal executor admits one running and
+one queued command; native buffer-allocation capacity remains unchanged.
+Completion groups cover admission before status publication. AIR reuses its
+native base-level pipe_surface with the texture, retaining/dropping genuine
+references so unchanged attachments do not dirty all FD6 state on every draw.
+
+128 combined host cases PASS/no skips, including9000real-adapter exchanges,
+two sequence rollovers, wrong echo at rollover and actual GCD backpressure/
+concurrent wait/order/repeated reuse. Complete ordered-overlay kernel and
+fresh Mesa/AIR/native Metal/signature/actual20H392 API builds PASS. Kernel
+local20261025-134128/noCI,
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+Graphics research/redfin-metal-queues-v1/local20261025-134128/noCI.
+V17 image 21dc02563ca8ee897d20a14820fba4995765b1fd77b34bf9909b5bb738bba791; real loader/ADT/liveFDT/
+firmware/power/DVFS/source-window/return preflight PASS. No new FPS/stability
+observation is claimed before the device run. FastRPC/file service remains
+unimplemented/in source review; the new wire-codec work is not in this kernel.
+
+Fresh V19 snapshot from clean HFSX/not inconsistent/write_count906598;
+178ranges/23650304bytes/zero new/zero freed blocks staged. All
+signed-file/seal/readback/native readonly fsck checks PASS. V19 is PREPARED,
+NOT APPLIED at this checkpoint; V18 and older are applied/stale and must never
+be reused. Next apply V19 once and collect one combined autonomous V17 run.
+Native SSC/HID/CoreMotion/directVD6281, actual Wi-Fi credential/autojoin,
+physical cable/motion, sustained60/90render FPS and Apple authorization remain
+unfinished. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x580355475702a8ce redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V16 short-surface GPU probe PASS; later HFI lifetime cap found — 2026-10-25
 
 Source7550587; kernel local20261025-132529/noCI cd481eed...; image
