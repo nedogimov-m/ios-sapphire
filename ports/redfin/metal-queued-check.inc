@@ -62,8 +62,9 @@ static BOOL queued_native(id<MTLDevice> device,id<MTLLibrary> library,uint64_t n
         id<MTLRenderCommandEncoder> bad=[partial renderCommandEncoderWithDescriptor:ordering_pass(target)];
         [bad setRenderPipelineState:pipeline];[bad drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[bad endEncoding];
         id<MTLCommandBuffer> empty=[queues[1] commandBuffer];
-        [partial commit];[empty commit];[empty waitUntilCompleted];[partial waitUntilCompleted];
+        [partial commit];[empty commit];[partial waitUntilScheduled];
         errorDrain=partial&&fill&&bad&&partial.status==MTLCommandBufferStatusError&&partial.error!=nil;
+        [empty waitUntilCompleted];[partial waitUntilCompleted];
         emptyOrdering=empty&&empty.status==MTLCommandBufferStatusCompleted;
         for(unsigned i=0;errorDrain&&i<page;++i)errorDrain=original[i]==(i>=offset&&i<offset+length?0x27:0xa5);
     }

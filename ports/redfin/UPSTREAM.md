@@ -29,6 +29,20 @@ full file audits without filesystem writes. Exact source ddda9d2 is building in
 GitHub Actions run40236406228 on the owned CI fork after origin denied push.
 Kernel delivery and actual A620/system performance evidence remain pending.
 
+V43 fails its first native compute fence, gpu-render and backboardd despite
+real queued render/present successes. Review the preferred Mesa25.0.7 actual
+constructor/suballocator contracts: util_queue ready starts signalled before
+deferred private-BO admission, and sa_funcs intentionally has no cpu_prep hook.
+Require a materialized nonzero kfence before skipping mutable submit state;
+freeze/reject the native fence accordingly. CPU preparation first submits the
+view's dependencies, then uses its retained actual fd_bo_heap_block rather than
+calling the suballocation's NULL callback. Actual crash reports show NULL PCs
+through u_default_texture_subdata/st_ReadPixels, matching this path. Use Redfin
+mach uptime for deadlines rather than the preferred different kernel's raw/
+continuous clock. Test public Error/Scheduled wait semantics through partial
+encoding refusal as well.49host contracts and full native/ABI/signatures pass;
+V44 hardware retry remains pending. CI kernel itself is reused unchanged.
+
 ## Command-local descriptor and graphics state reuse — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR stage

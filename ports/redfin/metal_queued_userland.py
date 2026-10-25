@@ -175,6 +175,14 @@ def adapt(text):
 }
 '''
     text=text[:first]+execute+text[last:]
+    # An encoding refusal can be recorded before previously emitted GPU work
+    # retires. Public Error/Completed status and scheduled waiters must cover
+    # that real fence and resource cleanup too.
+    text=replace_once(text,'- (NSUInteger)status { return _status; }',
+        '- (NSUInteger)status {NSUInteger status=_status;return !_redfinFinalized&&status>=RW_CB_SCHEDULED?RW_CB_COMMITTED:status;}')
+    text=replace_once(text,
+        '- (void)waitUntilScheduled {if (_status<RW_CB_SCHEDULED && _status>=RW_CB_COMMITTED) [self waitUntilCompleted];}',
+        '- (void)waitUntilScheduled {[self waitUntilCompleted];}')
     # Failed encoding can set Error before its emitted work has retired.
     first=text.index('- (void)addScheduledHandler:');last=text.index('\n}\n',first)+3
     part=text[first:last]

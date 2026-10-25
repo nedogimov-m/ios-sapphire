@@ -79,18 +79,21 @@ int main(void) {
 #include <stdint.h>
 struct fd_pipe {unsigned mutable_encoder_state;};
 struct util_queue_fence {bool ready;};
-struct fd_fence {struct fd_pipe *pipe;uint32_t ufence;struct util_queue_fence ready;};
+struct fd_fence {struct fd_pipe *pipe;uint32_t ufence;struct util_queue_fence ready;uint32_t kfence;};
 static unsigned flushes,waits;static struct fd_fence *admitted;
 static bool util_queue_fence_is_signalled(struct util_queue_fence *f){return f->ready;}
 static void util_queue_fence_wait(struct util_queue_fence *f){++waits;assert(f->ready);}
-static void fd_pipe_flush(struct fd_pipe *p,uint32_t f){assert(p&&f);++p->mutable_encoder_state;++flushes;admitted->ready.ready=true;}
+static void fd_pipe_flush(struct fd_pipe *p,uint32_t f){assert(p&&f);++p->mutable_encoder_state;++flushes;admitted->ready.ready=true;admitted->kfence=8;}
 #define MESA_TRACE_FUNC() ((void)0)
 '''+function+r'''
 int main(void) {
- struct fd_pipe pipe={0};struct fd_fence f={&pipe,1,{true}};admitted=&f;
+ struct fd_pipe pipe={0};struct fd_fence f={&pipe,1,{true},7};admitted=&f;
  fd_fence_flush(&f);assert(!flushes&&!waits&&!pipe.mutable_encoder_state);
- f.ready.ready=false;fd_fence_flush(&f);assert(flushes==1&&waits==1&&pipe.mutable_encoder_state==1);
+ /* Actual Mesa constructor: ready starts signalled, kfence is still zero.
+  * Private BO submits may remain deferred until this explicit publication. */
+ f.kfence=0;fd_fence_flush(&f);assert(flushes==1&&waits==1&&pipe.mutable_encoder_state==1&&f.kfence==8);
  fd_fence_flush(&f);assert(flushes==1&&waits==1&&pipe.mutable_encoder_state==1);
+ f.ready.ready=false;fd_fence_flush(&f);assert(flushes==2&&waits==2&&pipe.mutable_encoder_state==2);
  return 0;
 }
 ''')
@@ -225,6 +228,81 @@ int main(void) {
  return 0;
 }
 ''',{'util/u_upload_mgr.h':''})
+
+    def test_native_deadline_uses_the_same_mach_uptime_domain_as_kernel(self):
+        name='src/freedreno/drm/msm/msm_priv.h'
+        baseline=HERE.parents[1]/'research/redfin-metal-bindings-v1/mesa-25.0.7'/name
+        if not baseline.is_file():self.skipTest('private reviewed Mesa baseline is absent')
+        with tempfile.TemporaryDirectory() as directory:
+            target=Path(directory)/name;target.parent.mkdir(parents=True);shutil.copy2(baseline,target)
+            applied=subprocess.run(['git','apply','--include='+name,str(HERE/'metal-queued-submission.patch')],
+                                   cwd=directory,capture_output=True)
+            self.assertEqual(applied.returncode,0,applied.stderr.decode(errors='replace'))
+            source=target.read_text();first=source.index('static inline void\nget_abs_timeout(');last=source.index('\n}',first)+2
+            function=source[first:last]
+        self.run_c(r'''
+#include <assert.h>
+#include <stdint.h>
+#include <time.h>
+#include <mach/mach_time.h>
+#undef NSEC_PER_SEC
+#define NSEC_PER_SEC 1000000000l
+#define OS_TIMEOUT_INFINITE UINT64_MAX
+struct drm_msm_timespec {int64_t tv_sec,tv_nsec;};
+static int bad_scale;
+static int clock_scale_fixture(mach_timebase_info_t s){s->numer=125;s->denom=6;return bad_scale;}
+static uint64_t clock_ticks_fixture(void){return 60000123;}
+#define mach_timebase_info clock_scale_fixture
+#define mach_absolute_time clock_ticks_fixture
+'''+function+r'''
+int main(void) {
+ struct drm_msm_timespec tv={0};const uint64_t uptime=(60000123ull*125)/6;
+ get_abs_timeout(&tv,0);assert((uint64_t)tv.tv_sec*NSEC_PER_SEC+tv.tv_nsec==uptime);
+ get_abs_timeout(&tv,2000000000ull);assert((uint64_t)tv.tv_sec*NSEC_PER_SEC+tv.tv_nsec==uptime+2000000000ull);
+ get_abs_timeout(&tv,987654321);assert((uint64_t)tv.tv_sec*NSEC_PER_SEC+tv.tv_nsec==uptime+987654321&&tv.tv_nsec<1000000000);
+ get_abs_timeout(&tv,OS_TIMEOUT_INFINITE);assert((uint64_t)tv.tv_sec*NSEC_PER_SEC+tv.tv_nsec==uptime+3600ull*NSEC_PER_SEC);
+ bad_scale=1;get_abs_timeout(&tv,1);assert(tv.tv_sec<0&&tv.tv_nsec<0);
+ return 0;
+}
+''')
+
+    def test_cpu_prepare_uses_the_real_heap_block_for_suballocated_textures(self):
+        name='src/freedreno/drm/freedreno_bo.c'
+        baseline=HERE.parents[1]/'research/redfin-metal-bindings-v1/mesa-25.0.7'/name
+        if not baseline.is_file():self.skipTest('private reviewed Mesa baseline is absent')
+        with tempfile.TemporaryDirectory() as directory:
+            target=Path(directory)/name;target.parent.mkdir(parents=True);shutil.copy2(baseline,target)
+            applied=subprocess.run(['git','apply','--include='+name,str(HERE/'metal-queued-submission.patch')],
+                                   cwd=directory,capture_output=True)
+            self.assertEqual(applied.returncode,0,applied.stderr.decode(errors='replace'))
+            source=target.read_text();first=source.index('int\nfd_bo_cpu_prep(');last=source.index('\n}',first)+2
+            function=source[first:last]
+        self.run_c(r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <errno.h>
+#define FD_BO_PREP_FLUSH 8u
+struct fd_pipe {unsigned unused;};struct fd_bo;
+struct fd_bo_funcs {int (*cpu_prep)(struct fd_bo *,struct fd_pipe *,uint32_t);};
+struct fd_bo {const struct fd_bo_funcs *funcs;struct fd_bo *parent;unsigned handle,flushes;};
+static unsigned calls;static int refused;static struct fd_bo *wanted;static struct fd_pipe *wanted_pipe;
+static bool suballoc_bo(struct fd_bo *b){return b->parent!=0;}
+static struct fd_bo *fd_bo_heap_block(struct fd_bo *b){assert(b->parent);return b->parent;}
+static void bo_flush(struct fd_bo *b){++b->flushes;}
+static int native_prepare(struct fd_bo *b,struct fd_pipe *p,uint32_t op){assert(b==wanted&&p==wanted_pipe&&op==3&&b->handle==7);++calls;return refused;}
+'''+function+r'''
+int main(void) {
+ const struct fd_bo_funcs kernel={native_prepare},suballocation={0};struct fd_pipe pipe={0};wanted_pipe=&pipe;
+ struct fd_bo parent={&kernel,0,7,0},small={&suballocation,&parent,0,0};wanted=&parent;
+ assert(!fd_bo_cpu_prep(&parent,&pipe,3)&&calls==1&&parent.flushes==1);
+ assert(!fd_bo_cpu_prep(&small,&pipe,3|FD_BO_PREP_FLUSH)&&calls==2&&small.flushes==1);
+ assert(!fd_bo_cpu_prep(&small,&pipe,FD_BO_PREP_FLUSH)&&calls==2&&small.flushes==2);
+ refused=-ETIMEDOUT;assert(fd_bo_cpu_prep(&small,&pipe,3)==-ETIMEDOUT&&calls==3);
+ parent.funcs=&suballocation;assert(fd_bo_cpu_prep(&small,&pipe,3)==-ENOTSUP&&calls==3);
+ return 0;
+}
+''')
 
 
 if __name__=='__main__':unittest.main()

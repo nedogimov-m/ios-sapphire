@@ -1,5 +1,75 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete admission/heap CPU/error-clock repair built; V44 retry ready — 2026-10-26
+
+Source base570fa70 plus this block. Inspect fresh actual backboardd and
+gpu-render crash reports through the existing readonly HFS helpers: NULL PC
+through u_default_texture_subdata/rwa_texture_write and st_ReadPixels. Mesa's
+small suballocation sa_funcs has no cpu_prep; the new unconditional native
+CPU barrier called that NULL callback. Submit view dependencies, then call the
+retained actual fd_bo_heap_block's native hook, preserving errors/alias waits.
+Also fix deferred ready-before-admission (require nonzero kfence), publish
+validation, native mach-uptime deadlines, and public status/Scheduled waiting
+through partial encoding failure. Do the complete repair before the retry.
+
+49host contracts PASS, including actual deferred constructor state, missing
+suballocation CPU callback with real parent routing, backend errors, exact
+fractional native clock conversion, held-fence failure/public status/waiters,
+epochs/ownership and reentrant deallocation. Native graphics
+local20261026-030404/noCI in research/redfin-metal-queued-v7 full paired build/
+actual20H392 ABI/signatures PASS, input
+56155bc470cbca3ecd9862604e5354e99dc267aecefe469efdc7efd2d021bab5,
+pairing2d508d5c9907e7021e5288ff2216b81a89f96acdc464169689d6ef0aa1234b1e.
+Reuse exact unchanged CI run40236406228/kernel84fe1c5b05e3798f9f0cfe08172e77be641b1c0f6f105036e8f7396229634567.
+
+Fresh V48 snapshot at1220138, zero iOS boots/writes since V43; stage24829952bytes,
+zero new/freed blocks, all file/signature/native readonly fsck PASS. V48 has not
+yet been applied; apply once then one combined retry. Device idle in temporary
+recovery. V45/V47 applied-stale; V46 superseded/forbidden. V44 reuses its already
+validated imagea51811574c3f8588158f5e0b0b45308de70fd8006c1665370e630bbbee55ce2e,
+noncee913499bf5ec816e. Correctness jobs ON; captures and app opens OFF. Exact
+planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xe913499bf5ec816e redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Hardware outcomes and sustained UI FPS remain pending; broader goal stays active.
+
+## REDFIN V43 hardware FAILED; deferred fence admission bug isolated — 2026-10-26
+
+Source570fa70 (CI kernel source ddda9d2/run40236406228 SUCCESS), V43 exact image/
+nonce/args as the preceding ready entry. V47 applied ONCE with all live preimages,
+backup/full readback and clean root PASS; it is now APPLIED/STALE, never reuse.
+Observed hardware: Metal checker67 fails its first compute fence and exits1;
+gpu-render53 SIGSEGV; backboardd SIGSEGV14times (62,251,263,272,280,289,296,303,
+311,319,329,343,350,358). This is a failed graphics boot, not a performance result.
+Actual queued backboard jobs and780GPU presentations still finish; system
+commands sample4..20ms and queue admission tens of microseconds, but neither
+correctness nor sustained FPS is established. Do NOT boot the prepared ordinary
+V44 policy just to measure it. Phone/Photos auto-opens remained disabled.
+
+Authenticated ramoops is collected, but its alternate startup prefix is absent:
+RFH2/banner/BOOT_ID missing, stock rolling DBGC still valid at0x280000. Manually
+extract the bounded1MiB ring for diagnostics; it contains matching current
+userspace nonce and real native GPU work. Standard collector reports logs-collected
+instead of userspace-alive. No startup freshness/no-panic claim. Files/diagnostic
+summary stay privately in logs/redfin/gui-platform-v43/current. Clean unmounted
+HFSX/inconsistent=false/write_count1220138; verified Fastboot, no active phone
+command. Next fresh updaterV48/imageV44; V46 superseded/forbidden, V45/V47 stale.
+
+Concrete cause in source: util_queue_fence_init starts signalled even before a
+private-BO submit is admitted. The new Darwin ready-only flush shortcut skipped
+that deferred submit, leaving kfence0 and failing the first native wait. Require
+BOTH ready and nonzero logical kfence, and reject unpublished fences at the
+Gallium handoff. Align native WaitFence/CpuPrep deadlines with kernel mach uptime
+(preferred upstream used continuous/raw time for its different kernel). Add the
+actual constructor state to host coverage. Backboard crash cause remains to be
+confirmed separately; do not claim all SIGSEGVs fixed from this inference.
+
+Also implement/test actual public status and waitUntilScheduled across an
+encoding refusal after emitted work: publish Error/Completed only after real
+retirement/resource cleanup.13relevant host cases pass. These final frontend
+changes are not on the phone yet. New checks-on graphics work queued-v6 builds
+the admission/clock/error block using the SAME verified CI kernel. V48 must be
+fresh at1220138 with correctness jobs ON for a combined retry, then ordinary
+performance only after native correctness and a stable window server pass.
+
 ## REDFIN queued CI kernel + paired V43 ready for one hardware cycle — 2026-10-26
 
 Kernel GitHub Actions40236406228/run1/source ddda9d2 native build PASS; artifact

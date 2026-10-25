@@ -37,6 +37,7 @@ class MetalScheduledTests(unittest.TestCase):
         execute=execute[:at]+'\tif(_status==0)goto done;\n'+execute[block_end(execute,brace):]
         methods='\n'.join([method(native,'- (void)commit'),execute,
             method(native,'- (void)waitUntilCompleted'),
+            re.search(r'^- \(NSUInteger\)status \{[^\n]*\}',native,re.M).group(),
             re.search(r'^- \(void\)waitUntilScheduled \{[^\n]*\}',native,re.M).group(),
             method(native,'- (void)failWith:(const char *)reason')])
         source=r'''
@@ -51,13 +52,14 @@ class MetalScheduledTests(unittest.TestCase):
 #include "metal-queued.h"
 enum {RW_CB_COMMITTED=2,RW_CB_SCHEDULED=3,RW_CB_COMPLETED=4,RW_CB_ERROR=5};
 static dispatch_semaphore_t entered,release_fence;
-static unsigned fail_fence,fail_begin,submitted;static _Atomic(unsigned) visible;
+static unsigned fail_fence,fail_begin,fail_submit,submitted;static _Atomic(unsigned) visible;
 static dispatch_semaphore_t dealloc_done;
 struct rwa_redfin_completion {unsigned fail;};
 static int begin(void *d,char *why,size_t n){(void)d;if(fail_begin){snprintf(why,n,"native begin refusal");return -7;}return 0;}
 static int submit(void *d,struct rwa_redfin_completion **ticket,char *why,size_t n){
  (void)d;(void)why;(void)n;*ticket=calloc(1,sizeof(**ticket));assert(*ticket);(*ticket)->fail=fail_fence;
- __atomic_add_fetch(&submitted,1,__ATOMIC_RELEASE);return 0;
+ __atomic_add_fetch(&submitted,1,__ATOMIC_RELEASE);
+ if(fail_submit){snprintf(why,n,"encoding refusal after native work");return -7;}return 0;
 }
 static int wait_ticket(struct rwa_redfin_completion *ticket,char *why,size_t n){
  dispatch_semaphore_signal(entered);
@@ -106,6 +108,7 @@ static void redfin_metal_io_completed(const uint64_t *a,const uint64_t *b){(void
  BOOL _testResourceActive,_testDealloc;
 }
 - (void)commit;
+- (NSUInteger)status;
 - (void)redfinEncodeAfter:(dispatch_group_t)previous finish:(dispatch_block_t)finish;
 - (void)waitUntilCompleted;
 - (void)waitUntilScheduled;
@@ -134,10 +137,10 @@ static void redfin_metal_io_completed(const uint64_t *a,const uint64_t *b){(void
 int main(void) {
  @autoreleasepool {
   entered=dispatch_semaphore_create(0);release_fence=dispatch_semaphore_create(0);
-  for(unsigned trial=0;trial<2;++trial) {
-   fail_fence=trial;visible=0;TestCommand *command=[TestCommand new];[command commit];
+  for(unsigned trial=0;trial<3;++trial) {
+   fail_fence=trial==1;fail_submit=trial==2;visible=0;TestCommand *command=[TestCommand new];[command commit];
    assert(!dispatch_semaphore_wait(entered,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
-   assert(command->_status==RW_CB_COMMITTED && !command->_redfinFinalized && command->_testResourceActive && !visible);
+   assert(command.status==RW_CB_COMMITTED && !command->_redfinFinalized && command->_testResourceActive && !visible);
    dispatch_group_t waiter=dispatch_group_create();
    dispatch_group_async(waiter,dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{[command waitUntilScheduled];});
    assert(dispatch_group_wait(waiter,dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC))!=0);
@@ -145,10 +148,10 @@ int main(void) {
    assert(!dispatch_group_wait(waiter,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
    [command waitUntilCompleted];
    assert(command->_redfinFinalized && !command->_testResourceActive && command->_status==(trial?RW_CB_ERROR:RW_CB_COMPLETED));
-   assert(trial?!visible:visible==42);
+   assert(fail_fence?!visible:visible==42);
    dispatch_release(waiter);[command release];
   }
-  fail_fence=0;visible=0;submitted=0;
+  fail_fence=0;fail_submit=0;visible=0;submitted=0;
   TestCommand *first=[TestCommand new],*second=[TestCommand new];[first commit];[second commit];
   for(unsigned i=0;i<2;++i)assert(!dispatch_semaphore_wait(entered,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
   assert(__atomic_load_n(&submitted,__ATOMIC_ACQUIRE)==2);
