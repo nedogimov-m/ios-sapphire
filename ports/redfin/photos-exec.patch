@@ -1,0 +1,79 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -181,6 +181,9 @@
+ #include <IOKit/IOBSD.h>
+ 
+ #include "kern_exec_internal.h"
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include "redfin_photos_exec.h"
++#endif
+ 
+ extern boolean_t vm_darkwake_mode;
+ 
+@@ -1337,6 +1340,26 @@
+ 
+ 		goto badtoolate;
+ 	}
++
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/* A damaged custom system job must fail spawn, before NOTE_EXEC can
++	 * make launchd panic on missing native platform/signature status. */
++	const char *photo_args = PE_boot_args(); unsigned photo_length = 0;
++	if (photo_args) while (photo_length < 608 && photo_args[photo_length]) ++photo_length;
++	if (photo_length < 608 && redfin_photos_exec_selected(photo_args, photo_length + 1, imgp->ip_strings)) {
++		bool admitted = redfin_photos_exec_signature(load_result.csflags, load_result.platform_binary);
++		printf("REDFIN PHOTO EXEC: native-flags=%#x platform=%u admitted=%u\n",
++		    load_result.csflags, load_result.platform_binary, admitted);
++		if (!admitted) {
++			vm_map_deallocate(map); map = VM_MAP_NULL;
++			error = EACCES;
++			exec_failure_reason = os_reason_create(OS_REASON_EXEC, EXEC_EXIT_REASON_BAD_MACHO);
++			exec_failure_reason->osr_flags |= OS_REASON_FLAG_CONSISTENT_FAILURE;
++			goto badtoolate;
++		}
++	}
++#endif
+ 
+ 	/*
+ 	 * ERROR RECOVERY
+diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -291,7 +291,8 @@
+ 	}
+ 	const char *identity = csblob_get_identity(cs_blob);
+ 	if (identity && (!strcmp(identity, "com.apple.assetsd") ||
+-	    !strcmp(identity, "com.apple.mobileslideshow") || !strcmp(identity, "com.apple.tccd"))) {
++	    !strcmp(identity, "com.apple.mobileslideshow") || !strcmp(identity, "com.apple.tccd") ||
++	    !strcmp(identity, "com.redfin.photos-init"))) {
+ 		printf("REDFIN AMFI IDENTITY: name=%s root=%u mount-root=%u flags=%#x xml=%u photos=%u category=%u\n",
+ 		    identity, on_root, mp != NULL && (vfs_flags(mp) & MNT_ROOTFS) != 0,
+ 		    *cs_flags, ent != NULL,
+diff --git a/bsd/kern/redfin_photos_exec.h b/bsd/kern/redfin_photos_exec.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/redfin_photos_exec.h
+@@ -0,0 +1,21 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_PHOTOS_EXEC_H
++#define REDFIN_PHOTOS_EXEC_H
++#include <string.h>
++#include <stdbool.h>
++#include <arm64/redfin_gui_profile.h>
++
++static inline bool redfin_photos_exec_selected(const char *args, unsigned bytes, const char *saved)
++{
++    return args && saved && redfin_gpu_gui_profile(args, bytes, NULL) &&
++        !strcmp(saved, "executable_path=/redfin/bin/photos-init");
++}
++static inline bool redfin_photos_exec_signature(unsigned flags, bool platform)
++{
++    /* Native load_machfile must have validated the initial code page and the
++     * original root-signature policy must have assigned the platform status.
++     * A requested entitlement alone can never make a damaged helper valid. */
++    const unsigned required = 0x20000000u | 0x4000u | 1u;
++    return platform && (flags & required) == required;
++}
++#endif

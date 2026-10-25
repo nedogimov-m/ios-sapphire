@@ -6,8 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import device_identity
-import mkadt
+from ports.redfin import device_identity, mkadt
 from test_smp_gui import compile_shared, patched_source
 
 HERE = Path(__file__).resolve().parent

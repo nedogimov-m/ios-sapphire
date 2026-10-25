@@ -201,7 +201,7 @@ diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinGPU.cpp
-@@ -0,0 +1,438 @@
+@@ -0,0 +1,439 @@
 +/*
 + * A620 adaptation of the preferred HackiOS RedwoodGPU / msm DRM 1.7 bridge:
 + * oosexgang/hackios-xnu-kernel 8e611870, iokit/Kernel/RedwoodGPU.cpp.
@@ -639,12 +639,13 @@ new file mode 100644
 +    }
 +    return result;
 +}
++#include "RedfinGPUDisplay.inc"
 +#endif /* SWEET */
 diff --git a/iokit/Kernel/arm/RedfinGPUService.h b/iokit/Kernel/arm/RedfinGPUService.h
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinGPUService.h
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,34 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Private kernel boundary. Startup is CPU0; runtime callers hold the GPU
 + * mutex and its current-thread lease on a proved coherent GUI processor. */
@@ -662,6 +663,7 @@ new file mode 100644
 +int redfin_gpu_audit(void);
 +uint64_t redfin_gpu_address(uint64_t size);
 +int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
++int redfin_gpu_map_display(uint64_t address,uint64_t physical);
 +int redfin_gpu_mapped(void);
 +int redfin_gpu_release(uint64_t address,uint64_t size);
 +int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence);

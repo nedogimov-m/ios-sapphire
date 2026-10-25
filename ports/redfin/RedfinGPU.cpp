@@ -435,4 +435,5 @@ IOReturn RedwoodGPUUserClient::externalMethod(uint32_t selector,IOExternalMethod
     }
     return result;
 }
+#include "RedfinGPUDisplay.inc"
 #endif /* SWEET */

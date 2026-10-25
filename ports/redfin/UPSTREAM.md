@@ -1,5 +1,46 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete A620 panel presentation and bootstrap-installation correction — 2026-10-25
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's RedwoodGPU
+serialized submission/fence ownership and MiniIOMobileFramebuffer source
+holds remain the baseline; paired userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+is unchanged. Re-reviewed the installed Mesa25.0.7 fd6_blitter.cc,
+fd6_barrier.cc/fd6_emit.h, A620 device info and a6xx/adreno_pm4 register XML.
+The internal kernel presenter adapts their real 2D blit/clear/CCU sequence,
+using the existing GPU mutex/current-thread lease and actual synchronous
+completion checks. The public msm bridge and ordinary RAM-only mapper retain
+their ABI and page permissions. A separate kernel-only mapper permits just
+the independently verified fixed splash pages; it cannot map arbitrary
+reserved memory. No display SMMU, DPU/DSI register or scanout address changes.
+
+Redfin's4320-byte panel pitch is not representable by A6xx's64-byte fields.
+The whole frame scales into4352-byte rows, followed by two GPU copies:
+even rows use8704/8640-byte source/destination pitches; odd rows use the
+same doubled pitches, a64-aligned destination32bytes before the row and
+destination x=8. Every output row still has1080pixels. iPhone X canvas,
+conservative camera exclusion and inverse touch geometry remain native to
+Redfin. Unsupported layouts/clipping and swaps without a full base layer
+take the existing CPU path. A failed physical-target completion stops CPU
+pixel writes and retains both mappings and source in-use holds until reset.
+
+Before mapping the panel, a fenced private-RAM check exercises actual BGRA
+clear/scaling, all2340packed rows and prefix/tail guards. Four initial real
+panel frames also compare64actual pixels to the GPU staging result. These
+are runtime admission checks inside one combined boot; no hardware result
+or stable60fps claim exists before that run. Metal remains separate work.
+
+V6's new Photos executable is read back in unmounted recovery:1113bytes
+differ from the signed source, every difference lies in a source-zero byte,
+all nonzero source bytes and the complete catalog record match. Native
+codesign verification rejects that actual file. The sparse install planner
+omitted new all-zero blocks, incorrectly treating sparse-host zeros as live
+device preimages. Plan every newly allocated block regardless of content,
+and verify complete files through their actual extents after installation.
+The native exec guard requires the original valid/signed/platform and XML
+entitlement status for this one GUI3 helper before its exec event; it never
+manufactures signature validity or bypasses launchd's platform check.
+
 ## Complete clock/photo-library/private-serial block — 2026-10-25
 
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and paired

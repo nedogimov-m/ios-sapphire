@@ -6,6 +6,7 @@
  */
 #include "redfin_gpu_runtime.h"
 #include "redfin_gpu_service.h"
+#include "redfin_gpu_display.h"
 extern int redfin_gui_runtime_cpu(void);
 static struct {
     thread_t caller;
@@ -188,6 +189,18 @@ int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only)
         physical>RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-4096)return EINVAL;
     uint64_t *entry=gr_leaf(address);if(*entry)return EEXIST;
     *entry=rf_gr_page_entry(physical,read_only);
+    gr_dirty(entry,entry+1);return 0;
+}
+/* Kernel display presenter only; no IOKit selector accepts physical pages.
+ * The ordinary mapper above remains restricted to XNU-owned upper RAM.
+ * AppleCLCD supplies only its independently validated fixed splash surface. */
+int redfin_gpu_map_display(uint64_t address,uint64_t physical)
+{
+    if(!redfin_gpu_ready() || !(redfin_gui_cpu0() || redfin_gpu_runtime_caller()) ||
+        gx.poisoned || (address&0xfffu) || !rf_gd_panel_page(physical) ||
+        !rf_gr_find(&gr.arena,address,4096))return EINVAL;
+    uint64_t *entry=gr_leaf(address);if(*entry)return EEXIST;
+    *entry=rf_gr_page_entry(physical,false);
     gr_dirty(entry,entry+1);return 0;
 }
 int redfin_gpu_release(uint64_t address,uint64_t size)

@@ -4726,7 +4726,7 @@ diff --git a/bsd/dev/redfin_gpu_service.h b/bsd/dev/redfin_gpu_service.h
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_service.h
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,34 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Private kernel boundary. Startup is CPU0; runtime callers hold the GPU
 + * mutex and its current-thread lease on a proved coherent GUI processor. */
@@ -4744,6 +4744,7 @@ new file mode 100644
 +int redfin_gpu_audit(void);
 +uint64_t redfin_gpu_address(uint64_t size);
 +int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
++int redfin_gpu_map_display(uint64_t address,uint64_t physical);
 +int redfin_gpu_mapped(void);
 +int redfin_gpu_release(uint64_t address,uint64_t size);
 +int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence);
@@ -4764,7 +4765,7 @@ diff --git a/bsd/dev/redfin_gpu_runtime.inc b/bsd/dev/redfin_gpu_runtime.inc
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_runtime.inc
-@@ -0,0 +1,297 @@
+@@ -0,0 +1,310 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Persistent GUI3 owner. The existing startup proof remains mandatory;
 + * all objects are retained if DMA completion or TLB synchronization is lost.
@@ -4773,6 +4774,7 @@ new file mode 100644
 + */
 +#include "redfin_gpu_runtime.h"
 +#include "redfin_gpu_service.h"
++#include "redfin_gpu_display.h"
 +extern int redfin_gui_runtime_cpu(void);
 +static struct {
 +    thread_t caller;
@@ -4955,6 +4957,18 @@ new file mode 100644
 +        physical>RF_GM_PT_RAM_BASE+RF_GM_PT_RAM_BYTES-4096)return EINVAL;
 +    uint64_t *entry=gr_leaf(address);if(*entry)return EEXIST;
 +    *entry=rf_gr_page_entry(physical,read_only);
++    gr_dirty(entry,entry+1);return 0;
++}
++/* Kernel display presenter only; no IOKit selector accepts physical pages.
++ * The ordinary mapper above remains restricted to XNU-owned upper RAM.
++ * AppleCLCD supplies only its independently validated fixed splash surface. */
++int redfin_gpu_map_display(uint64_t address,uint64_t physical)
++{
++    if(!redfin_gpu_ready() || !(redfin_gui_cpu0() || redfin_gpu_runtime_caller()) ||
++        gx.poisoned || (address&0xfffu) || !rf_gd_panel_page(physical) ||
++        !rf_gr_find(&gr.arena,address,4096))return EINVAL;
++    uint64_t *entry=gr_leaf(address);if(*entry)return EEXIST;
++    *entry=rf_gr_page_entry(physical,false);
 +    gr_dirty(entry,entry+1);return 0;
 +}
 +int redfin_gpu_release(uint64_t address,uint64_t size)

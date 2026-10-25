@@ -74,8 +74,12 @@ complex samples still cost40–100ms or more. The next run proves over5120 submi
 restart. The user confirms Phone works. Seeding the native MobileCheckpoint
 cache removes Photos' synchronous service wait; its next blocker is a photo-
 library assertion. Stable60fps, Metal and working Photos remain unfinished.
+Adreno already draws and composes the system UI; the established display
+path still scales and copies those GPU surfaces to the panel with the CPU.
 The latest stable GPU image is
-`ports/redfin/out/gpu-gui-performance-v4/redfin-xnu.img`.
+`ports/redfin/out/gpu-gui-performance-v5/redfin-xnu.img`.
+An internal GPU path for final scaling and panel-buffer packing is now
+implemented; its hardware validation is pending.
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 Kernel logs are collected automatically through temporary Linux recovery and

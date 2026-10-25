@@ -102,6 +102,10 @@ struct SweetSurface {
 };
 static SweetSurface *current_surface;
 static SweetSurface *sweet_surface_copy(uint32_t id){return id==1 ? current_surface : NULL;}
+static int gpu_present_result;
+static int RedfinGPUPresent(SweetSurface *,const struct redfin_display_geometry *,const uint8_t *){
+ return gpu_present_result;
+}
 class AppleCLCD : public IOMobileFramebuffer {public:
  bool fConsShown=false,fConsolePaused=false,fRedfinCopyOnly=true;
  uint8_t *fFlip[2]={};void *fVig0=NULL,*fLock=(void *)1,*fRedfinCaptureLock=NULL;
@@ -179,6 +183,7 @@ WRAPPERS = r'''
 static struct redfin_display_workspace workspace;
 static SweetHIDTouch hid;
 extern "C" {
+void set_gpu_present_result(int value){gpu_present_result=value;}
 bool geometry(unsigned mode,unsigned w,unsigned h,unsigned cw,unsigned ch,struct redfin_display_geometry *g){
  return redfin_display_geometry_make(mode,w,h,cw,ch,g);
 }
@@ -412,6 +417,20 @@ class DisplayGeometryTests(unittest.TestCase):
                 if not (g.x <= x < g.x+g.w and g.y <= y < g.y+g.h):
                     self.assertEqual(output[y*WIDTH+x],0xff000000)
             self.assertEqual(output[-16:],[0x5a5a5a5a]*16)
+
+    def test_completed_gpu_and_uncertain_panel_dma_both_skip_every_cpu_pixel_write(self):
+        source, surface, output = self.buffers(offset=64)
+        original_source = bytes(source)
+        original_output = bytes(output)
+        rect = RECT(0,0,1125,2436)
+        try:
+            for result in (1,-1):
+                self.lib.set_gpu_present_result(result)
+                self.assertEqual(self.lib.present(2,output,C.byref(surface),rect,rect,0),0)
+                self.assertEqual(bytes(output),original_output)
+                self.assertEqual(bytes(source),original_source)
+        finally:
+            self.lib.set_gpu_present_result(0)
 
     @staticmethod
     def reference(source, surface, rect, dw, dh, x, y):

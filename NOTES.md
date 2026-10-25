@@ -1,5 +1,78 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete GPU panel block checked, built and preflighted; Photos bytes restored — 2026-10-25
+
+All122distinct selected host cases PASS. The first combined run exposed
+two fixture issues: the native display harness lacked the new GPU boundary,
+and a prior suite's tools path shadowed Redfin's bare mkadt import. The
+harness now exercises completed/uncertain GPU returns without CPU pixel
+writes; the identity suite uses its explicit package. Those14fixture/
+geometry/identity cases PASS after correction; all remaining distinct cases
+had passed initially. Actual PM4 decoding covers every interleaved panel row,
+scaling/cutout coordinates, BO/rectangle bounds, opcode/register allowlists,
+and the dedicated fixed-page mapper. New sparse-zero and complete-file
+readback regressions, native bootstrap admission and existing fence/audit/
+ownership/recovery/geometry/ASan/UBSan checks pass.
+
+Local native build20261025-050146PASS/noCI; full prepared-overlay fingerprint
+verified. Frozen kernel-gpu-panel-v1 SHA256
+db0a398c0577293a589a66eb5b36c1d1507a4c3dcfcc81786e35d99c4292d21d.
+Image ports/redfin/out/gpu-panel-v1/redfin-xnu.img SHA256
+7981aae14f8105ffe0be92ec849754ad95f6dcd6b0d3e1dcfd7980be08b9e8ee.
+Real loader/payload/ADT/live FDT, firmware inventory, bounded return policy,
+private serial equality and compiled display/admission markers preflightPASS.
+
+Fresh unmounted metadata is still journaled/not-inconsistent/dirty at
+write_count746577. Its pending journal spans2019840..2331136. Native fsck
+replays it on a private clone with canaries in every Photos program block:
+exit0, journal drains, all canaries/catalog/allocated program blocks remain
+unchanged. This proves the pending replay cannot overwrite the repair.
+Only this immutable helper's18allocated data blocks/73728bytes are restored,
+with all live preimages backed up and full-range readback. The entire70640-
+byte file then matches the signed bundle and passes native codesign strict
+verification. Device root headers/JIB/complete journal are byte-unchanged;
+no metadata, clean-bit or journal write. Device returns to verified Fastboot.
+The old changed-range readback had been insufficient to prove a whole file.
+
+One combined hardware run follows. Actual GPU scaling/panel packing, native
+Photos bootstrap/UI, MobileGestalt serial, frame cadence and Wi-Fi behavior
+are pending. No stable60fps, Metal or Apple activation/login claim.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x026ce38e14155367 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+## REDFIN complete GPU panel path and bootstrap-installation correction implemented — 2026-10-25
+
+Based on9fc592e/438b255 and the authenticated V6 failure. Read-only dirty-root
+capture proves the Photos executable's catalog record matches staging and
+all nonzero source bytes are intact, but1113source-zero bytes contain stale
+data. Its actual readback fails native codesign. The installer compared new
+all-zero blocks to an unpopulated sparse baseline and omitted them. Complete
+older Mesa/EAGL/loader/gpu-render bundle bytes in the V7 snapshot match their
+signed sources. The failure is confined to the new helper in that evidence.
+No raw identifier, Apple artifact or log is committed.
+
+The complete source block is implemented before a new test or iOS boot:
+an internal A6202D presenter clears/scales into4352-byte rows and packs all
+1080x2340pixels with two GPU interleaved-row copies into the existing4320-
+byte-pitch boot buffer. Existing queue ownership, full audits, real fences,
+camera/touch geometry and scalar fallback remain. A private native pixel/
+guard check precedes panel mapping; initial completed physical frames get
+actual sampled readback. Lost panel completion retains mappings/source
+in-use holds and stops CPU writes. No DPU/DSI/foreign SMMU ownership change.
+
+The installation planner now includes every new block, including zeros,
+and verifies complete file extents. A scoped native loading guard refuses a
+damaged photos-init before launchd's exec-event platform check. It retains
+the actual signature/page checks and native root policy. Bounded immutable-
+file byte repair must preserve the dirty header/journal and prove that any
+pending native journal replay cannot overwrite that file before application.
+No device write has followed the V6 panic yet.
+
+Combined host checks, native build and one integrated run follow this whole
+block. GPU panel output, native Photos creation, MobileGestalt identity,
+smoothness and Apple account login are not yet established. Metal is still
+disabled. Last actual local build20261025-042244/noCI; exact observed V6
+args/nonce46a64490da6d616a and failure are in the following entry.
+
 ## REDFIN V6 integrated boot stopped by native launchd platform check — 2026-10-25
 
 Source9fc592e / preflight record42e0776 / local build20261025-042244/noCI.
