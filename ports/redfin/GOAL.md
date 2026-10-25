@@ -4,6 +4,12 @@ The same objective is active in `/goal`. Continue autonomously. Implement a
 complete coherent block, then run combined checks and an integrated hardware
 test. Do not boot/test between its individual implementation subtasks.
 
+The user explicitly authorizes doing and testing everything independently;
+the phone stays connected. Implement every requested feature, including
+features whose final physical/manual checks need the user. Defer only those
+human-dependent actions/checks, and keep progressing on the rest. Do not wait
+for manual GUI feedback before continuing independent implementation/tests.
+
 ## Requested results
 
 - Preserve working GUI, touch, Phone, Wi-Fi and internet.

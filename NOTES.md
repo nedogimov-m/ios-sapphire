@@ -1,5 +1,15 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN independent implementation and testing explicitly authorized — 2026-10-25
+
+User: do and test everything possible independently; phone remains connected.
+Implement all requested features, leaving only human-dependent verification
+or actions for later. This updates the active `/goal` workflow and GOAL.md;
+it is not a pause. Current hardware remains idle verified unmounted recovery,
+fresh V8 clean/write_count761257 with empty journal. No new stage/apply/boot.
+Last actual build20261025-050146/noCI and exact nonce026ce38e14155367 args/
+results are unchanged and recorded below.
+
 ## REDFIN full user objective registered and next clean snapshot captured — 2026-10-25
 
 The user explicitly requested `/goal`: the active objective now includes
