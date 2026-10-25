@@ -17,7 +17,15 @@ finalizer and real NIR, proving a shared state hit, eviction lifetime and one
 last-reference deletion. No shader executes through those callbacks; actual
 A620 CSOs/pixels remain a separate native requirement.14modules and all19actual
 parameter sets pass these host contracts and instruction compilation. The
-complete native paired build/20H392 ABI/signatures pass; V35 is pending.
+complete native paired build/20H392 ABI/signatures pass. V35 now passes the
+actual70A620 variants, both eviction paths and retained-pipeline pixels/guards;
+launchd records checker exit(0). Backboardd records65template/66stage hits by
+pipeline64, with no eviction and5.12MiB charged template payload. One repeated
+pipeline takes329us versus12738us initially. Heavy first-time pipelines remain
+258..835ms and sampled command groups still take85..270ms; these are not display
+FPS and the correctness jobs ran in this capture. Retire those jobs again for
+ordinary startup/performance. All earlier native contracts pass; no panic or
+backboardd restart is observed. Sustained system rendering remains unfinished.
 
 ## Bounded shader preparation and immutable state reuse — 2026-10-25
 

@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V35 actual A620 caches and eviction lifetimes PASS; latency remains — 2026-10-25
+
+Sourcebb4212f; graphics local20261025-233008/noCI,
+pairinge635dd4c961177ff91d5fd912c8304d9e15d5065441fc8ad3ad72f5ced7fe3e1.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V35 imageec04e5a95a052f272f1d9b40076e5bd58a3154cbe61f3c01bca82d50fc4f6e00,
+noncef8a202ff81ecbe62. V38 applied once:178ranges/23207936bytes/zero new/zero
+freed; full live preimages/readback/signatures/native readonly fsck PASS.
+V38 applied/stale; never reuse. Authenticated exact current boot reports
+userspace-alive/no panic, clean consistent HFSX/write_count1141794, verified
+Fastboot. Next fresh rootV39/imageV36. Broader goal remains active.
+
+NEW native cache probe PASS: duplicate template/stage hits3/3, all70distinct
+color variants correct, bounds correct,30template/25stage evictions, and both
+retained original pipelines still draw correct pixels/guards afterwards.
+Launchd independently records metal-check67 exit(0). All prior192compute/two
+queues/32resource rounds and half/MRT/packed UBO/varying/sampler/raster/blit/
+pitch/alias/constants/guards PASS. Exactly one backboardd62 is observed; no
+window-server restart. Own-task footprint at pipeline64 is117536KiB; zero
+remaining-limit stays explicitly unavailable. No draw/kernel image capture or
+automatic Phone/Photos opens.
+
+Actual backboardd at pipeline64:65template hits/63misses,63entries/5118173
+charged bytes/no evictions;66stage hits/62misses,62entries/271292key bytes/no
+evictions. The same downsample4 pipeline call takes12738us at first creation
+and329us on repetition. These are actual API samples, not a controlled global
+speedup. First-time fixed_frag pipeline calls remain258141..835090us including
+waiting. First3-draw command still has9allocations/426337us allocation I/O
+(previous ordinary run13/451740us; workloads differ). A later24-draw sample is
+85394us total with18950us submit I/O;125draws cost270214us/16submits. These
+are command groups, not display FPS. Ordinary performance remains unresolved.
+
+Next disable the completed correctness jobs consistently in bundle/cached
+startup, keep bounded timing and collect an ordinary capture. Cold complex
+translation and hot command preparation/unprofiled IOKit calls remain concrete
+costs to separate; no assumption that caching alone fixes GUI responsiveness.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xf8a202ff81ecbe62 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN stage lookup fixed; complete block rebuilt; fresh V38 prepared for V35 — 2026-10-25
 
 Source basec4a4899 plus this correction block. V34's zero stage hits come from

@@ -106,7 +106,11 @@ A complete shader-preparation block now adds bounded per-device translation
 templates, reference-counted Gallium stage reuse and one shared immutable quad
 buffer. AIR folds defined state during scratch promotion rather than repeatedly
 walking dead branches. Host real-NIR ownership/eviction checks and all19captured
-parameter variants pass; the combined native performance run is pending.
+parameter variants pass. V35 also passes all70actual A620 cache variants and
+retained-pipeline pixels/guards after eviction. Actual backboardd reuses66stage
+states by pipeline64; one repeated pipeline takes329us versus12738us initially.
+First-time complex shaders and whole-command latency remain substantial; this
+does not establish smooth system FPS.
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
