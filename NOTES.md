@@ -1,5 +1,62 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V42 ordinary bindings verified; queue/finalization now dominate samples — 2026-10-26
+
+Source263627e (runtimed010573); ordinary graphics local20261026-014749/noCI,
+pairinge6df8198875235c747e2373699e315273ee88e5d9693c2a0fff145deff8b6992,
+compiler identity identical to V41's successful native contracts. Kernel unchanged/
+reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V42 image0d2e57380fe750be9c4d0b339ccd09c2bcabc485c85b5ae360710cc7f2c21f85, noncefcd710fe0be2866a.
+Fresh V45 applied once:6ranges/258048bytes/zero new/zero freed; all live preimages,
+complete readback/signatures/native readonly staged fsck PASS. V45 is applied/
+stale; NEVER reuse. Authenticated exact current boot userspace-alive, no panic,
+one backboardd61, clean unmounted HFSX header/inconsistent=false/write_count1200036,
+verified Fastboot. Next fresh rootV46/imageV43. No active exec sessions. This
+turn is progress; the full broader goal remains active and unfinished.
+
+Ordinary policy proved: no current nonce in either correctness job log, no heavy
+capture or automatic Phone/Photos opens. At pipeline32,36AIR/38ir3 hits with zero
+misses/stores/variant compiles. Every sampled command still has one real final
+finish and zero CPU drains, with zero live cached stage/vertex references after
+scope exit. Actual pixels/guards/error/eviction/persistence remain V41's successful
+hardware evidence, not probes rerun in this ordinary boot. No sustained FPS test.
+
+Measured ordinary groups: command8 has5draws,1128us encoding,28692us queue and
+11947us finalization/41769us total,1submit/11843us,2other calls/46us and no new
+allocations/maps/variants. Command16 has5draws/1516us encoding/42157us queue/
+28290us finalization/71965us total,1submit/13662us,2other calls/14470us. Command32
+has5draws/7503us encoding/21734us queue/4042us finalization/33280us total,
+1submit/3832us and4other calls/126us. Commands8/16each skip17graphics updates
+and clear10stale slots, but have6vertex calls/zero vertex skips. Descriptor
+reuse is limited in these particular changing system groups. Samples are not
+a paired workload or display FPS; nevertheless1.1..1.5ms encoding leaves queue
+and completion waits dominant here, so further tiny binding tweaks are not the
+next priority. First command still costs424241us (410110encoding) with only
+3218us allocation and406686us other-process I/O; do not blame heap size or
+remove original-page protection. Kernel's first8average full audits1858us,
+wait3740us and actual GPU3674us. GPU panel samples average7.7..8.6ms, one retained
+unsupported-swap CPU fallback. Physical90Hz remains separate from render FPS.
+
+Next coherent performance block should address actual queued submission and
+completion end-to-end, preserving real GPU proof. Current kernel submit polls to
+completion under GPUTransaction; native Metal's single execution worker holds
+its Gallium gate until the final fence. Returning early at one layer alone is
+incorrect and may not remove the queue delay. A complete design must retain
+BO/surface/original-page and command-resource ownership, preserve cache clean/
+invalidate ordering, implement real WaitFence/CpuPrep, safe release/client-close
+and failure retirement, and separate encoding from completion without clearing
+a newer command's GPU-write state. Keep per-resource/completion epochs and real
+completion callbacks, queue order and bounded backpressure; include mixed alias/
+CPU consumers and overlapping-resource/error lifetime checks. Build any kernel
+change through CI. Do not substitute another small cache patch for that end state.
+An autonomous actual system animation/presentation measurement is also needed
+before claiming smooth FPS; static startup command timings alone cannot prove it.
+Keep the user's requested whole-block implementation then combined test workflow,
+parallel host work/reused tools and retired Phone/Photos auto-opens. Exact V42
+observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xfcd710fe0be2866a redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V41 actual A620 binding reuse/exit/error ownership PASS — 2026-10-26
 
 Sourced010573; native graphics local20261026-014045/noCI,

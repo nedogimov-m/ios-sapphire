@@ -38,6 +38,16 @@ checker67 exits0. One backboardd, no panic and a clean root are observed. Ordina
 warm system latency/FPS remain pending; the same compiler identity is preserved
 for that next boot.
 
+V42 ordinary warm reboot confirms both correctness jobs/capture inactive, one
+backboardd, no panic, clean unmounted root and36AIR/38ir3 file hits without
+compilation by pipeline32. System5draw groups sample1.1/1.5ms encoding but29/42ms
+queue waits and12/28ms finalization; a later group has7.5ms encoding. All scopes
+clear cached refs and pay one actual fence. These are not paired FPS measurements.
+Further binding micro-optimizations are not the next priority: kernel submission
+is synchronous and the frontend worker waits under its gate. Address queued
+submission AND frontend completion as one ownership/cache/fence/epoch block,
+retaining bounded backpressure, CPU-consumer correctness and actual GPU proof.
+
 ## GPU-only ordering and actual CPU consumers — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR resource
