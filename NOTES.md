@@ -1,5 +1,53 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN descriptor fix and native Keychain/model/full-panel90Hz verified — 2026-10-25
+
+Source f5bd72e/local build20261025-062535/noCI, kernel
+4c26d9c20147ea4d15e5d18a0692e83346ac57ce64eaf48fa70a36c33a30dc4e.
+Image gui-platform-v2 SHA2561d2841ecac0ceaf5d3980b24485201b8c08388f13e7e3c5c962d8ab77f4bb6fa,
+authenticated boot0c965ca336c08207. No panic; the native4096byte AKS descriptor
+path prepares/copies/completes successfully. Native HFS journal replay and
+planned shutdown finish clean/not-inconsistent/write_count770135; all8file
+logs captured read-only, verified Fastboot. Software Keychain SecItem add0,
+read0/exact1/existing0 now succeeds. Its next boot must prove existing1.
+MobileGestalt model is present and its digest matches physical SKU G5NZ6;
+serial digest still matches the physical serial. No Apple activation claim.
+
+Physical90Hz repeats: TE16683->11124us, INTF21->31frames/350ms, actual FIFO
+completion/verified mode8. Authenticated RAM captures confirm full viewport,
+matching inverse HID geometry and a final lock screen. Private native A620
+2D2527200pixel/guard check and four64sample panel readbacks PASS, no GPU
+retirement/fault/submit failure. First8submit audit averages reach2108us;
+this short presentation-only stream is not a comparable system-render FPS
+measurement. Stable smooth60/90fps remains unproved.
+
+The already installed loader/EAGL guard were built with the old GUI profile
+header, which rejects90Hz. They silently skip insertion, so this run has no
+system EAGL installation/frames despite successful native shader/panel checks.
+Rebuild and install both bridge/loader against the current canonical profile;
+record its header digest with the bundle to prevent another stale pairing.
+The new status-bar adapter installs in SpringBoard, but no measured time-view
+layout is obtained yet. Native GUI checker's legacy LS opens both return0,
+so Phone/Photos UI was not exercised; add actual async error results and
+native foreground/unlock options for the no-passcode test environment.
+
+Photos canonical URL now validates as the native system /var/mobile/Media.
+Its well-known identifier is0, meaning an ordinary system library, which
+cannot be passed to the well-known-library create/open API: native asserts
+API misuse. Use the verified PHPhotoLibrary instance URL initializer and
+its createOrUpgradeLibraryUsingOptions:error: path for that system URL,
+retaining the native schema/creation/upgrade and all URL guards. No database
+or identifier is synthesized. Re-review installed method semantics first.
+
+Next coherent source block combines those bridge/Photos/native app-check
+corrections before combined testing and one integrated/persistence boot.
+A fresh V9 read must include the installed UI/gui-check files and updated
+bridge targets; V8 must never be reused. Power/charging/thermals/all sensors,
+Metal and real account authorization remain required. Private wrapping
+material backup/redfin/ios-keychain-material.json must persist unchanged;
+never regenerate it or print its contents.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0c965ca336c08207 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN physical90Hz proved; AKS descriptor panic located and fixed — 2026-10-25
 
 Source df42261/52d87df, kernel build20261025-061234/noCI. Authenticated image

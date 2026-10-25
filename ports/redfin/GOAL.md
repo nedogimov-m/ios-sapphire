@@ -57,7 +57,7 @@ builder import correction. Local kernel20261025-061234/noCI PASS; SHA256
 All138distinct selected host cases PASS. Native Photos/UI/app checker are
 signed and every nonweak import resolves through installed20H392 (52libs).
 
-Implemented, not yet proved on the device: persistent private AES256/RFC3394
+Implemented; actual verification status follows below: persistent private AES256/RFC3394
 AKS wrap/unwrap, synthetic SecItem reboot probe, actual model publication,
 canonical native Photos URL guard, full1080x2340viewport/inverse touch,
 UUID/type-guarded native status-bar camera avoidance, physical90Hz FIFO/TE
@@ -80,21 +80,29 @@ unchanged, verified Fastboot. Do not reuse V8 for another update. The next
 fresh V9 read phase must include the newly installed UI/GUI checker files.
 Private backups/preimages stay under research/redfin-graphics/root-update-v8.
 
-The first authenticated combined boot3635d632d4fbfca8 proves actual panel
-90Hz: TE mean16682->11123us and INTF21->31frames/350ms, successful native
-FIFO completion and native90Hz mode publication. Full display/HID viewport,
-private key-material removal and actual model publication are observed;
-securityd's32->40wrap succeeds. Smooth90fps and app outcomes remain unproved.
+Authenticated V1/V2 boots prove actual panel90Hz: TE about16683->11124us
+and INTF21->31frames/350ms, native FIFO completion and90Hz mode publication.
+Full display/HID viewport and authenticated lock-screen RAM capture pass.
+V2's AKS descriptor preparation fix eliminates the panic; native SecItem
+add/read succeeds exactly. Model/serial MobileGestalt digests match actual
+hardware. Root is clean/write_count770135; eight file logs captured read-only;
+device is verified Fastboot. V2 kernel/build/image/nonce are in NOTES.
 
-That run then panics in profiled's AKS writeBytes on an unwired large user
-memory descriptor. The complete input/output prepare/complete lifetime fix
-follows the preferred upstream;12targeted host cases and local native build
-20261025-062535PASS/noCI, kernel4c26d9c20147ea4d15e5d18a0692e83346ac57ce64eaf48fa70a36c33a30dc4e.
-Device is verified Fastboot; root dirty/not-inconsistent/write_count762490.
-Do not reuse V8 or apply files to this dirty root. Next kernel-only integrated
-boot replays its native journal and uses the existing180s clean shutdown;
-then perform the completed block's persistence reboot. Continue independent
-power/charging, thermal/all-sensor and Metal implementation afterwards.
+Remaining linked corrections before the next combined/persistence run:
+rebuild the installed loader/EAGL bridge with the current90Hz profile (the
+old compiled profile silently skips system acceleration); use the actual
+PHPhotoLibrary instance URL/create-or-upgrade API because system Media is
+identifier0 and is not a well-known library; improve native app launch
+checks with async errors/foreground options. Status-bar library installs,
+but correct time placement and system smoothness are not yet observed.
+No Phone/Photos UI success is inferred from rejected legacy LS opens.
+
+Next fresh V9 read must include installed UI/gui-check files and bridge
+updates. Never reuse V8. Keep backup/redfin/ios-keychain-material.json
+unchanged and private; future saved keys depend on it. Complete the linked
+source fixes, then combined build/preflight/integrated test and native
+Keychain persistence. Continue power/charging, thermals/all actual sensors
+and Metal implementation; defer only human-dependent checks/authorization.
 
 ## Operating constraints
 
