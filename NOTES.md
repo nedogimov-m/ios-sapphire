@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V24 native parent views PASS; repeated A8 reads stale; checkerboard is pre-display — 2026-10-25
+
+Source857651a, graphics local20261025-180921/noCI, pairing56c8240e96031f7eaaaf45e42e79ec220bdf96042ad55980eb03fb10ec8a48d9.
+Unchanged kernel local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V24 imagecff93d0759077134a7e40053fc4aa356ae2ac10f9259ea30a7204123a0d58c93, nonce651d2fe9c2873710.
+V27 applied once:167ranges/25239552bytes/5new/zero freed; complete preimages/
+full native file readback/signatures/readonly fsck PASS. V27 is now applied/stale;
+never reuse it. Authenticated capture leaves clean consistent HFSX/
+write_count1007047 and verified Fastboot. No kernel panic/runtime GPU fault;
+backboardd62 remains alive. App-check log has no current nonce; no automatic
+Phone/Photos launches.
+
+Prior192compute/raster/MRT/fetch/vertex/sampling/pitch/resolve/blit/mip/short-tail
+probes PASS. Independent external-page compute write/read, unaligned tail,
+outside guards and exact deallocator stages all PASS. Ordinary-parent native
+BO views now PASS pixels/guards; converted external views still PASS. Actual
+CoreAnimation A8 requests549x358/offset64/pitch576 and59x41/pitch64 now succeed;
+no recorded unsupported API/format refusal or actual compositor blit executes.
+
+The exact640x358 A8 sample passes its first CPU seed, but its immediate second
+command reads the previous seed (x0/y0 red10 versus expected63). This proves
+freshness failure, not an alpha-swizzle failure. Kernel inspection shows the
+external original pointer does not itself establish clientMapped: the seed/4ms
+surface heuristic may skip CPU-page maintenance. Native fd_bo_map uses the
+existing clientMemoryForType mapping/cache contract, including conservative
+per-submit maintenance. Establish/retain that genuine mapping for caller-backed
+buffer imports; no copied substitute or delay should hide the failure. GPU
+sampler-cache freshness is also part of the native repeat probe; do not claim
+the exact stale-data cause fixed before a new combined capture.
+
+21CRC-verified images include9FINAL command targets through draw215, captured
+after real fences/resolves. Final compositor output itself contains the same
+red/black checkerboard/cyan fills as final physical present10. The corruption
+therefore precedes panel scaling/output; do not claim GUI fixed or FPS.
+Reserve subsequent auxiliary capture for the actual post-logo draws/inputs,
+including alpha masks, rather than consuming it on repeated logos. Broader
+Wi-Fi/power/thermal/sensors/Apple authorization remains unfinished.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x651d2fe9c2873710 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native parent BO/A8/completed-frame block built; fresh V27 staged — 2026-10-25
 
 Source base69e819e plus this complete related block. Add the missing frontend
