@@ -137,7 +137,8 @@ rwa_redfin_linear_changed(struct rwa_texture *texture,bool gpu)
    for(struct rwa_texture *other=device->linear_textures;other;other=other->linear_next)
       if(surface&&other!=texture&&other->linear_surface==surface)other->linear_epoch=0;
    if(texture->buffer_parent) {
-      texture->buffer_pending=gpu&&(device->command_scope.active||device->command_scope.pending);
+      texture->buffer_pending=gpu&&device->encoding_epoch;
+      if(texture->buffer_pending)texture->buffer_write_epoch=device->encoding_epoch;
       rwa_redfin_buffer_changed(texture->buffer_parent,texture,gpu);
    }
    texture->linear_epoch=device->linear_epoch;

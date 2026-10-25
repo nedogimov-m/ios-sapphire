@@ -170,7 +170,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Redfin native dependencies
-        run: brew install jq gum bash cmake ninja
+        run: brew install jq gum bash cmake ninja ccache
+      - name: Restore Redfin compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: redfin-ccache-${{ env.MACHINE_CONFIG }}-${{ env.KERNEL_CONFIG }}-${{ hashFiles('ports/redfin/*.patch', 'ports/redfin/include/**', 'xnu/patches/**', 'ports/redfin/build-xnu.py') }}
+          restore-keys: |
+            redfin-ccache-${{ env.MACHINE_CONFIG }}-${{ env.KERNEL_CONFIG }}-
       - name: Restore private build-kit download
         uses: actions/cache@v4
         with:

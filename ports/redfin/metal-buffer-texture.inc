@@ -75,10 +75,11 @@ rwa_redfin_buffer_changed(struct rwa_buffer *buffer,struct rwa_texture *writer,b
 {
    if(!buffer)return;
    struct rwa_device *device=buffer->device;
-   bool pending=gpu&&(device->command_scope.active||device->command_scope.pending);
+   bool pending=gpu&&device->encoding_epoch;
    for(struct rwa_buffer *b=device->all_buffers;b;b=b->all_next) {
       if(!rwa_redfin_buffers_share(b,buffer))continue;
       b->gpu_pending|=pending;
+      if(pending)b->gpu_write_epoch=device->encoding_epoch;
       b->gpu_visible=!pending||(!writer&&b->res==buffer->res);
    }
    for(struct rwa_texture *t=device->buffer_textures;t;t=t->buffer_next) {

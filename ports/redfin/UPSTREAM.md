@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Retained submission and separate native completion — 2026-10-26
+
+Review preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's msm bridge
+and userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's serial Metal execution,
+plus Mesa25.0.7 lazy fences, BO recycling and CPU-preparation shortcuts. Adapt
+them together for Redfin: bounded retained CPU admission, the existing real
+serialized hardware owner/audit/cache path, and logical WaitFence retirement
+after actual completion. Original descriptors/pages/surfaces survive queued
+jobs and close. Display, IOSurface CPU locks and alias CpuPrep wait outside the
+hardware lock. The independent idle/thermal policy moves into the queue worker.
+
+Publish deferred Gallium fences under the frontend gate before off-thread
+waits. GPU-written ufences alone cannot prove native post-audit/invalidation;
+BO recycling and CPU consumers use actual kernel retirement. Per-write epochs
+prevent an older completion clearing newer command state. Keep synchronous
+standalone calls and opt-in diagnostic image drains. Two native commands may
+encode/admit while completion waits; resources, slots and callbacks retire only
+after the real fence, with predecessor completion order and reentrant callback/
+deallocator submission off the serial encoder. Require queued ABI1 in both Mesa
+and Metal. All46host contracts PASS; exact changed kernel C++ objects compile.
+Full paired native build, CI kernel and A620/device results remain pending.
+Physical90Hz is not a measured rendering rate.
+
 ## Command-local descriptor and graphics state reuse — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR stage

@@ -1,0 +1,287 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -80,6 +80,8 @@
+ 
+ #include "redfin_metal_command_scope.h"
+ #include "redfin_metal_ordering.h"
++#include "redfin_metal_queued.h"
++#include <pthread.h>
+ #define REDFIN_METAL_BINDINGS_RUNTIME 1
+ #include "redfin_metal_bindings.h"
+ #include "redfin_metal_raster.h"
+@@ -122,6 +124,10 @@
+    struct rwa_buffer *all_buffers;
+    uint64_t ordering[REDFIN_METAL_ORDERING_WORDS];
+    bool gpu_memory_pending;
++   uint64_t issued_epoch,encoding_epoch,completed_epoch,gpu_memory_epoch;
++   struct rwa_redfin_completion *queued_tickets;
++   unsigned queued_owners;
++   bool queued_closing,queued_failed;
+    struct redfin_metal_stage_bindings bindings[PIPE_SHADER_TYPES];
+    struct redfin_metal_graphics_bindings graphics_bindings;
+    uint64_t binding_stats[REDFIN_METAL_BINDING_WORDS];
+@@ -206,6 +212,7 @@
+    unsigned external_surface;
+    struct rwa_buffer *all_next;
+    bool gpu_pending,gpu_visible;
++   uint64_t gpu_write_epoch;
+ };
+ 
+ /* A texture, with the shape Metal asked for kept as it was given rather than as it was
+@@ -238,6 +245,7 @@
+    struct rwa_texture *buffer_next;
+    unsigned buffer_offset,buffer_pitch;
+    bool buffer_pending;
++   uint64_t buffer_write_epoch;
+ };
+ 
+ static int rwa_redfin_linear_import(struct rwa_texture *,const struct pipe_resource *,unsigned,unsigned,unsigned,char *,size_t);
+@@ -259,6 +267,10 @@
+ static void rwa_redfin_buffer_register(struct rwa_buffer *);
+ static void rwa_redfin_buffer_unregister(struct rwa_buffer *);
+ static void rwa_redfin_ordering_completed(struct rwa_device *);
++static void rwa_redfin_ordering_completed_epoch(struct rwa_device *,uint64_t);
++static int rwa_redfin_queued_drain(struct rwa_device *,char *,size_t);
++static void rwa_redfin_device_destroy(struct rwa_device *);
++
+ static int rwa_redfin_gpu_prepare(struct rwa_device *,char *,size_t);
+ static int rwa_redfin_gpu_complete(struct rwa_device *,bool,char *,size_t);
+ static int rwa_redfin_gpu_alias_transition(struct rwa_device *,char *,size_t);
+@@ -649,8 +661,8 @@
+    return NULL;
+ }
+ 
+-void
+-rwa_device_close(struct rwa_device *device)
++static void
++rwa_redfin_device_destroy(struct rwa_device *device)
+ {
+    if (!device)
+       return;
+@@ -3230,6 +3242,18 @@
+  * whether the GPU finished, and that is a failure. rwa_finish may be called with
+  * nothing outstanding at all, and then no fence means there was nothing to wait for.
+  */
++#ifdef GALLIUM_FREEDRENO
++extern int redfin_freedreno_fence_publish(struct pipe_fence_handle *);
++#endif
++static int rwa_redfin_fence_publish(struct rwa_device *device,struct pipe_fence_handle *fence)
++{
++   if(!fence)return 0;
++#ifdef GALLIUM_FREEDRENO
++   if(!device->software)return redfin_freedreno_fence_publish(fence);
++#endif
++   return 0;
++}
++
+ static int
+ finish_or_say_why(struct rwa_device *device, bool required, const char *what,
+                   char *why, size_t why_size)
+@@ -3245,7 +3269,11 @@
+       return -1;
+    }
+ 
+-   bool done = device->screen->fence_finish(device->screen, NULL, fence,
++   int publication=rwa_redfin_fence_publish(device,fence);
++   if(publication>0&&!required) {
++      device->screen->fence_reference(device->screen,&fence,NULL);return 0;
++   }
++   bool done = !publication && device->screen->fence_finish(device->screen, NULL, fence,
+                                             RWA_FENCE_TIMEOUT_NS);
+    device->screen->fence_reference(device->screen, &fence, NULL);
+    if (!done) {
+@@ -3280,11 +3308,13 @@
+ int
+ rwa_commands_begin(struct rwa_device *device, char *why, size_t why_size)
+ {
++   if(device->queued_closing||__atomic_load_n(&device->queued_failed,__ATOMIC_ACQUIRE)||
++      device->issued_epoch==UINT64_MAX){say(why,why_size,"Metal native context is closing or retired");return -1;}
+    int error=redfin_metal_scope_begin(&device->command_scope);
+    if(!error) {
+       if(device->linear_epoch==UINT64_MAX) {device->command_scope.active=false;device->command_scope.failed=true;error=-1;}
+       else ++device->linear_epoch;
+-      if(!error)rwa_redfin_trace_begin(device);
++      if(!error){device->encoding_epoch=++device->issued_epoch;rwa_redfin_trace_begin(device);}
+    }
+    if (error) say(why,why_size,"Metal command scope is already active or retired");
+    return error;
+@@ -3302,12 +3332,17 @@
+       device->pipe->set_framebuffer_state(device->pipe,&(struct pipe_framebuffer_state){0});
+       if(rwa_redfin_linear_resolve_all(device,why,why_size))device->command_scope.failed=true;
+    }
++   int prior=rwa_redfin_queued_drain(device,why,why_size);
+    int error=redfin_metal_scope_end(&device->command_scope,command_scope_finish,device,why,why_size);
++   if(prior)error=prior;
++   device->encoding_epoch=0;
+    rwa_redfin_bindings_clear(device);
+    if(!error)rwa_redfin_trace_end(device);
+    else if(why&&why_size&&!why[0])say(why,why_size,"Metal command scope retired after encoding/completion failure");
+    return error;
+ }
++
++#include "redfin_metal_queued.inc"
+ 
+ 
+ /* What the shader calls a texture slot, in the words a Metal programmer wrote it in,
+diff --git a/src/gallium/drivers/freedreno/freedreno_fence.c b/src/gallium/drivers/freedreno/freedreno_fence.c
+--- a/src/gallium/drivers/freedreno/freedreno_fence.c
++++ b/src/gallium/drivers/freedreno/freedreno_fence.c
+@@ -74,6 +74,13 @@
+    assert(!fence->batch);
+    fence->flushed = true;
+    return true;
++}
++
++int redfin_freedreno_fence_publish(struct pipe_fence_handle *fence)
++{
++   if(!fence||!fence_flush(NULL,fence,OS_TIMEOUT_INFINITE))return -1;
++   if(fence->last_fence)return redfin_freedreno_fence_publish(fence->last_fence);
++   return fence->fence?0:1;
+ }
+ 
+ void
+diff --git a/src/gallium/drivers/freedreno/freedreno_fence.h b/src/gallium/drivers/freedreno/freedreno_fence.h
+--- a/src/gallium/drivers/freedreno/freedreno_fence.h
++++ b/src/gallium/drivers/freedreno/freedreno_fence.h
+@@ -65,6 +65,8 @@
+    uint32_t syncobj;
+ };
+ 
++int redfin_freedreno_fence_publish(struct pipe_fence_handle *);
++
+ void fd_pipe_fence_repopulate(struct pipe_fence_handle *fence,
+                               struct pipe_fence_handle *last_fence);
+ void fd_pipe_fence_ref(struct pipe_fence_handle **ptr,
+diff --git a/src/freedreno/drm/freedreno_priv.h b/src/freedreno/drm/freedreno_priv.h
+--- a/src/freedreno/drm/freedreno_priv.h
++++ b/src/freedreno/drm/freedreno_priv.h
+@@ -342,6 +342,9 @@
+     * is complete, just that the kernel knows about it)
+     */
+    uint32_t last_submit_fence;
++#ifdef __APPLE__
++   uint32_t redfin_retired_fence;
++#endif
+ 
+    uint32_t last_enqueue_fence;   /* just for debugging */
+ 
+@@ -366,6 +369,7 @@
+    const struct fd_pipe_funcs *funcs;
+ };
+ 
++bool redfin_fd_fence_retired(struct fd_fence *);
+ uint32_t fd_pipe_emit_fence(struct fd_pipe *pipe, struct fd_ringbuffer *ring);
+ 
+ static inline void
+diff --git a/src/freedreno/drm/freedreno_pipe.c b/src/freedreno/drm/freedreno_pipe.c
+--- a/src/freedreno/drm/freedreno_pipe.c
++++ b/src/freedreno/drm/freedreno_pipe.c
+@@ -170,10 +170,39 @@
+    return fd_pipe_wait_timeout(pipe, fence, ~0);
+ }
+ 
++#ifdef __APPLE__
++static void redfin_fd_fence_completed(struct fd_pipe *pipe,uint32_t fence)
++{
++   uint32_t old=__atomic_load_n(&pipe->redfin_retired_fence,__ATOMIC_ACQUIRE);
++   while(old<fence&&!__atomic_compare_exchange_n(&pipe->redfin_retired_fence,&old,fence,
++         true,__ATOMIC_RELEASE,__ATOMIC_ACQUIRE)) {}
++}
++#endif
++bool redfin_fd_fence_retired(struct fd_fence *f)
++{
++#ifdef __APPLE__
++   /* Also called under fence_lock: do not flush or acquire submit_lock here. */
++   if(!util_queue_fence_is_signalled(&f->ready)||!f->kfence)return false;
++   if(__atomic_load_n(&f->pipe->redfin_retired_fence,__ATOMIC_ACQUIRE)>=f->kfence)return true;
++   if(f->pipe->funcs->wait(f->pipe,f,0))return false;
++   redfin_fd_fence_completed(f->pipe,f->kfence);return true;
++#else
++   return !fd_fence_before(f->pipe->control->fence,f->ufence);
++#endif
++}
++
+ int
+ fd_pipe_wait_timeout(struct fd_pipe *pipe, const struct fd_fence *fence,
+                      uint64_t timeout)
+ {
++#ifdef __APPLE__
++   fd_fence_flush((struct fd_fence *)fence);
++   if(!fence->kfence)return -EIO;
++   if(__atomic_load_n(&pipe->redfin_retired_fence,__ATOMIC_ACQUIRE)>=fence->kfence)return 0;
++   int result=pipe->funcs->wait(pipe,fence,timeout);
++   if(!result)redfin_fd_fence_completed(pipe,fence->kfence);
++   return result;
++#else
+    if (!fd_fence_after(fence->ufence, pipe->control->fence))
+       return 0;
+ 
+@@ -183,6 +212,7 @@
+    fd_pipe_flush(pipe, fence->ufence);
+ 
+    return pipe->funcs->wait(pipe, fence, timeout);
++#endif
+ }
+ 
+ uint32_t
+diff --git a/src/freedreno/drm/freedreno_bo.c b/src/freedreno/drm/freedreno_bo.c
+--- a/src/freedreno/drm/freedreno_bo.c
++++ b/src/freedreno/drm/freedreno_bo.c
+@@ -511,7 +511,7 @@
+    simple_mtx_unlock(&fence_lock);
+ 
+    for (unsigned i = 0; i < nr; i++) {
+-      fd_fence_flush(bo->fences[i]);
++      fd_fence_flush(fences[i]);
+       fd_fence_del(fences[i]);
+    }
+ }
+@@ -698,6 +698,13 @@
+ int
+ fd_bo_cpu_prep(struct fd_bo *bo, struct fd_pipe *pipe, uint32_t op)
+ {
++#ifdef __APPLE__
++   /* CPU consumers and shared aliases need the native post-cache barrier,
++    * including the IDLE/no-implicit-sync cases. FLUSH alone is not a read. */
++   bo_flush(bo);op&=~FD_BO_PREP_FLUSH;
++   if(!op)return 0;
++   return bo->funcs->cpu_prep(bo,pipe,op);
++#else
+    enum fd_bo_state state = fd_bo_state(bo);
+ 
+    if (state == FD_BO_STATE_IDLE)
+@@ -762,6 +769,7 @@
+       return 0;
+ 
+    return bo->funcs->cpu_prep(bo, pipe, op);
++#endif
+ }
+ 
+ /**
+@@ -779,7 +787,7 @@
+    for (int i = 0; i < bo->nr_fences; i++) {
+       struct fd_fence *f = bo->fences[i];
+ 
+-      if (fd_fence_before(f->pipe->control->fence, f->ufence))
++      if (!redfin_fd_fence_retired(f))
+          continue;
+ 
+       bo->nr_fences--;
+diff --git a/src/freedreno/drm/msm/msm_pipe.c b/src/freedreno/drm/msm/msm_pipe.c
+--- a/src/freedreno/drm/msm/msm_pipe.c
++++ b/src/freedreno/drm/msm/msm_pipe.c
+@@ -263,6 +263,13 @@
+    /* initialize before get_param(): */
+    pipe->dev = dev;
+    msm_pipe->pipe = pipe_id[id];
++#ifdef __APPLE__
++   uint64_t queued_abi=0;
++   if(query_param(pipe,0x52465131u,&queued_abi)||queued_abi!=1) {
++      ERROR_MSG("native retained GPU queue ABI 1 required");goto fail;
++   }
++#endif
++
+ 
+    /* these params should be supported since the first version of drm/msm: */
+    msm_pipe->gpu_id = get_param(pipe, MSM_PARAM_GPU_ID);

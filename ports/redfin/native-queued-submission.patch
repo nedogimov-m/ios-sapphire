@@ -1,0 +1,722 @@
+diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -3,11 +3,10 @@
+  * oosexgang/hackios-xnu-kernel 8e611870, iokit/Kernel/RedwoodGPU.cpp.
+  * Changed 2026-10-24 for Redfin's owned native backend and iOS20H392 surfaces.
+  *
+- * There is one serialized, synchronous GPU queue. Each submission must finish
+- * its actual GPU cache-flush fence before the kernel returns success. This
+- * also establishes when surfaces can be read by the existing CPU display path.
+- * A failed queue/TLB retains every mapped descriptor until the platform reset.
+- * No recovery, false completion, foreign fault clearing or Metal claim.
++ * CPU admission queues retained jobs. The existing serialized hardware
++ * owner still proves its actual GPU fence, audit and cache invalidation;
++ * WaitFence/CPU access and display consumers wait for that real retirement.
++ * A failed queue/TLB retains mapped descriptors until platform reset.
+  *
+  * This file contains Modifications of Original Code subject to the Apple
+  * Public Source License Version2.0 (https://opensource.apple.com/apsl/).
+@@ -31,6 +30,8 @@
+ #include <mach/mach_time.h>
+ #include "RedfinGPUService.h"
+ #include "RedfinGPURuntime.h"
++#include "RedfinGPUQueue.h"
++struct gpu_queued_job;
+ 
+ enum {
+     GemClose=0x09,GetParam=0x40,SetParam=0x41,GemNew=0x42,GemInfo=0x43,
+@@ -64,7 +65,12 @@
+ static IOLock *gLock;
+ static uint32_t gStarts;
+ static uint32_t gBufferLogCount;
+-static uint32_t gRejectLogCount;
++class GPUClientTransaction {
++    IOLock *lock;
++public:
++    explicit GPUClientTransaction(IOLock *value):lock(value){IOLockLock(lock);}
++    ~GPUClientTransaction(){IOLockUnlock(lock);}
++};
+ extern "C" int redfin_graphics_memory_admit(task_t);
+ class GPUTransaction {
+     void *previous;
+@@ -135,17 +141,13 @@
+     if(!redfin_gpu_ready() || !IOService::start(provider))return false;
+     setName("RedwoodGPU");setProperty(kIOUserClientClassKey,"RedwoodGPUUserClient");
+     setProperty("chip-id",0x06020001,32);setProperty("RedfinRuntimeABI",1,32);
++    setProperty("RedfinQueuedSubmissionABI",RF_GQ_ABI,32);
+     if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
+     registerService();return true;
+ }
+-static void redfinGpuGovernor(void *,wait_result_t)
+-{
+-    while(redfin_gpu_ready()) {
+-        {GPUTransaction transaction;(void)redfin_gpu_dvfs_idle();}
+-        IOSleep(100);
+-    }
+-    thread_terminate(current_thread());
+-}
++static bool redfinGpuQueueStart(void);
++static void redfinGpuQueueStop(void);
++static IOReturn redfinGpuQueueBarrier(const msm_timespec *,bool);
+ void RedfinGPUStart(void)
+ {
+     if(__atomic_exchange_n(&gStarts,1,__ATOMIC_ACQ_REL) || !redfin_gpu_ready())return;
+@@ -154,27 +156,23 @@
+     if(!gLock || !provider || !gpu || !gpu->init() || !gpu->attach(provider)) {
+         OSSafeReleaseNULL(gpu);IOLog("REDFIN GPU SERVICE: creation failed\n");return;
+     }
++    if(!redfinGpuQueueStart()) {
++        gpu->detach(provider);gpu->release();
++        GPUTransaction hardware;redfin_gpu_poison("retained GPU queue worker unavailable");return;
++    }
+     if(!gpu->start(provider)){gpu->detach(provider);IOLog("REDFIN GPU SERVICE: publication failed\n");}
+     else {
+-        IOLog("REDFIN GPU SERVICE: RedwoodGPU msm1.7 ready, native A620; synchronous actual fences\n");
++        IOLog("REDFIN GPU SERVICE: RedwoodGPU msm1.7 ready, native A620; retained queued submissions, actual-fence retirement\n");
+         IOLog("REDFIN GPU SERVICE: client-bound fence evidence enabled\n");
+         RedfinMetalConfigure(NULL);
+-        thread_t governor=THREAD_NULL;
+-        kern_return_t status=kernel_thread_start(redfinGpuGovernor,NULL,&governor);
+-        if(status==KERN_SUCCESS) {
+-            thread_set_thread_name(governor,"redfin GPU thermal and idle");thread_deallocate(governor);
+-        } else {
+-            /* Without the independent idle/thermal poller, keep the existing
+-             * minimum OPP rather than admitting an unmonitored boost. */
+-            IOLog("REDFIN GPU DVFS: governor thread creation failed; stopping runtime\n");
+-            GPUTransaction transaction;redfin_gpu_poison("GPU governor unavailable");
+-        }
++        IOLog("REDFIN GPU QUEUE ABI: version=%u jobs=%u byte-budget=%u real-finish-retirement=1\n",RF_GQ_ABI,RF_GQ_MAX_JOBS,RF_GQ_MAX_BYTES);
+     }
+     gpu->release();
+ }
+ void RedfinGPUStop(void)
+ {
+     if(!gLock)return;
++    redfinGpuQueueStop();
+     GPUTransaction transaction;redfin_gpu_stop();
+ }
+ struct gpu_buffer {
+@@ -182,7 +180,8 @@
+     SweetSurface *surface;
+     uint8_t *kernel;
+     uint64_t address,size;
+-    uint32_t flags,fence;
++    uint32_t flags,fence,pending;
++    uint64_t generation;
+     rf_gr_surface_cache cache;
+     bool clientMapped;
+ };
+@@ -209,6 +208,9 @@
+     OSDeclareDefaultStructors(RedwoodGPUUserClient);
+     task_t owner; /* Borrowed during synchronous init/start, before publication. */
+     gpu_buffer *buffers;
++    IOLock *clientLock;
++    rf_gq_client queue;
++    uint64_t nextGeneration;
+     uint32_t nextHandle,nextQueue;
+     bool closed;
+     gpu_buffer *buffer(uint32_t handle);
+@@ -219,6 +221,10 @@
+     IOReturn drop(uint32_t handle);
+     IOReturn mapDescriptor(IOMemoryDescriptor *,uint8_t *,SweetSurface *,uint64_t,uint32_t,uint32_t *);
+ public:
++    IOReturn executeQueued(gpu_queued_job *);
++    void retireQueued(gpu_queued_job *,IOReturn);
++    IOReturn waitQueued(msm_wait *);
++    IOReturn prepareQueued(msm_cpu_prep *);
+     bool initWithTask(task_t,void *,UInt32,OSDictionary *) APPLE_KEXT_OVERRIDE;
+     bool start(IOService *) APPLE_KEXT_OVERRIDE;
+     IOReturn clientClose(void) APPLE_KEXT_OVERRIDE;
+@@ -236,6 +242,7 @@
+ {
+     if(!redfin_gpu_ready() || !IOUserClient::start(provider))return false;
+     if(redfin_graphics_memory_admit(owner))return false;
++    clientLock=IOLockAlloc();if(!clientLock)return false;
+     buffers=IONewZero(gpu_buffer,RF_GR_OBJECTS);return buffers!=NULL;
+ }
+ gpu_buffer *RedwoodGPUUserClient::buffer(uint32_t handle)
+@@ -253,6 +260,7 @@
+         if(!buffers[at].memory){slot=at;break;}
+     }
+     if(slot==RF_GR_OBJECTS)return kIOReturnNoResources;
++    if(nextGeneration==UINT64_MAX)return kIOReturnNoResources;
+     uint64_t address=redfin_gpu_address(size);if(!address)return kIOReturnNoMemory;
+     int error=0;
+     for(uint64_t offset=0;offset<size;offset+=4096) {
+@@ -271,6 +279,7 @@
+     }
+     gpu_buffer *b=&buffers[slot];*b={};
+     b->memory=memory;b->surface=surface;b->kernel=kernel;b->address=address;b->size=size;b->flags=flags;
++    b->generation=++nextGeneration;
+     nextHandle=slot+1;*handle=slot+1;return kIOReturnSuccess;
+ }
+ IOReturn RedwoodGPUUserClient::create(msm_gem_new *r)
+@@ -310,6 +319,12 @@
+ IOReturn RedwoodGPUUserClient::drop(uint32_t handle)
+ {
+     gpu_buffer *b=buffer(handle);if(!b)return kIOReturnBadArgument;
++    uint64_t generation=b->generation;
++    while(b->pending) {
++        (void)IOLockSleep(clientLock,&b->pending,THREAD_UNINT);
++        b=buffer(handle);if(!b||b->generation!=generation)return kIOReturnBadArgument;
++    }
++    GPUTransaction hardware;
+     int error=redfin_gpu_release(b->address,b->size);
+     if(error) {
+         /* These references remain deliberately live; after a failed fence,
+@@ -322,18 +337,24 @@
+ }
+ IOReturn RedwoodGPUUserClient::clientClose(void)
+ {
+-    if(!closed && buffers) {
+-        GPUTransaction transaction;
+-        for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(buffers[i].memory)(void)drop(i+1);
+-        closed=true;
++    if(clientLock) {
++        GPUClientTransaction client(clientLock);queue.closing=true;
++        while(queue.pending)(void)IOLockSleep(clientLock,&queue.pending,THREAD_UNINT);
++        if(!closed&&buffers) {
++            for(unsigned i=0;i<RF_GR_OBJECTS;++i)if(buffers[i].memory)(void)drop(i+1);
++            closed=true;
++        }
+     }
+     if(!isInactive())terminate();return kIOReturnSuccess;
+ }
+ void RedwoodGPUUserClient::free(void)
+ {
+-    if(buffers){
+-        if(!closed){GPUTransaction transaction;for(unsigned i=0;i<RF_GR_OBJECTS;i++)if(buffers[i].memory)(void)drop(i+1);}
+-        IODelete(buffers,gpu_buffer,RF_GR_OBJECTS);buffers=NULL;
++    if(clientLock) {
++        IOLockLock(clientLock);queue.closing=true;
++        while(queue.pending)(void)IOLockSleep(clientLock,&queue.pending,THREAD_UNINT);
++        if(buffers&&!closed)for(unsigned i=0;i<RF_GR_OBJECTS;++i)if(buffers[i].memory)(void)drop(i+1);
++        if(buffers){IODelete(buffers,gpu_buffer,RF_GR_OBJECTS);buffers=NULL;}
++        IOLockUnlock(clientLock);IOLockFree(clientLock);clientLock=NULL;
+     }
+     IOUserClient::free();
+ }
+@@ -350,99 +371,14 @@
+ }
+ IOReturn RedwoodGPUUserClient::clientMemoryForType(UInt32 type,IOOptionBits *options,IOMemoryDescriptor **memory)
+ {
+-    if(!options || !memory || !gLock)return kIOReturnBadArgument;
+-    GPUTransaction transaction;gpu_buffer *b=buffer(type);
+-    if(!b || !redfin_gpu_ready())return kIOReturnNotFound;
+-    b->clientMapped=true;
++    if(!options || !memory || !clientLock)return kIOReturnBadArgument;
++    GPUClientTransaction client(clientLock);gpu_buffer *b=buffer(type);
++    if(!b || closed || queue.closing || !redfin_gpu_ready())return kIOReturnNotFound;
++    __atomic_store_n(&b->clientMapped,true,__ATOMIC_RELEASE);
+     *memory=b->memory;(*memory)->retain();
+     *options=b->surface?b->surface->mapCache:kIOMapWriteCombineCache;return kIOReturnSuccess;
+ }
+-IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
+-{
+-    if(!r->nr_cmds || r->nr_cmds>RF_GR_COMMANDS || !r->nr_bos || r->nr_bos>RF_GR_OBJECTS ||
+-        (r->flags&~0x80000010u) || (r->flags&0xffu)!=0x10u || r->nr_in || r->nr_out || r->in_syncobjs || r->out_syncobjs ||
+-        r->pad || r->queue>nextQueue)return kIOReturnBadArgument;
+-    msm_bo *bos=IONew(msm_bo,r->nr_bos);msm_cmd *commands=IONew(msm_cmd,r->nr_cmds);
+-    uint64_t addresses[RF_GR_COMMANDS];uint32_t words[RF_GR_COMMANDS],count=0;
+-    uint64_t began=0,again=0;
+-    IOReturn result=kIOReturnBadArgument;
+-    if(!bos || !commands){result=kIOReturnNoMemory;goto done;}
+-    if(copyin((user_addr_t)r->bos,bos,r->nr_bos*sizeof(*bos)) ||
+-        copyin((user_addr_t)r->cmds,commands,r->nr_cmds*sizeof(*commands))){result=kIOReturnVMError;goto done;}
+-    for(unsigned i=0;i<r->nr_bos;i++) {
+-        gpu_buffer *b=buffer(bos[i].handle);
+-        if(!b || !rf_gr_submit_bo(bos[i].flags,bos[i].presumed,b?b->address:0)) {
+-            if(gRejectLogCount++<8)IOLog("REDFIN GPU SUBMIT REJECT: BO=%u handle=%u metadata-flags=%#x present=%u\n",
+-                i,bos[i].handle,bos[i].flags,b!=NULL);
+-            goto done;
+-        }
+-    }
+-    for(unsigned i=0;i<r->nr_cmds;i++) {
+-        const msm_cmd *cmd=&commands[i];
+-        if(cmd->type!=1) {if(cmd->type==2 || cmd->type==3)continue;goto done;}
+-        gpu_buffer *b=cmd->index<r->nr_bos?buffer(bos[cmd->index].handle):NULL;
+-        if(!b || cmd->relocs || cmd->pad || !cmd->size || (cmd->offset&3u) ||
+-            (cmd->size&3u) || (uint64_t)cmd->offset+cmd->size>b->size)goto done;
+-        addresses[count]=b->address+cmd->offset;words[count++]=cmd->size/4;
+-    }
+-    if(!count)goto done;
+-    began=gpuNow();again=4ULL*NSEC_PER_MSEC;
+-    for(unsigned i=0;i<r->nr_bos;i++) {
+-        gpu_buffer *b=buffer(bos[i].handle);
+-        if(!b->surface)continue;
+-        /* Native SweetSurface state seed is at+0xc; pixels are separate. */
+-        uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
+-        if(rf_gr_surface_push(&b->cache,seed,began,again,b->clientMapped)) {
+-            redfin_gpu_sync(b->kernel,b->size,true);gTiming.cleaned+=b->size;
+-        } else gTiming.skipped++;
+-    }
+-    redfin_gpu_sync(NULL,0,false);
+-    gTiming.cleaning+=gpuNow()-began;began=gpuNow();
+-    result=gpuError(redfin_gpu_submit(addresses,words,count,&r->fence));
+-    if(result!=kIOReturnSuccess) {
+-        uint64_t address=0;uint32_t fsr=0;
+-        if(redfin_gpu_fault_info(&address,&fsr)) {
+-            bool found=false;
+-            for(unsigned i=0;i<r->nr_bos;++i) {
+-                gpu_buffer *b=buffer(bos[i].handle);
+-                if(address<b->address||address-b->address>=b->size)continue;
+-                found=true;
+-                IOLog("REDFIN GPU FAULT BO: submitted-index=%u handle=%u VA=%#llx bytes=%llu offset=%#llx surface=%u client-mapped=%u flags=%#x FSR=%#x\n",
+-                    i,bos[i].handle,b->address,b->size,address-b->address,b->surface!=NULL,b->clientMapped,b->flags,fsr);
+-                break;
+-            }
+-            if(!found) {
+-                gpu_buffer *previous=NULL;uint64_t end=0;
+-                for(unsigned i=0;i<r->nr_bos;++i) {
+-                    gpu_buffer *b=buffer(bos[i].handle);uint64_t limit=b->address+b->size;
+-                    if(limit<=address&&limit>end){previous=b;end=limit;}
+-                }
+-                IOLog("REDFIN GPU FAULT BO: address=%#llx outside-submitted-BOs=1 count=%u FSR=%#x\n",address,r->nr_bos,fsr);
+-                if(previous)IOLog("REDFIN GPU FAULT PRECEDING: VA=%#llx bytes=%llu end=%#llx gap=%llu surface=%u client-mapped=%u\n",
+-                    previous->address,previous->size,end,address-end,previous->surface!=NULL,previous->clientMapped);
+-            }
+-        }
+-    }
+-    gTiming.submitting+=gpuNow()-began;began=gpuNow();gTiming.submissions++;
+-    if(result==kIOReturnSuccess && (r->fence<=8 || !(r->fence%256))) {
+-        char name[20]={0};proc_selfname(name,sizeof(name));
+-        IOLog("REDFIN GPU CLIENT SUBMIT: name=%s pid=%d fence=%u IBs=%u completed=1\n",
+-            name,proc_selfpid(),r->fence,count);
+-    }
+-    if(result==kIOReturnSuccess)for(unsigned i=0;i<r->nr_bos;i++) {
+-        gpu_buffer *b=buffer(bos[i].handle);b->fence=r->fence;
+-        if(b->surface && (bos[i].flags&2u)) {
+-            /* The GPU has completed. Do not clean stale CPU data over its
+-             * pixels; only invalidate surfaces that this submission writes. */
+-            redfin_gpu_invalidate(b->kernel,b->size);gTiming.invalidated+=b->size;
+-        }
+-    }
+-    gTiming.invalidating+=gpuNow()-began;gpuTiming();
+-done:
+-    if(bos)IODelete(bos,msm_bo,r->nr_bos);
+-    if(commands)IODelete(commands,msm_cmd,r->nr_cmds);
+-    return result;
+-}
++#include "RedfinGPUQueue.inc"
+ static bool parameter(uint32_t param,uint64_t *value)
+ {
+     switch(param) {
+@@ -453,6 +389,7 @@
+     case 5:*value=mach_absolute_time();return true;
+     case 7:*value=1;return true;
+     case 0x10:*value=14;return true;
++    case RF_GQ_PARAM:*value=RF_GQ_ABI;return true;
+     /* A620 uses native UBWC3. Do not advertise A642L UBWC4 parameters. */
+     default:return false;
+     }
+@@ -465,7 +402,7 @@
+         msm_wait wait;msm_madvise madvise;msm_queue queue;msm_query query;drm_close close;
+         redwood_surface surface;redwood_show show;
+     } r;
+-    if(!args || !buffers || closed || !args->structureInput || args->scalarInputCount ||
++    if(!args || !buffers || !clientLock || !args->structureInput || args->scalarInputCount ||
+         args->scalarOutputCount)return kIOReturnBadArgument;
+     size_t expected=0;
+     switch(selector) {
+@@ -488,35 +425,32 @@
+     if(args->structureInputSize!=expected ||
+         (args->structureOutputSize && (!args->structureOutput || args->structureOutputSize<expected)))return kIOReturnBadArgument;
+     bzero(&r,sizeof(r));memcpy(&r,args->structureInput,expected);
+-    GPUTransaction transaction;
+-    if(!redfin_gpu_ready())return kIOReturnNotReady;
+     IOReturn result=kIOReturnSuccess;
++    if(selector==Submit)result=submit(&r.submit);
++    else if(selector==WaitFence)result=waitQueued(&r.wait);
++    else if(selector==CpuPrep)result=prepareQueued(&r.prep);
++    else {
++    GPUClientTransaction client(clientLock);
++    if(closed||queue.closing||!redfin_gpu_ready())return kIOReturnNotReady;
+     switch(selector) {
+     case GetParam:if(r.param.pipe!=0x10 || !parameter(r.param.param,&r.param.value))result=kIOReturnBadArgument;break;
+     case SetParam:break;
+-    case GemNew:result=create(&r.create);break;
++    case GemNew:{GPUTransaction hardware;result=create(&r.create);break;}
+     case GemInfo:result=info(&r.info);break;
+-    case CpuPrep:
+-        if(!buffer(r.prep.handle))result=kIOReturnBadArgument;
+-        else if(!redfin_gpu_done(buffer(r.prep.handle)->fence))result=kIOReturnBusy;
+-        break;
+     case CpuFini:if(!buffer(*(uint32_t *)&r))result=kIOReturnBadArgument;break;
+-    case Submit:result=submit(&r.submit);break;
+-    case WaitFence:
+-        if(!r.wait.fence || r.wait.fence>redfin_gpu_last() || !redfin_gpu_done(r.wait.fence))result=kIOReturnTimeout;
+-        break;
+     case Madvise:if(!buffer(r.madvise.handle))result=kIOReturnBadArgument;else r.madvise.retained=1;break;
+     case QueueNew:if(r.queue.flags || r.queue.prio || nextQueue==UINT32_MAX)result=kIOReturnBadArgument;else r.queue.id=++nextQueue;break;
+     case QueueClose:if(!*(uint32_t *)&r || *(uint32_t *)&r>nextQueue)result=kIOReturnBadArgument;break;
+     case QueueQuery:
+         if(!r.query.id || r.query.id>nextQueue || r.query.param || r.query.len<8 || !r.query.data)result=kIOReturnBadArgument;
+-        else {uint64_t faults=0;if(copyout(&faults,(user_addr_t)r.query.data,8))result=kIOReturnVMError;}
++        else {uint64_t faults=queue.failed?1:0;if(copyout(&faults,(user_addr_t)r.query.data,8))result=kIOReturnVMError;}
+         break;
+     case GemClose:result=drop(r.close.handle);break;
+-    case Surface:result=importSurface(&r.surface);break;
++    case Surface:{GPUTransaction hardware;result=importSurface(&r.surface);break;}
+     case Show:result=kIOReturnUnsupported;break; /* Use IOMobileFramebuffer/IOSurface for display. */
+     default:result=kIOReturnUnsupported;break;
+     }
++    }
+     if(result==kIOReturnSuccess && args->structureOutputSize) {
+         memcpy(args->structureOutput,&r,expected);args->structureOutputSize=(uint32_t)expected;
+     }
+diff --git a/iokit/Kernel/arm/RedfinGPUDisplay.inc b/iokit/Kernel/arm/RedfinGPUDisplay.inc
+--- a/iokit/Kernel/arm/RedfinGPUDisplay.inc
++++ b/iokit/Kernel/arm/RedfinGPUDisplay.inc
+@@ -254,6 +254,9 @@
+     if (!RedfinGPUDisplayWritable()) return -1;
+     if (!gLock || !redfin_gpu_ready() || !gd_selected() || !record ||
+         !redfin_display_geometry_valid(g)) return 0;
++    if(redfinGpuQueueBarrier(NULL,false)!=kIOReturnSuccess) {
++        gd_hold_uncertain();return -1;
++    }
+     GPUTransaction transaction;
+     if (!RedfinGPUDisplayWritable()) return -1;
+     if (!redfin_gpu_ready() || gd.disabled) return 0;
+diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.cpp
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -1373,6 +1373,8 @@
+ 	return s;
+ }
+ 
++extern "C" int redfin_gpu_queue_cpu_barrier(void);
++
+ IOReturn
+ IOSurfaceRootUserClient::trapLock(void *id, __unused void *options, void *seedOut,
+     void *, void *, void *)
+@@ -1381,7 +1383,8 @@
+ 	if (s == NULL) {
+ 		return kIOReturnNotFound;
+ 	}
+-	IOReturn ret = sweet_surface_seed_out(s, seedOut, false);
++	IOReturn ret = (IOReturn)redfin_gpu_queue_cpu_barrier();
++	if (ret == kIOReturnSuccess) ret = sweet_surface_seed_out(s, seedOut, false);
+ 	s->release();
+ 	return ret;
+ }
+diff --git a/iokit/Kernel/arm/RedfinGPUQueue.h b/iokit/Kernel/arm/RedfinGPUQueue.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPUQueue.h
+@@ -0,0 +1,59 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_GPU_QUEUE_H
++#define REDFIN_GPU_QUEUE_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <sys/errno.h>
++#define RF_GQ_ABI 1u
++#define RF_GQ_PARAM 0x52465131u
++#define RF_GQ_MAX_JOBS 16u
++#define RF_GQ_MAX_BYTES (4u<<20)
++#define RF_GQ_WAIT_NS UINT64_C(2000000000)
++struct rf_gq_budget {uint32_t jobs;uint64_t bytes;};
++struct rf_gq_client {uint32_t issued,retired,completed,failed,pending;int first_error;bool closing;};
++static inline int rf_gq_reserve(struct rf_gq_budget *b,uint64_t bytes)
++{
++    if(!b||!bytes||bytes>RF_GQ_MAX_BYTES)return EINVAL;
++    if(b->jobs>=RF_GQ_MAX_JOBS||b->bytes>RF_GQ_MAX_BYTES-bytes)return EAGAIN;
++    ++b->jobs;b->bytes+=bytes;return 0;
++}
++static inline int rf_gq_unreserve(struct rf_gq_budget *b,uint64_t bytes)
++{
++    if(!b||!b->jobs||!bytes||bytes>b->bytes)return EINVAL;
++    --b->jobs;b->bytes-=bytes;return 0;
++}
++/* Only the serialized accept path issues a client fence. It denotes queued
++ * work until retirement records a real native GPU finish and cache invalidate. */
++static inline int rf_gq_accept(struct rf_gq_client *q,uint32_t *fence)
++{
++    if(!q||!fence||q->closing||q->failed)return ECANCELED;
++    if(q->issued==UINT32_MAX||q->pending>=RF_GQ_MAX_JOBS)return EOVERFLOW;
++    *fence=++q->issued;++q->pending;return 0;
++}
++static inline int rf_gq_retire(struct rf_gq_client *q,uint32_t fence,int error)
++{
++    if(!q||!fence||!q->pending||fence!=q->retired+1||fence>q->issued)return EPROTO;
++    q->retired=fence;--q->pending;
++    if(error&&!q->failed){q->failed=fence;q->first_error=error;}
++    if(!q->failed)q->completed=fence;
++    return 0;
++}
++static inline int rf_gq_status(const struct rf_gq_client *q,uint32_t fence)
++{
++    if(!q||!fence||fence>q->issued)return EINVAL;
++    /* A failed predecessor does not release a later job's retained pages. */
++    if(fence>q->retired)return EAGAIN;
++    if(q->failed&&fence>=q->failed)return q->first_error?q->first_error:EIO;
++    return fence<=q->completed?0:EAGAIN;
++}
++/* drm_msm uses an absolute monotonic timespec. Zero is a nonblocking poll;
++ * huge valid deadlines are bounded without overflowing their conversion. */
++static inline int rf_gq_deadline(int64_t seconds,int64_t nanos,uint64_t now,uint64_t *end)
++{
++    if(!end||seconds<0||nanos<0||nanos>=1000000000)return EINVAL;
++    uint64_t limit=now>UINT64_MAX-RF_GQ_WAIT_NS?UINT64_MAX:now+RF_GQ_WAIT_NS;
++    uint64_t requested=(uint64_t)seconds>(UINT64_MAX-(uint64_t)nanos)/UINT64_C(1000000000)?UINT64_MAX:
++        (uint64_t)seconds*UINT64_C(1000000000)+(uint64_t)nanos;
++    *end=requested<limit?requested:limit;return 0;
++}
++#endif
+diff --git a/iokit/Kernel/arm/RedfinGPUQueue.inc b/iokit/Kernel/arm/RedfinGPUQueue.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPUQueue.inc
+@@ -0,0 +1,251 @@
++/* SPDX-License-Identifier: MIT
++ * CPU admission is asynchronous; a single native owner executes retained jobs
++ * using the already verified hardware submit/fence path. No early success is
++ * reported by WaitFence/CpuPrep or display consumers. Lock order:
++ * client -> queue (short admission), client -> hardware (map/release only).
++ * The worker never acquires a client/queue lock while holding hardware.
++ */
++struct gpu_queued_bo {gpu_buffer *buffer;uint32_t handle,flags;};
++struct gpu_queued_job {
++    gpu_queued_job *next;
++    RedwoodGPUUserClient *owner;
++    gpu_queued_bo *bos;
++    uint64_t addresses[RF_GR_COMMANDS],sequence,charge,accepted;
++    uint32_t words[RF_GR_COMMANDS],count,nr_bos,fence,physical_fence;
++    char process[20];int pid;
++};
++static struct {
++    IOLock *lock;
++    gpu_queued_job *head,*tail;
++    rf_gq_budget budget;
++    uint64_t issued,retired,first_failed,executed;
++    bool stopping;
++} gGPUQueue;
++static uint64_t gpuQueueAbsolute(uint64_t ns)
++{uint64_t ticks=0;nanoseconds_to_absolutetime(ns,&ticks);return ticks;}
++static IOReturn gpuQueueReserve(uint64_t bytes)
++{
++    if(!gGPUQueue.lock)return kIOReturnNotReady;
++    uint64_t end=gpuQueueAbsolute(gpuNow()+RF_GQ_WAIT_NS);
++    IOLockLock(gGPUQueue.lock);
++    IOReturn result=kIOReturnSuccess;
++    for(;;) {
++        if(gGPUQueue.stopping||!redfin_gpu_ready()){result=kIOReturnNotReady;break;}
++        int error=rf_gq_reserve(&gGPUQueue.budget,bytes);
++        if(!error)break;
++        if(error!=EAGAIN){result=gpuError(error);break;}
++        int waited=IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.budget,end,THREAD_ABORTSAFE);
++        if(waited==THREAD_TIMED_OUT){result=kIOReturnTimeout;break;}
++        if(waited!=THREAD_AWAKENED){result=kIOReturnAborted;break;}
++    }
++    IOLockUnlock(gGPUQueue.lock);return result;
++}
++static void gpuQueueUnreserve(uint64_t bytes)
++{
++    IOLockLock(gGPUQueue.lock);
++    if(rf_gq_unreserve(&gGPUQueue.budget,bytes))redfin_gpu_poison("queued admission accounting changed");
++    IOLockWakeup(gGPUQueue.lock,&gGPUQueue.budget,false);IOLockUnlock(gGPUQueue.lock);
++}
++static IOReturn redfinGpuQueueBarrier(const msm_timespec *timeout,bool nonblocking)
++{
++    if(!gGPUQueue.lock)return kIOReturnNotReady;
++    uint64_t end=0,now=gpuNow();
++    if(timeout) {if(rf_gq_deadline(timeout->seconds,timeout->nanoseconds,now,&end))return kIOReturnBadArgument;}
++    else end=now+RF_GQ_WAIT_NS;
++    IOLockLock(gGPUQueue.lock);uint64_t target=gGPUQueue.issued;
++    IOReturn result=kIOReturnSuccess;
++    while(gGPUQueue.retired<target) {
++        if(nonblocking){result=kIOReturnBusy;break;}
++        if(gpuNow()>=end){result=kIOReturnTimeout;break;}
++        int waited=IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.retired,gpuQueueAbsolute(end),THREAD_ABORTSAFE);
++        if(waited==THREAD_TIMED_OUT){result=kIOReturnTimeout;break;}
++        if(waited!=THREAD_AWAKENED){result=kIOReturnAborted;break;}
++    }
++    if(result==kIOReturnSuccess&&gGPUQueue.first_failed&&gGPUQueue.first_failed<=target)result=kIOReturnIOError;
++    IOLockUnlock(gGPUQueue.lock);return result;
++}
++static void redfinGpuQueueWorker(void *,wait_result_t)
++{
++    for(;;) {
++        IOLockLock(gGPUQueue.lock);
++        if(!gGPUQueue.head) {
++            if(gGPUQueue.stopping||!redfin_gpu_ready()){IOLockUnlock(gGPUQueue.lock);break;}
++            uint64_t wake=0;clock_interval_to_deadline(100,NSEC_PER_MSEC,&wake);
++            (void)IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.head,wake,THREAD_UNINT);
++        }
++        gpu_queued_job *job=gGPUQueue.head;bool cancelled=gGPUQueue.stopping;
++        if(job){gGPUQueue.head=job->next;if(!gGPUQueue.head)gGPUQueue.tail=NULL;}
++        IOLockUnlock(gGPUQueue.lock);
++        if(!job) {if(redfin_gpu_ready()){GPUTransaction hardware;(void)redfin_gpu_dvfs_idle();}continue;}
++        IOReturn result=kIOReturnNotReady;
++        {GPUTransaction hardware;if(!cancelled&&redfin_gpu_ready())result=job->owner->executeQueued(job);}
++        /* Hardware is unlocked before any client waiter or object release. */
++        job->owner->retireQueued(job,result);
++        IOLockLock(gGPUQueue.lock);
++        if(job->sequence!=gGPUQueue.retired+1)redfin_gpu_poison("global queued retirement order changed");
++        gGPUQueue.retired=job->sequence;++gGPUQueue.executed;
++        if(result!=kIOReturnSuccess&&!gGPUQueue.first_failed)gGPUQueue.first_failed=job->sequence;
++        IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);IOLockUnlock(gGPUQueue.lock);
++        RedwoodGPUUserClient *owner=job->owner;uint64_t charge=job->charge;
++        IODelete(job->bos,gpu_queued_bo,job->nr_bos);IODelete(job,gpu_queued_job,1);
++        gpuQueueUnreserve(charge);owner->release();
++    }
++    IOLockLock(gGPUQueue.lock);gGPUQueue.stopping=true;
++    IOLockWakeup(gGPUQueue.lock,&gGPUQueue.budget,false);IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);
++    IOLockUnlock(gGPUQueue.lock);thread_terminate(current_thread());
++}
++static bool redfinGpuQueueStart(void)
++{
++    gGPUQueue.lock=IOLockAlloc();if(!gGPUQueue.lock)return false;
++    thread_t worker=THREAD_NULL;
++    kern_return_t result=kernel_thread_start(redfinGpuQueueWorker,NULL,&worker);
++    if(result!=KERN_SUCCESS){gGPUQueue.stopping=true;return false;}
++    thread_set_thread_name(worker,"redfin retained GPU queue");thread_deallocate(worker);return true;
++}
++static void redfinGpuQueueStop(void)
++{
++    if(!gGPUQueue.lock)return;
++    IOLockLock(gGPUQueue.lock);gGPUQueue.stopping=true;
++    IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);IOLockWakeup(gGPUQueue.lock,&gGPUQueue.budget,false);
++    IOLockUnlock(gGPUQueue.lock);
++}
++IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
++{
++    if(!r->nr_cmds||r->nr_cmds>RF_GR_COMMANDS||!r->nr_bos||r->nr_bos>RF_GR_OBJECTS||
++       (r->flags&~0x80000010u)||(r->flags&0xffu)!=0x10u||r->nr_in||r->nr_out||r->in_syncobjs||r->out_syncobjs||r->pad)
++        return kIOReturnBadArgument;
++    uint64_t charge=sizeof(gpu_queued_job)+(uint64_t)r->nr_bos*sizeof(gpu_queued_bo)+(uint64_t)r->nr_cmds*sizeof(msm_cmd);
++    IOReturn result=gpuQueueReserve(charge);if(result!=kIOReturnSuccess)return result;
++    gpu_queued_job *job=IONewZero(gpu_queued_job,1);
++    msm_bo *bos=IONew(msm_bo,r->nr_bos);msm_cmd *commands=IONew(msm_cmd,r->nr_cmds);
++    if(job)job->bos=IONewZero(gpu_queued_bo,r->nr_bos);
++    if(!job||!job->bos||!bos||!commands){result=kIOReturnNoMemory;goto done;}
++    if(copyin((user_addr_t)r->bos,bos,r->nr_bos*sizeof(*bos))||copyin((user_addr_t)r->cmds,commands,r->nr_cmds*sizeof(*commands))) {
++        result=kIOReturnVMError;goto done;
++    }
++    IOLockLock(clientLock);
++    if(closed||queue.closing||queue.failed||!redfin_gpu_ready()||r->queue>nextQueue){result=kIOReturnNotReady;goto unlock;}
++    for(unsigned i=0;i<r->nr_bos;++i) {
++        gpu_buffer *b=buffer(bos[i].handle);
++        if(!b||!rf_gr_submit_bo(bos[i].flags,bos[i].presumed,b?b->address:0)||b->pending==UINT32_MAX){result=kIOReturnBadArgument;goto unlock;}
++        job->bos[i]={b,bos[i].handle,bos[i].flags};
++    }
++    for(unsigned i=0;i<r->nr_cmds;++i) {
++        const msm_cmd *cmd=&commands[i];if(cmd->type!=1){if(cmd->type==2||cmd->type==3)continue;result=kIOReturnBadArgument;goto unlock;}
++        gpu_buffer *b=cmd->index<r->nr_bos?job->bos[cmd->index].buffer:NULL;
++        if(!b||cmd->relocs||cmd->pad||!cmd->size||(cmd->offset&3u)||(cmd->size&3u)||
++            (uint64_t)cmd->offset+cmd->size>b->size){result=kIOReturnBadArgument;goto unlock;}
++        job->addresses[job->count]=b->address+cmd->offset;job->words[job->count++]=cmd->size/4;
++    }
++    if(!job->count){result=kIOReturnBadArgument;goto unlock;}
++    /* Publish this caller CPU's WC writes before a different CPU executes
++     * the retained IBs. The worker repeats the native cache maintenance. */
++    redfin_gpu_sync(NULL,0,false);
++    IOLockLock(gGPUQueue.lock);
++    if(gGPUQueue.stopping||!redfin_gpu_ready()||gGPUQueue.issued==UINT64_MAX)result=kIOReturnNotReady;
++    else result=gpuError(rf_gq_accept(&queue,&job->fence));
++    if(result==kIOReturnSuccess) {
++        job->owner=this;retain();job->nr_bos=r->nr_bos;job->charge=charge;job->accepted=gpuNow();
++        job->sequence=++gGPUQueue.issued;proc_selfname(job->process,sizeof(job->process));job->pid=proc_selfpid();
++        for(unsigned i=0;i<r->nr_bos;++i){++job->bos[i].buffer->pending;job->bos[i].buffer->fence=job->fence;}
++        if(gGPUQueue.tail)gGPUQueue.tail->next=job;else gGPUQueue.head=job;gGPUQueue.tail=job;
++        r->fence=job->fence;job=NULL;IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);
++    }
++    IOLockUnlock(gGPUQueue.lock);
++unlock:
++    IOLockUnlock(clientLock);
++done:
++    if(bos)IODelete(bos,msm_bo,r->nr_bos);if(commands)IODelete(commands,msm_cmd,r->nr_cmds);
++    if(job){if(job->bos)IODelete(job->bos,gpu_queued_bo,r->nr_bos);IODelete(job,gpu_queued_job,1);}
++    if(result!=kIOReturnSuccess)gpuQueueUnreserve(charge);return result;
++}
++static void gpuQueueFault(const gpu_queued_job *job)
++{
++    uint64_t address=0;uint32_t fsr=0;if(!redfin_gpu_fault_info(&address,&fsr))return;
++    gpu_buffer *previous=NULL;uint64_t end=0;
++    for(unsigned i=0;i<job->nr_bos;++i) {
++        gpu_buffer *b=job->bos[i].buffer;
++        if(address>=b->address&&address-b->address<b->size) {
++            IOLog("REDFIN GPU FAULT BO: submitted-index=%u handle=%u VA=%#llx bytes=%llu offset=%#llx surface=%u client-mapped=%u flags=%#x FSR=%#x\n",
++                i,job->bos[i].handle,b->address,b->size,address-b->address,b->surface!=NULL,
++                __atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE),b->flags,fsr);return;
++        }
++        uint64_t limit=b->address+b->size;if(limit<=address&&limit>end){previous=b;end=limit;}
++    }
++    IOLog("REDFIN GPU FAULT BO: address=%#llx outside-submitted-BOs=1 count=%u FSR=%#x\n",address,job->nr_bos,fsr);
++    if(previous)IOLog("REDFIN GPU FAULT PRECEDING: VA=%#llx bytes=%llu end=%#llx gap=%llu surface=%u client-mapped=%u\n",
++        previous->address,previous->size,end,address-end,previous->surface!=NULL,
++        __atomic_load_n(&previous->clientMapped,__ATOMIC_ACQUIRE));
++}
++IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job)
++{
++    uint64_t began=gpuNow(),again=4ULL*NSEC_PER_MSEC;
++    for(unsigned i=0;i<job->nr_bos;++i) {
++        gpu_buffer *b=job->bos[i].buffer;if(!b->surface)continue;
++        uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
++        if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
++            redfin_gpu_sync(b->kernel,b->size,true);gTiming.cleaned+=b->size;
++        } else ++gTiming.skipped;
++    }
++    redfin_gpu_sync(NULL,0,false);gTiming.cleaning+=gpuNow()-began;began=gpuNow();
++    IOReturn result=gpuError(redfin_gpu_submit(job->addresses,job->words,job->count,&job->physical_fence));
++    if(result!=kIOReturnSuccess)gpuQueueFault(job);
++    gTiming.submitting+=gpuNow()-began;began=gpuNow();++gTiming.submissions;
++    if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i) {
++        gpu_buffer *b=job->bos[i].buffer;
++        if(b->surface&&(job->bos[i].flags&2u)){redfin_gpu_invalidate(b->kernel,b->size);gTiming.invalidated+=b->size;}
++    }
++    gTiming.invalidating+=gpuNow()-began;gpuTiming();
++    if(job->fence<=8||!(job->fence%256)||result!=kIOReturnSuccess)
++        IOLog("REDFIN GPU QUEUED FINISH: name=%s pid=%d client-fence=%u physical-fence=%u IBs=%u actual-finish=%u result=%#x age-us=%llu\n",
++            job->process,job->pid,job->fence,job->physical_fence,job->count,result==kIOReturnSuccess,result,(gpuNow()-job->accepted)/1000);
++    return result;
++}
++void RedwoodGPUUserClient::retireQueued(gpu_queued_job *job,IOReturn result)
++{
++    IOLockLock(clientLock);
++    for(unsigned i=0;i<job->nr_bos;++i) {
++        gpu_buffer *b=job->bos[i].buffer;
++        if(!b->pending)redfin_gpu_poison("queued BO ownership counter changed");else --b->pending;
++        IOLockWakeup(clientLock,&b->pending,false);
++    }
++    int error=result==kIOReturnSuccess?0:result==kIOReturnTimeout?ETIMEDOUT:result==kIOReturnNotReady?ECANCELED:EIO;
++    if(rf_gq_retire(&queue,job->fence,error)) {
++        queue.failed=1;queue.first_error=EIO;if(queue.pending)--queue.pending;
++        redfin_gpu_poison("client queued retirement order changed");
++    }
++    IOLockWakeup(clientLock,&queue.pending,false);IOLockWakeup(clientLock,&queue.completed,false);
++    IOLockUnlock(clientLock);
++}
++IOReturn RedwoodGPUUserClient::waitQueued(msm_wait *r)
++{
++    uint64_t end=0;if(r->flags||rf_gq_deadline(r->timeout.seconds,r->timeout.nanoseconds,gpuNow(),&end))return kIOReturnBadArgument;
++    IOLockLock(clientLock);IOReturn result=kIOReturnSuccess;
++    if(r->queue>nextQueue){result=kIOReturnBadArgument;goto done;}
++    for(;;) {
++        int status=rf_gq_status(&queue,r->fence);
++        if(status!=EAGAIN){result=gpuError(status);break;}
++        if(gpuNow()>=end){result=kIOReturnTimeout;break;}
++        int waited=IOLockSleepDeadline(clientLock,&queue.completed,gpuQueueAbsolute(end),THREAD_ABORTSAFE);
++        if(waited==THREAD_TIMED_OUT){result=kIOReturnTimeout;break;}
++        if(waited!=THREAD_AWAKENED){result=kIOReturnAborted;break;}
++    }
++done:IOLockUnlock(clientLock);return result;
++}
++IOReturn RedwoodGPUUserClient::prepareQueued(msm_cpu_prep *r)
++{
++    if(r->op&~7u)return kIOReturnBadArgument;
++    IOLockLock(clientLock);gpu_buffer *b=buffer(r->handle);
++    if(!b||closed||queue.closing){IOLockUnlock(clientLock);return kIOReturnBadArgument;}
++    uint64_t generation=b->generation;IOLockUnlock(clientLock);
++    IOReturn result=redfinGpuQueueBarrier(&r->timeout,(r->op&4u)!=0);if(result!=kIOReturnSuccess)return result;
++    IOLockLock(clientLock);b=buffer(r->handle);
++    if(!b||b->generation!=generation)result=kIOReturnBadArgument;
++    IOLockUnlock(clientLock);return result;
++}
++
++extern "C" int redfin_gpu_queue_cpu_barrier(void)
++{
++    /* No GPU service is published in non-GUI/bootstrap profiles. */
++    return gGPUQueue.lock?(int)redfinGpuQueueBarrier(NULL,false):(int)kIOReturnSuccess;
++}

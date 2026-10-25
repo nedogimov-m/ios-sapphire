@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import unittest
 
-from ports.redfin import gpu_command,metal_userland,mkadt
+from ports.redfin import gpu_command,metal_userland,metal_queued_userland,mkadt
 from ports.redfin.wifi_userland import _encode_same_size
 
 
@@ -65,26 +65,27 @@ int main(void){
 #include <pthread.h>
 #include <stdlib.h>
 #include <dispatch/dispatch.h>
-'''+metal_userland.EXECUTION+r'''
+'''+metal_queued_userland.EXECUTION+r'''
 int main(void) {
  dispatch_group_t first=dispatch_group_create(),second=dispatch_group_create(),third=dispatch_group_create();
  dispatch_semaphore_t started=dispatch_semaphore_create(0),release=dispatch_semaphore_create(0);
  dispatch_semaphore_t submitted=dispatch_semaphore_create(0);
  __block unsigned output=0;
  dispatch_group_enter(first);
- redfin_metal_schedule(first,^{
+ redfin_metal_schedule(first,^(dispatch_group_t previous,dispatch_block_t finish){
+  (void)previous;
   dispatch_semaphore_signal(started);
   assert(!dispatch_semaphore_wait(release,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
-  output=41;
+  output=41;finish();
  });
  assert(!dispatch_semaphore_wait(started,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
  assert(dispatch_group_wait(first,DISPATCH_TIME_NOW)!=0 && !output);
  dispatch_group_enter(second);
- redfin_metal_schedule(second,^{assert(output==41);++output;});
+ redfin_metal_schedule(second,^(dispatch_group_t previous,dispatch_block_t finish){(void)previous;assert(output==41);++output;finish();});
  assert(dispatch_group_wait(second,DISPATCH_TIME_NOW)!=0);
  dispatch_group_enter(third);
  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE,0),^{
-  redfin_metal_schedule(third,^{assert(output==42);++output;});
+  redfin_metal_schedule(third,^(dispatch_group_t previous,dispatch_block_t finish){(void)previous;assert(output==42);++output;finish();});
   dispatch_semaphore_signal(submitted);
  });
  assert(dispatch_semaphore_wait(submitted,dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC))!=0);
@@ -95,7 +96,7 @@ int main(void) {
  assert(!dispatch_group_wait(second,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
  assert(!dispatch_group_wait(first,DISPATCH_TIME_NOW) && output==43);
  for(unsigned i=0;i<200;++i) {
-  dispatch_group_enter(first);redfin_metal_schedule(first,^{});
+  dispatch_group_enter(first);redfin_metal_schedule(first,^(dispatch_group_t previous,dispatch_block_t finish){(void)previous;finish();finish();});
   assert(!dispatch_group_wait(first,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
  }
  dispatch_release(first);dispatch_release(second);dispatch_release(third);

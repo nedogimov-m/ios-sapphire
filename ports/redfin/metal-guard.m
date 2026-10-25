@@ -82,6 +82,7 @@ int redfin_metal_hardware_ready(void)
     io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("RedwoodGPU"));
     int valid=service && number(service,CFSTR("chip-id"),0x06020001) &&
         number(service,CFSTR("RedfinRuntimeABI"),1) &&
+        number(service,CFSTR("RedfinQueuedSubmissionABI"),1) &&
         (number(service,CFSTR("RedfinMetalPolicy"),1) ||
          number(service,CFSTR("RedfinMetalPolicy"),2));
     if (service) IOObjectRelease(service);

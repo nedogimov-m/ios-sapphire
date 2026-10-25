@@ -237,7 +237,7 @@ def main(argv=None):
                                          'wifi-firmware.patch', 'wifi-fw-source.patch', 'wifi-smp2p.patch',
                                          'wifi-fw-build.patch', 'wifi-radio.patch', 'wifi-network.patch',
                                          'wifi-network-build.patch', 'wifi-gui.patch', 'touch-response.patch', 'preinit-progress.patch',
-                                         'userspace-waits.patch', 'gpu-service.patch', 'graphics-eagl.patch', 'graphics-physical.patch', 'graphics-journal.patch', 'graphics-exec.patch', 'graphics-memory.patch', 'graphics-lifecycle.patch', 'touch-reconnect.patch', 'platform-entitlements.patch', 'display-presenter.patch', 'device-identity.patch', 'photos-exec.patch', 'gpu-display.patch', 'userland-platform.patch', 'gui-integration.patch', 'keychain-descriptors.patch', 'platform-power.patch', 'metal-platform.patch', 'platform-readiness.patch', 'native-validated-platform.patch', 'native-observability.patch', 'native-tcc-observation.patch', 'native-session-performance.patch', 'sensor-platform.patch', 'native-sensor-cold.patch', 'native-sandbox.patch', 'native-gpu-dvfs.patch', 'native-sensor-discovery.patch', 'native-failure-capture.patch', 'native-surface-lifecycle.patch', 'native-runtime-queues.patch'), 21):
+                                         'userspace-waits.patch', 'gpu-service.patch', 'graphics-eagl.patch', 'graphics-physical.patch', 'graphics-journal.patch', 'graphics-exec.patch', 'graphics-memory.patch', 'graphics-lifecycle.patch', 'touch-reconnect.patch', 'platform-entitlements.patch', 'display-presenter.patch', 'device-identity.patch', 'photos-exec.patch', 'gpu-display.patch', 'userland-platform.patch', 'gui-integration.patch', 'keychain-descriptors.patch', 'platform-power.patch', 'metal-platform.patch', 'platform-readiness.patch', 'native-validated-platform.patch', 'native-observability.patch', 'native-tcc-observation.patch', 'native-session-performance.patch', 'sensor-platform.patch', 'native-sensor-cold.patch', 'native-sandbox.patch', 'native-gpu-dvfs.patch', 'native-sensor-discovery.patch', 'native-failure-capture.patch', 'native-surface-lifecycle.patch', 'native-runtime-queues.patch', 'native-queued-submission.patch'), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)
@@ -296,6 +296,20 @@ def main(argv=None):
                 'ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"',
                 'ARCHS="arm64" VALID_ARCHS="arm64" '
                 'OTHER_CFLAGS="-mkernel -nostdinc -Wno-packed -mcpu=cortex-a53"')
+            # Preserve exact compiler/flags while reusing unchanged native
+            # objects in CI. ccache validates source/header/compiler contents.
+            ccache = shutil.which("ccache", path=environment["PATH"])
+            result["ccache_enabled"] = bool(ccache)
+            if ccache:
+                wrappers = work / "ccache-bin"
+                wrappers.mkdir(exist_ok=True)
+                for tool, variable in (("clang", "CC"), ("clang++", "CXX")):
+                    compiler = run(["xcrun", "--find", tool], capture=True)
+                    wrapper = wrappers / tool
+                    wrapper.write_text("#!/bin/sh\nexec " + shlex.join([ccache, compiler]) + ' "$@"\n')
+                    wrapper.chmod(0o755)
+                    source = replace_once(source, 'export ' + variable + '="$(xcrun -find ' + tool + ')"',
+                                          'export ' + variable + '=' + shlex.quote(str(wrapper)))
             # Always ask make to evaluate dependencies; the pinned builder's
             # existence check otherwise silently returns an old final kernel.
             source = replace_once(source,

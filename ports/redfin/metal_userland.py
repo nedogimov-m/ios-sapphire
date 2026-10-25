@@ -539,6 +539,8 @@ int redfin_metal_binding_statistics(id device,uint64_t *counts,size_t words)
 }
 
 '''
+    from ports.redfin.metal_queued_userland import adapt as adapt_queued
+    text=adapt_queued(text)
     return text.replace('/redwood/', '/redfin/').replace('libredwoodair.dylib', 'libredfinair.dylib')
 
 

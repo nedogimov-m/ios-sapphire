@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "metal-queued-resource-check.inc"
 
 int redfin_metal_resource_check(const char *path, uint64_t nonce);
 
@@ -216,7 +217,7 @@ int redfin_metal_resource_check(const char *path,uint64_t nonce)
       (unsigned long long)nonce,cold,warm,(unsigned long long)second[12],
       (unsigned long long)(second[18]-first[18]),(unsigned long long)second[16],
       (unsigned long long)second[17],persistent);
-   return persistent;
+   return persistent&&redfin_resource_queued(nonce);
 }
 
 #ifdef REDFIN_METAL_RESOURCE_STANDALONE

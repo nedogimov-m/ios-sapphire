@@ -104,6 +104,8 @@ def main():
                            ('metal-ordering.patch','metal-ordering.h','metal-ordering.inc')]
                 inputs += [ROOT/'ports/redfin'/name for name in
                            ('metal-bindings.patch','metal-bindings.h','metal-bindings.inc')]
+                inputs += [ROOT/'ports/redfin'/name for name in
+                           ('metal-queued-submission.patch','metal-queued.h','metal-queued.inc')]
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -181,6 +183,10 @@ def main():
                         shutil.copy2(ROOT/'ports/redfin'/('metal-bindings.'+suffix),
                                      source/'src/compiler/air'/('redfin_metal_bindings.'+suffix))
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-bindings.patch'],source)
+                    for suffix in ('h','inc'):
+                        shutil.copy2(ROOT/'ports/redfin'/('metal-queued.'+suffix),
+                                     source/'src/compiler/air'/('redfin_metal_queued.'+suffix))
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-queued-submission.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -273,6 +279,8 @@ def main():
                                   ('metal-ordering.h','metal-ordering-check.inc')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal-bindings.h','metal-bindings-check.inc')]
+                metal_sources += [ROOT/'ports/redfin'/name for name in
+                                  ('metal_queued_userland.py','metal-queued.h','metal-queued-check.inc','metal-queued-resource-check.inc')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)

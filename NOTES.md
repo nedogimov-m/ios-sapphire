@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN retained queue and separate Metal completion implemented — 2026-10-26
+
+Source base831584d plus this coherent block. Queue ABI1/parameter0x52465131;
+16jobs/4MiB metadata admission, logical per-client fences and real hardware/
+post-audit/cache retirement. Keep the verified low-level synchronous A620
+submit under one retained worker; overlap CPU encoding/admission with it.
+BO counters/generations and client retains preserve original descriptor/pages/
+surfaces until actual retirement, including close/error/stop. WaitFence does
+not release a later job merely because its predecessor failed. Display and
+IOSurface/alias CPU consumers wait outside the hardware/client lock.
+
+Metal publishes Gallium fences before off-thread wait, then retires under the
+frontend gate. Per-write epochs preserve newer pending writes, and CPU drains
+cover prior tickets even when the current scope is empty. Device destruction
+defers through ticket ownership. Keep two bounded in-flight commands and FIFO
+resource/status completion. Scheduled/Completed/slots/callbacks wait for real
+retirement; raw encoder captures keep user deallocators off its serial queue.
+Mesa's ufence/idle/recycling shortcuts now require native kernel retirement.
+Heavy image tracing retains its explicit synchronous diagnostic drain only.
+
+46host contracts PASS, including two encodes before a held native fence,
+overlapping resource gates, reentrant deallocator submit/wait, wait-once/error/
+missing-fence/OOM, retained device, epochs and native budget/deadlines. Exact
+RedfinGPU/SweetSurface C++ objects compile against the existing native build
+headers; no local kernel is delivered. Full paired graphics build currently
+fixes compile integration (const util_queue_fence and missing publish prototype).
+CI kernel and A620 results PENDING; no FPS improvement claimed. Add persistent
+Redfin ccache in GitHub Actions to avoid recompiling unchanged kernel sources.
+
+Phone unchanged since verified V42 Fastboot, clean unmounted HFSX/write_count
+1200036. V45 applied/stale: NEVER reuse. Next fresh updaterV46/imageV43, with
+the NEW CI kernel and paired queued-ABI userspace installed together. Planned
+boot args preserve V42's exact profile but use a new nonce: `debug=0xc serial=3
+cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0
+sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1
+ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1
+redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1
+redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2
+redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3
+redfinbootid=NEW_NONCE redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Checks-on for the one combined hardware contract run; captures and Phone/Photos
+auto-opens stay off. Whole broader goal remains active and unfinished.
+
 ## REDFIN V42 ordinary bindings verified; queue/finalization now dominate samples — 2026-10-26
 
 Source263627e (runtimed010573); ordinary graphics local20261026-014749/noCI,
