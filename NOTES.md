@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V34 templates hit; stage-cache correctness test FAIL — 2026-10-25
+
+Sourceefc1059; graphics local20261025-231820/noCI,
+pairinge16fc06f94f0f9226a71c7dbb4afa557c6c0c46a512382a2924889969aec244f.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V34 image59eeb64422bbc58f91cd6527ef5d20b82024722f18e4c06ca7ad4eb07fddf8b3,
+noncefa842e7ef79c4d5a. V37 applied once:183ranges/24174592bytes/zero new/zero
+freed; all live preimages/full-file readback/signatures/native readonly fsck
+PASS. V37 applied/stale; never reuse. Authenticated exact current boot reports
+userspace-alive/no panic; clean consistent HFSX/write_count1131754, verified
+Fastboot. Next fresh rootV38/imageV35. The broader goal remains open.
+
+All prior actual A620 compute/resource/half/raster/transfer/pitch/alias/constant
+pixels/guards PASS and one backboardd62 remains alive. The NEW cache probe
+FAILS before its70variant loop: duplicate-template-and-stage-hits=0, variants=0,
+bounded=1, surviving-pipelines=0. Do not call the entire checker PASS. Actual
+bounded samples prove translation-template hits (64hits/64misses at pipeline64,
+32entries/3384929charged bytes) but ZERO stage hits (128misses,32entries,
+119444key bytes,96evictions). Even repeated simple native pipelines miss their
+stage keys. Fix canonical stage equality before claiming state reuse works.
+
+Actual sampled fixed_frag_lph_cph pipeline API calls are306726..956739us;
+they include waiting and are not a same-variant controlled compiler benchmark.
+Later31draw sample costs221748us including108987us queue wait; the22draw
+sample is80341us. These are command groups, not measured display FPS, and the
+explicit correctness jobs ran in this combined boot. Correctness is retained
+but preparation/performance remain unfinished. No draw/kernel image capture or
+automatic Phone/Photos opens. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xfa842e7ef79c4d5a redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN complete preparation/cache block built; fresh V37 prepared for V34 — 2026-10-25
 
 Source basee10a951 plus this coherent block. Actual host phase profiling finds
