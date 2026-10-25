@@ -1,5 +1,30 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full platform image preflight and complete V8 installation — 2026-10-25
+
+Source df42261 plus the standalone builder import correction; local build
+20261025-061234/noCI. Frozen kernel522ea9fd7ded64cd6b327ddc16a100721feae172e576bdecc45651ce7521b042.
+Image ports/redfin/out/gui-platform-v1/redfin-xnu.img SHA256
+dfcf8cdcfa402d32bac0888ed0df5b166fa913172f5f3c6856d53a1b930d45ae.
+Native loader over actual payload/ADT/live FDT/Image, exact firmware hashes,
+GUI8/shim return policy, mirrored private serial/actual model, persistent
+private key material equality and compiled mode/keychain markers preflightPASS.
+Capture and userspace-wait snapshots are mutually exclusive by the existing
+log-size policy; this integrated image explicitly selects authenticated screen
+capture and opt-in native Phone/Photos checks. No physical result yet.
+
+Complete V8 update applied from verified unmounted recovery: all22ranges/
+195blocks/798720bytes have saved matched preimages and full device readback;
+38new blocks, zero freed. Complete executable/dylib contents match the signed
+bundles; host native readonly fsckPASS, root clean/write_count761257, native
+JIB and empty journal unchanged. Verified Fastboot. V8 is now an applied
+snapshot and must never be reused for another update or after a boot. A fresh
+V9 must include the new GUI-check/UI files in its read phase. No iOS partition
+or boot/recovery/modem/persist/EFS image was flashed.
+Next: one combined authenticated180s run, then the persistence reboot only
+once this complete block's result is assessed. No manual user action needed.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3635d632d4fbfca8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete native platform/display block built and host-verified — 2026-10-25
 
 Whole source block implemented before combined checks or a new iOS boot:

@@ -394,7 +394,7 @@ def main():
     if a.keychain_material:
         if not a.gpu_gui or not a.apple_adt:
             p.error('--keychain-material requires --gpu-gui and --apple-adt')
-        from ports.redfin import keychain_material
+        import keychain_material
         try:
             private_keychain = keychain_material.load(a.keychain_material)
         except (OSError, ValueError, TypeError):

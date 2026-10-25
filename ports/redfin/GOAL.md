@@ -51,52 +51,41 @@ thermal/sensor support and credential persistence remain unfinished.
 
 ## Current independent work and evidence
 
-- Device is idle in verified unmounted recovery, with its return timer
-  stopped. Fresh private V8 snapshot is clean/consistent, write_count761257,
-  empty journal: `research/redfin-graphics/root-update-v8/`.
-  Only its read phase has run. Its stage/apply still need adapting for the
-  complete next bundle; do not run the old new-files-only stage unchanged.
-- Native Photos helper executes with platform/signature/entitlements admitted
-  and512MiB. It refuses its system-library URL guard before creation. Inspect
-  actual20H392 PHPhotoLibrary/PLPhotoLibraryPathManager URL semantics; do not
-  invent a library ID/schema or bypass the Photos UI assertion. Fresh V8
-  crash reports and directory metadata still need collecting read-only.
-- Actual recovery reports this unit's hardware SKU as G5NZ6 and model Pixel5,
-  saved privately in V8/physical-model-evidence.json. Use the actual model
-  number; retain the separate iPhone10,3 compatibility identity required by
-  the installed userland. A model number is not an Apple factory part number.
-- Actual securityd asks AppleKeyStore selector10 with2scalars/32input bytes,
-  expecting1scalar/40output bytes, and receives Unsupported0xe00002c7.
-  SweetKeyStore implements neither key wrapping nor unwrapping. Preferred
-  MiniAppleKeyStore provides the ABI and missing operations, but uses a fixed
-  nonsecret mixing pattern. Adapt the ABI with a persistent private software
-  wrapping key and the existing portable AES provider; keep secrets out of
-  git/logs/accessible IORegistry properties. Verify persistence across boots.
-- Remaining mixed render/presentation audits average3240us per submission.
-  Panel GPU work averages7805us; total presenter13162us includes other work.
-  Inspect duplicated immutable firmware comparisons/parent checks and memory
-  ordering before optimizing. Their exact contribution is still a hypothesis.
-  Keep complete ownership/fault/completion checks. Consider removing the
-  staging/packing bandwidth with direct scaled interleaved rows only after
-  a bounded native comparison to the already proved GPU path.
-- Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and userland
-  906425b75e02b4f99eb5d7bb1ef7c9583472d772 contain no identified cutout-layout
-  override. Review current UIKit20H392 class/selector ABI before implementing
-  the clock/status-bar adaptation. Keep the native logical1125x2436 canvas
-  while using the full1080x2340panel and matching inverse touch geometry.
-  Actual UIKitCore1242978a2c2c37818d6c9777edce2804 has _UIStatusBar
-  setAvoidanceFrame:, setAvoidanceFrame:animationSettings:options:,
-  layoutSubviews and native region/layout APIs; _UIStatusBarTimeItem has
-  timeView/shortTimeView/pillTimeView/viewForIdentifier:/applyUpdate. Exact
-  types/RVAs are in research/redfin-photos/native-path-and-statusbar-methods.json.
-  Investigate the native avoidance/layout mechanism before moving leaf views.
-- Exact Google panel DTS is downloaded privately under
-  `research/redfin-display/panel90-source/`, commit
-  500b3a2059c1eec0fec08ec56add06320ea901a8, SHA256
-  5a42f5ebeb27708068f0406fc98625cdbeb199dd45af65031702fad4547d0e4d.
-  Its60/90Hz modes both specify554MHz DSI clock and different timing-switch
-  commands. The attempted old in-kernel DSI/SDE source paths returned404;
-  locate their actual matching display repository before adapting writes.
+Whole native platform/display block source is df42261, with its standalone
+builder import correction. Local kernel20261025-061234/noCI PASS; SHA256
+522ea9fd7ded64cd6b327ddc16a100721feae172e576bdecc45651ce7521b042.
+All138distinct selected host cases PASS. Native Photos/UI/app checker are
+signed and every nonweak import resolves through installed20H392 (52libs).
+
+Implemented, not yet proved on the device: persistent private AES256/RFC3394
+AKS wrap/unwrap, synthetic SecItem reboot probe, actual model publication,
+canonical native Photos URL guard, full1080x2340viewport/inverse touch,
+UUID/type-guarded native status-bar camera avoidance, physical90Hz FIFO/TE
+transaction, native display mode metadata/current IDs and corrected native
+time/time/counter callback ABI. Nested immutable-payload comparisons are
+removed while the complete outer GPU audit still checks every payload once.
+The opt-in native checker opens Phone/Photos and records process/SpringBoard
+survival without calls/messages/account actions.
+
+Image ports/redfin/out/gui-platform-v1/redfin-xnu.img has preflightPASS;
+nonce3635d632d4fbfca8, SHA256
+dfcf8cdcfa402d32bac0888ed0df5b166fa913172f5f3c6856d53a1b930d45ae.
+Exact pending full-panel90Hz capture args are in the newest NOTES entry.
+Capture excludes the separate userspace-wait payload by the existing policy.
+
+V8 installation is complete:22backed-up/readback-verified ranges,195blocks/
+798720bytes,38new blocks, zero freed; all signed files match completely,
+native readonly fsckPASS, root clean/write_count761257, empty journal/JIB
+unchanged, verified Fastboot. Do not reuse V8 for another update. The next
+fresh V9 read phase must include the newly installed UI/GUI checker files.
+Private backups/preimages stay under research/redfin-graphics/root-update-v8.
+
+Next: one integrated180s authenticated boot, native GUI/app/Photos/model/
+Keychain/panel/cadence evidence, then an automated persistence reboot for the
+completed block. Leave only physical human judgment/account authorization
+for later. Continue power/charging, thermal/all-sensor and Metal source blocks.
+Read-only Linux inventory already observes real battery100%/Full/35.6C,
+USB-PD source and native thermal inputs; this does not establish iOS support.
 
 ## Operating constraints
 
@@ -110,5 +99,5 @@ Private serial/config is `backup/redfin/ios-device-identity.json`; never print
 its value. Keep dumps, logs, secrets and Apple artifacts ignored. The V7
 new-zero-block installer bug was fixed: write ALL newly allocated blocks,
 including zeros, and verify complete files through their actual extents.
-Do not reuse V7 or the pre-boot data-repair snapshot. V8 is the current clean
-generation. No new iOS boot has followed the gpu-panel-v1 combined run.
+Do not reuse V7, the pre-boot data-repair snapshot or applied V8. Use a fresh
+root generation for the next update; assess the current combined run first.
