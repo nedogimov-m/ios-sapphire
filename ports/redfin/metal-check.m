@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include "iosurface-abi.h"
 #include "gui-profile.h"
+#include "graphics-memory-report.h"
 
 @interface NSObject (RedfinMetalSurface)
 - (id)newTextureWithDescriptor:(MTLTextureDescriptor *)descriptor iosurface:(IOSurfaceRef)surface plane:(NSUInteger)plane;
@@ -277,6 +278,7 @@ int main(void)
         int admitted=memory_limit();
         printf("REDFIN METAL CHECK MEMORY: native-own-pid=1 active=512 inactive=512 error=%d\n",admitted);
         if (admitted) return 2;
+        redfin_graphics_memory_report("checker-before",0);
         @try {
             /* This initializes Metal's real device array before private registration. */
             id<MTLDevice> device=MTLCreateSystemDefaultDevice();
@@ -339,6 +341,7 @@ int main(void)
             printf("REDFIN METAL COMPOSITION RESULT: boot=%016llx clear-only-mrt-scissor-viewport-fetch-pixels-guards=%u vertex-stream-varying-sample-pixels-guards=%u pitch480-two-seeds-pixels-guards=%u pitch4512-two-seeds-pixels-guards=%u resolve480-pixels-guards=%u resolve4512-pixels-guards=%u visible-overlay=0\n",
                 (unsigned long long)nonce,raster,vertices,pitch480,pitch4512,resolve480,resolve4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
+            redfin_graphics_memory_report("checker-after",0);
             return gmem&&short_bounds&&raster&&vertices&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&resourceReferences ? 0 : 1;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);

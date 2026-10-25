@@ -1,5 +1,31 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native shader lifetime and memory accounting — 2026-10-25
+
+Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's
+AIR translation/render state ownership and kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+memorystatus policy alongside actual Redfin V30. The kernel already records
+active/inactive/effective512MiB for each real backboardd; its limit must not be
+inferred from launchd's unrelated50MB warning. Stock backboardd has no native
+memorystatus setter entitlement. Preserve the bounded existing limit and add
+own-task TASK_VM_INFO observations rather than manufacturing an entitlement.
+
+The preferred render factory keeps both translated stage originals for the
+whole pipeline lifetime, although Gallium owns separate clones and fixed
+render stages never recompile. Free the originals after cloning, retain the
+independently copied interface metadata and clean every failure path, including
+the standalone generated vertex stage. AIR's constructor/inlining/state
+promotion can leave unreachable NIR allocations under each retained shader;
+use Mesa25.0.7's ownership-aware nir_sweep after translation and finalization.
+Compute's pristine NIR remains available for variable workgroup recompilation.
+Actual captured-shader debug accounting measures retained NIR18087120 ->
+188064bytes and eight held complete contexts144765312 ->1572864bytes. All19
+actual parameter variants compile after sweeping, and repeated independent
+context release preserves validated surviving NIR. Fresh native build/actual
+ABI/signatures and34host cases pass. One combined native run remains pending;
+host allocator results do not establish the phone's process footprint or correct
+system rendering. No process limit, page check or kernel source changes.
+
 ## Defined packed state before executable resource analysis — 2026-10-25
 
 Preferred graphics pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772

@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN shader lifetime block built; fresh V34 prepared for V31 — 2026-10-25
+
+Source base4fe1804 plus this complete block. Preserve the already observed
+native512MiB backboardd limit; stock backboardd lacks a memorystatus setter
+entitlement. Add bounded GUI3 own-task TASK_VM_INFO footprint/resident/remaining-
+limit observations in the loader and around real pipeline creation. Report
+availability/count/status explicitly; never invent a limit when the native
+revision omits that field. No memory-policy or kernel change.
+
+Reclaim unreachable AIR constructor/inlining/promotion allocations with Mesa's
+nir_sweep at translation completion and final Gallium handoff. Fixed render
+states own distinct driver clones and independently copied interface metadata;
+free both original translated stages after state creation. Clean every failure
+path, including the generated standalone vertex shader. Compute retains its
+original for variable-workgroup recompilation. No resource/page checks weakened.
+
+34host cases PASS/no skips. Fresh debug-allocator comparison on actual captured
+CoreAnimation fixed_frag_lph_cph parameters measures retained NIR18087120 ->
+188064bytes and complete context18095664 ->196608bytes. Eight independent held
+contexts measure144765312 ->1572864bytes; release preserves the surviving shader
+and all repeated NIR validates. These are compiler allocations on Mac, not an
+observed phone process footprint. Four NIR modules/seven A620 pattern/snapshot
+compiles PASS, plus all19actual parameter variants PASS (retained NIR171216..
+1170720bytes). This supports a concrete memory-bloat fix; actual jetsam/GUI
+behavior is still pending the combined device run.
+
+Fresh full native Mesa/AIR/Metal/checker/shader build and actual20H392 ABI/
+strict signatures PASS: research/redfin-metal-lifetimes-v1,
+local20261025-214502/noCI, pairingade1b05cda9a3b93eee928cbcacadc434ecd6ab74d36082dc459fa6434254aa9.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+Fresh V31 imageb9e6d8e316b566aaee48bde287df915c78fb19bccf090bd6ae8ea43587de3082,
+nonce98857fe8f8154d78; complete loader/ADT/liveFDT/firmware/power/DVFS/source-
+window/return preflight PASS. Fresh V34 from clean consistent HFSX/write_count
+1091583:214ranges/23420928bytes/4new/zero freed. Full staged files/signatures/
+seal/readback/native readonly fsck PASS. V34 PREPARED, NOT APPLIED; all prior
+applied stages remain stale. Automatic app launches stay disabled. Next apply
+once and collect one combined V31. Correct rendering/FPS and broader goal open.
+Additional V30 analysis splits per-process draw resets before applying the strict
+decoder:47/48/48records pass bounds/base64/CRC; finals still show checkerboard
+then lavender fills. Valid captures do not establish a working GUI.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x98857fe8f8154d78 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V30 native packed-state/Bool contract PASS; backboardd hits a memory limit — 2026-10-25
 
 Source59dc5a3; graphics local20261025-211455/noCI,
@@ -30,11 +73,14 @@ clients still refuse original-page no-copy lookups; preserve these checks.
 Concatenated per-process draw sequences correctly fail the strict single-process
 decoder. Do not interpret that as pixel/CRC evidence.
 
-Next read the actual own-PID8796 memory properties in the scoped native loader,
-preserve higher limits, set only bounded deficient limits and verify readback.
-The existing plist requests512MiB and the kernel contains an admission adapter,
-but neither establishes the actual limit reached by these processes. The
-launchd50MB warning is not evidence of backboardd's specific limit. Use fresh
+Full-log review finds18native memory admission reports: each actual backboardd
+gets active/inactive/effective512MiB with result0. The stock binary has no
+memorystatus entitlement; adding an own-PID setter in its loader would fail
+and would not solve the observed512MiB overrun. The earlier summary omitted
+these real kernel reports. The launchd50MB warning is unrelated to the daemon's
+observed limit. Next reclaim dead AIR/NIR arenas and redundant fixed render
+stage originals; add bounded native own-task footprint/remaining-limit reports.
+Keep existing process limits and native ownership checks. Use fresh
 root V34 from generation1091583 and fresh image V31 for the next coherent block.
 Correct rendering/performance and the broader goal remain open.
 Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7da016b8a3225eb9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.

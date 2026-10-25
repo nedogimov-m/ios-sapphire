@@ -1,0 +1,98 @@
+--- a/src/compiler/air/air_to_nir.c
++++ b/src/compiler/air/air_to_nir.c
+@@ -4504,6 +4504,12 @@
+       info->entry_point = ralloc_strdup(mem_ctx, info->entry_point);
+    }
+    ralloc_free(ctx);
++   /* Constructors/inlining and partial-word promotion leave dead instructions
++    * and function arenas behind. The pipeline retains the optimized shader;
++    * reclaim unreachable NIR now, using Mesa's normal ownership-aware sweep.
++    * Do not keep the entire pre-specialization program for every CA variant.
++    */
++   nir_sweep(c.nir);
+    if (error)
+       *error = NULL;
+    return c.nir;
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -5291,10 +5291,10 @@
+    return true;
+ }
+ 
+-/* A compiled pipeline for drawing. The shaders are kept pristine under mem_ctx and a
+- * clone is handed to the driver, for the reason compute_state_for gives: a Gallium
+- * driver steals the NIR it is given, so what this library frees at destroy must be its
+- * own copy and not the driver's.
++/* A compiled pipeline for drawing. The fixed stages are cloned into their
++ * Gallium state objects. Only independent interface metadata remains under
++ * mem_ctx; unlike variable-workgroup compute, render never recompiles its
++ * original stages, so those translations are released before returning.
+  */
+ struct rwa_render {
+    struct rwa_device *device;
+@@ -5347,6 +5347,7 @@
+       return NULL;
+    }
+    finalize_for_gallium(clone, device->screen);
++   nir_sweep(clone);
+ 
+    struct pipe_shader_state templ = { .type = PIPE_SHADER_IR_NIR, .ir.nir = clone };
+    struct pipe_context *pipe = device->pipe;
+@@ -6212,6 +6213,7 @@
+    render->device = device;
+    render->mem_ctx = ralloc_context(NULL);
+    render->shape = *shape;
++   nir_shader *fs = NULL, *vs = NULL;
+ 
+    struct rwa_render_info out = { 0 };
+ 
+@@ -6225,7 +6227,7 @@
+    if(num_ffc<0)goto fail;
+    const struct air_to_nir_options fopts = { .constants = ffc, .num_constants = num_ffc };
+    const char *error;
+-   nir_shader *fs = air_to_nir(render->mem_ctx, fragment_bitcode, fragment_size,
++   fs = air_to_nir(render->mem_ctx, fragment_bitcode, fragment_size,
+                                fragment_entry, &fopts, device->nir_options, &render->finfo,
+                                &error);
+    if (!fs) {
+@@ -6270,7 +6272,6 @@
+     * to end. A supplied module is translated and bound, but a vertex shader that reads
+     * vertex attributes is refused, because the contract carries no layout to feed them.
+     */
+-   nir_shader *vs;
+    if (vertex_bitcode) {
+       if (vertex_size < 4) {
+          say(why, why_size, "%zu bytes is not a vertex shader module", vertex_size);
+@@ -6377,13 +6378,15 @@
+    if (!render->fs_cso)
+       goto fail;
+    render->vs_cso = make_stage_cso(device, vs, why, why_size);
+-   /* the generated stage is standalone (not under mem_ctx); the driver has a clone, so
+-    * the source is this library's to free either way
+-    */
+-   if (render->generated_vertex)
+-      ralloc_free(vs);
+    if (!render->vs_cso)
+       goto fail;
++   /* The state objects own distinct clones. Interface strings/arrays were
++    * copied out by air_to_nir and the resource/slot tables contain no NIR
++    * references. Free both fixed-stage originals, including supplied stages.
++    */
++   ralloc_free(fs);
++   ralloc_free(vs);
++   fs = vs = NULL;
+ 
+    /*
+     * THE BLEND STATE, which until now was the fixed one air_run draws with -- colormask
+@@ -6549,6 +6552,11 @@
+    return render;
+ 
+ fail:
++   /* Also covers a generated standalone vertex stage when fragment state
++    * creation fails; freeing these removes their link from mem_ctx first.
++    */
++   ralloc_free(fs);
++   ralloc_free(vs);
+    rwa_render_destroy(render);
+    return NULL;
+ }

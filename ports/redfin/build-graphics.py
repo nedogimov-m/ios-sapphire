@@ -89,6 +89,7 @@ def main():
                 inputs += [ROOT/'ports/redfin/metal-resource-pointers.patch']
                 inputs += [ROOT/'ports/redfin/metal-active-resources.patch',ROOT/'ports/redfin/metal-active-resources.inc']
                 inputs += [ROOT/'ports/redfin/metal-defined-state.patch']
+                inputs += [ROOT/'ports/redfin/metal-memory-lifetime.patch']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -135,6 +136,7 @@ def main():
                     shutil.copy2(ROOT/'ports/redfin/metal-active-resources.inc',source/'src/compiler/air/redfin_metal_active_resources.inc')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-active-resources.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-defined-state.patch'],source)
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-memory-lifetime.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -218,6 +220,7 @@ def main():
                                   ('metal_userland.py','metal_raster_userland.py','metal_resource_userland.py','metal_blit_userland.py','metal_buffer_userland.py','metal_completion_userland.py','metal_buffer_texture_userland.py','metal-buffer-view-object.inc','metal-resource-completion.inc','metal-buffer-object.inc','iosurface-abi.h','metal-blit-encoder.inc','metal-raster.h','metal-guard.m','metal-check.m','metal-raster-check.inc','metal-vertex-check.inc','metal-blit-check.inc','metal-buffer-check.inc','metal-buffer-texture-check.inc','metal-alpha-check.inc','metal-check.metal')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in ('metal_function_constants_userland.py','metal-function-constants-object.inc','metal-function-constants.h','metal-function-constants-check.inc')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in ('metal-resource-check.c','metal-resource-check.ll')]
+                metal_sources += [ROOT/'ports/redfin/graphics-memory-report.h']
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)
@@ -241,7 +244,7 @@ def main():
                 binary=plugin/'RedfinMetal'
                 run([*c,'-bundle','-O2','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
                     '-Werror=incompatible-pointer-types','-Werror=incompatible-function-pointer-types',
-                    '-I'+str(metal),metal/'redwoodmetal.m',metal/'redwooddrawable.m',
+                    '-I'+str(metal),'-I'+str(ROOT/'ports/redfin'),metal/'redwoodmetal.m',metal/'redwooddrawable.m',
                     ROOT/'ports/redfin/metal-guard.m','-framework','Foundation',
                     '-framework','CoreFoundation','-framework','IOKit','-framework','Metal','-framework','IOSurface','-lobjc','-o',binary])
                 import plistlib
@@ -319,7 +322,7 @@ def main():
             result.update(success=True,sdk=str(sdk),input_sha256=fingerprint,bundle=str(bundle),
                 gui_profile_sha256=hashlib.sha256((ROOT/'ports/redfin/gui-profile.h').read_bytes()).hexdigest(),
                 gui_sources_sha256={name:hashlib.sha256((ROOT/'ports/redfin'/name).read_bytes()).hexdigest()
-                    for name in ('graphics-loader.c','eagl-guard.c','eagl_userland.py')},
+                    for name in ('graphics-loader.c','graphics-memory-report.h','eagl-guard.c','eagl_userland.py')},
                 artifacts={str(x.relative_to(bundle)):hashlib.sha256(x.read_bytes()).hexdigest()
                            for x in sorted(bundle.rglob('*')) if x.is_file()})
         except (subprocess.CalledProcessError,ValueError,OSError) as e:

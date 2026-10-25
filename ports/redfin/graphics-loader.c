@@ -13,6 +13,7 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 #include "gui-profile.h"
+#include "graphics-memory-report.h"
 
 static bool property(io_service_t service,const char *name,int expected)
 {
@@ -45,6 +46,7 @@ __attribute__((constructor)) static void redfin_graphics_load(void)
     if(service)IOObjectRelease(service);
     if(!valid){dprintf(2,"REDFIN EAGL LOADER: boot=%016llx native A620 absent\n",nonce);return;}
     dprintf(2,"REDFIN EAGL LOADER: boot=%016llx pid=%d GUI3 native A620\n",nonce,getpid());
+    redfin_graphics_memory_report("loader-before",0);
     /* These must precede dlopen: Mesa reads its driver choice on first use. */
     setenv("OSMESA_SOFTWARE","0",1);
     /* Native A620 has512KiB GMEM. Let freedreno select its ordinary tiled
@@ -57,5 +59,6 @@ __attribute__((constructor)) static void redfin_graphics_load(void)
     if(!bridge){dprintf(2,"REDFIN EAGL LOADER: bridge load failed: %s\n",dlerror());return;}
     int (*installed)(void)=(int (*)(void))dlsym(bridge,"redfin_eagl_installed");
     dprintf(2,"REDFIN EAGL LOADER: boot=%016llx installed=%d\n",nonce,installed?installed():0);
+    redfin_graphics_memory_report("loader-after",0);
     /* Both handles stay loaded: ObjC method implementations refer into them. */
 }

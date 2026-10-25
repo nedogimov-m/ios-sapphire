@@ -283,7 +283,7 @@ static void redfin_metal_io_completed(const uint64_t before[4],const uint64_t af
 
 def adapt_driver(text):
     text = replace_once(text, '#include "redwood_drawable.h"',
-        '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include <pthread.h>\n#include <mach/mach_time.h>\n'
+        '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include "graphics-memory-report.h"\n#include <pthread.h>\n#include <mach/mach_time.h>\n'
         'extern int redfin_metal_abi_ready(void);\nextern int redfin_metal_hardware_ready(void);')
     text = replace_once(text, 'static bool\nmesa_available(void)', LOCKING + EXECUTION + FENCE_OBSERVATIONS + '\nstatic bool\nmesa_available(void)')
     text = replace_once(text, 'mesa_available(void)\n{', 'mesa_available(void)\n{\n\tREDFIN_MESA_SCOPE;')
@@ -432,6 +432,20 @@ def adapt_driver(text):
     text = adapt_buffer_textures(text)
     from ports.redfin.metal_function_constants_userland import adapt as adapt_constants
     text = adapt_constants(text)
+    # Bounded own-task observations bracket real system pipeline compilation.
+    # The stock daemon has no memorystatus setter entitlement; its existing
+    # kernel admission already proves a fatal 512 MiB limit in V30.
+    point='\tstruct rwa_render_info info = { 0 };'
+    text=replace_once(text,point,point+'''
+    static unsigned redfin_pipeline_ordinal;
+    unsigned redfin_pipeline_number=__atomic_add_fetch(&redfin_pipeline_ordinal,1,__ATOMIC_RELAXED);
+    BOOL redfin_memory_sample=redfin_pipeline_number<=4 ||
+        (redfin_pipeline_number<=1024 && !(redfin_pipeline_number&(redfin_pipeline_number-1)));
+    if(redfin_memory_sample)redfin_graphics_memory_report("pipeline-before",redfin_pipeline_number);
+''')
+    point='\tif (render == NULL) {'
+    text=replace_once(text,point,
+        '    if(redfin_memory_sample)redfin_graphics_memory_report("pipeline-after",redfin_pipeline_number);\n'+point)
     text += '''
 /* Private readonly evidence for the paired native pixel checker. */
 int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)

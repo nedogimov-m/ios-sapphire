@@ -100,6 +100,42 @@ def prepare_ir3_tool(source):
     path.write_text(text)
 
 
+def prepare_memory_probe(source):
+    """Use the actual frontend's debug allocator; never guess memory from IR size."""
+    path = source/'src/gallium/drivers/freedreno/ir3/ir3_cmdline.c'
+    text = path.read_text()
+    point = '   nir_shader *nir = air_to_nir(NULL, bitcode, bitcode_size, NULL, &options,'
+    text = replace_once(text, point,
+        '   void *redfin_host_context = ralloc_context(NULL);\n'
+        '   nir_shader *nir = air_to_nir(redfin_host_context, bitcode, bitcode_size, NULL, &options,')
+    point = '   nir_print_shader(nir, stdout);\n   return nir;'
+    text = replace_once(text, point, r'''
+   const char *repeat_text = getenv("REDFIN_HOST_LIFETIME_ROUNDS");
+   unsigned repeats = repeat_text ? strtoul(repeat_text, NULL, 10) : 0;
+   if (repeats > 32) errx(1, "bounded host shader lifetime rounds required");
+   size_t retained = ralloc_total_size(redfin_host_context);
+   printf("; AIR MEMORY: shader-bytes=%zu context-bytes=%zu\n",
+          ralloc_total_size(nir), retained);
+   void *held[32] = {0}; size_t held_bytes = 0;
+   for (unsigned round = 0; round < repeats; round++) {
+      held[round] = ralloc_context(NULL);
+      struct air_shader_info repeated_info;
+      nir_shader *repeated = air_to_nir(held[round], bitcode, bitcode_size,
+          NULL, &options, ir3_get_compiler_options(compiler), &repeated_info, &err);
+      if (!repeated) errx(1, "lifetime round %u: %s", round, err);
+      nir_validate_shader(repeated, "repeated actual AIR translation");
+      held_bytes += ralloc_total_size(held[round]);
+   }
+   for (unsigned round = 0; round < repeats; round++) ralloc_free(held[round]);
+   if (ralloc_total_size(redfin_host_context) != retained)
+      errx(1, "releasing independent shader contexts changed the retained shader");
+   nir_validate_shader(nir, "surviving AIR after independent contexts released");
+   printf("; AIR LIFETIME: rounds=%u held-bytes=%zu independent-release=1\n",
+          repeats, held_bytes);
+''' + point)
+    path.write_text(text)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mesa-source', type=Path, required=True)
@@ -108,6 +144,8 @@ def main():
     parser.add_argument('--shader', type=Path, action='append', default=[])
     parser.add_argument('--constant-byte', type=lambda s: int(s, 0), action='append')
     parser.add_argument('--snapshots', type=Path, help='private JSON: function name -> {index: hex bytes}')
+    parser.add_argument('--lifetime-rounds', type=int, default=0,
+                        help='hold/release up to 32 independent translations with native debug allocator accounting')
     args = parser.parse_args()
     work = args.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=False)
@@ -134,6 +172,9 @@ def main():
             source.mkdir()
             run(['cp', '-cR', str(native) + '/.', source])
             prepare_ir3_tool(source)
+            if not 0 <= args.lifetime_rounds <= 32:
+                raise ValueError('lifetime rounds must be between 0 and 32')
+            prepare_memory_probe(source)
             venv = args.venv.resolve() if args.venv else work/'venv'
             if not (venv/'bin/meson').is_file():
                 run([sys.executable, '-m', 'venv', venv])
@@ -177,6 +218,7 @@ def main():
                 cases = ['snapshot'] if explicit is not None else patterns
                 for pattern in cases:
                     check_env = dict(env)
+                    check_env['REDFIN_HOST_LIFETIME_ROUNDS'] = str(args.lifetime_rounds)
                     if explicit is not None:
                         fields = []
                         for index, value in sorted(explicit.items(), key=lambda item: int(item[0])):
