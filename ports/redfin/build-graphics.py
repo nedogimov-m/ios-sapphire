@@ -86,6 +86,7 @@ def main():
                 inputs += [ROOT/'ports/redfin/metal-buffer-texture.patch',ROOT/'ports/redfin/metal-buffer-texture.inc']
                 inputs += [ROOT/'ports/redfin/metal-buffer-native-view.patch',ROOT/'ports/redfin/metal-composition-final.patch']
                 inputs += [ROOT/'ports/redfin/metal-function-constants.patch',ROOT/'ports/redfin/metal-function-constants.h',ROOT/'ports/redfin/metal-function-constants.inc']
+                inputs += [ROOT/'ports/redfin/metal-resource-pointers.patch']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -128,6 +129,7 @@ def main():
                     shutil.copy2(ROOT/'ports/redfin/metal-function-constants.h',source/'src/compiler/air/redfin_metal_function_constants.h')
                     shutil.copy2(ROOT/'ports/redfin/metal-function-constants.inc',source/'src/compiler/air/redfin_metal_function_constants.inc')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-function-constants.patch'],source)
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-resource-pointers.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -210,6 +212,7 @@ def main():
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal_userland.py','metal_raster_userland.py','metal_resource_userland.py','metal_blit_userland.py','metal_buffer_userland.py','metal_completion_userland.py','metal_buffer_texture_userland.py','metal-buffer-view-object.inc','metal-resource-completion.inc','metal-buffer-object.inc','iosurface-abi.h','metal-blit-encoder.inc','metal-raster.h','metal-guard.m','metal-check.m','metal-raster-check.inc','metal-vertex-check.inc','metal-blit-check.inc','metal-buffer-check.inc','metal-buffer-texture-check.inc','metal-alpha-check.inc','metal-check.metal')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in ('metal_function_constants_userland.py','metal-function-constants-object.inc','metal-function-constants.h','metal-function-constants-check.inc')]
+                metal_sources += [ROOT/'ports/redfin'/name for name in ('metal-resource-check.c','metal-resource-check.ll')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)
@@ -255,6 +258,8 @@ def main():
                 checker=bundle/'bin/metal-check'
                 run([*c,'-O2','-fblocks','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
                     '-I'+str(ROOT/'ports/redfin'),ROOT/'ports/redfin/metal-check.m',
+                    '-I'+str(source/'src/compiler/air'),ROOT/'ports/redfin/metal-resource-check.c',
+                    '-L'+str(bundle/'lib'),'-lredfinair',
                     '-framework','Foundation','-framework','Metal','-framework','CoreFoundation',
                     '-framework','IOKit','-framework','IOSurface','-lobjc','-o',checker])
                 dependencies=run(['otool','-L',checker],capture=True)
@@ -273,6 +278,9 @@ def main():
                     '-std=ios-metal2.4','-c',ROOT/'ports/redfin/metal-check.metal','-o',metal/'check.air'])
                 run(['xcrun','--sdk','iphoneos','metallib',metal/'check.air','-o',shader])
                 if shader.read_bytes()[:4]!=b'MTLB':raise ValueError('native Metal shader library absent')
+                resource_shader=bundle/'lib/redfin-resource-check.bc'
+                run(['xcrun','--sdk','iphoneos','metal','-x','ir','-c','-emit-llvm','-O0',
+                     '-Xclang','-disable-llvm-passes',ROOT/'ports/redfin/metal-resource-check.ll','-o',resource_shader])
                 from ports.redfin.metal_userland import job as metal_job,JOB_PATH as METAL_JOB,LOG_PATH as METAL_LOG
                 check_job=bundle/METAL_JOB.lstrip('/');check_job.parent.mkdir(parents=True,exist_ok=True)
                 check_job.write_bytes(plistlib.dumps(metal_job(),fmt=plistlib.FMT_BINARY,sort_keys=False))
@@ -295,6 +303,7 @@ def main():
                     (plugin/'Info.plist','/System/Library/Extensions/RedfinMetal.bundle/Info.plist',0,0o644),
                     (plugin/'_CodeSignature/CodeResources','/System/Library/Extensions/RedfinMetal.bundle/_CodeSignature/CodeResources',0,0o644),
                     (checker,'/redfin/bin/metal-check',0,0o755),(shader,'/redfin/lib/'+shader.name,0,0o644),
+                    (resource_shader,'/redfin/lib/'+resource_shader.name,0,0o644),
                     (check_job,METAL_JOB,0,0o644),(check_log,METAL_LOG,501,0o600)]
                 metal_manifest=dict(success=True,actual_abi_compatible=True,pairing_sha256=pairing,
                     max_buffer_bytes=128<<20,files={target:dict(source=str(source.relative_to(bundle)),

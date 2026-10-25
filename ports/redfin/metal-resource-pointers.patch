@@ -1,0 +1,1014 @@
+diff --git a/src/compiler/air/air_private.h b/src/compiler/air/air_private.h
+--- a/src/compiler/air/air_private.h
++++ b/src/compiler/air/air_private.h
+@@ -16,8 +16,8 @@
+ 
+ /* Where a pointer points. AIR's address spaces say which kind of memory;
+  * which buffer, and the byte offset into it, the translator tracks itself
+- * (docs/air.md section 3): no pointer in the corpus is ever stored to
+- * memory or cast to an integer, so a pointer never has to become a number.
++ * (docs/air.md section 3). Opaque resource references may be stored in private
++ * memory as compiler-owned descriptor indices; these are never GPU addresses.
+  */
+ enum air_ptr_class {
+    AIR_PTR_NONE,
+@@ -42,6 +42,7 @@
+ struct air_ptr {
+    enum air_ptr_class class;
+    unsigned binding;
++   nir_def *binding_index;           /* absolute descriptor index, or NULL for binding */
+    bool is_image;                    /* a texture the shader writes: an image, not a view */
+    nir_def *offset;                  /* bytes, 32-bit; NULL means zero */
+    const struct air_type *pointee;   /* for sizes, and for loads without a type */
+@@ -56,10 +57,9 @@
+    /* A POINTER as a value rather than a resolution. air_ptr is *(where, byte
+     * offset)* decided while translating, which is what lets this frontend emit
+     * load_ubo at Metal's own index with no descriptor indirection; a pointer
+-    * CHOSEN at run time has no such resolution, so the choice itself is kept
+-    * and made where the pointer is used. A pointer STORED to memory is the
+-    * other half of the same problem and has no form here at all -- see
+-    * docs/air.md section 3 for what that costs.
++    * CHOSEN at run time keeps the choice until use. Opaque sampler/read-view
++    * references can instead carry a descriptor index, including through real
++    * private scratch stores/loads and control-flow merges.
+     */
+ 
+    /* `select i1 %c, ptr %a, ptr %b`: .def is the condition and .elems[0..1]
+@@ -220,6 +220,10 @@
+ /* value bookkeeping */
+ struct air_val *air_val_ssa(struct air_ctx *c, nir_def *def);
+ struct air_val *air_val_ptr(struct air_ctx *c, struct air_ptr ptr);
++enum air_ptr_class air_resource_type(const struct air_type *type);
++nir_def *air_binding_index(struct air_ctx *c, struct air_ptr ptr);
++bool air_resource_ptr(struct air_ctx *c, struct air_val *value,
++                      enum air_ptr_class want, struct air_ptr *out);
+ struct air_val *air_get(struct air_ctx *c, const struct air_value *v);
+ void air_set(struct air_ctx *c, const struct air_value *v, struct air_val *val);
+ 
+diff --git a/src/compiler/air/air_to_nir.c b/src/compiler/air/air_to_nir.c
+--- a/src/compiler/air/air_to_nir.c
++++ b/src/compiler/air/air_to_nir.c
+@@ -89,6 +89,63 @@
+    return v && (v->kind == AIR_VAL_PTR || v->kind == AIR_VAL_PTR_SELECT);
+ }
+ 
++/* The typed opaque references in AIR are descriptor identities, not addresses.
++ * Keep ordinary buffer pointers out of this representation: their byte offsets
++ * and address spaces must not be lost by pretending they are resource indices.
++ */
++enum air_ptr_class
++air_resource_type(const struct air_type *type)
++{
++   if (!type || type->kind != AIR_TYPE_POINTER || !type->elem ||
++       type->elem->kind != AIR_TYPE_STRUCT || !type->elem->opaque ||
++       !type->elem->name)
++      return AIR_PTR_NONE;
++   const char *name = type->elem->name;
++   if (strstr(name, "_sampler_t"))
++      return AIR_PTR_SAMPLER;
++   if (strstr(name, "_texture_") || strstr(name, "_depth_"))
++      return AIR_PTR_TEXTURE;
++   return AIR_PTR_NONE;
++}
++
++nir_def *
++air_binding_index(struct air_ctx *c, struct air_ptr ptr)
++{
++   return ptr.binding_index ? ptr.binding_index : nir_imm_int(&c->b, ptr.binding);
++}
++
++bool
++air_resource_ptr(struct air_ctx *c, struct air_val *v,
++                  enum air_ptr_class want, struct air_ptr *out)
++{
++   if (!v)
++      return false;
++   if (v->kind == AIR_VAL_PTR_SELECT) {
++      struct air_ptr a, b;
++      if (!air_resource_ptr(c, v->elems[0], want, &a) ||
++          !air_resource_ptr(c, v->elems[1], want, &b))
++         return false;
++      if (a.is_image != b.is_image)
++         return air_error(c, "instruction: a resource choice mixing an image and a sampled view");
++      *out = a;
++      out->binding = 0;
++      out->binding_index = nir_bcsel(&c->b, v->def,
++                                     air_binding_index(c, a), air_binding_index(c, b));
++      return true;
++   }
++   if (v->kind != AIR_VAL_PTR ||
++       (v->ptr.class != want && v->ptr.class != AIR_PTR_NONE))
++      return air_error(c, "instruction: expected a typed %s reference",
++                       want == AIR_PTR_SAMPLER ? "sampler" : "texture");
++   *out = v->ptr;
++   if (out->class == AIR_PTR_NONE) {
++      out->class = want;
++      out->binding = ~0u; /* symbolic null; lowered to zero without a descriptor read */
++      out->binding_index = NULL;
++   }
++   return true;
++}
++
+ /* Two resolutions that are the same resolution.
+  *
+  * This is what lets a `phi` or a `select` between pointers be answered without
+@@ -102,7 +159,8 @@
+ static bool
+ same_ptr(const struct air_ptr *a, const struct air_ptr *b)
+ {
+-   if (a->class != b->class || a->binding != b->binding || a->is_image != b->is_image)
++   if (a->class != b->class || a->binding != b->binding ||
++       a->binding_index != b->binding_index || a->is_image != b->is_image)
+       return false;
+    if (a->offset == b->offset)
+       return true;
+@@ -573,6 +631,12 @@
+        * bytes in an argument buffer are the runtime's 8-byte handles.
+        */
+       return air_error(c, "instruction: a load of bytes out of an argument buffer"), NULL;
++   case AIR_PTR_NONE:
++      /* An ordinary null-buffer dereference has undefined value. Keeping it
++       * undefined lets an inactive optional path disappear after specialization;
++       * it must never become a read of an invented buffer binding.
++       */
++      return nir_undef(&c->b, comps, as_bool ? 1 : bits);
+    default:
+       return air_error(c, "instruction: a load through a %s pointer",
+                        ptr.class == AIR_PTR_NONE ? "null" : "texture or sampler"), NULL;
+@@ -1705,7 +1769,17 @@
+    for (unsigned i = 0; i < ARRAY_SIZE(sysvals); i++) {
+       if (md_key(node, sysvals[i].key) < 0)
+          continue;
+-      nir_def *def = load_sysval(c, sysvals[i].sv);
++      nir_def *def;
++      if (sysvals[i].sv == AIR_SV_POINT_COORD) {
++         /* Like fragment position, retain the system-value variable until the
++          * consumer can lower it to its native point-coordinate varying.
++          */
++         nir_variable *var = make_io_var(c, nir_var_system_value, t,
++                                          SYSTEM_VALUE_POINT_COORD, "point_coord");
++         def = nir_load_var(&c->b, var);
++      } else {
++         def = load_sysval(c, sysvals[i].sv);
++      }
+       if (!def)
+          return air_error(c, "interface: %s", sysvals[i].key);
+       c->params[param] = air_val_ssa(c, fit(c, def, t));
+@@ -1926,8 +2000,9 @@
+ 
+    /* the one thing left that is not an error: an argument nothing reads */
+    if (md_key(node, "air.arg_unused") >= 0) {
+-      c->params[param] = air_val_ssa(c, nir_undef(&c->b, air_nir_components(t),
+-                                                  air_nir_bit_size(c, t)));
++      c->params[param] = t->kind == AIR_TYPE_POINTER ?
++         air_val_ptr(c, (struct air_ptr){ .class = AIR_PTR_NONE, .pointee = t->elem }) :
++         air_val_ssa(c, nir_undef(&c->b, air_nir_components(t), air_nir_bit_size(c, t)));
+       return true;
+    }
+ 
+@@ -2036,6 +2111,77 @@
+ 
+ /* -- instructions ------------------------------------------------------- */
+ 
++/* A private cell holds a 64-bit AIR reference, represented internally by the
++ * low 32-bit descriptor identity. Actual scratch accesses preserve aliases,
++ * branches and overwrites; a translation-time map of the last store cannot.
++ */
++static struct air_val *
++load_resource_reference(struct air_ctx *c, struct air_val *address,
++                         const struct air_type *type, unsigned align)
++{
++   enum air_ptr_class kind = air_resource_type(type);
++   if (!kind)
++      return air_error(c, "instruction: a stored raw buffer address is not a resource reference"), NULL;
++   if (address->kind == AIR_VAL_PTR_SELECT) {
++      struct air_val *a = load_resource_reference(c, address->elems[0], type, align);
++      struct air_val *b = load_resource_reference(c, address->elems[1], type, align);
++      struct air_ptr result;
++      if (!a || !b || !air_resource_ptr(c, air_val_ptr_select(c, address->def, a, b),
++                                       kind, &result))
++         return NULL;
++      return air_val_ptr(c, result);
++   }
++   if (address->kind != AIR_VAL_PTR)
++      return air_error(c, "instruction: a resource load without a private address"), NULL;
++   if (address->ptr.class == AIR_PTR_NONE)
++      return air_val_ptr(c, (struct air_ptr){ .class = AIR_PTR_NONE, .pointee = type->elem });
++   if (address->ptr.class != AIR_PTR_SCRATCH)
++      return air_error(c, "instruction: resource references can only be loaded from private memory"), NULL;
++   const struct air_type word = { .kind = AIR_TYPE_INT, .bits = 32 };
++   nir_def *bits = air_load_ptr(c, address->ptr, &word, align);
++   if (!bits)
++      return NULL;
++   return air_val_ptr(c, (struct air_ptr){
++      .class = kind, .binding_index = bits, .pointee = type->elem,
++   });
++}
++
++static bool
++store_resource_reference(struct air_ctx *c, struct air_val *address,
++                          struct air_val *value, const struct air_type *type,
++                          unsigned align)
++{
++   enum air_ptr_class kind = air_resource_type(type);
++   if (!kind)
++      return air_error(c, "instruction: a store of a raw buffer address is unsupported");
++   struct air_ptr resource;
++   if (!air_resource_ptr(c, value, kind, &resource))
++      return false;
++   if (resource.is_image)
++      return air_error(c, "instruction: a stored image reference needs explicit image type metadata");
++   if (address->kind != AIR_VAL_PTR || address->ptr.class != AIR_PTR_SCRATCH)
++      return air_error(c, "instruction: resource references can only be stored in private memory");
++   if (!air_store_ptr(c, address->ptr, air_binding_index(c, resource), align))
++      return false;
++   struct air_ptr high = air_ptr_add(c, address->ptr, nir_imm_int(&c->b, 4));
++   return air_store_ptr(c, high, nir_imm_int(&c->b, 0), MIN2(align ? align : 4, 4));
++}
++
++static struct air_val *
++cast_pointer_value(struct air_ctx *c, struct air_val *v, const struct air_type *pointee)
++{
++   if (v->kind == AIR_VAL_PTR_SELECT) {
++      struct air_val *a = cast_pointer_value(c, v->elems[0], pointee);
++      struct air_val *b = cast_pointer_value(c, v->elems[1], pointee);
++      return a && b ? air_val_ptr_select(c, v->def, a, b) : NULL;
++   }
++   if (v->kind != AIR_VAL_PTR)
++      return air_error(c, "instruction: a bitcast of something that is not a pointer"), NULL;
++   struct air_ptr p = v->ptr;
++   p.pointee = pointee;
++   return air_val_ptr(c, p);
++}
++
+ /* A load through a pointer this frontend could not resolve: load through BOTH
+  * sides of the choice and select the values. That is the only form NIR has --
+  * there is no select of pointers in the 32bit_index_offset model -- and it is
+@@ -2189,13 +2335,13 @@
+    const struct air_type *dt = in->base.type;
+    const struct air_type *st = in->operands[0]->type;
+ 
+-   if (in->sub == AIR_CAST_BITCAST && dt->kind == AIR_TYPE_POINTER) {
++   if ((in->sub == AIR_CAST_BITCAST || in->sub == AIR_CAST_ADDRSPACECAST) &&
++       dt->kind == AIR_TYPE_POINTER) {
+       struct air_val *v = air_get(c, in->operands[0]);
+-      if (!v || v->kind != AIR_VAL_PTR)
+-         return air_error(c, "instruction: a bitcast of something that is not a pointer");
+-      struct air_ptr p = v->ptr;
+-      p.pointee = dt->elem;
+-      air_set(c, &in->base, air_val_ptr(c, p));
++      struct air_val *result = v ? cast_pointer_value(c, v, dt->elem) : NULL;
++      if (!result)
++         return false;
++      air_set(c, &in->base, result);
+       return true;
+    }
+ 
+@@ -2493,11 +2639,8 @@
+       nir_def *i = air_get_ssa(c, in->operands[2]);
+       if (!v || !x || !i)
+          return false;
+-      if (!nir_src_is_const(nir_src_for_ssa(i)))
+-         return air_error(c, "instruction: insertelement at a run-time index");
+       air_set(c, &in->base,
+-              air_val_ssa(c, nir_vector_insert_imm(&c->b, v, x,
+-                                                   nir_src_as_uint(nir_src_for_ssa(i)))));
++              air_val_ssa(c, nir_vector_insert(&c->b, v, x, nir_u2u32(&c->b, i))));
+       return true;
+    }
+    case AIR_OP_SHUFFLEVEC: {
+@@ -2594,13 +2737,7 @@
+       uint64_t count;
+       if (!air_const_uint(in->operands[0], &count))
+          return air_error(c, "instruction: an alloca of a run-time size");
+-      /* A local holding a POINTER. Scratch memory cannot hold one -- a pointer
+-       * here is a resolution and not bytes -- so it becomes a translation-time
+-       * slot instead, when and only when that is sound: see AIR_VAL_SLOT. The
+-       * two GL-on-Metal fragment shaders store their last two buffer arguments
+-       * into such a local and never read them back, which LLVM left behind and
+-       * which used to stop the module at "a pointer where a number belongs".
+-       */
++      /* Opaque resource cells use the same real scratch allocation as numbers. */
+       uint64_t size = air_type_alloc_size(c->m, in->aux_type) * count;
+       unsigned align = MAX2(in->align, air_type_abi_align(c->m, in->aux_type));
+       c->scratch_size = ALIGN_POT(c->scratch_size, MAX2(align, 1));
+@@ -2617,6 +2754,14 @@
+       struct air_val *p = air_get(c, in->operands[0]);
+       if (!p)
+          return false;
++      if (in->base.type->kind == AIR_TYPE_POINTER &&
++          !(p->kind == AIR_VAL_PTR && p->ptr.class == AIR_PTR_ARGBUF)) {
++         struct air_val *result = load_resource_reference(c, p, in->base.type, in->align);
++         if (!result)
++            return false;
++         air_set(c, &in->base, result);
++         return true;
++      }
+       if (p->kind == AIR_VAL_PTR_SELECT) {
+          nir_def *res = load_through_choice(c, p, in->base.type, in->align);
+          if (!res)
+@@ -2647,19 +2792,11 @@
+       struct air_val *p = air_get(c, in->operands[1]);
+       if (!p)
+          return false;
+-      /* A POINTER stored into memory. There is nothing to write: a pointer in
+-       * this frontend is a resolution -- a binding and a byte offset decided
+-       * while translating -- and not an address, so it has no bytes. Naming
+-       * that here rather than letting air_get_ssa say "a pointer where a
+-       * number belongs" is the difference between a wall with a reason and a
+-       * wall with a symptom; the reason is in docs/air.md section 3.
+-       */
+       struct air_val *sv = air_get(c, in->operands[0]);
+       if (!sv)
+          return false;
+       if (val_is_pointerish(sv))
+-         return air_error(c, "instruction: a store of a pointer into memory, which this "
+-                             "frontend has no address to write");
++         return store_resource_reference(c, p, sv, in->operands[0]->type, in->align);
+       if (p->kind == AIR_VAL_PTR_SELECT)
+          return air_error(c, "instruction: a store through a chosen pointer, which would "
+                              "have to write both of them");
+@@ -2833,6 +2970,113 @@
+    return false;
+ }
+ 
++static bool
++call_def_is_parameter(nir_def *def)
++{
++   return def && !nir_src_is_const(nir_src_for_ssa(def));
++}
++
++/* Carry every caller-owned SSA component through a real NIR parameter. Static
++ * resource identities remain specialized, and constant offsets are rebuilt in
++ * the callee. No caller def may be smuggled in through a pointer or aggregate.
++ */
++static unsigned
++call_value_parameters(const struct air_val *v)
++{
++   if (!v)
++      return 0;
++   if (v->kind == AIR_VAL_SSA)
++      return 1;
++   if (v->kind == AIR_VAL_PTR)
++      return call_def_is_parameter(v->ptr.offset) +
++             call_def_is_parameter(v->ptr.binding_index);
++   unsigned n = v->kind == AIR_VAL_PTR_SELECT ? 1 : 0;
++   for (unsigned i = 0; i < v->num_elems; i++)
++      n += call_value_parameters(v->elems[i]);
++   return n;
++}
++
++static void
++declare_call_def(nir_function *fn, nir_def *def, unsigned *index)
++{
++   fn->params[(*index)++] = (nir_parameter){
++      .num_components = def->num_components, .bit_size = def->bit_size,
++   };
++}
++
++static void
++declare_call_value(nir_function *fn, const struct air_val *v, unsigned *index)
++{
++   if (!v)
++      return;
++   if (v->kind == AIR_VAL_SSA) {
++      declare_call_def(fn, v->def, index);
++   } else if (v->kind == AIR_VAL_PTR) {
++      if (call_def_is_parameter(v->ptr.offset))
++         declare_call_def(fn, v->ptr.offset, index);
++      if (call_def_is_parameter(v->ptr.binding_index))
++         declare_call_def(fn, v->ptr.binding_index, index);
++   } else {
++      if (v->kind == AIR_VAL_PTR_SELECT)
++         declare_call_def(fn, v->def, index);
++      for (unsigned i = 0; i < v->num_elems; i++)
++         declare_call_value(fn, v->elems[i], index);
++   }
++}
++
++static nir_def *
++import_call_def(struct air_ctx *c, nir_def *def, unsigned *index)
++{
++   if (!def)
++      return NULL;
++   if (call_def_is_parameter(def))
++      return nir_load_param(&c->b, (*index)++);
++   /* Pointer components are scalar 32-bit offsets/descriptor indices. */
++   return nir_imm_int(&c->b, nir_src_as_uint(nir_src_for_ssa(def)));
++}
++
++static struct air_val *
++import_call_value(struct air_ctx *c, const struct air_val *v, unsigned *index)
++{
++   if (!v)
++      return NULL;
++   if (v->kind == AIR_VAL_SSA)
++      return air_val_ssa(c, nir_load_param(&c->b, (*index)++));
++   if (v->kind == AIR_VAL_PTR) {
++      struct air_ptr p = v->ptr;
++      p.offset = import_call_def(c, p.offset, index);
++      p.binding_index = import_call_def(c, p.binding_index, index);
++      return air_val_ptr(c, p);
++   }
++   struct air_val *result = air_val_agg(c, v->num_elems);
++   result->kind = v->kind;
++   if (v->kind == AIR_VAL_PTR_SELECT)
++      result->def = nir_load_param(&c->b, (*index)++);
++   for (unsigned i = 0; i < v->num_elems; i++)
++      result->elems[i] = import_call_value(c, v->elems[i], index);
++   return result;
++}
++
++static void
++export_call_value(nir_call_instr *call, const struct air_val *v, unsigned *index)
++{
++   if (!v)
++      return;
++   if (v->kind == AIR_VAL_SSA) {
++      call->params[(*index)++] = nir_src_for_ssa(v->def);
++   } else if (v->kind == AIR_VAL_PTR) {
++      if (call_def_is_parameter(v->ptr.offset))
++         call->params[(*index)++] = nir_src_for_ssa(v->ptr.offset);
++      if (call_def_is_parameter(v->ptr.binding_index))
++         call->params[(*index)++] = nir_src_for_ssa(v->ptr.binding_index);
++   } else {
++      if (v->kind == AIR_VAL_PTR_SELECT)
++         call->params[(*index)++] = nir_src_for_ssa(v->def);
++      for (unsigned i = 0; i < v->num_elems; i++)
++         export_call_value(call, v->elems[i], index);
++   }
++}
++
+ /* A function of the module, translated as a nir_function so that
+  * nir_inline_functions can fold it into its callers afterwards.
+  *
+@@ -2853,18 +3097,11 @@
+ translate_callee(struct air_ctx *c, const struct air_function *f,
+                  struct air_val **argv, bool *is_param)
+ {
+-   /* A texture, sampler or buffer argument is not a value in this frontend: it
+-    * is resolved at translation time into a binding, and tex_handle wants an
+-    * AIR_VAL_PTR rather than an SSA def. Such an argument is bound from the
+-    * caller's own resolution and takes no NIR parameter, which specialises the
+-    * callee to its call site -- so it is not cached. Each of the four modules
+-    * that needs this has exactly one call site, counted beforehand.
+-    *
+-    * A pointer carrying a byte offset is refused instead: that offset is an
+-    * nir_def of the CALLER's impl, and using it here would be the same
+-    * cross-function def/use that the globals used to cause.
++   /* Pointer/aggregate shapes specialize the function, while their dynamic
++    * components are ordinary parameters. Resource indices are never addresses.
+     */
+    bool specialised = false;
++   unsigned argument_parameters = 0;
+    for (unsigned i = 0; i < f->num_args; i++) {
+       /* A struct holding a pointer counts as one too: CoreImage passes a
+        * texture and a sampler as metal::texture2d and metal::sampler, which
+@@ -2875,22 +3112,10 @@
+        */
+       bool ptr = argv && argv[i] && (argv[i]->kind == AIR_VAL_PTR ||
+                                      val_holds_ptr(argv[i]));
+-      if (ptr && argv[i]->kind == AIR_VAL_PTR && argv[i]->ptr.offset) {
+-         air_error(c, "intrinsic: a call passing a pointer at a computed offset as "
+-                      "argument %u, which would use the caller's own value here", i);
+-         return NULL;
+-      }
+-      /* The same reason, for the two pointers that are values: a chosen
+-       * pointer's condition is a def of the CALLER's impl, and a slot's
+-       * soundness rests on every use being in one block of one function.
+-       */
+-      if (argv && argv[i] && argv[i]->kind == AIR_VAL_PTR_SELECT) {
+-         air_error(c, "intrinsic: a call passing a pointer chosen at run time as "
+-                      "argument %u", i);
+-         return NULL;
+-      }
+-      is_param[i] = !ptr;
+-      specialised |= ptr;
++      unsigned count = call_value_parameters(argv ? argv[i] : NULL);
++      is_param[i] = count != 0;
++      argument_parameters += count;
++      specialised |= ptr || (argv && argv[i] && argv[i]->kind != AIR_VAL_SSA);
+    }
+ 
+    struct hash_entry *e = specialised ? NULL : _mesa_hash_table_search(c->fns, f);
+@@ -2920,7 +3145,7 @@
+    } else if (has_ret) {
+       nret = 1;
+    }
+-   unsigned nparams = f->num_args + nret;
++   unsigned nparams = argument_parameters + nret;
+    nir_function *fn = nir_function_create(c->nir, f->base.name ? f->base.name : "callee");
+    fn->num_params = nparams;
+    fn->params = rzalloc_array(c->nir, nir_parameter, MAX2(nparams, 1));
+@@ -2949,13 +3174,7 @@
+       };
+    }
+    for (unsigned i = 0; i < f->num_args; i++) {
+-      if (!is_param[i])
+-         continue;
+-      const struct air_type *at = f->args[i].type;
+-      fn->params[idx++] = (nir_parameter){
+-         .num_components = (uint8_t)air_nir_components(at),
+-         .bit_size = (uint8_t)air_nir_bit_size(c, at),
+-      };
++      declare_call_value(fn, argv[i], &idx);
+    }
+    fn->num_params = idx;   /* the pointers took no parameter */
+ 
+@@ -3021,11 +3240,7 @@
+    }
+    unsigned pidx = nret;
+    for (unsigned i = 0; i < f->num_args && ok; i++) {
+-      if (!is_param[i]) {
+-         air_set(c, &f->args[i], argv[i]);   /* the caller's own resolution */
+-         continue;
+-      }
+-      air_set(c, &f->args[i], air_val_ssa(c, nir_load_param(&c->b, pidx++)));
++      air_set(c, &f->args[i], import_call_value(c, argv[i], &pidx));
+    }
+    if (ok)
+       ok = translate_body(c);
+@@ -3116,13 +3331,7 @@
+    }
+    /* operand 0 is the callee; the arguments follow it */
+    for (unsigned i = 0; i < f->num_args; i++) {
+-      if (!is_param[i])
+-         continue;
+-      nir_def *a = air_get_ssa(c, in->operands[i + 1]);
+-      if (!a)
+-         return air_error(c, "intrinsic: argument %u of %s is not a value this can pass",
+-                          i, name);
+-      call->params[idx++] = nir_src_for_ssa(a);
++      export_call_value(call, argv[i], &idx);
+    }
+    nir_builder_instr_insert(&c->b, &call->instr);
+ 
+@@ -3302,18 +3511,7 @@
+    unsigned idx = 0;
+    call->params[idx++] = nir_src_for_ssa(&nir_build_deref_var(&c->b, tmp)->def);
+    for (unsigned i = 0; i < f->num_args; i++) {
+-      /* only the arguments translate_callee made parameters: a texture, a
+-       * sampler or a constant pointer was bound into the callee instead, and
+-       * has no SSA def to pass. Passing one anyway inserts a call whose source
+-       * has no value, which NIR dereferences while adding uses -- a segfault
+-       * inside nir_instr_insert rather than a message.
+-       */
+-      if (!is_param[i])
+-         continue;
+-      nir_def *a = argv[i] ? argv[i]->def : NULL;
+-      if (!a)
+-         return air_error(c, "library: argument %u has no value to pass", i);
+-      call->params[idx++] = nir_src_for_ssa(a);
++      export_call_value(call, argv[i], &idx);
+    }
+    nir_builder_instr_insert(&c->b, &call->instr);
+ 
+@@ -3396,7 +3594,8 @@
+       const struct air_block *blk = &f->blocks[bi];
+       for (unsigned i = 0; i < blk->num_insts; i++) {
+          const struct air_inst *in = blk->insts[i];
+-         if (in->op != AIR_OP_PHI || in->base.type->kind == AIR_TYPE_POINTER)
++         if (in->op != AIR_OP_PHI ||
++             (in->base.type->kind == AIR_TYPE_POINTER && !air_resource_type(in->base.type)))
+             continue;
+          /* A phi of an AGGREGATE, named here rather than by whatever notices
+           * the consequence further down. A struct is a tree of values in this
+@@ -3412,8 +3611,9 @@
+             return air_error(c, "instruction: a phi of %s, which NIR has no register for",
+                              in->base.type->kind == AIR_TYPE_STRUCT ? "a struct"
+                                                                     : "an array");
+-         nir_def *reg = nir_decl_reg(&entry, air_nir_components(in->base.type),
+-                                     air_nir_bit_size(c, in->base.type), 0);
++         bool resource = air_resource_type(in->base.type) != AIR_PTR_NONE;
++         nir_def *reg = nir_decl_reg(&entry, resource ? 1 : air_nir_components(in->base.type),
++                                     resource ? 32 : air_nir_bit_size(c, in->base.type), 0);
+          _mesa_hash_table_insert(c->phi_regs, in, reg);
+       }
+    }
+@@ -3440,6 +3640,15 @@
+          const struct air_inst *in = blk->insts[i];
+          if (in->op != AIR_OP_PHI)
+             continue;
++         enum air_ptr_class resource = air_resource_type(in->base.type);
++         if (resource) {
++            struct hash_entry *e = _mesa_hash_table_search(c->phi_regs, in);
++            air_set(c, &in->base, air_val_ptr(c, (struct air_ptr){
++               .class = resource, .binding_index = nir_load_reg(&c->b, e->data),
++               .pointee = in->base.type->elem,
++            }));
++            continue;
++         }
+          if (in->base.type->kind == AIR_TYPE_POINTER) {
+             if (!resolve_pointer_phi(c, in, reachable))
+                return false;
+@@ -3571,7 +3780,18 @@
+             if (!ce)
+                continue; /* an edge from a block the entry cannot reach */
+             c->b.cursor = *(nir_cursor *)ce->data;
+-            nir_def *val = air_get_ssa(c, in->operands[k]);
++            nir_def *val;
++            enum air_ptr_class resource = air_resource_type(in->base.type);
++            if (resource) {
++               struct air_ptr pointer;
++               if (!air_resource_ptr(c, air_get(c, in->operands[k]), resource, &pointer))
++                  return false;
++               if (pointer.is_image)
++                  return air_error(c, "instruction: an image phi needs explicit image type metadata");
++               val = air_binding_index(c, pointer);
++            } else {
++               val = air_get_ssa(c, in->operands[k]);
++            }
+             if (!val)
+                return false;
+             nir_store_reg(&c->b, val, re->data);
+@@ -3638,6 +3858,96 @@
+    };
+ #undef FIELD
+    return s;
++}
++
++static bool
++type_contains_pointer(const struct air_type *type)
++{
++   if (type->kind == AIR_TYPE_POINTER)
++      return true;
++   if (type->kind == AIR_TYPE_ARRAY || type->kind == AIR_TYPE_VECTOR)
++      return type_contains_pointer(type->elem);
++   if (type->kind == AIR_TYPE_STRUCT)
++      for (unsigned i = 0; i < type->num_members; i++)
++         if (type_contains_pointer(type->members[i]))
++            return true;
++   return false;
++}
++
++/* Serialize read-only numeric globals without a per-invocation array of
++ * stores. Preserve scalar bits (including NaN payloads), ABI member offsets,
++ * array strides and vector padding. Undefined/padding bytes may be zero.
++ */
++static bool
++serialize_initializer(struct air_ctx *c, const struct air_type *type,
++                       const struct air_value *value, uint8_t *bytes)
++{
++   const struct air_constant *k = value ? air_value_as_constant(value) : NULL;
++   if (!k)
++      return air_error(c, "interface: a numeric global initializer is not a constant");
++   if (k->ckind == AIR_CONST_NULL || k->ckind == AIR_CONST_UNDEF ||
++       k->ckind == AIR_CONST_POISON)
++      return true;
++   if (type->kind == AIR_TYPE_STRUCT || type->kind == AIR_TYPE_ARRAY ||
++       type->kind == AIR_TYPE_VECTOR) {
++      unsigned count = type->kind == AIR_TYPE_STRUCT ? type->num_members : type->count;
++      if (k->num_elems != count ||
++          (k->ckind != AIR_CONST_AGGREGATE && k->ckind != AIR_CONST_DATA))
++         return air_error(c, "interface: a global initializer has an invalid aggregate shape");
++      for (unsigned i = 0; i < count; i++) {
++         const struct air_type *elem = type->kind == AIR_TYPE_STRUCT ? type->members[i] : type->elem;
++         uint64_t offset = type->kind == AIR_TYPE_STRUCT ? air_struct_member_offset(c->m, type, i) :
++            i * (type->kind == AIR_TYPE_ARRAY ? air_type_alloc_size(c->m, elem) :
++                 MAX2(air_type_bit_size(elem) / 8, 1));
++         if (k->ckind == AIR_CONST_DATA) {
++            struct air_constant scalar = { .base = { .kind = AIR_VALUE_CONSTANT, .type = elem },
++               .ckind = air_type_is_float(elem) ? AIR_CONST_FLOAT : AIR_CONST_INT,
++               .u = k->data[i],
++            };
++            if (!serialize_initializer(c, elem, &scalar.base, bytes + offset))
++               return false;
++         } else if (!serialize_initializer(c, elem, k->elems[i], bytes + offset)) {
++            return false;
++         }
++      }
++      return true;
++   }
++   if (k->ckind != AIR_CONST_INT && k->ckind != AIR_CONST_FLOAT)
++      return air_error(c, "interface: unsupported numeric global initializer kind %u", k->ckind);
++   unsigned size = MAX2(air_type_bit_size(type) / 8, 1);
++   if (size > sizeof(k->u))
++      return air_error(c, "interface: global scalar initializer exceeds 64 bits");
++   for (unsigned i = 0; i < size; i++)
++      bytes[i] = (k->u >> (8 * i)) & 0xff;
++   return true;
++}
++
++static bool
++initialize_private_value(struct air_ctx *c, struct air_ptr address,
++                           const struct air_type *type, struct air_val *value)
++{
++   if (!value)
++      return true; /* an undefined aggregate member */
++   if (type->kind == AIR_TYPE_POINTER)
++      return store_resource_reference(c, air_val_ptr(c, address), value, type, 0);
++   if (type->kind == AIR_TYPE_STRUCT || type->kind == AIR_TYPE_ARRAY) {
++      unsigned count = type->kind == AIR_TYPE_STRUCT ? type->num_members : type->count;
++      if (value->kind != AIR_VAL_AGG || value->num_elems != count)
++         return air_error(c, "interface: invalid private global aggregate initializer");
++      for (unsigned i = 0; i < count; i++) {
++         const struct air_type *elem = type->kind == AIR_TYPE_STRUCT ? type->members[i] : type->elem;
++         uint64_t offset = type->kind == AIR_TYPE_STRUCT ? air_struct_member_offset(c->m, type, i) :
++            i * air_type_alloc_size(c->m, elem);
++         struct air_ptr field = air_ptr_add(c, address, nir_imm_int(&c->b, offset));
++         field.pointee = elem;
++         if (!initialize_private_value(c, field, elem, value->elems[i]))
++            return false;
++      }
++      return true;
++   }
++   if (value->kind != AIR_VAL_SSA)
++      return air_error(c, "interface: a private global scalar initializer is not numeric");
++   return air_store_ptr(c, address, value->def, 0);
+ }
+ 
+ static void
+@@ -3708,6 +4018,26 @@
+          pl->offset = c->shared_size;
+          pl->has_offset = true;
+          c->shared_size += air_type_alloc_size(c->m, g->value_type);
++      } else if (g->is_const && g->init && !type_contains_pointer(g->value_type)) {
++         unsigned align = MAX2(g->align, air_type_abi_align(c->m, g->value_type));
++         unsigned offset = ALIGN_POT(c->nir->constant_data_size, MAX2(align, 1));
++         uint64_t size = air_type_alloc_size(c->m, g->value_type);
++         if (size > UINT32_MAX - offset) {
++            air_error(c, "interface: constant globals exceed 32-bit offsets");
++            return;
++         }
++         unsigned old_size = c->nir->constant_data_size;
++         c->nir->constant_data_size = offset + size;
++         c->nir->constant_data = reralloc_size(c->nir, c->nir->constant_data,
++                                               MAX2(c->nir->constant_data_size, 1));
++         memset((uint8_t *)c->nir->constant_data + old_size, 0,
++                c->nir->constant_data_size - old_size);
++         if (!serialize_initializer(c, g->value_type, g->init,
++                                    (uint8_t *)c->nir->constant_data + offset))
++            return;
++         pl->class = AIR_PTR_CONSTANT_DATA;
++         pl->offset = offset;
++         pl->has_offset = true;
+       } else {
+          /* a program-scope variable: private to the invocation, written by
+           * the static initializers below
+@@ -3743,6 +4073,24 @@
+          .offset = pl->has_offset ? nir_imm_int(&c->b, pl->offset) : NULL,
+       };
+       air_set(c, &g->base, air_val_ptr(c, p));
++   }
++}
++
++static void
++initialize_globals(struct air_ctx *c)
++{
++   for (unsigned i = 0; i < c->m->num_globals && !c->error[0]; i++) {
++      const struct air_global_plan *pl = &c->global_plan[i];
++      const struct air_global *g = c->m->globals[i];
++      if (pl->skip || pl->class != AIR_PTR_SCRATCH || !g->init)
++         continue;
++      const struct air_constant *init = air_value_as_constant(g->init);
++      if (init && (init->ckind == AIR_CONST_UNDEF || init->ckind == AIR_CONST_POISON))
++         continue;
++      struct air_val *address = air_get(c, &g->base);
++      struct air_val *value = air_get(c, g->init);
++      if (!address || !value || !initialize_private_value(c, address->ptr, g->value_type, value))
++         return;
+    }
+ }
+ 
+@@ -3795,6 +4143,68 @@
+    }
+ }
+ 
++/* Null texture references remain a sentinel through stores, phis and calls.
++ * Guard the actual descriptor access only after CFG structuring/inlining, so
++ * no unbound substitute descriptor is sampled, even on a live optional path.
++ */
++static bool
++lower_null_resource_access(nir_builder *b, nir_instr *instr, void *data)
++{
++   if (instr->type != nir_instr_type_tex)
++      return false;
++   nir_tex_instr *tex = nir_instr_as_tex(instr);
++   bool static_null = tex->texture_index == ~0u || tex->sampler_index == ~0u;
++   bool dynamic = false;
++   for (unsigned i = 0; i < tex->num_srcs; i++)
++      dynamic |= tex->src[i].src_type == nir_tex_src_texture_offset ||
++                 tex->src[i].src_type == nir_tex_src_sampler_offset;
++   if (!static_null && !dynamic)
++      return false;
++   b->cursor = nir_before_instr(instr);
++   if (static_null) {
++      nir_def_rewrite_uses(&tex->def, nir_imm_zero(b, tex->def.num_components, tex->def.bit_size));
++      nir_instr_remove(instr);
++      return true;
++   }
++   nir_def *valid = nir_imm_true(b);
++   for (unsigned i = 0; i < tex->num_srcs; i++) {
++      if (tex->src[i].src_type != nir_tex_src_texture_offset &&
++          tex->src[i].src_type != nir_tex_src_sampler_offset)
++         continue;
++      unsigned base = tex->src[i].src_type == nir_tex_src_texture_offset ?
++         tex->texture_index : tex->sampler_index;
++      nir_def *index = nir_iadd_imm(b, tex->src[i].src.ssa, base);
++      valid = nir_iand(b, valid, nir_ine_imm(b, index, ~0u));
++   }
++   nir_if *present = nir_push_if(b, valid);
++   nir_tex_instr *sample = nir_instr_as_tex(nir_instr_clone(b->shader, instr));
++   nir_builder_instr_insert(b, &sample->instr);
++   nir_push_else(b, present);
++   nir_def *zero = nir_imm_zero(b, tex->def.num_components, tex->def.bit_size);
++   nir_pop_if(b, present);
++   nir_def *result = nir_if_phi(b, &sample->def, zero);
++   nir_def_rewrite_uses(&tex->def, result);
++   nir_instr_remove(instr);
++   return true;
++}
++
++static void
++optimize_specialized_state(nir_shader *nir)
++{
++   bool progress;
++   do {
++      progress = false;
++      NIR_PASS(progress, nir, nir_lower_vars_to_ssa);
++      NIR_PASS(progress, nir, nir_copy_prop);
++      NIR_PASS(progress, nir, nir_opt_constant_folding);
++      NIR_PASS(progress, nir, nir_opt_algebraic);
++      NIR_PASS(progress, nir, nir_opt_if, 0);
++      NIR_PASS(progress, nir, nir_opt_dead_cf);
++      NIR_PASS(progress, nir, nir_opt_cse);
++      NIR_PASS(progress, nir, nir_opt_dce);
++   } while (progress);
++}
++
+ /* -- the entry point ---------------------------------------------------- */
+ 
+ nir_shader *
+@@ -3944,6 +4354,8 @@
+       plan_globals(&c);
+    if (!c.error[0])
+       materialise_globals(&c);
++   if (!c.error[0])
++      initialize_globals(&c);
+    if (!c.error[0])
+       run_static_initializers(&c);
+ 
+@@ -4024,6 +4436,14 @@
+       NIR_PASS(_, c.nir, nir_opt_dce);
+    }
+ 
++   /* Static constructors and private resource cells must be visible to each
++    * other before promotion. This is the stock Mesa scratch-to-variable pass,
++    * including correct byte/word packing, rather than a frontend slot cache.
++    */
++   NIR_PASS(_, c.nir, nir_lower_scratch_to_var);
++   optimize_specialized_state(c.nir);
++   nir_shader_instructions_pass(c.nir, lower_null_resource_access, nir_metadata_none, NULL);
++   optimize_specialized_state(c.nir);
+    nir_index_ssa_defs(nir_shader_get_entrypoint(c.nir));
+ 
+    if (info) {
+diff --git a/src/compiler/air/air_intrinsics.c b/src/compiler/air/air_intrinsics.c
+--- a/src/compiler/air/air_intrinsics.c
++++ b/src/compiler/air/air_intrinsics.c
+@@ -1377,11 +1377,7 @@
+    struct air_val *v = air_get(c, in->operands[operand]);
+    if (!v)
+       return false;
+-   if (v->kind != AIR_VAL_PTR || v->ptr.class != want)
+-      return air_error(c, "intrinsic: argument %u is not a %s", operand - 1,
+-                       want == AIR_PTR_TEXTURE ? "texture" : "sampler");
+-   *out = v->ptr;
+-   return true;
++   return air_resource_ptr(c, v, want, out);
+ }
+ 
+ /* a constant i1/i32 argument, which these intrinsics use as flags */
+@@ -1422,7 +1418,7 @@
+               nir_texop op, nir_def *lod, unsigned comps)
+ {
+    if (tex->is_image) {
+-      nir_def *index = nir_imm_int(&c->b, tex->binding);
++      nir_def *index = air_binding_index(c, *tex);
+       switch (op) {
+       case nir_texop_txs: {
+          /* an image size has as many components as the image has dimensions;
+@@ -1443,15 +1439,19 @@
+       }
+    }
+ 
+-   nir_tex_instr *q = nir_tex_instr_create(c->nir, lod ? 1 : 0);
++   nir_tex_instr *q = nir_tex_instr_create(c->nir, (lod ? 1 : 0) + (tex->binding_index ? 1 : 0));
+    q->op = op;
+    q->sampler_dim = t->dim;
+    q->is_array = t->is_array;
+    q->dest_type = nir_type_int32;
+-   q->texture_index = tex->binding;
++   q->texture_index = tex->binding_index ? 0 : tex->binding;
+    q->sampler_index = 0;
+    if (lod)
+       q->src[0] = (nir_tex_src){ .src_type = nir_tex_src_lod, .src = nir_src_for_ssa(lod) };
++   if (tex->binding_index)
++      q->src[lod ? 1 : 0] = (nir_tex_src){
++         .src_type = nir_tex_src_texture_offset, .src = nir_src_for_ssa(tex->binding_index),
++      };
+    /* NIR fixes the size of a query's result itself -- txs is two components
+     * for a 2D texture whatever the caller asks one of them for -- so it is
+     * asked here and the component picked afterwards.
+@@ -1657,7 +1657,7 @@
+       if (!tex.is_image)
+          return air_error(c, "intrinsic: air.%s to a texture the interface says is not "
+                              "written", n->part[0]);
+-      nir_image_store(&c->b, nir_imm_int(&c->b, tex.binding),
++      nir_image_store(&c->b, air_binding_index(c, tex),
+                       nir_pad_vector(&c->b, nir_u2u32(&c->b, coord), 4),
+                       nir_imm_int(&c->b, 0), nir_pad_vector(&c->b, value, 4),
+                       nir_imm_int(&c->b, 0),
+@@ -1675,7 +1675,7 @@
+       uint64_t extra;
+       if (!tex_flag(c, in, arg, &extra))
+          return false;
+-      nir_def *res = nir_image_load(&c->b, 4, dest_bits, nir_imm_int(&c->b, tex.binding),
++      nir_def *res = nir_image_load(&c->b, 4, dest_bits, air_binding_index(c, tex),
+                                     nir_pad_vector(&c->b, nir_u2u32(&c->b, coord), 4),
+                                     nir_imm_int(&c->b, t.is_ms ? extra : 0),
+                                     nir_imm_int(&c->b, t.is_ms ? 0 : extra),
+@@ -1723,12 +1723,8 @@
+          compare = nir_f2fN(&c->b, compare, coord->bit_size);
+    }
+ 
+-   /* Seven and not six: a compare sample in the gradient form carries a coordinate, a
+-    * comparison value, an offset, two derivatives and a minimum level at once, which is
+-    * exactly six, and the next source anyone adds should not be the one that overflows
+-    * this silently.
+-    */
+-   nir_tex_src srcs[7];
++   /* Six sampling operands plus separate dynamic texture/sampler identities. */
++   nir_tex_src srcs[9];
+    unsigned nsrc = 0;
+    srcs[nsrc++] = (nir_tex_src){ .src_type = nir_tex_src_coord,
+                                  .src = nir_src_for_ssa(coord) };
+@@ -1856,6 +1852,13 @@
+       };
+    }
+ 
++   if (tex.binding_index)
++      srcs[nsrc++] = (nir_tex_src){ .src_type = nir_tex_src_texture_offset,
++                                    .src = nir_src_for_ssa(tex.binding_index) };
++   if (have_sampler && samp.binding_index)
++      srcs[nsrc++] = (nir_tex_src){ .src_type = nir_tex_src_sampler_offset,
++                                    .src = nir_src_for_ssa(samp.binding_index) };
++   assert(nsrc <= ARRAY_SIZE(srcs));
+    nir_tex_instr *tex_instr = nir_tex_instr_create(c->nir, nsrc);
+    tex_instr->op = op;
+    tex_instr->sampler_dim = t.dim;
+@@ -1871,8 +1874,8 @@
+    tex_instr->is_new_style_shadow = t.compare;
+    tex_instr->dest_type = dest_type;
+    tex_instr->coord_components = ncoord;
+-   tex_instr->texture_index = tex.binding;
+-   tex_instr->sampler_index = have_sampler ? samp.binding : 0;
++   tex_instr->texture_index = tex.binding_index ? 0 : tex.binding;
++   tex_instr->sampler_index = have_sampler && !samp.binding_index ? samp.binding : 0;
+    if (op == nir_texop_tg4) {
+       uint64_t component;
+       if (!tex_flag(c, in, arg, &component))
+@@ -1923,6 +1926,15 @@
+ 
+    if (!strcmp(n.part[0], "is_function_constant_defined"))
+       return fc_defined_op(c, in);
++   if (!strncmp(n.part[0], "get_null_texture_", 17) ||
++       !strncmp(n.part[0], "get_null_depth_", 15)) {
++      if (in->num_operands != 1 || air_resource_type(in->base.type) != AIR_PTR_TEXTURE)
++         return air_error(c, "intrinsic: invalid typed null texture signature");
++      air_set(c, &in->base, air_val_ptr(c, (struct air_ptr){
++         .class = AIR_PTR_TEXTURE, .binding = ~0u, .pointee = in->base.type->elem,
++      }));
++      return true;
++   }
+    if (n.num >= 2 && !strcmp(n.part[0], "wg") && !strcmp(n.part[1], "barrier"))
+       return barrier_op(c, in);
+    if (!strcmp(n.part[0], "atomic"))
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -411,13 +411,20 @@
+     * variable becomes an input varying here -- and then needs a driver_location, which
+     * nothing else would give it.
+     */
+-   if (nir->info.stage == MESA_SHADER_FRAGMENT && !screen->caps.fs_position_is_sysval) {
++   if (nir->info.stage == MESA_SHADER_FRAGMENT) {
+       static const struct nir_lower_sysvals_to_varyings_options pos_opts = {
+-         .frag_coord = true,
++         .point_coord = true,
+       };
+-      if (nir_lower_sysvals_to_varyings(nir, &pos_opts)) {
++      struct nir_lower_sysvals_to_varyings_options coordinates = pos_opts;
++      coordinates.frag_coord = !screen->caps.fs_position_is_sysval;
++      /* Point coordinates are a varying on fd6 as well as softpipe. Actual
++       * generic CoreAnimation variants retain this input; leaving the system
++       * intrinsic behind reaches ir3's unsupported load_point_coord case.
++       */
++      if (nir_lower_sysvals_to_varyings(nir, &coordinates)) {
+          nir_foreach_shader_in_variable(var, nir)
+-            if (var->data.location == VARYING_SLOT_POS)
++            if (var->data.location == VARYING_SLOT_PNTC ||
++                (coordinates.frag_coord && var->data.location == VARYING_SLOT_POS))
+                var->data.driver_location = nir->num_inputs++;
+       }
+    }

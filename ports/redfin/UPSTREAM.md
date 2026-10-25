@@ -1,5 +1,36 @@
 # HackiOS upstream review — 2026-10-22
 
+## Typed private resources and actual system specialization — 2026-10-25
+
+Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 AIR's pointer,
+global-planning, module-call and Gallium-finalization paths; kernel pin stays
+8e61187098f2c26c5daee8f9f72b6416aa64b9ab. Actual20H392 CoreAnimation stores,
+selects and reads sampler references and passes them to module helpers. Its
+stores are live. The earlier corpus assumption that no pointer is stored is
+insufficient once actual native function constants enable this shader.
+
+Adapt opaque sampler/read-view references to compiler-owned descriptor indices,
+carried by real private memory, phis and NIR parameters. A symbolic null never
+samples an invented descriptor; guard the actual resource operation after CFG
+structuring and inlining. Keep raw device-address stores and image-reference
+cells unsupported explicitly. Helper calls rebuild constant offsets and pass
+all dynamic SSA components instead of using definitions from another function.
+Initialize real global data (including sampler wrappers and exact NaN/padding/
+aggregate layouts), then use Mesa25.0.7's existing nir_lower_scratch_to_var after
+inlining so constructors and private state can fold together. Numeric read-only
+globals use the existing constant-data path. Dynamic vector insertion uses
+Mesa's ordinary vector operation. Point-coordinate inputs retain the system
+variable that the fd6 consumer can lower to its point-coordinate varying.
+
+Fresh native compilation/actual-cache ABI/signatures and34host cases pass.
+An independent host copy validates4NIR modules and compiles7variants to actual
+A620 instructions without booting the phone. The host-only standalone compiler
+owns the GLSL type cache and initializes driver UBO indices like the native
+factory; none of those harness fixes changes the production driver. An authored
+32-round contract is ready for real device pixel/guard checks. Correct system
+composition and sustained FPS still require native evidence. App-launch jobs
+remain disabled; actual parameter snapshots are bounded and kept in private logs.
+
 ## Native Metal function constants and AIR specialization — 2026-10-25
 
 V26 exposed a concrete native-object error before GPU specialization ran:

@@ -91,6 +91,24 @@ redfin_specialized_function_locked(id library,NSString *name,id values,NSString 
     if(specializedName.length)[function setLabel:specializedName];
     rw_print("REDFIN METAL SPECIALIZATION: function=%s values=%lu native-function=1 immutable=1\n",name.UTF8String,
         (unsigned long)(immutable.length/sizeof(struct redfin_metal_constant)));
+    /* Bounded rendering parameters let the host reproduce actual system
+     * variants. The capture contains no device identity or user resources. */
+    static unsigned snapshots;
+    if([name hasPrefix:@"fixed_"]&&__sync_fetch_and_add(&snapshots,1)<16) {
+        char record[4096]={0};size_t used=0;BOOL complete=YES;
+        const struct redfin_metal_constant *items=immutable.bytes;
+        unsigned count=(unsigned)(immutable.length/sizeof(*items));
+        for(unsigned i=0;i<count&&complete;++i) {
+            int wrote=snprintf(record+used,sizeof(record)-used,"%s%u/",i?",":"",items[i].index);
+            if(wrote<0||(size_t)wrote>=sizeof(record)-used){complete=NO;break;}used+=(size_t)wrote;
+            const unsigned char *bytes=(const unsigned char *)items[i].words;
+            for(unsigned j=0;j<items[i].bytes;++j) {
+                wrote=snprintf(record+used,sizeof(record)-used,"%02x",bytes[j]);
+                if(wrote<0||(size_t)wrote>=sizeof(record)-used){complete=NO;break;}used+=(size_t)wrote;
+            }
+        }
+        if(complete)rw_print("REDFIN METAL CONSTANT SNAPSHOT: function=%s values=%u data=%s\n",name.UTF8String,count,record);
+    }
     [immutable release];return function;
 }
 static id

@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN typed resource/global-initializer block built; V31 staged for V28 — 2026-10-25
+
+Source base63bd0d6 plus this coherent block. Extend preferred AIR with typed
+sampler/read-view descriptor identities in actual private cells (64-bit ABI
+pointers use two32-bit words, descriptor index plus zero upper word; no GPU
+addresses), resource choices/phis/null guards and real dynamic helper parameters.
+Rebuild static offsets in each callee rather than capturing caller SSA defs.
+Raw buffer-address stores and image-reference cells remain explicit refusals.
+Preserve actual scalar/aggregate global initializer bits, offsets/strides and
+NaN payloads; read-only numeric globals use NIR constant data. Initialize private
+globals once before constructors, inline module helpers, then use Mesa's ordinary
+scratch-to-variable promotion and state folding. Support dynamic vector insertion.
+Retain point coordinates as a system variable until the fd6 consumer lowers the
+actual point-coordinate varying; enabled generic system variants exposed that
+previously unreachable intrinsic. Add bounded actual fixed_* parameter snapshots.
+
+34 combined host cases PASS/no skips. Fresh independent Mac source copy validates
+four modules' NIR and compiles7A620 cases: actual CoreAnimation fixed fragment,
+fixed vertex and downsample with explicit0/1byte patterns, plus an authored
+resource contract. This is instruction compilation, not device execution or a
+rendering/FPS result. The new native32-round contract checks conditional private
+sampler writes, alias selection, null-texture phis, helper offsets, inline sampler
+initializers, exact numeric/NaN/padded-vector bits, dynamic lanes and guards.
+Host softpipe cannot faithfully execute its independent sampler/view indexing;
+no host backend adapter or software fallback is shipped. Its pixels need A620.
+
+Full fresh Mesa/AIR/native Metal/checker/shader/actual20H392 ABI/signature build
+PASS: research/redfin-metal-resources-v1, local20261025-201136/noCI,
+pairinge8c2fae4825c1230769067f84139c920fcfa83a0634f70611d57e04a9189c807.
+All four native AIR/consumer inputs match the independently checked source.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V28 image3543be281fda9a6bdbdc6f4bc07fbe9f32f58f90dfb5753f981fae531fbe653f, nonce47ede8ef6eb9380c;
+complete loader/ADT/liveFDT/firmware/power/DVFS/source-window/return preflight PASS.
+Fresh V31 from clean consistent HFSX/write_count1040953: 165ranges/
+24027136bytes/6new/zero freed. Initial host-only staging refused the new
+contract filename's absent allowlist entry before any device writes; retain that
+partial clone, add only the exact reviewed filename and restage from the clean
+read epoch. Complete files/signatures/seal/readback/native readonly fsck PASS.
+V31 is PREPARED, NOT APPLIED; older applied stages remain stale. App launches stay
+disabled. Next apply V31 once and collect one combined V28 run. V27's missing GUI
+and actual display corruption are not yet proven fixed; broader goal stays open.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x47ede8ef6eb9380c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V27 actual function specialization PASS; AIR resource locals are next — 2026-10-25
 
 Source1c9e5c2, graphics local20261025-190743/noCI, unchanged kernel
