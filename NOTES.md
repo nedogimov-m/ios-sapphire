@@ -1,5 +1,42 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V47 actual ordinary system FPS measured:17.4 GPU FPS — 2026-10-26
+
+Source224291e/kernel source5afedeb, CI40243857927/run3 SUCCESS, kernel
+1617aa6f44e5a77788effa04968b64498197e5e315d2d542e12cc1c2d3d19b75;
+UIv4 and ordinary graphicsv8/local20261026-031736 unchanged. V53 applied ONCE
+with full live preimages/backups/readback/clean journal PASS; now APPLIED/STALE,
+never reuse. V47 image5855aedd2b8e0bc903faa89551f75aff04ba365617d3598cbb2edd77b7775708.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0b1f45629afae83b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Authenticated fresh boot ID matched once, userspace-alive/no panic, one
+backboardd61, no GPU stop/fault. Correctness jobs/captures/app opens truly OFF.
+Clean unmounted consistent HFSX/write_count1253412; verified Fastboot.
+
+Native observer PASS stats-valid1/timed-out0:174actual completed presentations,
+ALL174GPU, over10.000221physical seconds =17.399615FPS. Ten valid per-second
+samples range15..20FPS, zero missed. Separate CADisplayLink601callbacks/60FPS,
+max16.667ms interval, despite requested90. Physical panel90Hz, counter19200000Hz,
+Mach/physical ratio1.000000000: no timebase mismatch. This is one bounded
+existing-fullscreen-system-window animation, not a manual scroll or90FPS claim.
+The old capture-lock gate and empty-frame accounting are fixed and measured.
+
+Warm sampled37draw groups take80..83ms encoding, with7actual submits,61..78other
+IOKit calls/9..35ms and no variant compilation. Kernel hardware jobs average
+about1.96ms full audit plus2.55ms actual GPU by1536submits; surface maintenance
+adds about0.99ms/job. The display's own GPU part averages6.35ms by120presents,
+but the whole presenter averages26.9ms with7.84ms mailbox wait. These overlapping
+samples are observations, not an additive per-frame cost proof.
+
+Read-only source review confirms CpuPrep, IOSurfaceLock and display all drain
+the entire issued queue, including unrelated buffers. The display then competes
+again for the hardware lock. Next complete throughput block: resource-scoped
+actual-retirement waits (including aliases/private suballocations), fair queued
+presentation, and native frame-cadence policy; assess bounded full-vs-fast runtime
+ownership audits without dropping fault/lease checks. Preferred upstream pins stay
+unchanged. Implement the related block first, then combined native tests/device
+cycle. No intermediate mini-task boot. Next fresh stageV54/imageV48; broader goal
+remains active. Private analysis: logs/redfin/gui-platform-v47/presentation-summary.json.
+
 ## REDFIN ordinary counters CI delivered; complete V47 ready for combined measurement — 2026-10-26
 
 Source5afedeb, GitHub Actions40243857927/run3 SUCCESS with ccache. Matching

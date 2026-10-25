@@ -32,6 +32,13 @@ CI kernel40243857927/run3/source5afedeb now passes the full native build.
 The matching V47 image and V53 stage pass exact source/ABI/read-only fsck;
 actual system FPS remains pending. Preferred pins stay unchanged.
 
+V47 now provides a valid ordinary measurement:174actual GPU presentations in
+10.000221physical seconds (17.399615FPS),15..20in ten samples. CADisplayLink is
+separately60FPS, panel90Hz and native/Mach clock ratio1.0. No panic, one window
+server, probes/captures/app opens off and a clean root are observed. Stable60/90
+render FPS remains unfinished. Review next the global CpuPrep/IOSurface/display
+barriers, presentation admission and actual native frame-rate policy together.
+
 ## Retained submission and separate native completion — 2026-10-26
 
 Review preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's msm bridge
