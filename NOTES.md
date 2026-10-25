@@ -1,5 +1,57 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V40 ordinary warm ordering verified; UI latency still open — 2026-10-26
+
+Source8ab2c89 (runtime57b155b); ordinary graphics local20261026-010624/noCI,
+pairinged0dccbcf9deffa0c641a505e73cb889bed017ba600e892c129f69d1c4d3e7dc,
+compiler identity identical to the successful V39 checks-on capture. Kernel
+unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V40 image4fe598549d46965cc9b7e7b21fe906bcefd678952e322316a704652131c82531, nonce8bc66619bc511d0b.
+Fresh V43 applied once:6ranges/258048bytes/zero new/zero freed; live preimages,
+full readback/signatures/native readonly fsck PASS. V43 applied/stale; NEVER reuse.
+Authenticated exact current boot userspace-alive, no panic, one backboardd61,
+clean consistent HFSX/write_count1182852, verified Fastboot. Next fresh rootV44/
+imageV41. No active exec sessions; broader goal stays active, progress not blocked.
+
+Ordinary policy proved: zero current boot nonce in both correctness probe logs,
+zero heavy capture; Phone/Photos auto-launch remains off. At pipeline32,36AIR/
+38ir3 file hits and zero misses/stores/variant compiles. New variants39/40 still
+miss and get stored. All sampled command scopes pay one real final finish and
+zero explicit CPU drains; their operations remain deferred inside the scope.
+Native pixel/guard/error/cache contracts are the successful prior V39 evidence,
+not probes rerun in this ordinary boot. Sustained GUI FPS is NOT measured.
+
+Remaining latency observed: command8 has5draws/48382us total (21345queue,
+14100encoding,12934finalization),1submit/12702us,2other calls/102us and no new
+allocations/maps/compiles. Command16 has5draws/84157us (55911queue,14435encoding,
+13809finalization),1submit/13512us. Command32 has6draws/24463us (53queue,
+19905encoding,4503finalization),1submit/4251us and no compile/allocations/maps.
+First command costs165140us; inclusive process counters show401932us allocation
+and140900us other calls, not additive same-thread CPU cost or proof about heap
+size. No claim of a paired workload speedup. Actual kernel submits remain
+synchronous; first8average full audits1748us, wait3894us, GPU3825us. GPU panel
+present samples average6.6..7.4ms, with one retained unsupported-swap CPU fallback.
+None of these command/submit/present samples alone establishes display FPS.
+
+Next coherent performance block: examine/reduce frontend/Gallium binding churn
+and stale resource slots, then run the combined native contracts. In the current
+preferred25.0.7 path, even unchanged sampler/blend bindings dirty state; AIR
+unbinds views/images/samplers after each draw but leaves old SSBO/UBO slots bound.
+This is a candidate CPU/dependency cost, not yet a measured causal proof. Reuse
+within a command must clear trailing slots and clean up all stages on success/
+error while retaining native state/resources through the real final fence.
+Do not simply skip unbinds. Separately, making kernel submission asynchronous
+requires retained BO/surface/page ownership, correct cache maintenance, real
+WaitFence/CpuPrep and release/client-close handling; returning early alone is
+incorrect. Preserve original-page, half, fault and final-completion checks.
+Follow the user's speed preference: reuse verified kernels/archive/toolchain,
+run independent host build/checks concurrently, prepare the next ordinary image
+while a combined device cycle runs, and do not repeat unrelated shader checks.
+Keep whole related implementation blocks before the next combined device test.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x8bc66619bc511d0b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V39 real A620 queued GPU/CPU-consumer ordering PASS — 2026-10-26
 
 Source57b155b; graphics local20261026-010258/noCI,

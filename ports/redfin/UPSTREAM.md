@@ -33,6 +33,18 @@ two GPU-written unaligned float4 uploads preserve both rendered values with
 actual waits. All previous native contracts pass and checker67 exits0. No panic
 or window-server restart is observed. Ordinary warm performance remains pending.
 
+V40 ordinary reboot proves both correctness jobs/heavy capture inactive and the
+same compiler identity warm:36AIR/38ir3 file hits by pipeline32 with zero misses
+or compiles. Each sampled system command has one final real finish and zero CPU
+drains, but5-draw groups still take48..84ms including21..56ms queue delay, and
+6draws take24.5ms with19.9ms encoding. One backboardd, no panic and a clean root
+are observed. These are command samples, not display FPS or a paired speedup.
+Review the same preferred fd sampler/view/blend setters: they dirty state even
+for identical bindings; consider coherent command-local state reuse/stale-slot
+clearing next, preserving completion/resource lifetime and native regressions.
+Kernel submissions remain synchronously completed; async ownership/cache/wait
+semantics must be implemented as a whole before changing that contract.
+
 ## Persistent AIR and ir3 compilation with a native compiler identity — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's
