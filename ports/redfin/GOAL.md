@@ -87,6 +87,20 @@ been read-only reviewed; existing graphics references remain8e611870/906425b.
 Power/charging/thermals, all actual sensors, native Metal and real Apple
 account authorization remain mandatory. Defer only human-dependent actions.
 
+The next full source block is implemented and host-built: native Redfin
+QG/ADC5/SMB5 battery/charging, TSENS26xx/OSM temperature/frequency control,
+retained-RTC/UTC mapping, native thermal notifications and verified90Hz
+CADisplay periods/UIScreen caps. Native MobileWiFi password/readiness/TLS
+checks use a synthetic unjoined marker only. Actual assetsd TCC rejection
+is confirmed; native SecTask/TCC and daemon logging are added without a
+permission override. Do not claim Photos repaired until a real run proves it.
+All47distinct selected host casesPASS; local kernel20261025-072951/noCI,
+e3ae1202... is frozen. Complete signed/actual-import bundles and V10 private
+stage pass native readonly fsck. V10 has not been applied or booted yet;
+31ranges/234blocks/958464bytes,55new/zero freed. Only this complete V10 set
+may be applied. Next physical results, full Metal, every actual sensor and
+real account authorization remain unfinished; see newest NOTES.
+
 ## Operating constraints
 
 Follow AGENTS.md, README.md and latest NOTES.md. Prefer the user's two

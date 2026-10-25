@@ -36,6 +36,9 @@ __attribute__((constructor)) static void redfin_graphics_load(void)
         dprintf(2,"REDFIN EAGL LOADER: profile refused bytes=%zu current-profile-rates=10/30/60/90 full-panel=1\n",size);
         return;
     }
+    /* Separate actual-ABI library: QuartzCore periods need the measured panel
+     * mode in the event server as well as app/UIScreen processes. */
+    (void)dlopen("/redfin/lib/libredfin-refresh.dylib",RTLD_NOW|RTLD_LOCAL);
     io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("RedwoodGPU"));
     bool valid=service && property(service,"chip-id",0x06020001) &&
         property(service,"RedfinRuntimeABI",1);

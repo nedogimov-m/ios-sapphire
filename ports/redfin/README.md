@@ -296,6 +296,20 @@ prepared root there destroys Android user data and requires explicit approval.
 
 ## Offline recovery
 
+The optional complete native power profile uses `--gpu-gui --platform-power`
+and `--rtc-anchor backup/redfin/ios-rtc-anchor.json`. Capture that private
+counter/UTC mapping once in verified offline recovery with
+`python3 ports/redfin/capture-rtc-anchor.py`; keep it across RAM boots. This
+does not set the PMIC RTC or alarms. Build thermal/network services with
+`PYTHONPATH=. python3 ports/redfin/platform_userland.py --out research/redfin-power/userland-v2`
+and supply `build-root.py --platform-bundle` when preparing a fresh root.
+The profile binds PM7250B/QG/ADC5/SMB5, TSENS26xx and standard OSM from the
+actual live FDT. It requires physical validation; see newest NOTES/GOAL.
+Native frame-rate publication also requires the matching `ui_userland.py`
+bundle, including `libredfin-refresh.dylib`; an old UI/graphics bundle must
+not be paired with a new measured90Hz kernel. Current app refresh, charging,
+thermal and Wi-Fi-persistence observations remain separate from user checks.
+
 `build-recovery.py` builds a temporary ADB-only Linux image from the verified
 boot/vendor_boot backups. Its root ADB, recovery marker, unmounted userdata and
 read-only disk access have been verified. It disables the recovery UI and starts

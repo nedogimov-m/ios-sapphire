@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <sys/time.h>
 #include "gui-profile.h"
 
 extern int memorystatus_control(uint32_t, int32_t, uint32_t, void *, size_t);
@@ -118,6 +119,30 @@ keychain_proof(const char *nonce)
     CFRelease(query);
 }
 
+/* Observe Security/TCC's own answers for this signed helper. Preserve all
+ * native authorization decisions; no policy override or database edit. */
+static void
+authorization_proof(const char *nonce)
+{
+    void *security=dlopen("/System/Library/Frameworks/Security.framework/Security",RTLD_NOW|RTLD_LOCAL);
+    CFTypeRef (*task_create)(CFAllocatorRef)=security ? (CFTypeRef (*)(CFAllocatorRef))dlsym(security,"SecTaskCreateFromSelf") : NULL;
+    CFTypeRef (*copy)(CFTypeRef,CFStringRef,CFErrorRef *)=security ?
+        (CFTypeRef (*)(CFTypeRef,CFStringRef,CFErrorRef *))dlsym(security,"SecTaskCopyValueForEntitlement") : NULL;
+    uint32_t (*flags)(CFTypeRef)=security ? (uint32_t (*)(CFTypeRef))dlsym(security,"SecTaskGetCodeSignStatus") : NULL;
+    CFTypeRef task=task_create ? task_create(NULL) : NULL;
+    CFErrorRef error=NULL;CFTypeRef allow=task && copy ? copy(task,CFSTR("com.apple.private.tcc.allow"),&error) : NULL;
+    BOOL entitled=allow && CFGetTypeID(allow)==CFArrayGetTypeID() &&
+        CFArrayContainsValue((CFArrayRef)allow,CFRangeMake(0,CFArrayGetCount((CFArrayRef)allow)),CFSTR("kTCCServicePhotos"));
+    void *tcc=dlopen("/System/Library/PrivateFrameworks/TCC.framework/TCC",RTLD_NOW|RTLD_LOCAL);
+    long (*preflight)(CFStringRef,CFDictionaryRef)=tcc ? (long (*)(CFStringRef,CFDictionaryRef))dlsym(tcc,"tcc_authorization_preflight") : NULL;
+    long authorization=preflight ? preflight(CFSTR("kTCCServicePhotos"),NULL) : -1;
+    struct timeval now={};gettimeofday(&now,NULL);
+    printf("REDFIN PHOTO AUTHORIZATION: boot=%s SecTask=%u flags=%#x native-photos-entitlement=%u entitlement-error=%ld TCC-preflight=%ld calendar-valid=%u\n",
+        nonce,task!=NULL,task && flags ? flags(task) : 0,entitled,error ? (long)CFErrorGetCode(error) : 0,
+        authorization,(uint64_t)now.tv_sec>=1577836800ULL);
+    if (allow) CFRelease(allow);if (error) CFRelease(error);if (task) CFRelease(task);
+}
+
 int main(void)
 {
     setvbuf(stdout,NULL,_IOLBF,0); setvbuf(stderr,NULL,_IOLBF,0);
@@ -136,6 +161,7 @@ int main(void)
             identity_proof(nonce);
             if (limit) return 4;
             keychain_proof(nonce);
+            authorization_proof(nonce);
             Class photo=NSClassFromString(@"PHPhotoLibrary");
             Class manager=NSClassFromString(@"PLPhotoLibraryPathManager");
             if (!manager) dlopen("/System/Library/PrivateFrameworks/PhotoLibraryServicesCore.framework/PhotoLibraryServicesCore",RTLD_NOW|RTLD_LOCAL);

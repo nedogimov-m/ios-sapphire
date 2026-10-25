@@ -1,5 +1,53 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native Redfin power/thermal/clock and measured app refresh — 2026-10-25
+
+Read-only review of preferred kernelHEAD
+d82c64a3a31cd27a0a0afbf6e213e467e44b1b4c (relative to8e611870) finds the
+7zip setup check and ramfb-mode selection, without a Redfin PMIC/thermal
+backend. Retain8e611870's RedwoodBattery IOPMPowerSource publication and
+adapt the native pressure-notification boundary from userland
+a79ff0772a3454fd1ef127e181e5b3bce6c9ce18 thermald.c. Its expected kernel
+thermal implementation is absent from these kernel snapshots. No Redwood
+PM7325B/UEFI cache, guessed temperature or EPSS address is imported.
+
+Google kernel/msm500b3a2059c1eec0fec08ec56add06320ea901a8 supplies the
+actual Redfin interfaces: PM7250B SID2/QG4800/SDAMb100/ADC53100/SMB5,
+tsens2xxx.c's26xx SROT/TM layout and qcom-cpufreq-hw.c's standard OSM
+110/stride32/920 layout. These are bound against the captured live FDT.
+Native QG code22813 corresponds to the independent4440253uV observation;
+signed14 at subtype4 is4272uA. ADC5 uses the native100k table/full-scale
+70e4; RRADC's Kelvin conversion and generic tsens-v2 are inappropriate.
+
+Only the owned ADC5 configuration/conversion request, charge-enable/pause
+bits and QG monotonic SOC are writable through this private adapter. A late
+SPMI/ADC completion retires the adapter without reuse. Native charge limits,
+JEITA and safety timers must be valid before enabling; no voltage/current
+limit, protection, regulator or PMIC calibration overwrite is added. Real
+TSENS pressure selects valid hardware OSM rows for6/1/1cores; hardware owns
+voltage. Foreign LUT/perf state changes retire that domain. The retained
+RTC6048 is read-only: Android's old epoch mapping disappeared with userdata,
+so a private host-UTC/counter anchor restores calendar time without changing
+the RTC/alarm. Thermal critical thresholds request native clean shutdown.
+Physical battery/charging/thermal/frequency behavior still requires the next
+combined hardware run; host fault models are not physical measurements.
+
+Actual20H392 CADisplay refreshRate/hardwareRefreshRate return seconds per
+frame; UIScreen maximumFramesPerSecond returns Hz. UUID/type-bound adapters
+use1/90 and90 only when the framebuffer publishes the independently verified
+physical90Hz result. CADisplay minimumFrameDuration is a frame count and is
+left native. The camera layout keeps its measured x53.35time placement.
+Native MobileWiFi Set/CopyPassword from preferred906425b's wifipw_test.c is
+adapted as a persistent synthetic unjoined marker, without reading/logging
+any user's password. Native HTTPS keeps system trust and uses no cookies.
+
+Current assetsd crash's actual executable+162ec throws "assetsd requires
+TCCPhotosService access" after PLPrivacy photosAccessAllowedWithScope7.
+Current tccd exists and its database/home permissions are already correct.
+Do not infer a permission fix from kernel XML flags: observe native SecTask/
+TCC preflight and the native daemons' scoped logs; no TCC override, database
+edit, fabricated entitlement or suppressed exception is added.
+
 ## Native AKS descriptor lifetime correction after physical90Hz capture — 2026-10-25
 
 Authenticated boot3635d632d4fbfca8 proves S6E3HC2 TE60->90Hz and independent

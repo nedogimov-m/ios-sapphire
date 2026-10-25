@@ -16,14 +16,49 @@ struct target {const char *path;unsigned uid,mode;};
 static const struct target targets[]={
     {"/redfin/bin/photos-init",0,0755},
     {"/redfin/bin/gui-check",0,0755},
+    {"/redfin/bin/thermald",0,0755},
+    {"/redfin/bin/network-check",0,0755},
     {"/redfin/lib/libredfin-ui.dylib",0,0644},
     {"/redfin/lib/libredfin-graphics.dylib",0,0644},
     {"/redfin/lib/libredfin-eagl.dylib",0,0644},
+    {"/redfin/lib/libredfin-refresh.dylib",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.photos-init.plist",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.gui-check.plist",0,0644},
+    {"/System/Library/LaunchDaemons/com.redfin.thermald.plist",0,0644},
+    {"/System/Library/LaunchDaemons/com.redfin.network-check.plist",0,0644},
     {"/private/var/mobile/Library/Logs/redfin-ui.log",501,0600},
+    {"/private/var/mobile/Library/Logs/redfin-refresh.log",501,0600},
     {"/private/var/mobile/Library/Logs/redfin-gui-check.log",501,0644},
+    {"/private/var/log/redfin-thermald.log",0,0600},
+    {"/private/var/log/redfin-network-check.log",0,0600},
+    {"/private/var/mobile/Library/Logs/redfin-native-tcc.log",501,0600},
+    {"/private/var/mobile/Library/Logs/redfin-native-assetsd.log",501,0600},
 };
+
+/* This host HFS library writes overflow keys using physical block numbers;
+ * native HFS expects logical fork offsets. New small programs must therefore
+ * get one complete free run, never the allocator's fragmented first-fit path.
+ * This changes only the ordinary allocation hint. The native allocator still
+ * allocates/zeros every block and maintains its bitmap/counters; the caller
+ * subsequently verifies complete extents and native readonly fsck. */
+static int stage_contiguous(Volume *volume,uint32_t needed)
+{
+    uint32_t total=volume->volumeHeader->totalBlocks;
+    if (total!=4194304 || !needed || needed>1024) return 0;
+    size_t bytes=(total+7u)/8u;unsigned char *bitmap=malloc(bytes);
+    if (!bitmap) return 0;
+    if (!READ(volume->allocationFile,0,bytes,bitmap)) {free(bitmap);return 0;}
+    uint32_t start=0,count=0;
+    /* Leave room for ordinary catalog/extent-tree growth before file data. */
+    for (uint32_t block=1;block<total-1;++block) {
+        if (bitmap[block/8]&(0x80u>>(block%8))) {count=0;continue;}
+        if (!count) start=block;
+        if (++count==needed+16) {
+            volume->volumeHeader->nextAllocation=start;free(bitmap);return 1;
+        }
+    }
+    free(bitmap);return 0;
+}
 int main(int argc,char **argv)
 {
     if (argc<4 || (argc-2)%2) return 2;
@@ -53,6 +88,8 @@ int main(int argc,char **argv)
             memcpy(old_extents,file->dataFork.extents,sizeof(old_extents));free(record);
         }
         FILE *input=fopen(argv[i],"rb");if (!input) return 11;
+        uint32_t wanted=(uint32_t)((source.st_size+4095)/4096);
+        if (wanted>old_blocks && !stage_contiguous(volume,wanted-old_blocks)) return 16;
         if (!add_hfs(volume,createAbstractFileFromFile(input),target->path) ||
             !chmodFile(target->path,target->mode,volume) || !chownFile(target->path,target->uid,target->uid,volume)) return 12;
         record=getRecordFromPath(target->path,volume,NULL,NULL);
@@ -62,6 +99,8 @@ int main(int argc,char **argv)
             file->dataFork.totalBlocks!=(uint64_t)(source.st_size+4095)/4096 ||
             file->permissions.ownerID!=target->uid || file->permissions.groupID!=target->uid ||
             (file->permissions.fileMode&07777)!=target->mode || (old_id && old_id!=file->fileID)) return 14;
+        if (!old_id && (file->dataFork.extents[0].blockCount!=file->dataFork.totalBlocks ||
+            file->dataFork.extents[1].blockCount)) return 17;
         for (unsigned j=0;j<8 && old_extents[j].blockCount;++j)
             if (file->dataFork.extents[j].startBlock!=old_extents[j].startBlock ||
                 file->dataFork.extents[j].blockCount<old_extents[j].blockCount) return 15;

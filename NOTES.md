@@ -1,5 +1,54 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native power/thermal/clock/app-refresh block built — 2026-10-25
+
+Source base9e1bcf2; final local kernel build20261025-072951/noCI PASS,
+SHA256e3ae120285ac57d0bcb32d26ab55e3df520c9b2acb733b895685cb3fe5d739e0,
+frozen research/redfin-gpu/kernel-native-platform-v1. Whole implementation
+precedes combined checks/new iOS boot: QG/ADC5/SMB5 live battery/power-source
+publication, guarded charging, TSENS26xx temperatures/pressure, native OSM
+frequency control and critical clean shutdown, read-only retained-RTC epoch
+mapping, native iOS thermal notifications, measured90Hz app/CA periods,
+MobileWiFi synthetic credential persistence/readiness/HTTPS probe and native
+Photos authorization/error logging. Generic RRADC/tsens-v2/Redwood EPSS are
+not used. App FPS remains distinct from TE or a software notification rate.
+
+All47distinct selected host casesPASS, including actual adapter code with
+SPMI timeout/foreign-owner/map-change faults, stale/busy/late ADC and exact
+configuration restoration, OSM row bounds/foreign retirement, native QG
+units/sign/TSENS validity, charge guards/hysteresis/coulomb gaps, native job
+scope/aliasing and previous root/keychain/geometry contracts. The first
+compile finds missing private memory/DT headers; complete corrected build
+passes. PhotosV4, UI/refreshV2, platformV2 and rebuilt graphics/loader all
+pass native20H392 import and strict signature checks. No physical claim yet.
+
+Fresh V10 is still clean/unmounted/write_count783850. Complete private stage
+passes native readonly fsck/full signed-file readback/allocation audits;
+31ranges/234blocks/958464bytes,55new blocks, zero freed. It preserves all
+existing file allocations and runtime/user/keychain data. New13block thermald
+initially exposes this host HFS library's wrong physical overflow keys;
+the rejected private clone never reaches the phone. The bounded stager now
+selects a complete free run using the ordinary allocator hint and checks a
+single native extent for new files. Its actual selector passes fragmented/
+short/unbounded bitmap cases, and complete native fsck thenPASS. Device
+remains idle recovery; no V10 apply or new iOS boot yet. Do not reuse V9.
+
+Read-only current-boot crash reports confirm assetsd's exact native TCC
+access assertion and Photos' zero-section downstream failure. Native tccd
+exists; its501-owned TCC directory/database permissions are correct. This
+block adds native SecTask/TCC preflight plus scoped native daemon output,
+without an entitlement/policy override, schema edit or suppressed assertion.
+The real RTC counter has a non-Unix epoch; its private mapping was captured
+once against host UTC, with no PMIC RTC/alarm write. Keep it and the existing
+private wrapping material unchanged. New time/charging/thermal/frequency/
+app-rate/native-Wi-Fi results must be assessed in one integrated run.
+
+Last actual observed image/nonce/args remain gui-platform-v3/24640daa371b61c8
+in the next entry. Next: build/preflight one fresh power-enabled image,
+apply the backed-up full V10 set, run the complete capture, then continue
+native Photos/Metal/all actual sensors. Human cable/motion/smoothness/account
+checks remain deferred; they do not block independent implementation.
+
 ## REDFIN combined90Hz/EAGL, reboot Keychain and Phone verified — 2026-10-25
 
 Source a07a2ce; kernel unchanged/local20261025-062535/noCI,

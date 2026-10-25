@@ -32,6 +32,11 @@ static bool redfin_publish_modes(IOService *fb,uint32_t width,uint32_t height,ui
         timing->setObject("HorizontalAttributes",horizontal);timing->setObject("VerticalAttributes",vertical);
         timing->setObject("ColorModes",colors);timings->setObject(timing);
         success=fb->setProperty("TimingElements",timings) && fb->setProperty("ColorElements",colors);
+        /* hz90 can only reach this point after the panel's physical TE and
+         * independent INTF counter admitted the transaction. Userland may
+         * advertise it only with both of these measured-mode properties. */
+        success=fb->setProperty("RedfinVerifiedRefreshHz",hz,32) && success;
+        success=fb->setProperty("RedfinPhysicalRefreshVerified",hz==90) && success;
     }
     OSSafeReleaseNULL(timings);OSSafeReleaseNULL(colors);OSSafeReleaseNULL(timing);
     OSSafeReleaseNULL(horizontal);OSSafeReleaseNULL(vertical);OSSafeReleaseNULL(color);

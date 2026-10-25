@@ -17,6 +17,7 @@ import gui_profile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
+sys.path.insert(0,str(ROOT))
 PAGE = 4096
 
 
@@ -55,6 +56,8 @@ def main():
     p.add_argument('--apple-adt', type=Path, help='D22AP product identity and development policy for Apple userspace')
     p.add_argument('--device-identity', type=Path, help='private physical Redfin serial; does not provide Apple activation certificates')
     p.add_argument('--keychain-material', type=Path, help='private persistent software keywrap material; GUI3 only, consumed before userspace')
+    p.add_argument('--platform-power', action='store_true', help='native Redfin QG/ADC5/SMB5, thermal/OSM and retained-RTC support; GUI3 only')
+    p.add_argument('--rtc-anchor', type=Path, help='private retained-RTC/UTC epoch mapping captured in verified recovery; requires --platform-power')
     p.add_argument('--memory-base', type=lambda x: int(x, 0))
     p.add_argument('--memory-size', type=lambda x: int(x, 0))
     p.add_argument('--boot-mpidr', type=lambda x: int(x, 0), default=0)
@@ -399,6 +402,16 @@ def main():
             private_keychain = keychain_material.load(a.keychain_material)
         except (OSError, ValueError, TypeError):
             p.error('private Redfin keychain material is invalid or unreadable')
+    private_rtc = None
+    if a.platform_power or a.rtc_anchor:
+        if not a.platform_power or not a.gpu_gui or not a.apple_adt:
+            p.error('--platform-power requires --gpu-gui/--apple-adt; --rtc-anchor requires --platform-power')
+        from ports.redfin import platform_power
+        if a.rtc_anchor:
+            try:
+                private_rtc=platform_power.load_anchor(a.rtc_anchor)
+            except (OSError,ValueError,TypeError):
+                p.error('private retained RTC epoch mapping is invalid or unreadable')
     if not 4320 <= a.stride <= 16384 or a.stride % 4:
         p.error('--stride must be a multiple of 4 in [4320, 16384]')
     if not 5 <= a.seconds <= 300:
@@ -449,6 +462,9 @@ def main():
             mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes(), private_identity)
         if private_keychain is not None:
             keychain_material.apply(tree, private_keychain)
+        platform_power_proof = None
+        if a.platform_power:
+            platform_power_proof=platform_power.apply(tree,a.dtb.read_bytes(),private_rtc)
         from memory import _tree
         nodes, _ = _tree(a.dtb.read_bytes())
         from peripherals import add_observers
@@ -814,6 +830,8 @@ def main():
         manifest['device_identity'] = device_identity.report(a.device_identity, private_identity)
     if private_keychain is not None:
         manifest['keychain_material'] = keychain_material.report(a.keychain_material, private_keychain)
+    if a.platform_power:
+        manifest['platform_power'] = platform_power_proof
     if a.display_hz is not None:
         manifest['display_hz'] = a.display_hz
     if a.display_fit:

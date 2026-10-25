@@ -92,6 +92,12 @@ def build(out, cache_path=None):
             if any(key not in actual or actual[key]['types'] != value for key, value in wanted.items()):
                 raise ValueError('native photo-library ABI differs: ' + name)
             abi[path] = {'uuid': image.uuid, 'class': name, 'methods': wanted}
+        for path,wanted in [('/System/Library/Frameworks/Security.framework/Security',
+            ['_SecTaskCreateFromSelf','_SecTaskCopyValueForEntitlement','_SecTaskGetCodeSignStatus']),
+            ('/System/Library/PrivateFrameworks/TCC.framework/TCC',['_tcc_authorization_preflight'])]:
+            image=cache.image(path);exports,_=image.exports()
+            if any(not exports.get(name) for name in wanted):raise ValueError('native authorization API unavailable')
+            abi[path]={'uuid':image.uuid,'exports':wanted}
     sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
     executable = out / 'photos-init'
     command = ['xcrun', '--sdk', 'iphoneos', 'clang', '-arch', 'arm64', '-isysroot', sdk,

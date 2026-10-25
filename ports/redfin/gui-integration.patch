@@ -370,7 +370,7 @@ diff --git a/iokit/Kernel/arm/RedfinDisplayMode.inc b/iokit/Kernel/arm/RedfinDis
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinDisplayMode.inc
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,46 @@
 +/* SPDX-License-Identifier: APSL-2.0 */
 +/* Mode publication adapted from preferred8e611870 MiniIOMobileFramebuffer.
 + * Native20H392 IOMobileFramebuffer reads TimingElements/ColorElements and
@@ -405,6 +405,11 @@ new file mode 100644
 +        timing->setObject("HorizontalAttributes",horizontal);timing->setObject("VerticalAttributes",vertical);
 +        timing->setObject("ColorModes",colors);timings->setObject(timing);
 +        success=fb->setProperty("TimingElements",timings) && fb->setProperty("ColorElements",colors);
++        /* hz90 can only reach this point after the panel's physical TE and
++         * independent INTF counter admitted the transaction. Userland may
++         * advertise it only with both of these measured-mode properties. */
++        success=fb->setProperty("RedfinVerifiedRefreshHz",hz,32) && success;
++        success=fb->setProperty("RedfinPhysicalRefreshVerified",hz==90) && success;
 +    }
 +    OSSafeReleaseNULL(timings);OSSafeReleaseNULL(colors);OSSafeReleaseNULL(timing);
 +    OSSafeReleaseNULL(horizontal);OSSafeReleaseNULL(vertical);OSSafeReleaseNULL(color);
