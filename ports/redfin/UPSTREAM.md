@@ -47,6 +47,16 @@ extra GPU finish for an empty ticket after a CPU drain; legacy rwa_finish waits
 prior async tickets even without current pending work. Final native build is
 local20261026-030905 with49host cases/actual20H392 ABI/signatures PASS.
 
+V44 now passes actual A620: two commits before wait, ordered shared writes and
+distinct snapshots/guards, reentrant callback submit/wait, real partial-error
+drain, empty ordering, older retire preserving newer writes, CPU drain of prior
+tickets and retained device close. All earlier192compute/70cache variants/half/
+MRT/varying/sampler/blit/pitch/alias/CPU indices/unaligned uniforms/persistence/
+binding contracts also pass; checker67 and gpu-render53 exit0. One backboardd62,
+fresh authenticated boot ID/no panic and clean HFSX are observed. Warm ordinary
+system latency/FPS remain pending; the queued submission block itself is now
+hardware-validated.
+
 ## Command-local descriptor and graphics state reuse — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR stage

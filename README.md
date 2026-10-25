@@ -134,6 +134,13 @@ changed CPU data, sparse high-to-low slots and error cleanup after encoded work.
 An eight-draw command skips14descriptor/70graphics/7vertex updates and releases
 all cached references at scope exit. System UI rendering FPS remains unfinished.
 
+Retained kernel GPU submission and separate Metal completion now pass the full
+native A620 contract: two commands before waiting, shared writes and snapshots,
+reentrant callbacks, partial errors, CPU dependencies, per-write epochs and
+deferred device lifetime. V44 preserves one backboardd and a clean shutdown;
+all earlier pixels/guards and192compute commands pass. Ordinary warm UI latency
+and sustained system60/90FPS remain unmeasured.
+
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
 have complete, independently verified local backups. Android userdata has

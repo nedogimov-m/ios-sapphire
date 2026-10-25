@@ -1,8 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## REDFIN final repair includes empty-ticket/legacy-drain semantics; V49 ready — 2026-10-26
+## REDFIN V44 complete actual A620 queued block PASS; ordinary V45 next — 2026-10-26
 
-Sourcefc78cb5 plus this final related ordering fix. Empty tickets still wait for
+Sourcec246eea; native graphics local20261026-030905/noCI/checks-on evidence
+retained in research/redfin-metal-queued-v8-checks-on-evidence; input
+d44e2c6650b19d4e752676620d83fdf3f8fe5dccc2503c207ccb26ff8523adee,
+pairing6ca6878b11dcf71a84cc234750dc682634b22de5a5a12eb8ffe5c8c36e40dc4f.
+Unchanged kernel GitHub Actions40236406228/run1/source ddda9d2 SUCCESS,
+84fe1c5b05e3798f9f0cfe08172e77be641b1c0f6f105036e8f7396229634567.
+V49 applied ONCE with full live preimages/backups/readback/clean root PASS; now
+APPLIED/STALE, never reuse. V44 imagea51811574c3f8588158f5e0b0b45308de70fd8006c1665370e630bbbee55ce2e,
+noncee913499bf5ec816e, exact observed args are the V44 args in the ready entry.
+Fresh authenticated BOOT_ID matched once, userspace-alive, no panic, one
+backboardd62 through planned shutdown. gpu-render53/checker67 both exit0. Clean
+unmounted HFSX/inconsistent=false/write_count1229010; verified Fastboot.
+
+NEW actual queued contracts PASS: two commits before waiting, shared write
+order/distinct snapshots/guards, reentrant callback submit/wait, partial-error
+actual drain and Scheduled waiting, empty ordering. Raw two-ticket context
+proves old retire does not clear the newer write, CPU map drains the later
+ticket, and device close is retained through ticket destruction. Every previous
+192compute/two queues/70cache variants/evictions/half/MRT/varying/sampler/blit/
+pitch/alias/A8/bool/constants/CPU index/unaligned UBO/persistence/binding pixel
+and guard contract passes. Host49pass too. The two V43 failures are repaired.
+
+Cold correctness boot is not an FPS result. System pipeline32still costs1.03s
+and command8has38draws/90438us encoding/7135us finalization/59us queue,97634us
+total. Physical90Hz remains distinct from rendering rate. Prepare ordinary
+local20261026-031736/noCI with EXACT same input/pairing/ABI/signatures, probes
+off. V45 image26dce9ee3d0005c8ffe2ebcf5fec916769f1a44bdbeb1d91be7b688f818a5fb6
+has complete preflight PASS. Fresh V50 read/stage/apply must use1229010; the read
+has started, no new writes yet. Captures and Phone/Photos auto-opens stay off.
+Next: ordinary warm latency, then an actual system animation/presentation
+benchmark using the existing readonly native display statistics separately from
+callbacks; do not infer FPS from command groups or idle frames. Full goal remains
+active. Private resume details: research/redfin-gpu/queued-current-state.json.
+
+## REDFIN final repair includes empty-ticket/legacy-drain semantics; V49 applied, V44 running — 2026-10-26
+
+Sourcec246eea (basefc78cb5) includes this final related ordering fix. Empty tickets still wait for
 their predecessor but do not count an extra GPU finish after a CPU drain. The
 legacy rwa_finish also drains prior queued tickets when its current scope is
 empty.49host cases PASS, including held fences, actual constructor/heap/null-hook/
@@ -17,11 +53,13 @@ Kernel unchanged GitHub Actions40236406228/run1/source ddda9d2,
 V48 was applied ONCE with full preimages/readback/clean root PASS but NEVER
 booted into iOS. Do NOT reuse V48. Fresh V49 reads its actual current data and
 metadata at1220138; stage9474048bytes/zero new/freed blocks, all file/signature/
-native readonly fsck PASS. V49 apply/hardware results pending; phone idle in
-temporary recovery. No iOS test boot occurred between the error/clock/heap and
+native readonly fsck PASS. V49 applied ONCE with all live preimages/full readback/clean root PASS; it is
+now APPLIED/STALE and must never be reused. V44 combined hardware cycle is LIVE
+in logs/redfin/gui-platform-v44; no other device commands while it runs. No iOS test boot occurred between the error/clock/heap and
 empty-ticket fixes. Use the already preflighted V44 image/nonce and EXACT V44
 args written in the next entry, correctness jobs ON/captures/app opens OFF.
-Next: apply V49 once and run one complete V44 retry before ordinary performance.
+Next: collect/analyze V44; ordinary V45/native probes-off is already prepared
+with the EXACT same compiler identity/pairing. Next fresh root stageV50.
 V43 remains a failed hardware boot; no stable UI FPS claim. Goal remains active.
 
 ## REDFIN complete admission/heap CPU/error-clock repair built; V44 retry ready — 2026-10-26
