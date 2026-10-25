@@ -12,7 +12,8 @@ def adapt(text):
     text = '#include "redfin_metal_raster.h"\n'+text
     point = '\t_fragmentBuffers[index] = buffer;'
     text = replace_once(text, point, '''\tstatic unsigned redfin_fragment_bind_reports;
-    if(__sync_fetch_and_add(&redfin_fragment_bind_reports,1)<128)
+    const char *redfin_bind_capture=getenv("REDFIN_METAL_DRAW_CAPTURE");
+    if(redfin_bind_capture&&!strcmp(redfin_bind_capture,"1")&&__sync_fetch_and_add(&redfin_fragment_bind_reports,1)<128)
         rw_print("REDFIN METAL FRAGMENT BIND: index=%lu present=%u bytes=%lu offset=%lu\\n",
             (unsigned long)index,buffer!=nil,(unsigned long)[buffer length],(unsigned long)offset);
 '''+point)

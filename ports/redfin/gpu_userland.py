@@ -25,6 +25,15 @@ LEGACY_JOB={'Label':LABEL,'ProgramArguments':['/redfin/bin/gpu-render'],'RunAtLo
     'EnvironmentVariables':{'OSMESA_SOFTWARE':'0','FD_MESA_DEBUG':'sysmem','MESA_DEBUG':'context'}}
 
 
+def job(enabled=True):
+    if type(enabled) is not bool:raise ValueError('GPU startup-check policy must be boolean')
+    value=plistlib.loads(Path(__file__).with_name('gpu-render-job.plist').read_bytes())
+    if value.get('Label')!=LABEL or value.get('ProgramArguments')!=['/redfin/bin/gpu-render']:
+        raise ValueError('unexpected GPU diagnostic startup identity')
+    if not enabled:value.update(Disabled=True,RunAtLoad=False)
+    return value
+
+
 def backboardd_job(original,draw_capture=False):
     """Preserve the event server; exec supplies the gated loader after launchd."""
     services=original.get('MachServices')
@@ -56,7 +65,7 @@ def backboardd_job(original,draw_capture=False):
     return job
 
 
-def patch_launchd_cache(original,system_eagl=False,draw_capture=False):
+def patch_launchd_cache(original,system_eagl=False,draw_capture=False,startup_checks=True):
     if draw_capture and not system_eagl:raise ValueError('draw capture requires the native window-server job')
     if not isinstance(original,bytes) or not original.startswith(b'bplist00') or not 40<=len(original)<=0x1000000:
         raise ValueError('GPU diagnostic requires the current bounded binary launchd cache')
@@ -64,21 +73,19 @@ def patch_launchd_cache(original,system_eagl=False,draw_capture=False):
     jobs=cache.get('LaunchDaemons') if isinstance(cache,dict) else None
     if not isinstance(jobs,dict) or any(not isinstance(job,dict) for job in jobs.values()):
         raise ValueError('GPU diagnostic requires a LaunchDaemons dictionary')
-    job=plistlib.loads(Path(__file__).with_name('gpu-render-job.plist').read_bytes())
-    if job.get('Label')!=LABEL or job.get('ProgramArguments')!=['/redfin/bin/gpu-render']:
-        raise ValueError('unexpected GPU diagnostic startup identity')
+    selected_job=job(enabled=startup_checks)
     found=[(key,value) for key,value in jobs.items() if value.get('Label')==LABEL]
-    previous_raster=copy.deepcopy(job)
+    previous_raster=job()
     previous_raster.setdefault('EnvironmentVariables',{})['FD_MESA_DEBUG']='sysmem'
     before=hashlib.sha256(original).hexdigest()
-    if len(found)>1 or (found and (found[0][0] not in (JOB_PATH,OLD_JOB_PATH) or found[0][1] not in (job,LEGACY_JOB,previous_raster))):
+    if len(found)>1 or (found and (found[0][0] not in (JOB_PATH,OLD_JOB_PATH) or found[0][1] not in (job(),job(False),LEGACY_JOB,previous_raster))):
         raise ValueError('refusing an existing conflicting GPU job')
     if JOB_PATH in jobs and (not found or found[0][0]!=JOB_PATH):
         raise ValueError('GPU job path already belongs to a different daemon')
     expected=copy.deepcopy(cache)
     migrated=bool(found and found[0][0]==OLD_JOB_PATH)
     if migrated:del expected['LaunchDaemons'][OLD_JOB_PATH]
-    expected['LaunchDaemons'][JOB_PATH]=job
+    expected['LaunchDaemons'][JOB_PATH]=selected_job
     allowed={JOB_PATH,OLD_JOB_PATH}
     if system_eagl:
         backboards=[key for key,value in jobs.items() if value.get('Label')=='com.apple.backboardd']
@@ -86,7 +93,7 @@ def patch_launchd_cache(original,system_eagl=False,draw_capture=False):
         expected['LaunchDaemons'][BACKBOARD_PATH]=backboardd_job(jobs[BACKBOARD_PATH],draw_capture=draw_capture)
         allowed.add(BACKBOARD_PATH)
     common=dict(label=LABEL,job_key=JOB_PATH,system_eagl=system_eagl,migrated_from=OLD_JOB_PATH if migrated else None,
-        bytes=len(original),before_sha256=before,root_writes=False)
+        bytes=len(original),before_sha256=before,root_writes=False,startup_checks=startup_checks)
     if expected==cache:
         return original,dict(common,changed=False,after_sha256=before)
     result,padding=_encode_same_size(expected,len(original),compact=True)
@@ -104,8 +111,9 @@ def main():
     parser.add_argument('input',type=Path)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--system-eagl',action='store_true')
+    parser.add_argument('--startup-checks',choices=('on','off'),default='on')
     args=parser.parse_args()
-    data,report=patch_launchd_cache(args.input.read_bytes(),args.system_eagl)
+    data,report=patch_launchd_cache(args.input.read_bytes(),args.system_eagl,startup_checks=args.startup_checks=='on')
     with args.output.open('xb') as stream:stream.write(data)
     print(json.dumps(report,indent=2))
 

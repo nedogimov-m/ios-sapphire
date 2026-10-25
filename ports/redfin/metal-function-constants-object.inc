@@ -89,12 +89,14 @@ redfin_specialized_function_locked(id library,NSString *name,id values,NSString 
     CC_SHA256_Update(&hash,immutable.bytes,(CC_LONG)immutable.length);CC_SHA256_Final(digest,&hash);
     ((void (*)(id,SEL,const void *))objc_msgSend)(function,sel_getUid("setFunctionConstantSpecializationHash:"),digest);
     if(specializedName.length)[function setLabel:specializedName];
-    rw_print("REDFIN METAL SPECIALIZATION: function=%s values=%lu native-function=1 immutable=1\n",name.UTF8String,
+    const char *capture_option=getenv("REDFIN_METAL_DRAW_CAPTURE");
+    BOOL capture_parameters=capture_option&&!strcmp(capture_option,"1");
+    if(capture_parameters)rw_print("REDFIN METAL SPECIALIZATION: function=%s values=%lu native-function=1 immutable=1\n",name.UTF8String,
         (unsigned long)(immutable.length/sizeof(struct redfin_metal_constant)));
     /* Bounded rendering parameters let the host reproduce actual system
      * variants. The capture contains no device identity or user resources. */
     static unsigned snapshots;
-    if([name hasPrefix:@"fixed_"]&&__sync_fetch_and_add(&snapshots,1)<16) {
+    if(capture_parameters&&[name hasPrefix:@"fixed_"]&&__sync_fetch_and_add(&snapshots,1)<16) {
         char record[4096]={0};size_t used=0;BOOL complete=YES;
         const struct redfin_metal_constant *items=immutable.bytes;
         unsigned count=(unsigned)(immutable.length/sizeof(*items));

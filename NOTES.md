@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN ordinary-composition profile built; fresh V36 prepared for V33 — 2026-10-25
+
+Source base84db72b plus this coherent performance-observation block. Add explicit
+startup-checks on/off selection with scoped, reversible gpu-render/metal-check
+job migration. The off bundle, manifests, cached jobs and fresh-root installer
+agree on Disabled=true/RunAtLoad=false for these probes. The actual backboardd
+and unrelated jobs remain live. Phone/Photos app jobs stay disabled. Remove
+REDFIN_METAL_DRAW_CAPTURE from the native compositor job and remove kernel
+redfinscreen from the next image. Parameter and fragment-binding dumps use the
+explicit capture gate. The known per-draw scope drains/native image readbacks
+therefore do not participate in this ordinary run.
+
+Keep bounded real-fence/submit/allocation samples and add bounded pipeline-call
+latency (including time waiting for the native shared compiler gate). No actual
+shader values, precision, resource/page checks, completion rules or kernel code
+change. Mesa/compiler input fingerprint matches V32 exactly; preserve V32's
+complete bundle/build evidence before this legitimate driver-only rebuild.
+The previously passing GPU contracts are retired from automatic startup here,
+not silently treated as fresh results from a boot that never ran them.
+
+42combined host scope/migration/idempotency/reversal/fence/graphics cases PASS,
+no skips. Full native driver/checker/shader/actual20H392 ABI/signatures PASS:
+research/redfin-metal-varyings-v2, local20261025-223758/noCI,
+pairing5790509423ce258da37021d8158e36b0fe303631c092c470fce9831b92482092.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+Fresh V33 imaged8127d0172a3097b8f6f32ff890c78f5ba8c4317b66d3a2aa70ed5d54e44a2ef,
+nonce1b680e86c7e16828; complete loader/ADT/liveFDT/firmware/power/DVFS/source-
+window/return preflight PASS with screen capture explicitly false.
+Fresh V36 from clean consistent HFSX/write_count1114126:23ranges/778240bytes/
+zero new/zero freed; complete staged files/signatures/seal/readback/native
+readonly fsck PASS. V36 PREPARED, NOT APPLIED; older applied stages stale.
+Next apply once and collect one ordinary V33. No new native pixel-probe/image
+captures are expected in this profile. V32's correct GUI is user-confirmed,
+but severe lag and sustained rendering FPS remain unresolved until measured;
+broader goal stays open.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x1b680e86c7e16828 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V32 half contracts PASS; user confirms correct GUI, severe lag remains — 2026-10-25
 
 Sourcec28c62b; graphics local20261025-221735/noCI,

@@ -20,36 +20,41 @@ JOB_PATH='/System/Library/LaunchDaemons/com.redfin.metal-check.plist'
 LOG_PATH='/private/var/mobile/Library/Logs/redfin-metal-check.log'
 
 
-def job():
-    return dict(Label='com.redfin.metal-check',ProgramArguments=['/redfin/bin/metal-check'],
+def job(enabled=True):
+    require(type(enabled) is bool,'Metal startup-check policy must be boolean')
+    value=dict(Label='com.redfin.metal-check',ProgramArguments=['/redfin/bin/metal-check'],
         RunAtLoad=True,KeepAlive=False,UserName='mobile',ProcessType='Background',
         StandardOutPath=LOG_PATH,StandardErrorPath=LOG_PATH,
         EnvironmentVariables={'FD_MESA_DEBUG':'gmem','RWA_SOFTWARE':'0'},
         JetsamProperties={'ActiveHardMemoryLimit':512,'InactiveHardMemoryLimit':512})
+    if not enabled:value.update(Disabled=True,RunAtLoad=False)
+    return value
 
 
-def patch_launchd_cache(original):
+def patch_launchd_cache(original,startup_checks=True):
     require(isinstance(original,bytes) and original.startswith(b'bplist00') and
             40<=len(original)<=16*1024**2,'bounded native launchd cache required')
     before=plistlib.loads(original);after=copy.deepcopy(before)
     jobs=after.get('LaunchDaemons');require(isinstance(jobs,dict),'native launchd jobs absent')
     found=[(k,v) for k,v in jobs.items() if isinstance(v,dict) and v.get('Label')==job()['Label']]
     previous_raster=copy.deepcopy(job());previous_raster['EnvironmentVariables']['FD_MESA_DEBUG']='sysmem'
-    require(not found or found in [[(JOB_PATH,job())],[(JOB_PATH,previous_raster)]],'conflicting Metal checker identity')
+    require(not found or found in [[(JOB_PATH,job())],[(JOB_PATH,job(False))],[(JOB_PATH,previous_raster)]],'conflicting Metal checker identity')
     require(JOB_PATH not in jobs or bool(found),'occupied Metal checker path')
-    jobs[JOB_PATH]=job()
-    if after==before:return original,dict(changed=False)
+    jobs[JOB_PATH]=job(enabled=startup_checks)
+    if after==before:return original,dict(changed=False,startup_checks=startup_checks)
     encoded,padding=_encode_same_size(after,len(original),compact=True)
     decoded=plistlib.loads(encoded)
     for value in (before,decoded):value['LaunchDaemons'].pop(JOB_PATH,None)
     require(decoded==before,'Metal checker changed an unrelated native job')
-    return encoded,dict(changed=True,padding_bytes=padding)
+    return encoded,dict(changed=True,padding_bytes=padding,startup_checks=startup_checks)
 
 
 def inventory(bundle):
     bundle=Path(bundle);proof=json.loads((bundle/'metal-build.json').read_text())
     require(proof.get('success') and proof.get('actual_abi_compatible') and
             proof.get('max_buffer_bytes')==128<<20,'complete actual-ABI Metal bundle required')
+    checks=proof.get('startup_checks_enabled',True)
+    require(type(checks) is bool,'native Metal startup policy must be boolean')
     result=[]
     for target,record in proof['files'].items():
         require(target.startswith('/') and '..' not in Path(target).parts,'unsafe Metal bundle destination')
@@ -57,6 +62,7 @@ def inventory(bundle):
         require(bundle.resolve() in source.resolve().parents and source.is_file() and
                 not source.is_symlink(),'unsafe Metal bundle source')
         require(hashlib.sha256(source.read_bytes()).hexdigest()==record['sha256'],'Metal bundle artifact changed')
+        if target==JOB_PATH:require(plistlib.loads(source.read_bytes())==job(enabled=checks),'Metal bundle startup policy differs')
         result.append((source,target,record['uid'],record['mode'],record['sha256']))
     return result
 
@@ -68,7 +74,8 @@ def prepare_root(root,metadata,bundle):
         for source,target,uid,mode,digest in inventory(bundle)])
     path=root/'System/Library/xpc/launchd.plist'
     require(not path.is_symlink() and root in path.resolve().parents,'native launchd cache escapes root')
-    before=path.read_bytes();after,proof=patch_launchd_cache(before)
+    build=json.loads((Path(bundle)/'metal-build.json').read_text())
+    before=path.read_bytes();after,proof=patch_launchd_cache(before,startup_checks=build.get('startup_checks_enabled',True))
     with path.open('r+b') as stream:
         require(stream.write(after)==len(after),'short Metal startup write')
         stream.flush();stream.seek(0)
@@ -442,10 +449,21 @@ def adapt_driver(text):
     BOOL redfin_memory_sample=redfin_pipeline_number<=4 ||
         (redfin_pipeline_number<=1024 && !(redfin_pipeline_number&(redfin_pipeline_number-1)));
     if(redfin_memory_sample)redfin_graphics_memory_report("pipeline-before",redfin_pipeline_number);
+    (void)pthread_once(&redfin_fence_once,redfin_fence_identity);
+    uint64_t redfin_pipeline_requested=mach_absolute_time();
 ''')
     point='\tif (render == NULL) {'
     text=replace_once(text,point,
-        '    if(redfin_memory_sample)redfin_graphics_memory_report("pipeline-after",redfin_pipeline_number);\n'+point)
+        '''    uint64_t redfin_pipeline_call_us=redfin_phase_us(redfin_pipeline_requested,mach_absolute_time());
+    static unsigned redfin_slow_pipeline_reports;
+    BOOL redfin_pipeline_report=redfin_memory_sample || (redfin_pipeline_call_us>=20000 &&
+        __atomic_fetch_add(&redfin_slow_pipeline_reports,1,__ATOMIC_RELAXED)<16);
+    if(redfin_pipeline_report && redfin_fence_boot[0])
+        rw_print("REDFIN METAL PIPELINE TIME: boot=%s ordinal=%u call-us=%llu success=%u vertex=%.80s fragment=%.80s\\n",
+            redfin_fence_boot,redfin_pipeline_number,(unsigned long long)redfin_pipeline_call_us,
+            render!=NULL,vertex?[[vertex name] UTF8String]:"generated",[[fragment name] UTF8String]);
+    if(redfin_memory_sample)redfin_graphics_memory_report("pipeline-after",redfin_pipeline_number);
+'''+point)
     text += '''
 /* Private readonly evidence for the paired native pixel checker. */
 int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)

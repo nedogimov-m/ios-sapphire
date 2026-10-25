@@ -186,6 +186,21 @@ int main(void) {
             bad=copy.deepcopy(value);bad['LaunchDaemons'][key]=job
             with self.assertRaises(ValueError):metal_userland.patch_launchd_cache(_encode_same_size(bad,8192)[0])
 
+    def test_runtime_checker_policy_is_scoped_idempotent_and_reversible(self):
+        value={'LaunchDaemons':{'stock':{'Label':'stock','KeepAlive':True}},'Keep':b'preserved'}
+        original=_encode_same_size(value,8192)[0]
+        enabled,_=metal_userland.patch_launchd_cache(original)
+        disabled,report=metal_userland.patch_launchd_cache(enabled,startup_checks=False)
+        after=plistlib.loads(disabled);probe=after['LaunchDaemons'].pop(metal_userland.JOB_PATH)
+        self.assertTrue(probe['Disabled']);self.assertFalse(probe['RunAtLoad']);self.assertFalse(probe['KeepAlive'])
+        self.assertEqual(after,value);self.assertFalse(report['startup_checks'])
+        self.assertEqual(len(disabled),len(original))
+        self.assertEqual(metal_userland.patch_launchd_cache(disabled,startup_checks=False)[0],disabled)
+        restored,_=metal_userland.patch_launchd_cache(disabled)
+        self.assertEqual(plistlib.loads(restored),plistlib.loads(enabled))
+        for invalid in ('off',0,None):
+            with self.assertRaises(ValueError):metal_userland.job(invalid)
+
     def test_shared_gallium_gate_serializes_queues_and_releases_void_nested_and_error_calls(self):
         # Compile the gate actually inserted into the driver. Each native queue
         # races an intentionally unthreaded context; even a void destroy, a

@@ -84,5 +84,35 @@ class GPUUserlandTests(unittest.TestCase):
             {'ActiveHardMemoryLimit':512,'InactiveHardMemoryLimit':512})
         self.assertEqual(jobs[gpu_userland.JOB_PATH]['StandardOutPath'],gpu_userland.GPU_LOG)
 
+    def test_runtime_policy_retires_probe_and_capture_without_disabling_window_server(self):
+        before=plistlib.loads(self.original())
+        before['LaunchDaemons'][gpu_userland.BACKBOARD_PATH]=self.backboard()
+        original=wifi_userland._encode_same_size(before,len(self.original()))[0]
+        captured,_=gpu_userland.patch_launchd_cache(original,system_eagl=True,draw_capture=True)
+        ordinary,report=gpu_userland.patch_launchd_cache(captured,system_eagl=True,
+            draw_capture=False,startup_checks=False)
+        after=plistlib.loads(ordinary);probe=after['LaunchDaemons'].pop(gpu_userland.JOB_PATH)
+        self.assertTrue(probe['Disabled']);self.assertFalse(probe['RunAtLoad']);self.assertFalse(probe['KeepAlive'])
+        event=after['LaunchDaemons'][gpu_userland.BACKBOARD_PATH]
+        self.assertTrue(event['RunAtLoad']);self.assertTrue(event['KeepAlive']);self.assertNotIn('Disabled',event)
+        self.assertEqual(event['MachServices'],self.backboard()['MachServices'])
+        self.assertNotIn('REDFIN_METAL_DRAW_CAPTURE',event['EnvironmentVariables'])
+        self.assertEqual(len(ordinary),len(original));self.assertFalse(report['startup_checks'])
+        self.assertEqual(gpu_userland.patch_launchd_cache(ordinary,system_eagl=True,startup_checks=False)[0],ordinary)
+        # Re-enabling the exact reviewed diagnostic profile is reversible.
+        restored,_=gpu_userland.patch_launchd_cache(ordinary,system_eagl=True,draw_capture=True)
+        self.assertEqual(plistlib.loads(restored),plistlib.loads(captured))
+        after['LaunchDaemons'].pop(gpu_userland.BACKBOARD_PATH)
+        before['LaunchDaemons'].pop(gpu_userland.BACKBOARD_PATH)
+        self.assertEqual(after,before)
+
+    def test_startup_probe_policy_is_explicit_and_foreign_disabled_jobs_are_refused(self):
+        for invalid in ('off',0,None):
+            with self.assertRaises(ValueError):gpu_userland.job(invalid)
+        value=plistlib.loads(self.original());bad=gpu_userland.job(False)
+        bad['ProgramArguments']=['/another/program'];value['LaunchDaemons'][gpu_userland.JOB_PATH]=bad
+        with self.assertRaises(ValueError):
+            gpu_userland.patch_launchd_cache(wifi_userland._encode_same_size(value,len(self.original()))[0],startup_checks=False)
+
 
 if __name__=='__main__':unittest.main()

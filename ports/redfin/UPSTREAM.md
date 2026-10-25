@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Ordinary composition startup and lightweight latency observations — 2026-10-25
+
+Preferred906425b7/8e611870 graphics sources remain unchanged. V32's complete
+native half/resource probes pass and the user confirms correct system colours,
+but severe lag remains. Review the scoped trace: it explicitly drains real
+command batches and reads textures between draws; command8 incurs108submits
+and578303us for51draws. This diagnostic path cannot establish ordinary FPS.
+
+Add a reversible startup selection that disables only gpu-render/metal-check
+probes, preserves the live backboardd and all unrelated launchd jobs, and agrees
+between bundle files, bundle manifest, cached jobs and fresh-root installation.
+Remove compositor draw capture and the separate kernel screen-capture option
+in the next runtime image. Parameter/fragment-binding dumps follow the same
+explicit capture gate. Actual shader/compiler/resource/fence semantics stay
+unchanged; all GPU/page ownership checks remain. Keep sampled real completion/
+I/O observations and bounded pipeline-call latency, which includes time waiting
+for the shared compiler gate and is not labelled pure compiler CPU time.
+42combined policy/migration/reversal/fence/graphics cases and full native actual-
+cache ABI/signatures pass. The Mesa/compiler fingerprint remains identical to
+V32. Fresh V36 ordinary jobs/cache stage passes complete readback and native
+readonly fsck. One ordinary native run remains pending. No FPS claim follows
+from disabling diagnostics alone; no kernel source changes.
+
 ## Full-register raster varying transport for logical half values — 2026-10-25
 
 Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and

@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -39,6 +40,8 @@ def main():
     p.add_argument('--work-dir',type=Path,default=ROOT/'research/redfin-graphics')
     p.add_argument('--cache',type=Path,default=DEFAULT_CACHE,help='actual installed arm64 dyld cache and paired .symbols')
     p.add_argument('--metal',action='store_true',help='also build the paired native Metal/AIR driver in this private work tree')
+    p.add_argument('--startup-checks',choices=('on','off'),default='on',
+                   help='automatic offscreen graphics correctness probes; ordinary GUI performance uses off')
     a=p.parse_args();work=a.work_dir.resolve();work.mkdir(parents=True,exist_ok=True)
     upstream=a.upstream.resolve()
     actual=subprocess.check_output(['git','-C',upstream,'rev-parse','HEAD'],text=True).strip()
@@ -250,7 +253,6 @@ def main():
                     '-I'+str(metal),'-I'+str(ROOT/'ports/redfin'),metal/'redwoodmetal.m',metal/'redwooddrawable.m',
                     ROOT/'ports/redfin/metal-guard.m','-framework','Foundation',
                     '-framework','CoreFoundation','-framework','IOKit','-framework','Metal','-framework','IOSurface','-lobjc','-o',binary])
-                import plistlib
                 (plugin/'Info.plist').write_bytes(plistlib.dumps(dict(
                     CFBundleIdentifier='com.redfin.metal',CFBundleName='RedfinMetal',
                     CFBundleExecutable='RedfinMetal',CFBundlePackageType='BNDL',
@@ -296,13 +298,17 @@ def main():
                      '-Xclang','-disable-llvm-passes',ROOT/'ports/redfin/metal-resource-check.ll','-o',resource_shader])
                 from ports.redfin.metal_userland import job as metal_job,JOB_PATH as METAL_JOB,LOG_PATH as METAL_LOG
                 check_job=bundle/METAL_JOB.lstrip('/');check_job.parent.mkdir(parents=True,exist_ok=True)
-                check_job.write_bytes(plistlib.dumps(metal_job(),fmt=plistlib.FMT_BINARY,sort_keys=False))
+                check_job.write_bytes(plistlib.dumps(metal_job(enabled=a.startup_checks=='on'),fmt=plistlib.FMT_BINARY,sort_keys=False))
                 check_log=bundle/'metal-log-initial';check_log.write_text('REDFIN native Metal/AIR; hardware observations follow.\n')
                 metal_artifacts=[air,binary,checker]
                 result['metal_pairing_sha256']=pairing
             launch=bundle/'System/Library/LaunchDaemons'
             launch.mkdir(parents=True,exist_ok=True)
-            shutil.copy2(ROOT/'ports/redfin/gpu-render-job.plist',launch/'com.redfin.gpu-render.plist')
+            if a.startup_checks=='on':
+                shutil.copy2(ROOT/'ports/redfin/gpu-render-job.plist',launch/'com.redfin.gpu-render.plist')
+            else:
+                from ports.redfin.gpu_userland import job as gpu_job
+                (launch/'com.redfin.gpu-render.plist').write_bytes(plistlib.dumps(gpu_job(enabled=False),fmt=plistlib.FMT_BINARY,sort_keys=False))
             old_job=bundle/'Library/LaunchDaemons/com.redfin.gpu-render.plist'
             if old_job.is_file():old_job.unlink()  # old build output only, never a root/device path
             shutil.copy2(upstream/'LICENSE',bundle/'UPSTREAM-LICENSE')
@@ -319,12 +325,13 @@ def main():
                     (resource_shader,'/redfin/lib/'+resource_shader.name,0,0o644),
                     (check_job,METAL_JOB,0,0o644),(check_log,METAL_LOG,501,0o600)]
                 metal_manifest=dict(success=True,actual_abi_compatible=True,pairing_sha256=pairing,
-                    max_buffer_bytes=128<<20,files={target:dict(source=str(source.relative_to(bundle)),
+                    max_buffer_bytes=128<<20,startup_checks_enabled=a.startup_checks=='on',files={target:dict(source=str(source.relative_to(bundle)),
                         uid=uid,mode=mode,sha256=hashlib.sha256(source.read_bytes()).hexdigest())
                         for source,target,uid,mode in selected})
                 (bundle/'metal-build.json').write_text(json.dumps(metal_manifest,indent=2)+'\n')
             result['actual_abi_compatible']=True
             result.update(success=True,sdk=str(sdk),input_sha256=fingerprint,bundle=str(bundle),
+                startup_checks_enabled=a.startup_checks=='on',
                 gui_profile_sha256=hashlib.sha256((ROOT/'ports/redfin/gui-profile.h').read_bytes()).hexdigest(),
                 gui_sources_sha256={name:hashlib.sha256((ROOT/'ports/redfin'/name).read_bytes()).hexdigest()
                     for name in ('graphics-loader.c','graphics-memory-report.h','eagl-guard.c','eagl_userland.py')},
