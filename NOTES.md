@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V21 genuine roundtrips PASS; checkerboard remains; bounded draw readback works — 2026-10-25
+
+Source2cc0a37, graphics local20261025-161528/noCI, unchanged kernel
+local20261025-134128/noCI7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V21 image6b08dafd6e73c0bc0806264be1a0c73fc3435d436f5b481ece1cfa047dfaaa35,
+nonceaf270eba8ded0753. V24 applied once:168ranges/24842240bytes/7new/
+zero freed; complete preimages/readback/signatures/readonly fsck PASS. V24
+is now applied/stale. Capture returns clean consistent HFSX/write_count958871
+and verified Fastboot. No kernel panic/runtime GPU fault; backboardd62 and
+SpringBoard26 remain alive until planned shutdown. App checker has no current
+nonce and does not auto-open Phone/Photos.
+
+The raw-alias format fix now produces21CRC-verified real per-draw thumbnails
+without V20's diagnostic crash. They cover initial Apple-logo/blank composition,
+not the later bad lock-screen draws. Authenticated final panel frame/present8
+still shows large red/cyan checkerboard, so this block has NOT fixed rendering.
+The observer currently skips nonlinear private inputs/attachments and stops at
+draw32; broaden bounded capture to the actual failing later draws and genuine
+GPU readback of private textures. Ordinary FPS remains unestablished.
+
+All previous192compute/raster/MRT/scissor/viewport/fetch/vertex/sampling/pitch/
+resolve probes still PASS pixels/guards. Both new queued buffer-to-texture,
+texture-to-texture, unaligned IOSurface and texture-to-buffer roundtrips PASS
+actual pixels/guards/source preservation;26GMEM/26sysmem overall. Initial byte
+fill/copy guards also reach the invalid-range phase, but the combined byte test
+fails because it assumes waitUntilCompleted also waits for asynchronous callback
+delivery; use an explicit callback semaphore. Mip readback fails exactly at
+byte2164: the two valid bytes in its final partial dword stay untouched. Source
+inspection confirms native R32 SSBO descriptors floor element count; allocate
+real dword tail padding while preserving the public logical length and bounds.
+Mipmap correctness is not yet fully proven.
+
+CoreAnimation creates the new blit encoder but executes NO recorded blit request
+in its original process this run. It DOES request the still-unserved no-copy
+buffer API. Do not infer actual copies merely from encoder creation. The existing
+Redfin SweetSurface IOSurfaceAddress and GPU import already pin/map external
+pages; adapt that real sharing/lifetime path, not a silent CPU copy. Include it,
+exact buffer-tail semantics, callback-check correction and complete bounded
+compositor evidence in the next related block, then one combined run. Broader
+Wi-Fi/power/thermal/sensors/Apple authorization and smooth rendering remain open.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xaf270eba8ded0753 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN ordered native GPU blit block built; fresh V24 staged — 2026-10-25
 
 Source basecbc0c19 plus this complete related block. Implement a genuine
