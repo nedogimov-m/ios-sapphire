@@ -40,6 +40,15 @@ explicit replacement because Mesa treats existing entries as immutable. Fresh
 native paired build/actual20H392 ABI/signatures pass. V40 is staged with native
 readonly fsck; actual A620 persistence and warm-system latency remain pending.
 
+V37 now proves actual A620 persistence: two fresh resource contexts each pass
+all32rounds with changed live inputs; the second reports2AIR file hits and4ir3
+file hits, no stale record and zero queued bytes at the sample. All existing
+192compute/two queues/70cache variants and half/raster/transfer/guard contracts
+pass; launchd records checker exit(0). Backboardd's cold templates are stored
+with no dropped job or invalid record. One backboardd and no panic are observed.
+Retire startup probes and test the same compiler identity across the next
+ordinary reboot before claiming a system-startup speed improvement.
+
 ## Preserve stage lookup hash; retain more templates within the same payload cap — 2026-10-25
 
 V34 proves correct native raster/half/resource pixels but the new combined cache

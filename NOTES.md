@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V37 actual A620 AIR/ir3 persistent reuse PASS — 2026-10-26
+
+Source7e46435; graphics local20261026-001711/noCI,
+pairingdf1f49f1eb4a2ca0fd01470daffdfb62ef38703a110f851dd9d7969fbba60891.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V37 imagef96d68ce5298c1cdb8a850576d7740140d4e771875afd2fd054847eed8dd0251,
+nonce21b819b42131c0da. V40 applied once:58ranges/26660864bytes/19new/zero
+freed; all live preimages/full readback/signatures/native readonly fsck PASS.
+V40 applied/stale, never reuse. Authenticated exact current boot userspace-alive,
+no panic, clean consistent HFSX/write_count1158426, verified Fastboot. Next
+fresh rootV41/imageV38. No manual check requested; broader goal remains active.
+
+NEW persistence test PASS on actual A620:2independent resource contexts with
+changed live seed data each pass32rounds, unpruned/active-high bindings, missing
+resource refusal, every output and guard. Context2records2AIR file hits and4ir3
+file hits, pending-bytes0/stale-records0/passed1. Native70variants/old pipelines
+after both evictions and all earlier192compute/two queues/half/MRT/packed UBO/
+varying/sampler/blit/pitch/alias/A8/bool/constants/guards PASS. Launchd explicitly
+records metal-check67 exit(0). One live backboardd62, no window-server restart.
+
+Backboardd cold cache is enabled: pipeline34records38AIR misses/38queued puts,
+no drop/invalid record,114861pending bytes at that sample;4ir3 hits/37misses/
+37stores. Cold fixed_frag calls still260728..993118us; this first cache-filling
+boot does not establish warm startup speed. Actual first command has7map/unmap
+operations/139250us mapping I/O, while9allocations cost4787us; keep those costs
+separate. A51draw command costs139433us total, with8submits/38070us submit I/O,
+7allocations/18571us,30other methods/1197us,7map operations/523us, zero variant
+compiles in its scope. These are process/command samples, not display FPS or
+pure compiler CPU time. No original-page checks or memory mappings weakened.
+
+Preserve complete checks-on bundle/results/ABI privately in
+research/redfin-metal-persistence-v2-checks-on-evidence. During V37, prepare
+ordinary startup off in the same native work: local20261026-002605/noCI, exact
+same compiler fingerprint and source pairing, full native/20H392 ABI/signatures
+PASS. Fresh V38 image/preflight already prepared. Next fresh V41 changes only
+the completed graphics checker jobs/cached policies, then collect an ordinary
+warm boot with those files intact. Phone/Photos auto-launch and all heavy
+image/parameter capture stay disabled. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x21b819b42131c0da redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN persistent compilation block built; fresh V40 ready for V37 — 2026-10-26
 
 Source baseb18e64d plus this complete cache/timing block. Preferred ir3 explicitly
