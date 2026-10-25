@@ -27,6 +27,19 @@ FPS and the correctness jobs ran in this capture. Retire those jobs again for
 ordinary startup/performance. All earlier native contracts pass; no panic or
 backboardd restart is observed. Sustained system rendering remains unfinished.
 
+The subsequent V36 ordinary capture proves both checker jobs inactive and no
+heavy draw capture. Template/stage hits30/31 at pipeline34, with no eviction;
+one repeated pipeline takes323us versus6075us initially. Cold complex pipelines
+still take378..955ms. A38-draw command costs205ms including86ms queue wait and
+111ms encoding, with38ms actual submission I/O. These are command samples, not
+FPS. First allocation I/O is only2269us in this run while finalization costs
+288ms, so the earlier426..451ms allocation samples must not be treated as proof
+that buffer size itself is the cause. Preserve the existing mapping checks.
+Two private host schedules and scratch variable splitting improve only about
+1..2percent on representative cases; leave production unchanged and restore the
+private baseline. Continue from measured cold compilation and CPU command
+preparation, considering Mesa's existing cache facilities before new machinery.
+
 ## Bounded shader preparation and immutable state reuse — 2026-10-25
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's

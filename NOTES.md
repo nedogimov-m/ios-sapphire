@@ -1,5 +1,52 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V36 ordinary caches verified; cold pipelines/command preparation still slow — 2026-10-25
+
+Source5cdbc47; ordinary graphics local20261025-234246/noCI,
+pairinge635dd4c961177ff91d5fd912c8304d9e15d5065441fc8ad3ad72f5ced7fe3e1.
+Compiler fingerprint/source pairing identical to successful V35. Kernel unchanged/
+reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V36 image3017369e9723a8dfd3f1bdd427e25fbbd613680bfc5fbb5a837638d477b77f85,
+nonce6a2eb3f3d97d61c5. V39 applied once:6ranges/258048bytes/zero new/zero freed;
+all live preimages/full readback/signatures/native readonly fsck PASS. V39
+applied/stale; never reuse. Authenticated exact current boot userspace-alive,
+no panic, clean consistent HFSX/write_count1149742, verified Fastboot. Next
+fresh rootV40/imageV37. Broader goal remains active; no manual check requested.
+
+Ordinary policy confirmed: zero current nonce in metal-check/gpu-render logs,
+zero heavy draw/image records and one actual backboardd61. Native contracts from
+V35 remain prior evidence, not rerun results. At pipeline34 there are30template
+hits/38misses and31stage hits/37misses, no eviction,2231529charged template bytes
+and125448stage-key bytes. Repeated downsample4 pipeline preparation is323us
+versus6075us initially. No sustained rendering-FPS or smoothness claim.
+
+Cold fixed_frag_lph_cph pipeline calls still377831..955403us, including any
+waiting. Actual38-draw command8 takes205102us total (86231us queue,111433us
+encoding,7437us finalization),7submit calls/38179us submit I/O, zero allocations.
+First command now has9allocations but only2269us allocation I/O; encoding2874us,
+finalization288149us/total291110us with only12157us measured submit I/O. Therefore
+previous426..451ms allocation samples are not proof that buffer size is the
+remaining cause; do not shrink the heap or weaken mapping based on that guess.
+Whole-command CPU preparation, driver finalization and unprofiled IOKit calls
+need separating alongside heavy cold shader translation. Actual GPU/panel mode
+must not be confused with command-group time or perceived UI FPS.
+
+During the ordinary boot, private host profiles in research/redfin-air-prep-
+tuning-v1 test copy/dead-write propagation/array splitting before promotion and
+two cleanup schedules. Representative warm medians are~0.144baseline/~0.141
+candidate and~0.142restored, only1..2percent, insufficient evidence for deployment.
+No production source changes. The private source and linked tools are restored
+to their original baseline; candidate/instrumented sources and result logs stay
+private. Per-pass samples show4..5cleanup iterations, with algebraic15..17ms,
+dead-CF~12ms and constant folding~11ms; SSA itself~3.4ms. These are host-only
+profiles, not phone GPU speed. Next inspect/reuse Mesa's existing bounded disk
+cache for cold compilation and distinguish remaining command preparation costs;
+implement one coherent block before the next combined native check. Preserve
+64entry/8MiB in-memory bounds, original-page and fence checks, disabled captures
+and disabled automatic Phone/Photos launching. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x6a2eb3f3d97d61c5 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN verified caches retained; correctness startup retired; V39 ready for ordinary V36 — 2026-10-25
 
 Sourceae79e13, unchanged compiler fingerprint and source pairing from successful

@@ -111,6 +111,11 @@ retained-pipeline pixels/guards after eviction. Actual backboardd reuses66stage
 states by pipeline64; one repeated pipeline takes329us versus12738us initially.
 First-time complex shaders and whole-command latency remain substantial; this
 does not establish smooth system FPS.
+The subsequent ordinary V36 capture proves both graphics probes and heavy
+capture inactive, working template/stage hits, one live backboardd and no panic.
+Repeated pipeline preparation is323us; cold complex pipelines still cost
+378..955ms and the sampled38-draw command costs205ms. Remaining CPU preparation
+and waits are the next performance blocker.
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
