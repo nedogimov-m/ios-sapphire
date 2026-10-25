@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN verified caches retained; correctness startup retired; V39 ready for ordinary V36 — 2026-10-25
+
+Sourceae79e13, unchanged compiler fingerprint and source pairing from successful
+V35. Preserve the complete checks-on bundle/results/ABI evidence privately in
+research/redfin-metal-preparation-v2-checks-on-evidence before rebuilding the
+same work with startup-checks off. Full ordinary native build/actual20H392 ABI/
+signatures PASS: local20261025-234246/noCI,
+pairinge635dd4c961177ff91d5fd912c8304d9e15d5065441fc8ad3ad72f5ced7fe3e1.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+Only gpu-render/metal-check startup policies change consistently in their files,
+bundle manifest and native cached jobs. Actual backboardd remains enabled;
+automatic Phone/Photos launches and all image/parameter capture remain off.
+V35 checker ran20.7seconds; it has completed all contracts and need not consume
+ordinary startup resources. No shader, resource/page or completion change.
+
+Fresh V36 image3017369e9723a8dfd3f1bdd427e25fbbd613680bfc5fbb5a837638d477b77f85,
+nonce6a2eb3f3d97d61c5; complete loader/ADT/liveFDT/firmware/power/DVFS/source-
+window/return preflight PASS. Fresh V39 from clean consistent HFSX/
+write_count1141794:258048bytes/6ranges/zero new/zero freed; staged full files/
+readback/signatures/seal/native readonly fsck PASS. V39 PREPARED, NOT APPLIED;
+all earlier applied stages remain stale. Next apply once and collect ordinary
+V36; V35 native cache/pixels PASS remain prior evidence, not probes rerun in an
+off boot. Heavy cold pipelines and whole-command latency remain unfinished;
+broader goal remains active. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x6a2eb3f3d97d61c5 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V35 actual A620 caches and eviction lifetimes PASS; latency remains — 2026-10-25
 
 Sourcebb4212f; graphics local20261025-233008/noCI,
