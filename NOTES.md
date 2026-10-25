@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V32 half contracts PASS; user confirms correct GUI, severe lag remains — 2026-10-25
+
+Sourcec28c62b; graphics local20261025-221735/noCI,
+pairing4935a088d00890c92e54a945a3f07dec5618c99ec4cfd2ff76147047920170a6.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V32 image9a154758c9ed139f949ed7dbdc56cc1a05b676f25a08fa5b822c8d1e8249bad6,
+noncef255a6948cbb09a7. V35 applied once:239ranges/23261184bytes/24new/
+zero freed, with full live preimages/readback/signatures/native readonly fsck
+PASS. V35 is applied/stale; never reuse. Authenticated exact current boot is
+userspace-alive/no panic; clean consistent HFSX/write_count1114126 and verified
+Fastboot. Next fresh rootV36/imageV33. Automatic app launches remain disabled.
+
+Every new actual A620 half probe PASS: constant half colour, packed half3/
+scalar/packed_half3 UBO, true half MRT export, attachment1 half fetch and
+half vertex formats/smooth/flat/noperspective textured two-round pixels/guards.
+Read-only input bytes stay exact. Prior192compute/two queues/32resource rounds,
+Bool/Bool3, raster/vertex/pitch/resolve/alias/A8 probes also PASS. Only backboardd62
+is observed; no window-server restart or current kernel GPU fault is reported.
+Its sampled footprint at pipeline64 is129792KiB; zero remaining-limit values
+are correctly marked unavailable, independent of the real kernel512MiB limit.
+
+The user now explicitly confirms that the checkerboard/corruption has gone and
+the system looks normal. They also report extreme lag/near-zero perceived FPS.
+Do not call the port smooth or infer a measured FPS from this report.48strict
+draw records and3physical captures pass sequence/base64/CRC. The latter require
+removing3unrelated leading transport prefixes in a derived view; original logs
+and all pixel payloads stay intact. Sampled physical frames alone do not replace
+the user's complete GUI observation.
+
+Current diagnostic timing proves a material perturbation: command8 has51draws,
+108native submit calls/287154us submit I/O and578303us total; the tracer explicitly
+drains the real command scope and maps/readbacks textures between draws. A
+later53-draw sample costs134724us with4submits; a hot6-draw sample is16925us.
+These are command samples, NOT display FPS. Full-panel presentation alone is
+about7..8ms in these samples.6no-copy refusals also occur in the same daemon
+(49152/65536/32768-byte original-page lookups); preserve strict checks and do
+not mislabel all such failures as post-restart effects.
+
+Next remove heavy per-draw/final image capture, kernel screen capture and the
+already-passing automatic graphics probe jobs for an ordinary composition run.
+Keep lightweight real-fence/I/O and bounded pipeline-call timing so remaining
+CPU compilation, submission and presentation delays can be distinguished.
+Correct system colours are user-confirmed; performance and broader goal remain
+unfinished. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xf255a6948cbb09a7 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN full-register half varying block built; fresh V35 prepared for V32 — 2026-10-25
 
 Source basee72b66a plus this complete block. Actual old fixed_vert_lph_spc

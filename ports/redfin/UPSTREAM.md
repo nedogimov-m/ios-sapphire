@@ -26,7 +26,12 @@ exports remain half. Native actual-cache ABI/signatures and34host cases pass.
 The larger authored checker library is a versioned exact asset: preserve the
 old device file's eight inline extents and avoid the known host HFS overflow
 writer, with full new-file readback and native readonly fsck. A combined A620
-run is still pending; compilation does not prove correct GUI pixels/FPS.
+run V32 now passes every authored half storage/export/fetch/varying/sampler
+pixel/guard check on A620, and the user confirms normal GUI colours without
+checkerboard. They report severe lag. The captured run forces per-draw drains
+and native readbacks (108submits/578ms for one51-draw sample); remove that
+measurement load before interpreting ordinary rendering performance. Neither
+correct colours nor successful probes establish sustained FPS.
 
 ## Native shader lifetime and memory accounting — 2026-10-25
 

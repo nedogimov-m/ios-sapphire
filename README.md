@@ -94,11 +94,13 @@ thermal throttling/restoration; Photos still fails in its native assetsd/TCC
 path. Physical90Hz and credential persistence are independently observed.
 
 The user confirms Phone and Photos now work normally; their automatic launch
-checks are retired. V19 proves native GPU row conversion and same-command
-texture aliasing for480-byte sources/outputs, but actual system composition
-still shows checkerboard/incorrect fills. Correct rendering is the current
-priority. Bounded per-draw compositor capture and broader native vertex/sampler
-probes are prepared; stable60/90render FPS is not established.
+checks are retired. V32 repairs half-precision vertex-to-fragment transport and
+passes actual A620 half storage, MRT, fetch, vertex/varying/sampler pixel and
+guard probes. The user now confirms normal system colours and no checkerboard,
+but reports severe lag. The earlier window-server memory-limit restarts are
+also removed. Heavy diagnostic readbacks materially perturb this run; ordinary
+composition performance is the next priority. Stable60/90render FPS remains
+unproved.
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
