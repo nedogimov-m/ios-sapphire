@@ -45,9 +45,11 @@ static const char *redfin_graphics_exec_environment(struct image_params *imgp)
     while (bytes<608 && args[bytes]) ++bytes;
     const char *path=saved+sizeof(key)-1;
     const char *leaf=strrchr(path,'/');
-    if (bytes==608 || !leaf || !redfin_ui_executable(path) ||
+    if (bytes==608 || !leaf ||
         strlen(leaf+1)!=(unsigned)imgp->ip_ndp->ni_cnd.cn_namelen ||
-        memcmp(leaf+1,imgp->ip_ndp->ni_cnd.cn_nameptr,strlen(leaf+1)) ||
-        !redfin_ui_fullscreen(args,bytes+1)) return NULL;
-    return "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-ui.dylib";
+        memcmp(leaf+1,imgp->ip_ndp->ni_cnd.cn_nameptr,strlen(leaf+1))) return NULL;
+    if (redfin_diagnostic_executable(path) && redfin_diagnostic_requested(args,bytes+1))
+        return "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-diagnostic.dylib";
+    return redfin_ui_executable(path) && redfin_ui_fullscreen(args,bytes+1) ?
+        "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-ui.dylib" : NULL;
 }

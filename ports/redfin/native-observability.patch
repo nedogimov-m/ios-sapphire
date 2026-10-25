@@ -1,0 +1,170 @@
+diff --git a/bsd/kern/redfin_graphics_amfi.inc b/bsd/kern/redfin_graphics_amfi.inc
+--- a/bsd/kern/redfin_graphics_amfi.inc
++++ b/bsd/kern/redfin_graphics_amfi.inc
+@@ -30,7 +30,8 @@
+         !memchr(path,0,sizeof(path))) return ENOPOLICY;
+     bool graphics=!strcmp(path,"/usr/libexec/backboardd");
+     bool ui=redfin_ui_executable(path) && redfin_ui_fullscreen(args,length+1);
+-    if (!graphics && !ui) return ENOPOLICY;
++    bool diagnostic=redfin_diagnostic_executable(path) && redfin_diagnostic_requested(args,length+1);
++    if (!graphics && !ui && !diagnostic) return ENOPOLICY;
+     struct {uint64_t input_flags;user_addr_t output_flags;} query;
+     int error=copyin(address,&query,sizeof(query));
+     if(error)return error;
+diff --git a/bsd/kern/redfin_graphics_exec.inc b/bsd/kern/redfin_graphics_exec.inc
+--- a/bsd/kern/redfin_graphics_exec.inc
++++ b/bsd/kern/redfin_graphics_exec.inc
+@@ -45,9 +45,11 @@
+     while (bytes<608 && args[bytes]) ++bytes;
+     const char *path=saved+sizeof(key)-1;
+     const char *leaf=strrchr(path,'/');
+-    if (bytes==608 || !leaf || !redfin_ui_executable(path) ||
++    if (bytes==608 || !leaf ||
+         strlen(leaf+1)!=(unsigned)imgp->ip_ndp->ni_cnd.cn_namelen ||
+-        memcmp(leaf+1,imgp->ip_ndp->ni_cnd.cn_nameptr,strlen(leaf+1)) ||
+-        !redfin_ui_fullscreen(args,bytes+1)) return NULL;
+-    return "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-ui.dylib";
++        memcmp(leaf+1,imgp->ip_ndp->ni_cnd.cn_nameptr,strlen(leaf+1))) return NULL;
++    if (redfin_diagnostic_executable(path) && redfin_diagnostic_requested(args,bytes+1))
++        return "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-diagnostic.dylib";
++    return redfin_ui_executable(path) && redfin_ui_fullscreen(args,bytes+1) ?
++        "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-ui.dylib" : NULL;
+ }
+diff --git a/bsd/kern/redfin_graphics_exec_scope.h b/bsd/kern/redfin_graphics_exec_scope.h
+--- a/bsd/kern/redfin_graphics_exec_scope.h
++++ b/bsd/kern/redfin_graphics_exec_scope.h
+@@ -31,4 +31,22 @@
+     }
+     return false;
+ }
++/* Read-only native exception/authorization observations for an explicit
++ * capture boot. Do not admit another daemon, writable path or ordinary boot. */
++static inline bool redfin_diagnostic_executable(const char *path)
++{
++    return path && !strcmp(path,
++        "/System/Library/Frameworks/AssetsLibrary.framework/Support/assetsd");
++}
++static inline bool redfin_diagnostic_requested(const char *args,unsigned bytes)
++{
++    if (!redfin_gpu_gui_profile(args,bytes,NULL)) return false;
++    for (unsigned at=0;at<bytes && args[at];) {
++        if (args[at]==' ') {++at;continue;}
++        unsigned first=at;
++        while (at<bytes && args[at] && args[at]!=' ') ++at;
++        if (redfin_gui_token(args+first,at-first,"redfinscreen=1")) return true;
++    }
++    return false;
++}
+ #endif
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -86,6 +86,8 @@
+ #include "RedfinDisplayGeometry.h"
+ #include "RedfinGPUDisplayService.h"
+ #include "RedfinGPUService.h"
++#include <arm64/redfin_gui_profile.h>
++#include "RedfinDisplayStatistics.h"
+ #include <kern/thread.h>
+ #include <kern/thread_call.h>
+ #include <IOKit/IOKitKeys.h>
+@@ -252,6 +254,7 @@
+ 	bool          allocateRedfinFitWorkspace(void);
+ 	void          free(void) APPLE_KEXT_OVERRIDE;
+ 	uint64_t      fRedfinFrames;
++	uint64_t      fRedfinGPUFrames;
+ 	uint32_t      fRedfinCaptures;
+ 	IOLock       *fRedfinCaptureLock; /* independent of fLock, boot lifetime */
+ 	uint64_t      fRedfinPositivePresents;
+@@ -501,7 +504,7 @@
+ 	if (!IOService::start(provider)) return false;
+ 	fRedfinFit = fit_geometry;
+ 	fRedfinCopyOnly = true;
+-	fRedfinFrames = 0;
++	fRedfinFrames = 0; fRedfinGPUFrames = 0;
+ 	fRedfinCaptureLock = NULL;
+ 	fRedfinPositivePresents = 0;
+ 	fRedfinFinalDone = false;
+@@ -1322,7 +1325,7 @@
+ 		int gpu = RedfinGPUPresent(fSurface, &fRedfinFit, rec);
+ 		if (gpu != 0) {
+ 			if (gpu > 0) {
+-				++fRedfinFrames;
++				++fRedfinFrames; ++fRedfinGPUFrames;
+ 				uint32_t frame = redfin_capture_early(this);
+ 				if (frame != 0) captureRedfin(frame, fRedfinFrames);
+ 				if (fRedfinFrames <= 3 || !(fRedfinFrames % 60))
+@@ -1525,6 +1528,28 @@
+ 	uint32_t outCount = 0;
+ 
+ 	switch (selector) {
++	case REDFIN_DISPLAY_STATISTICS_SELECTOR: {
++		/* Read only real completed presents, under their existing dedicated
++		 * lock. A busy presenter refuses; it never stalls the UI on hardware. */
++		const char *arguments=PE_boot_args();unsigned bytes=0;
++		if (arguments) while (bytes<608 && arguments[bytes]) ++bytes;
++		if (!fFB || !fFB->fRedfinCopyOnly || !fFB->fRedfinCaptureLock ||
++		    bytes==608 || args->scalarInputCount!=1 || !args->scalarInput ||
++		    args->structureInputSize || args->structureInputDescriptor ||
++		    args->structureOutputDescriptor || !args->structureOutput ||
++		    args->structureOutputSize!=sizeof(struct redfin_display_statistics) ||
++		    !redfin_display_statistics_admit(arguments,bytes+1,args->scalarInput[0]))
++			return kIOReturnBadArgument;
++		if (!IOLockTryLock(fFB->fRedfinCaptureLock)) return kIOReturnBusy;
++		struct redfin_display_statistics stats={1,(uint32_t)sizeof(stats),mach_absolute_time(),
++		    fFB->fRedfinFrames,fFB->fRedfinGPUFrames,
++		    fFB->fRedfinVsyncUS ? 1000000u/fFB->fRedfinVsyncUS : 0,0};
++		IOLockUnlock(fFB->fRedfinCaptureLock);
++		if (!redfin_display_statistics_valid(&stats)) return kIOReturnNotReady;
++		memcpy(args->structureOutput,&stats,sizeof(stats));
++		args->structureOutputSize=sizeof(stats);args->scalarOutputCount=0;
++		return kIOReturnSuccess;
++	}
+ 	case kSweetFBGetLayerDefaultSurface:
+ 		out[0] = sweet_surface_port_in_task(fFB->fSurface, fTask);
+ 		outCount = 1;
+diff --git a/iokit/Kernel/arm/RedfinDisplayStatistics.h b/iokit/Kernel/arm/RedfinDisplayStatistics.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinDisplayStatistics.h
+@@ -0,0 +1,40 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_DISPLAY_STATISTICS_H
++#define REDFIN_DISPLAY_STATISTICS_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++
++/* A read-only private capture query. Include the common GUI profile first.
++ * Presents are incremented only after the actual panel copy/GPU fence.
++ * Notification ticks and CADisplayLink callbacks are never counted here. */
++#define REDFIN_DISPLAY_STATISTICS_SELECTOR 0x52465053u
++struct redfin_display_statistics {
++    uint32_t version,bytes;
++    uint64_t ticks,presents,gpu_presents;
++    uint32_t panel_hz,reserved;
++};
++#ifdef __cplusplus
++static_assert(sizeof(struct redfin_display_statistics)==40,"native capture statistics ABI");
++#else
++_Static_assert(sizeof(struct redfin_display_statistics)==40,"native capture statistics ABI");
++#endif
++
++static inline bool redfin_display_statistics_admit(const char *args,unsigned bytes,uint64_t requested)
++{
++    uint64_t nonce=0;
++    if (!requested || !redfin_gpu_gui_profile(args,bytes,&nonce) || nonce!=requested) return false;
++    for (unsigned at=0;at<bytes && args[at];) {
++        if (args[at]==' ') {++at;continue;}
++        unsigned first=at;
++        while (at<bytes && args[at] && args[at]!=' ') ++at;
++        if (redfin_gui_token(args+first,at-first,"redfinscreen=1")) return true;
++    }
++    return false;
++}
++static inline bool redfin_display_statistics_valid(const struct redfin_display_statistics *s)
++{
++    return s && s->version==1 && s->bytes==sizeof(*s) && s->ticks &&
++        s->gpu_presents<=s->presents && !s->reserved && (s->panel_hz==60 || s->panel_hz==90);
++}
++#endif

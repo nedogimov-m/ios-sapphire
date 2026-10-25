@@ -30,7 +30,8 @@ redfin_graphics_amfi_syscall(struct proc *process,int call,user_addr_t address)
         !memchr(path,0,sizeof(path))) return ENOPOLICY;
     bool graphics=!strcmp(path,"/usr/libexec/backboardd");
     bool ui=redfin_ui_executable(path) && redfin_ui_fullscreen(args,length+1);
-    if (!graphics && !ui) return ENOPOLICY;
+    bool diagnostic=redfin_diagnostic_executable(path) && redfin_diagnostic_requested(args,length+1);
+    if (!graphics && !ui && !diagnostic) return ENOPOLICY;
     struct {uint64_t input_flags;user_addr_t output_flags;} query;
     int error=copyin(address,&query,sizeof(query));
     if(error)return error;

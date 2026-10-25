@@ -173,12 +173,35 @@ static void redfin_metal_leave(int *locked) {(void)locked;redfin_metal_unlock();
 #define RF_MESA(member,...) ({ REDFIN_MESA_SCOPE; mesa.member(__VA_ARGS__); })
 '''
 
+FENCE_OBSERVATIONS = r'''
+/* Completion evidence is emitted only after Gallium's actual fence succeeds.
+ * Keep callback/timer activity separate from commands that reached the GPU. */
+static pthread_once_t redfin_fence_once=PTHREAD_ONCE_INIT;
+static char redfin_fence_boot[17];
+static uint64_t redfin_fence_count;
+static void redfin_fence_identity(void)
+{
+    char args[1024]={0};size_t bytes=sizeof(args);
+    if (sysctlbyname("kern.bootargs",args,&bytes,NULL,0) || !bytes || bytes>sizeof(args)) return;
+    const char *nonce=strstr(args,"redfinbootid=0x");
+    if (nonce && strlen(nonce+15)>=16) memcpy(redfin_fence_boot,nonce+15,16);
+}
+static void redfin_metal_completed(unsigned draws,unsigned computes)
+{
+    if ((!draws && !computes) || pthread_once(&redfin_fence_once,redfin_fence_identity) || !redfin_fence_boot[0]) return;
+    uint64_t count=__atomic_add_fetch(&redfin_fence_count,1,__ATOMIC_RELAXED);
+    if (count<=4 || !(count&(count-1)) || !(count%120))
+        rw_print("REDFIN METAL FENCE: boot=%s sequence=%llu draws=%u computes=%u actual-finish=1\n",
+            redfin_fence_boot,(unsigned long long)count,draws,computes);
+}
+'''
+
 
 def adapt_driver(text):
     text = replace_once(text, '#include "redwood_drawable.h"',
         '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include <pthread.h>\n'
         'extern int redfin_metal_abi_ready(void);\nextern int redfin_metal_hardware_ready(void);')
-    text = replace_once(text, 'static bool\nmesa_available(void)', LOCKING + '\nstatic bool\nmesa_available(void)')
+    text = replace_once(text, 'static bool\nmesa_available(void)', LOCKING + FENCE_OBSERVATIONS + '\nstatic bool\nmesa_available(void)')
     text = replace_once(text, 'mesa_available(void)\n{', 'mesa_available(void)\n{\n\tREDFIN_MESA_SCOPE;')
     # Diagnostics also run from independent native command queues.
     text = replace_once(text, 'rw_print(const char *fmt, ...)\n{',
@@ -211,6 +234,20 @@ def adapt_driver(text):
     text = replace_once(text, '\t/* The struct Metal reads out of this device by raw pointer,',
         '\tif (_gpu == IO_OBJECT_NULL || _mesa == NULL) { [self release]; return nil; }\n\n'
         '\t/* The struct Metal reads out of this device by raw pointer,')
+    # Native Redfin msm rejects pipe0. The compiler already uses MSM_PIPE_3D;
+    # the upstream's separate human-readable chip query must use it as well.
+    text = replace_once(text, '.pipe = 0, .param = which,', '.pipe = 0x10, .param = which,')
+    text = replace_once(text, '@"Adreno 7c+ Gen 3 (chip %#x, Redwood)"',
+        '@"Adreno 620 (chip %#x, Redfin)"')
+    text = replace_once(text, '@"Adreno (Redwood; the GPU is not started)"',
+        '@"Adreno 620 (Redfin; chip query unavailable)"')
+    text = replace_once(text, 'if (_status == RW_CB_ERROR) {\n\t\treturn;\n\t}',
+        'if (_status == RW_CB_ERROR || _status == RW_CB_COMPLETED) {\n\t\treturn;\n\t}')
+    text = replace_once(text, '\t_status = RW_CB_COMPLETED;   /* the fence has been paid, and only now */',
+        '\t_status = RW_CB_COMPLETED;   /* the fence has been paid, and only now */\n'
+        '\tunsigned draws=0,computes=0;\n'
+        '\tfor (RedwoodMetalWork *work in _work) { if (work->render) ++draws; else ++computes; }\n'
+        '\tredfin_metal_completed(draws,computes);')
     match = re.search(r'- \(NSUInteger\)featureProfile\n\{.*?\n\}', text, re.S)
     require(match is not None, 'preferred Metal profile getter changed')
     text = text[:match.start()] + ('- (NSUInteger)featureProfile\n{\n'
@@ -245,6 +282,11 @@ def adapt_drawable(text):
         'static int redfin_surface_enter(void){redfin_metal_lock();return 1;}\n'
         'static void redfin_surface_leave(int *p){(void)p;redfin_metal_unlock();}\n'
         '#define REDFIN_SURFACE_SCOPE int locked_ __attribute__((cleanup(redfin_surface_leave)))=redfin_surface_enter(); (void)locked_\n')
+    text = replace_once(text, 'static const struct rwd_format rwd_formats[] = {',
+        'static const struct rwd_format rwd_formats[] = {\n'
+        '\t/* Native kCVPixelFormatType_TwoComponent8; AIR already uses R8G8. */\n'
+        '\t{ 30, \'2C08\', 2, 0, "MTLPixelFormatRG8Unorm" },\n'
+        '\t{ 31, \'2C08\', 2, 0, "MTLPixelFormatRG8Unorm_sRGB" },')
     for signature in ('rwd_import(void)','rwd_shared_connection(void)'):
         text=replace_once(text,signature+'\n{',signature+'\n{\n\tREDFIN_SURFACE_SCOPE;')
     text = replace_once(text, '\ttexture = import(mesa_device, want, (int)id, surface.offset, surface.rowBytes, why,\n\t    why_size);',

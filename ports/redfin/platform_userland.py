@@ -16,6 +16,7 @@ from ports.redfin.wifi_userland import _encode_same_size
 from ports.redfin.userland_files import prepare
 
 MOBILE_WIFI='/System/Library/PrivateFrameworks/MobileWiFi.framework/MobileWiFi'
+DIAGNOSTIC_LIBRARY='/redfin/lib/libredfin-diagnostic.dylib'
 NETWORK_ENTITLEMENTS={'application-identifier':'com.apple.wifid','platform-application':True,
                       'com.apple.private.system-keychain':True}
 PROGRAMS={'thermald':dict(label='com.redfin.thermald',source='thermald.c',uid=0),
@@ -81,6 +82,7 @@ def inventory(bundle):
             (label+'.plist','/System/Library/LaunchDaemons/'+label+'.plist',0,0o644),
             (name+'-log-initial','/private/var/log/redfin-'+name+'.log',0,0o600)]
     for label,(_,path) in NATIVE_LOGS.items():files.append((label+'-log-initial',path,501,0o600))
+    files.append(('libredfin-diagnostic.dylib',DIAGNOSTIC_LIBRARY,0,0o644))
     return [(bundle/name,path,uid,mode,v['sha256'][name]) for name,path,uid,mode in files]
 
 
@@ -109,12 +111,21 @@ def build(out,cache_path=None):
             subprocess.run(['codesign','--verify','--strict',str(out/name)],check=True,stdout=log,stderr=log)
             (out/(record['label']+'.plist')).write_bytes(plistlib.dumps(job(name),fmt=plistlib.FMT_BINARY,sort_keys=False))
             (out/(name+'-log-initial')).write_text('REDFIN native '+name+'; boot-bound observations follow.\n')
+        command=['xcrun','--sdk','iphoneos','clang','-arch','arm64','-isysroot',sdk,
+            '-miphoneos-version-min=16.0','-O2','-Wall','-Wextra','-Werror','-fobjc-arc','-fblocks',
+            '-I',str(HERE),'-dynamiclib','-install_name',DIAGNOSTIC_LIBRARY,
+            str(HERE/'native-diagnostics.m'),'-framework','Foundation','-o',str(out/'libredfin-diagnostic.dylib')]
+        subprocess.run(command,check=True,stdout=log,stderr=log)
+        subprocess.run(['codesign','--force','--sign','-','--timestamp=none','--identifier','com.redfin.native-diagnostic',
+            str(out/'libredfin-diagnostic.dylib')],check=True,stdout=log,stderr=log)
+        subprocess.run(['codesign','--verify','--strict',str(out/'libredfin-diagnostic.dylib')],check=True,stdout=log,stderr=log)
     for label in NATIVE_LOGS:(out/(label+'-log-initial')).write_text('REDFIN scoped native '+label+' output.\n')
-    with (Cache(cache_path) if cache_path else Cache()) as cache:abi=audit_bundle(cache,[out/name for name in PROGRAMS])
+    with (Cache(cache_path) if cache_path else Cache()) as cache:abi=audit_bundle(cache,
+        [out/name for name in PROGRAMS]+[out/'libredfin-diagnostic.dylib'])
     if not abi['compatible']:raise ValueError('native platform service imports unavailable on20H392')
     report=dict(success=True,abi=abi,mobile_wifi_uuid=uuid,synthetic_password_only=True,
                 source_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest()
-                    for n in ['thermald.c','network-check.m','gui-profile.h']},
+                    for n in ['thermald.c','network-check.m','native-diagnostics.m','graphics-exec-scope.h','gui-profile.h']},
                 sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.is_file() and p.name!='build.json'})
     (out/'build.json').write_text(json.dumps(report,indent=2)+'\n');return report
 

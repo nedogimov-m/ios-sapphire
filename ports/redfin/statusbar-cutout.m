@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include "gui-profile.h"
 #include "graphics-exec-scope.h"
 #include "statusbar-geometry.h"
@@ -21,6 +22,8 @@ static __thread bool in_layout;
 static Class time_class;
 static char boot_nonce[17];
 static unsigned log_count;
+static uint64_t display_probe_nonce;
+extern void redfin_display_probe_schedule(UIWindow *,uint64_t);
 
 static void ui_log(const char *format,...)
 {
@@ -68,6 +71,7 @@ static void cutout_layout(id object,SEL selector)
     UIView *bar=object; UIWindow *window=bar.window;
     UIScreen *screen=window.screen;
     if (!window || screen!=UIScreen.mainScreen) return;
+    if (display_probe_nonce) redfin_display_probe_schedule(window,display_probe_nonce);
     CGRect fixed=[screen.fixedCoordinateSpace bounds];
     /* Native iPhoneX375x812@3 remains essential to its status-bar provider. */
     if (fabs(fixed.size.width-375)>0.5 || fabs(fixed.size.height-812)>0.5) return;
@@ -119,6 +123,9 @@ __attribute__((constructor)) static void install_cutout(void)
     const char *nonce=strstr(args,"redfinbootid=0x");
     if (!nonce || strlen(nonce+15)<16) return;
     memcpy(boot_nonce,nonce+15,16);
+    if (redfin_diagnostic_requested(args,(unsigned)bytes) &&
+        !strcmp(NSProcessInfo.processInfo.processName.UTF8String,"SpringBoard"))
+        display_probe_nonce=strtoull(boot_nonce,NULL,16);
     (void)dlopen("/redfin/lib/libredfin-refresh.dylib",RTLD_NOW|RTLD_LOCAL);
     Class bar=objc_getClass("_UIStatusBar"); time_class=objc_getClass("_UIStatusBarTimeItem");
     if (!bar || !time_class ||

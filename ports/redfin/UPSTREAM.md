@@ -1,5 +1,24 @@
 # HackiOS upstream review — 2026-10-22
 
+## System Metal/CoreAnimation and native RG8 adaptation — 2026-10-25
+
+V8 physically selects preferred906425b75e02b4f99eb5d7bb1ef7c9583472d772's
+Metal implementation in backboardd, creates the real CoreAnimation pipelines
+and preserves the visible UI/Phone/SpringBoard. Its AIR table already maps
+Metal30/31 to R8G8_UNORM/SRGB; the separate drawable table lacks native
+kCVPixelFormatType_TwoComponent8/2C08. Add that exact two-byte mapping with
+all existing single-plane/stride/bounds guards and an actual RG8/guard probe.
+Use Redfin's kernel-required MSM_PIPE_3D0x10 in the separate chip-name query,
+not the foreign pipe0/A635 marketing name. Native Metal-finish observations
+are boot-bound and occur only after the real Gallium fence succeeds.
+
+The paired kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab remains the base.
+Capture-only assetsd exception observation preserves Apple's exception and
+TCC/Security policies. A bounded native UIKit animation compares callbacks
+with lock-protected actual completed panel copies/GPU presentations; no fake
+notification-based FPS and no new display hardware operation are introduced.
+These additions are fully built/host-checked; new physical results are pending.
+
 ## Native entitlement enforcement, probe admission and Redfin OSM — 2026-10-25
 
 Hardware follow-up bfdf8d0/V7: paired906425b renderer now opens FD620 and

@@ -85,8 +85,10 @@ The latest stable GPU image is
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
 The latest authenticated platform capture also proves real Metal on A620:
-192compute commands across two queues and4096IOSurface pixels pass. System
-Metal discovery and sustained UI FPS are the next integration check. All
+192compute commands across two queues and4096IOSurface pixels pass. The next
+capture also selects system Metal, builds actual CoreAnimation pipelines,
+completes backboardd GPU submissions and preserves a visible physical home
+screen. Sustained UI FPS remains unmeasured. All
 three CPU domains now reach their native normal frequencies with observed
 thermal throttling/restoration; Photos still fails in its native assetsd/TCC
 path. Physical90Hz and credential persistence are independently observed.

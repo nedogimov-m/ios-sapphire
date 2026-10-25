@@ -78,21 +78,31 @@ static BOOL compute(id<MTLDevice> device,id<MTLComputePipelineState> pipeline,ui
     [input release];[output release];[queue release];return valid;
 }
 
-static BOOL render(id<MTLDevice> device,id<MTLLibrary> library)
+static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask)
 {
+    MTLPixelFormat format=mask ? MTLPixelFormatRG8Unorm : MTLPixelFormatBGRA8Unorm;
+    unsigned bpe=mask ? 2 : 4,stride_bytes=64*bpe;
     NSDictionary *properties=@{(id)kIOSurfaceWidth:@64,(id)kIOSurfaceHeight:@64,
-        (id)kIOSurfaceBytesPerElement:@4,(id)kIOSurfaceBytesPerRow:@256,
-        (id)kIOSurfaceAllocSize:@16384,(id)kIOSurfacePixelFormat:@(0x42475241),@"IOSurfaceIsGlobal":@YES};
+        (id)kIOSurfaceBytesPerElement:@(bpe),(id)kIOSurfaceBytesPerRow:@(stride_bytes),
+        (id)kIOSurfaceAllocSize:@16384,(id)kIOSurfacePixelFormat:@(mask ? 0x32433038 : 0x42475241),@"IOSurfaceIsGlobal":@YES};
     IOSurfaceRef surface=IOSurfaceCreate((CFDictionaryRef)properties);
     if (!surface || !IOSurfaceGetID(surface)) {if(surface)CFRelease(surface);return NO;}
-    MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:64 height:64 mipmapped:NO];
+    uint32_t initial_seed=0;
+    if (IOSurfaceGetAllocSize(surface)!=16384 || IOSurfaceLock(surface,0,&initial_seed)!=KERN_SUCCESS) {
+        CFRelease(surface);return NO;
+    }
+    void *initial=IOSurfaceGetBaseAddress(surface);
+    if (!initial) {IOSurfaceUnlock(surface,0,&initial_seed);CFRelease(surface);return NO;}
+    memset(initial,0xa5,16384);
+    if (IOSurfaceUnlock(surface,0,&initial_seed)!=KERN_SUCCESS) {CFRelease(surface);return NO;}
+    MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:64 height:64 mipmapped:NO];
     desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
     desc.storageMode=MTLStorageModeShared;
     id<MTLTexture> texture=[(id)device newTextureWithDescriptor:desc iosurface:surface plane:0];
     MTLRenderPipelineDescriptor *shape=[[MTLRenderPipelineDescriptor alloc] init];
     shape.vertexFunction=[library newFunctionWithName:@"redfin_vertex"];
     shape.fragmentFunction=[library newFunctionWithName:@"redfin_fragment"];
-    shape.colorAttachments[0].pixelFormat=MTLPixelFormatBGRA8Unorm;
+    shape.colorAttachments[0].pixelFormat=format;
     NSError *error=nil;
     id<MTLRenderPipelineState> pipeline=texture ? [device newRenderPipelineStateWithDescriptor:shape error:&error] : nil;
     id<MTLCommandQueue> queue=pipeline ? [device newCommandQueue] : nil;
@@ -121,12 +131,14 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library)
         if (valid) {
             const uint8_t *pixels=IOSurfaceGetBaseAddress(surface);
             size_t stride=IOSurfaceGetBytesPerRow(surface);
-            valid=pixels && stride==256 && IOSurfaceGetWidth(surface)==64 && IOSurfaceGetHeight(surface)==64;
+            valid=pixels && stride==stride_bytes && IOSurfaceGetWidth(surface)==64 && IOSurfaceGetHeight(surface)==64;
             for (unsigned y=0;valid && y<64;++y) for (unsigned x=0;valid && x<64;++x) {
-                const uint8_t *p=pixels+y*stride+x*4;
-                valid=p[0]>=190 && p[0]<=192 && p[1]>=127 && p[1]<=129 &&
-                    p[2]>=63 && p[2]<=65 && p[3]==255;
+                const uint8_t *p=pixels+y*stride+x*bpe;
+                valid=mask ? (p[0]>=63 && p[0]<=65 && p[1]>=127 && p[1]<=129) :
+                    (p[0]>=190 && p[0]<=192 && p[1]>=127 && p[1]<=129 &&
+                     p[2]>=63 && p[2]<=65 && p[3]==255);
             }
+            if (mask) for (unsigned at=8192;valid && at<16384;++at) valid=pixels[at]==0xa5;
             if (IOSurfaceUnlock(surface,kIOSurfaceLockReadOnly,&seed)!=KERN_SUCCESS) valid=NO;
         }
     }
@@ -190,11 +202,12 @@ int main(void)
             if (dispatch_group_wait(group,dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC))) {
                 printf("REDFIN METAL CHECK: concurrent command queues timed out\n");return 1;
             }
-            BOOL pixels=first && second && render(device,library);
-            printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u\n",
-                (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels);
+            BOOL pixels=first && second && render(device,library,NO);
+            BOOL masks=pixels && render(device,library,YES);
+            printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u\n",
+                (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels,(unsigned)masks);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
-            return pixels ? 0 : 1;
+            return masks ? 0 : 1;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
             return 1;

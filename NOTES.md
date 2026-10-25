@@ -1,5 +1,53 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V8 system Metal selected; RG8/native observation/animation block ready — 2026-10-25
+
+V8 sourcef250187, same bfdf8d0 kernel local20261025-084355/noCI,
+36b98fbbcfab1582cbd22ea617bc8552cf66b4279f37416db2cee325922d0956;
+image 2c46b0fd772f5501c2de329148b63d5598e45e1683fd448a839e4881e6aaf95f. Boot8be20a2f77380ee1
+passes authenticated exact-image/nonce/launchd proof, userspace-alive/exit0,
+clean HFSX/not inconsistent/write_count818829 and verified Fastboot.
+Native system plugin discovery is observed. Backboardd61 opens the FD620
+Metal compiler and builds Apple's actual com.apple.coreanimation.draw
+pipelines; its real native submissions complete through fence1024. No
+backboardd/SpringBoard restart or kernel panic. Mode2 helper repeats192
+compute commands/guards and4096IOSurface pixelsPASS. The final physical
+panel frame23 is reconstructed from exact log substrings with all650chunks
+and original CRC32 verified; the home UI is visible. This idle capture is
+not a sustained FPS measurement. Phone247survives; Photos/assetsd still
+abort, with native Security validated1/TCC-preflight0.
+
+Observed CoreAnimation mask imports request RG8/format30, missing only in the
+upstream drawable FourCC table; AIR already maps it to PIPE_FORMAT_R8G8_UNORM.
+The complete next block adds native2C08/RG8 imports and an actual4096pixel
+plus8192byte guard probe, fixes the chip-query MSM_PIPE_3D/name, and records
+successful Metal finishes separately from initialization. Bounded native
+UIKit animation now measures both display-link callbacks and the framebuffer's
+completed CPU/GPU presentations. Its private readonly40byte query requires
+this exact GUI3 capture nonce and the existing presentation lock; it reads
+no new MMIO and refuses a busy presenter. The six-layer animation disappears
+automatically. Ordinary boots do not run it.
+
+Capture-only native exception preprocessor preserves the prior handler and
+original exception, and reads native Security/TCC without altering answers.
+The existing UI insertion carries it for exact system apps; one additional
+exact assetsd vnode is eligible only for GUI3 capture. No TCC override,
+entitlement fabrication, database modification or suppressed abort. Actual
+exception reason remains for the next run. Sensors/SSC/HID integration and
+real Apple authorization remain unfinished.
+
+29selected host checks, full native kernel/AIR/plugin/helper/UI/diagnostic
+builds, signatures/imports and actual payload/ADT/FDT loader preflightPASS.
+Kernel local20261025-091259/noCI,
+ae5aae0d625ed5d1267a489d2987c4ceda7b7b1b3e9cb60f6d65fe759bcb5c15.
+Fresh V13 staged against clean818829:22ranges/438272bytes,24new blocks,
+zero freed; complete file/signed-bundle readback and native readonly fsckPASS.
+V13 NOT applied yet. New V9 image 62294b2b329c24278b00edfa3843788d11bb829456d139d8fd429ca9bd40981b,
+nonce40cdadce6712794f,system mode. Next apply V13 once and collect one
+combined hardware run; all new behavior above remains physically unverified.
+Exact V8 observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x8be20a2f77380ee1 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Exact V9 planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x40cdadce6712794f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V7 genuine Metal compute/pixels and Gold/Prime PASS — 2026-10-25
 
 Sourcebfdf8d0; kernel local20261025-084355/noCI,

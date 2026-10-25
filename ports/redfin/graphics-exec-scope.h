@@ -31,4 +31,22 @@ static inline bool redfin_ui_fullscreen(const char *args, unsigned bytes)
     }
     return false;
 }
+/* Read-only native exception/authorization observations for an explicit
+ * capture boot. Do not admit another daemon, writable path or ordinary boot. */
+static inline bool redfin_diagnostic_executable(const char *path)
+{
+    return path && !strcmp(path,
+        "/System/Library/Frameworks/AssetsLibrary.framework/Support/assetsd");
+}
+static inline bool redfin_diagnostic_requested(const char *args,unsigned bytes)
+{
+    if (!redfin_gpu_gui_profile(args,bytes,NULL)) return false;
+    for (unsigned at=0;at<bytes && args[at];) {
+        if (args[at]==' ') {++at;continue;}
+        unsigned first=at;
+        while (at<bytes && args[at] && args[at]!=' ') ++at;
+        if (redfin_gui_token(args+first,at-first,"redfinscreen=1")) return true;
+    }
+    return false;
+}
 #endif

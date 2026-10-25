@@ -22,6 +22,7 @@ static const struct target targets[]={
     {"/redfin/lib/libredfin-graphics.dylib",0,0644},
     {"/redfin/lib/libredfin-eagl.dylib",0,0644},
     {"/redfin/lib/libredfin-refresh.dylib",0,0644},
+    {"/redfin/lib/libredfin-diagnostic.dylib",0,0644},
     {"/redfin/lib/libredfinair.dylib",0,0644},
     {"/redfin/lib/redfin-check.metallib",0,0644},
     {"/redfin/bin/metal-check",0,0755},

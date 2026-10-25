@@ -10,7 +10,18 @@ features whose final physical/manual checks need the user. Defer only those
 human-dependent actions/checks, and keep progressing on the rest. Do not wait
 for manual GUI feedback before continuing independent implementation/tests.
 
-Latest verified block (2026-10-25, sourcebfdf8d0): V12 applied once/stale,
+Latest system integration (2026-10-25, sourcef250187): V8/8be20a2f77380ee1
+has native system discovery/CoreAnimation Metal pipelines, completed native
+backboardd fences, a CRC-verified visible physical home frame, stable Phone/
+SpringBoard and repeated mode2 actual compute/pixelsPASS. Clean root818829/
+Fastboot. Photos/assetsd still abort; idle samples do not establish FPS.
+Next complete RG8/Metal-fence/native exception/animation-statistics block is
+built with29selected checksPASS. Kernel local20261025-091259/noCI ae5aae0d...;
+V13 staged438272bytes/24new/zero freed/readback/fsckPASS, not applied.
+V9/40cdadce6712794f system image/actual native loader preflightPASS. Apply
+V13 once, then one integrated capture. Sensors and authorization remain.
+
+Earlier verified block (2026-10-25, sourcebfdf8d0): V12 applied once/stale,
 V7/c539c81afb12dd77 has authenticated image/launchd proof, clean root810424
 and verified Fastboot. Actual Metal two queues x96compute commands/output/
 guards and4096IOSurface pixelsPASS, with a separately completed native GPU
