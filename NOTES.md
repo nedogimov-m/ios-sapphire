@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V13 Photos survives; native ADSP/SSC starts; registry discovery next — 2026-10-25
+
+Source40b3536, kernel local20261025-121323/noCI639a8eaa...,
+V13/c6d98dae573cfa4ad1bbce0ebb84f6c0aa54a61a41cb6b7f708c26bc6915e7d9,
+nonce4144e05c499bc114 passes authenticated exact-image/launchd/userspace proof.
+Native TCCD now issues actual Photos extensions successfully; Photos' own
+preflight2/authorization-right2/error0. Phone253 and Photos254 both survive
+5/17s and SpringBoard26 remains stable. This is automated process/native-
+permission evidence; human interaction in Photos remains deferred. No TCC
+answer, permission grant, DB or entitlement fabrication. Metal192compute,
+BGRA/RG8/blend/dependency/guards and actual5GMEM/0sysmem PASS. Warmed native
+animation145GPU presentations/10.000402s=14.499fps,601callbacks/60Hz; smooth
+60/90render FPS remains unfinished. No recorded GPU stop, panic or window-
+server restart. Actual saved Wi-Fi credential/online0 remains unproved.
+
+Critical ADSP progress: cold witness, owned metadata, PAS1 INIT(3calls/2resumes),
+MEM_SETUP(1call),684full copy/readback chunks, AUTH(22calls/21resumes) all
+succeed; ready state0x2 in8162ms. Native GLINK/QRTR advertises service400/v1
+node5/port0xe. First registry SUID lookup yields an actual empty list, currently
+incorrectly treated as fatal; no native sensor/HID/CoreMotion samples yet.
+Next preserve the update subscription through native registry startup and
+verify actual host-file/registry data, alongside native GPU DVFS. Existing
+GPU remains fixed to its proven minimum275MHz; native fuse/OPP/thermal support
+is now being implemented, not tested on hardware yet.
+
+Capture leaves clean HFSX/not inconsistent/write_count873717, all file logs
+captured readonly and productredfin verified in Fastboot. No root update;
+V16 remains applied/stale and must not be reused. Future offline staging must
+start from873717. Direct VD6281, real credential/autojoin, cable/motion and
+actual Apple authorization remain pending.
+Exact V13 observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x4144e05c499bc114 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native Sandbox and cold ADSP block built; V13 ready — 2026-10-25
 
 Source base5fa54a6 plus this complete block. The actual native Photos reply
