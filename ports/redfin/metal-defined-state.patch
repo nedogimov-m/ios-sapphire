@@ -1,0 +1,16 @@
+diff --git a/src/compiler/air/air_to_nir.c b/src/compiler/air/air_to_nir.c
+--- a/src/compiler/air/air_to_nir.c
++++ b/src/compiler/air/air_to_nir.c
+@@ -4216,6 +4216,12 @@ optimize_specialized_state(nir_shader *nir)
+    do {
+       progress = false;
+       NIR_PASS(progress, nir, nir_lower_vars_to_ssa);
++      /* Choose a legal concrete value for undefined scratch/padding bits
++       * before folding byte stores. Otherwise even a completely defined byte
++       * may remain hidden behind masks of an undefined neighboring byte, and
++       * dead descriptor branches survive until after pipeline validation.
++       */
++      NIR_PASS(progress, nir, nir_lower_undef_to_zero);
+       NIR_PASS(progress, nir, nir_copy_prop);
+       NIR_PASS(progress, nir, nir_opt_constant_folding);
+       NIR_PASS(progress, nir, nir_opt_algebraic);

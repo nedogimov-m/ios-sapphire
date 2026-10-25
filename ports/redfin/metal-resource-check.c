@@ -140,10 +140,15 @@ redfin_metal_resource_check(const char *path, uint64_t nonce)
          }
       }
       for (unsigned i = 36; i < 256; i++) {
+         if (i >= 40 && i < 44) continue;
          if (((uint8_t *)output)[i] != 0xa5) {
             snprintf(why, sizeof(why), "round %u modified output guard %u", round, i);
             goto done;
          }
+      }
+      if (output[10] != 0x100) {
+         snprintf(why, sizeof(why), "defined false/true bytes in an undefined word changed: %08x", output[10]);
+         goto done;
       }
       completed++;
    }
@@ -157,8 +162,8 @@ redfin_metal_resource_check(const char *path, uint64_t nonce)
    memset(output, 0xa5, 256);
    if (rwa_dispatch(enabled, &full, groups, groups, why, sizeof(why)))
       goto done;
-   enabled_pixels = output[9] == (control[0] ^ 0x3f800000u);
-   for (unsigned i = 40; i < 256; i++)
+   enabled_pixels = output[9] == (control[0] ^ 0x3f800000u) && output[10] == 0x101;
+   for (unsigned i = 44; i < 256; i++)
       enabled_pixels &= ((uint8_t *)output)[i] == 0xa5;
    if (!enabled_pixels)
       snprintf(why, sizeof(why), "enabled high bindings returned incorrect output/guards");

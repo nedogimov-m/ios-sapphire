@@ -8,6 +8,7 @@ target triple = "air64-apple-ios16.0.0"
 %struct._texture_2d_t = type opaque
 %struct._sampler_t = type opaque
 %struct.redfin_constants = type { i8, i32, [2 x <3 x i16>], float }
+%struct.redfin_partial = type { i8, i8, i8, i8 }
 
 @redfin_constants = internal addrspace(2) constant %struct.redfin_constants {
   i8 59, i32 305419896,
@@ -18,10 +19,24 @@ target triple = "air64-apple-ios16.0.0"
 @redfin_state = internal addrspace(2) global i32 826366246, align 4
 @redfin_zero = internal addrspace(2) global [2 x i8] zeroinitializer, align 1
 @redfin_extra = internal addrspace(2) externally_initialized constant i8 undef, section "air.fc_initializer", align 1
+@redfin_partial = internal addrspace(2) global %struct.redfin_partial undef, align 4
 @__air_sampler_state = internal addrspace(2) constant i64 -9188470239253757879, align 8
 @redfin_fallback = internal constant { %struct._sampler_t addrspace(2)* } {
   %struct._sampler_t addrspace(2)* bitcast (i64 addrspace(2)* @__air_sampler_state to %struct._sampler_t addrspace(2)*)
 }, align 8
+
+define internal void @redfin_initialize_partial() section "air.static_init" {
+entry:
+  %extra = load i8, i8 addrspace(2)* @redfin_extra, align 1
+  %one = getelementptr %struct.redfin_partial, %struct.redfin_partial addrspace(2)* @redfin_partial, i32 0, i32 1
+  %zero = getelementptr %struct.redfin_partial, %struct.redfin_partial addrspace(2)* @redfin_partial, i32 0, i32 2
+  %flag = getelementptr %struct.redfin_partial, %struct.redfin_partial addrspace(2)* @redfin_partial, i32 0, i32 3
+  ; Byte zero deliberately remains undefined. All three following bytes are defined.
+  store i8 1, i8 addrspace(2)* %one, align 1
+  store i8 0, i8 addrspace(2)* %zero, align 1
+  store i8 %extra, i8 addrspace(2)* %flag, align 1
+  ret void
+}
 
 define internal <4 x float> @redfin_sample(%struct._texture_2d_t addrspace(1)* %texture,
     %struct._sampler_t addrspace(2)* %sampler, i32 addrspace(2)* %word) noinline {
@@ -113,7 +128,21 @@ joined:
   %short32 = and i32 %short_word, 65535
   %out_short = getelementptr i32, i32 addrspace(1)* %output, i32 8
   store i32 %short32, i32 addrspace(1)* %out_short, align 4
-  %extra = load i8, i8 addrspace(2)* @redfin_extra, align 1
+  %extra_address = getelementptr %struct.redfin_partial, %struct.redfin_partial addrspace(2)* @redfin_partial, i32 0, i32 3
+  %one_address = getelementptr %struct.redfin_partial, %struct.redfin_partial addrspace(2)* @redfin_partial, i32 0, i32 1
+  %zero_address2 = getelementptr %struct.redfin_partial, %struct.redfin_partial addrspace(2)* @redfin_partial, i32 0, i32 2
+  %extra = load i8, i8 addrspace(2)* %extra_address, align 1
+  %one_value = load i8, i8 addrspace(2)* %one_address, align 1
+  %zero_value = load i8, i8 addrspace(2)* %zero_address2, align 1
+  %extra32 = zext i8 %extra to i32
+  %one32 = zext i8 %one_value to i32
+  %zero32_2 = zext i8 %zero_value to i32
+  %one_bits = shl i32 %one32, 8
+  %zero_bits = shl i32 %zero32_2, 16
+  %partial0 = or i32 %one_bits, %zero_bits
+  %partial = or i32 %partial0, %extra32
+  %out_partial = getelementptr i32, i32 addrspace(1)* %output, i32 10
+  store i32 %partial, i32 addrspace(1)* %out_partial, align 4
   %enabled = icmp ne i8 %extra, 0
   br i1 %enabled, label %extra_path, label %finished
 extra_path:

@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: MIT */
+#include <stdbool.h>
 static BOOL constants_dispatch(id<MTLDevice> device,id<MTLFunction> function,uint32_t seed,
     const float vector[4],const uint8_t opcodes[3],BOOL defined)
 {
@@ -27,6 +28,43 @@ static BOOL constants_dispatch(id<MTLDevice> device,id<MTLFunction> function,uin
     }
     if(!valid&&error)printf("REDFIN METAL CONSTANT COMPUTE: %s\n",error.description.UTF8String);
     [queue release];[output release];[table release];[arguments release];[pipeline release];return valid;
+}
+static BOOL constants_bools(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce)
+{
+    bool flag=false,lanes[4]={false,true,false,false};NSError *error=nil;
+    MTLFunctionConstantValues *values=[[MTLFunctionConstantValues alloc]init];
+    [values setConstantValue:&flag type:MTLDataTypeBool atIndex:70];
+    [values setConstantValue:lanes type:MTLDataTypeBool3 atIndex:72];
+    id<MTLFunction> first=[library newFunctionWithName:@"redfin_bool_constants" constantValues:values error:&error];
+    flag=true;lanes[0]=true;lanes[1]=false;lanes[2]=true;
+    [values setConstantValue:&flag type:MTLDataTypeBool atIndex:70];
+    [values setConstantValue:lanes type:MTLDataTypeBool3 atIndex:72];
+    id<MTLFunction> second=[library newFunctionWithName:@"redfin_bool_constants" constantValues:values error:&error];
+    [values reset];id<MTLFunction> functions[3]={first,second,first};
+    const uint32_t flags[3]={0x00010000u,0x01000101u,0x00010000u};
+    id<MTLBuffer> output=[device newBufferWithLength:256 options:MTLResourceStorageModeShared];
+    id<MTLBuffer> seed=[device newBufferWithLength:4 options:MTLResourceStorageModeShared];
+    id<MTLCommandQueue> queue=[device newCommandQueue];BOOL valid=first&&second&&output&&seed&&queue&&output.contents&&seed.contents;
+    for(unsigned round=0;valid&&round<3;++round) {
+        id<MTLComputePipelineState> pipeline=[device newComputePipelineStateWithFunction:functions[round] error:&error];
+        if(!pipeline){valid=NO;break;}uint32_t value=(uint32_t)nonce^(round*0x9182ac31u);
+        memcpy(seed.contents,&value,4);memset(output.contents,0xa5,256);
+        id<MTLCommandBuffer> command=[queue commandBuffer];
+        id<MTLComputeCommandEncoder> encoder=[command computeCommandEncoder];valid=valid&&command&&encoder;
+        if(encoder) {
+            [encoder setComputePipelineState:pipeline];[encoder setBuffer:output offset:0 atIndex:0];
+            [encoder setBuffer:seed offset:0 atIndex:1];
+            [encoder dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[encoder endEncoding];
+            valid=valid&&blit_completed(command,"native-bool-false-true-bool3-snapshot");
+        }
+        for(unsigned i=0;valid&&i<16;++i)valid=((uint32_t *)output.contents)[i]==((value+i*1664525u)^flags[round]);
+        for(unsigned i=64;valid&&i<256;++i)valid=((uint8_t *)output.contents)[i]==0xa5;
+        [pipeline release];
+    }
+    if(!valid&&error)printf("REDFIN METAL BOOL: %s\n",error.description.UTF8String);
+    printf("REDFIN METAL BOOL RESULT: boot=%016llx supplied-false-true-bool3-immutable-pixels-guards=%u\n",
+        (unsigned long long)nonce,valid);
+    [queue release];[seed release];[output release];[second release];[first release];[values release];return valid;
 }
 static BOOL constants_raster(id<MTLDevice> device,id<MTLLibrary> library)
 {
@@ -103,9 +141,9 @@ static BOOL function_constants_native(id<MTLDevice> device,id<MTLLibrary> librar
     if(compute)compute=constants_dispatch(device,first,seedA,a,opsA,NO)&&
         constants_dispatch(device,second,seedB,b,opsB,YES)&&constants_dispatch(device,first,seedA,a,opsA,NO)&&
         constants_dispatch(device,asynchronous,seedB,b,opsB,YES)&&constants_dispatch(device,described,seedA,a,opsA,NO);
-    BOOL raster=constants_raster(device,library);
+    BOOL raster=constants_raster(device,library);BOOL bools=constants_bools(device,library,nonce);
     printf("REDFIN METAL CONSTANT RESULT: boot=%016llx required-refusal=%u distinct-native-hashes=%u immutable-vectors-optional-zero-argbuf-async-descriptor-compute=%u separate-vertex-fragment-pixels-guards=%u\n",
         (unsigned long long)nonce,refused,separate,compute,raster);
     if(arrived){[asynchronous release];dispatch_release(completed);}
-    [described release];[second release];[first release];[values release];return refused&&separate&&compute&&raster;
+    [described release];[second release];[first release];[values release];return refused&&separate&&compute&&raster&&bools;
 }

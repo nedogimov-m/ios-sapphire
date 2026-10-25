@@ -76,3 +76,14 @@ vertex float4 redfin_constants_vertex(uint id [[vertex_id]])
     return float4(points[id]*redfin_fc_vector.xy,0,1);
 }
 fragment float4 redfin_constants_fragment() {return redfin_fc_vector;}
+
+constant bool redfin_fc_flag [[function_constant(70)]];
+constant bool3 redfin_fc_flags [[function_constant(72)]];
+kernel void redfin_bool_constants(device uint *output [[buffer(0)]],
+    constant uint &seed [[buffer(1)]], uint index [[thread_position_in_grid]])
+{
+    if(index>=16)return;
+    uint flags=uint(redfin_fc_flag)|(uint(redfin_fc_flags.x)<<8)|
+        (uint(redfin_fc_flags.y)<<16)|(uint(redfin_fc_flags.z)<<24);
+    output[index]=(seed+index*1664525u)^flags;
+}

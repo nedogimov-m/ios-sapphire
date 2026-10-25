@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Defined packed state before executable resource analysis — 2026-10-25
+
+Preferred graphics pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+and kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab. Review Mesa25.0.7's
+nir_lower_undef_to_zero and the actual CoreAnimation initializer/optimized NIR.
+V29 false attachment flags are stored correctly, but their byte loads remain
+hidden behind masks of undefined neighboring bytes. Conservative early binding
+analysis therefore retains disabled attachment1/2 while the original flags
+say framebuffer_fetch1/has_attachment1=0/has_attachment2=0.
+
+Use the existing legal undefined-value lowering after private-state promotion,
+then fold the fully defined bits and analyze resources. Explicit constants and
+NaN payloads remain exact; missing-binding and original-page checks stay strict.
+All19captured actual parameter sets compile with no phantom attachment1/2
+requirement; one case now takes11A620instructions. Native bool false/true/Bool3
+snapshots and adjacent defined bytes in an undefined word extend the combined
+hardware contract. Device correctness/FPS still need the next integrated run.
+
 ## Executable pipeline resources without changing declaration ABI — 2026-10-25
 
 Preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 runtime validates

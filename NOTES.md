@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN defined packed state and native bool block built; V33 staged for V30 — 2026-10-25
+
+Source base60ae83b plus this coherent block. Run Mesa25.0.7's existing
+nir_lower_undef_to_zero after variable promotion and before state folding.
+Choosing zero for undefined SSA/padding is legal; all defined stores/inputs and
+explicit NaN constants retain their bits. This lets masked partial-byte stores
+fold before the pipeline's strict resource analysis instead of retaining phantom
+attachment1/2 accesses. No binding/page/ownership check is weakened, and no nil
+texture substitute, fabricated resource or software rendering path is added.
+
+Extend authored AIR with an undefined four-byte word whose neighboring bytes
+are explicitly true/false/function-constant71. Check only defined bytes, exercise
+the inactive branch's binding requirements, all32native sampler/null/alias/helper
+rounds, and enabled high-slot pixels/guards. Add native Metal scalar Bool false/
+true and Bool3 factories/snapshots, reset/reuse and actual compute pixel/guard
+checks; generated AIR confirms real i8/<3xi8> storage. These new native results
+remain pending, not inferred from the host.
+
+34host cases/four NIR modules/eight A620 pattern compiles PASS. All19actual V28
+value sets also PASS, and attachment textures1/2 disappear from every actual
+fragment pipeline requirement. One formerly complex case becomes11A620
+instructions; other actual fragments span9..87instructions. This is compiler
+output, not a sustained physical rendering-rate measurement. Full fresh native
+Mesa/AIR/Metal/checker/shaders/actual20H392 ABI/signature build PASS:
+research/redfin-metal-defined-v1, local20261025-211455/noCI,
+pairingf5dd3584165331a4a90697864f4d50d603fb36d3f58cac6be1aea8defc4734fb.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V30 image5bdc596693b60f1f85f2eca335ea4fffacd0e6708abd21ae6964afcfc4ab0be7, nonce7da016b8a3225eb9;
+full loader/ADT/liveFDT/firmware/power/DVFS/source-window/return preflight PASS.
+Fresh V33 from clean consistent HFSX/write_count1073175: 208ranges/
+23519232bytes/2new/zero freed; complete staged files/native signatures/
+seal/readback/readonly fsck PASS. V33 PREPARED, NOT APPLIED; older applied stages
+remain stale. App launches stay disabled. Next apply once and collect one V30
+combined capture. Correct system rendering and sustained FPS remain unproved;
+user's V29 photograph is still the latest physical observation. Broader goal open.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7da016b8a3225eb9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V29 active binding contract PASS; undefined packed state blocks GUI — 2026-10-25
 
 Sourceb69ad85; graphics local20261025-204746/noCI,
