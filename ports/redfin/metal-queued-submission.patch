@@ -125,6 +125,15 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
  
  
  /* What the shader calls a texture slot, in the words a Metal programmer wrote it in,
+@@ -4159,7 +4195,7 @@
+ {
+    if(device->command_scope.failed)return -1;
+    if(rwa_redfin_linear_resolve_all(device,why,why_size))return -1;
+-   if(device->command_scope.pending)return rwa_redfin_cpu_drain(device,why,why_size);
++   if(device->command_scope.pending||device->queued_tickets)return rwa_redfin_cpu_drain(device,why,why_size);
+    return finish_or_say_why(device, false, "work", why, why_size);
+ }
+ 
 diff --git a/src/gallium/drivers/freedreno/freedreno_fence.c b/src/gallium/drivers/freedreno/freedreno_fence.c
 --- a/src/gallium/drivers/freedreno/freedreno_fence.c
 +++ b/src/gallium/drivers/freedreno/freedreno_fence.c

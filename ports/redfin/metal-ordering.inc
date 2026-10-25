@@ -24,7 +24,7 @@ static void rwa_redfin_buffer_unregister(struct rwa_buffer *buffer)
 }
 static void rwa_redfin_ordering_completed_epoch(struct rwa_device *device,uint64_t epoch)
 {
-   ++device->ordering[1];device->completed_epoch=MAX2(device->completed_epoch,epoch);
+   device->completed_epoch=MAX2(device->completed_epoch,epoch);
    if(device->gpu_memory_epoch<=epoch)device->gpu_memory_pending=false;
    for(struct rwa_buffer *b=device->all_buffers;b;b=b->all_next) {
       if(b->gpu_write_epoch<=epoch){b->gpu_pending=false;b->gpu_visible=true;}
@@ -34,6 +34,7 @@ static void rwa_redfin_ordering_completed_epoch(struct rwa_device *device,uint64
 }
 static void rwa_redfin_ordering_completed(struct rwa_device *device)
 {
+   ++device->ordering[1];
    rwa_redfin_ordering_completed_epoch(device,device->encoding_epoch?device->encoding_epoch:device->issued_epoch);
    if(!device->command_scope.active)device->encoding_epoch=0;
 }

@@ -209,6 +209,13 @@ int main(void) {
  rwa_device_close(&d);assert(!destroyed&&d.queued_closing);
  rwa_redfin_completion_destroy(one);assert(!destroyed&&d.queued_owners==1);
  rwa_redfin_completion_destroy(two);assert(destroyed==1&&!d.queued_owners);
+ /* An empty/error-after-CPU-drain scope preserves ordering without claiming
+  * an extra GPU finish for a last_fence that was already retired. */
+ struct rwa_device empty={.pipe=&pipe,.screen=&screen};
+ assert(!redfin_metal_scope_begin(&empty.command_scope));empty.issued_epoch=empty.encoding_epoch=1;
+ next_fence=NULL;assert(!rwa_redfin_commands_submit(&empty,&one,why,sizeof(why)));
+ assert(!rwa_redfin_completion_retire(one,why,sizeof(why))&&empty.completed_epoch==1&&!empty.ordering[1]);
+ rwa_redfin_completion_destroy(one);
  /* Generic encoding refusal still retains a real ticket and actual fence. */
  struct rwa_device partial={.pipe=&pipe,.screen=&screen};next_fence=&first;resolve_error=1;scope(&partial,1);
  assert(rwa_redfin_commands_submit(&partial,&one,why,sizeof(why))<0&&one);

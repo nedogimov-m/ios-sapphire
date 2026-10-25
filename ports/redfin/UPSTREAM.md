@@ -42,6 +42,10 @@ mach uptime for deadlines rather than the preferred different kernel's raw/
 continuous clock. Test public Error/Scheduled wait semantics through partial
 encoding refusal as well.49host contracts and full native/ABI/signatures pass;
 V44 hardware retry remains pending. CI kernel itself is reused unchanged.
+Final ordering review also preserves predecessor waits without inventing an
+extra GPU finish for an empty ticket after a CPU drain; legacy rwa_finish waits
+prior async tickets even without current pending work. Final native build is
+local20261026-030905 with49host cases/actual20H392 ABI/signatures PASS.
 
 ## Command-local descriptor and graphics state reuse — 2026-10-26
 

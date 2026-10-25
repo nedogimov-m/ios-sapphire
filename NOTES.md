@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN final repair includes empty-ticket/legacy-drain semantics; V49 ready — 2026-10-26
+
+Sourcefc78cb5 plus this final related ordering fix. Empty tickets still wait for
+their predecessor but do not count an extra GPU finish after a CPU drain. The
+legacy rwa_finish also drains prior queued tickets when its current scope is
+empty.49host cases PASS, including held fences, actual constructor/heap/null-hook/
+mach clock/public error status, empty-ticket counts and ownership. Final native
+graphics local20261026-030905/noCI in research/redfin-metal-queued-v8 full paired
+build/actual20H392 ABI/signatures PASS; input
+d44e2c6650b19d4e752676620d83fdf3f8fe5dccc2503c207ccb26ff8523adee,
+pairing6ca6878b11dcf71a84cc234750dc682634b22de5a5a12eb8ffe5c8c36e40dc4f.
+Kernel unchanged GitHub Actions40236406228/run1/source ddda9d2,
+84fe1c5b05e3798f9f0cfe08172e77be641b1c0f6f105036e8f7396229634567.
+
+V48 was applied ONCE with full preimages/readback/clean root PASS but NEVER
+booted into iOS. Do NOT reuse V48. Fresh V49 reads its actual current data and
+metadata at1220138; stage9474048bytes/zero new/freed blocks, all file/signature/
+native readonly fsck PASS. V49 apply/hardware results pending; phone idle in
+temporary recovery. No iOS test boot occurred between the error/clock/heap and
+empty-ticket fixes. Use the already preflighted V44 image/nonce and EXACT V44
+args written in the next entry, correctness jobs ON/captures/app opens OFF.
+Next: apply V49 once and run one complete V44 retry before ordinary performance.
+V43 remains a failed hardware boot; no stable UI FPS claim. Goal remains active.
+
 ## REDFIN complete admission/heap CPU/error-clock repair built; V44 retry ready — 2026-10-26
 
 Source base570fa70 plus this block. Inspect fresh actual backboardd and

@@ -9,7 +9,7 @@ struct rwa_redfin_completion {
    struct pipe_fence_handle *fence;
    pthread_mutex_t mutex;
    uint64_t epoch;
-   bool waited,retired;
+   bool waited,retired,gpu_work;
    int error;
 };
 
@@ -35,7 +35,10 @@ int rwa_redfin_completion_retire(struct rwa_redfin_completion *ticket,char *why,
    int error=rwa_redfin_completion_wait(ticket,why,bytes);
    struct rwa_device *device=ticket->device;
    if(!ticket->retired) {
-      if(!error)rwa_redfin_ordering_completed_epoch(device,ticket->epoch);
+      if(!error) {
+         if(ticket->gpu_work)++device->ordering[1];
+         rwa_redfin_ordering_completed_epoch(device,ticket->epoch);
+      }
       else {device->command_scope.failed=true;device->command_scope.completion_failed=true;}
       struct rwa_redfin_completion **at=&device->queued_tickets;
       while(*at&&*at!=ticket)at=&(*at)->next;
@@ -96,7 +99,8 @@ int rwa_redfin_commands_submit(struct rwa_device *device,struct rwa_redfin_compl
    /* Opt-in image capture reads real pixels under this gate. Keep its heavy
     * diagnostic drain, without imposing that wait on ordinary composition. */
    if(rwa_redfin_trace_selected()&&rwa_redfin_cpu_drain(device,why,bytes))error=-1;
-   bool required=device->command_scope.pending||device->queued_tickets;
+   ticket->gpu_work=device->command_scope.pending;
+   bool required=ticket->gpu_work||device->queued_tickets;
    device->pipe->flush(device->pipe,&ticket->fence,0);
    int published=rwa_redfin_fence_publish(device,ticket->fence);
    if(published>0&&!required)device->screen->fence_reference(device->screen,&ticket->fence,NULL);
