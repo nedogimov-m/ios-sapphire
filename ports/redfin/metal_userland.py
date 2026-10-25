@@ -406,6 +406,8 @@ def adapt_driver(text):
     text = adapt_buffers(text)
     from ports.redfin.metal_completion_userland import adapt as adapt_completion
     text = adapt_completion(text)
+    from ports.redfin.metal_buffer_texture_userland import adapt as adapt_buffer_textures
+    text = adapt_buffer_textures(text)
     text += '''
 /* Private readonly evidence for the paired native pixel checker. */
 int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)

@@ -1,6 +1,8 @@
 """Protect native raw-alias mapping and Metal's 64-bit transfer bounds."""
 from pathlib import Path
 import subprocess
+import ctypes
+import random
 import tempfile
 import unittest
 
@@ -113,6 +115,27 @@ int main(void){
  return 0;
 }
 ''')
+
+    def test_actual_aliased_texture_row_test_matches_independent_byte_ownership(self):
+        text=(HERE/'metal-buffer-texture.inc').read_text()
+        start=text.index('static bool\nrwa_redfin_view_rows_overlap(');end=text.index('\nstatic int',start)
+        function=text[start:end].replace('static bool\n','bool\n',1)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'overlap.c').write_text('#include <stdint.h>\n#include <stdbool.h>\n'+function)
+            built=subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC',
+                str(root/'overlap.c'),'-o',str(root/'overlap.so')],capture_output=True)
+            self.assertEqual(built.returncode,0,built.stderr.decode(errors='replace'))
+            lib=ctypes.CDLL(str(root/'overlap.so'));f=lib.rwa_redfin_view_rows_overlap
+            f.argtypes=[ctypes.c_uint64,ctypes.c_uint32,ctypes.c_uint32,ctypes.c_uint32]*2;f.restype=ctypes.c_bool
+            rng=random.Random(620)
+            for _ in range(5000):
+                a,b=rng.randrange(64),rng.randrange(64);ap,bp=rng.randrange(1,33),rng.randrange(1,33)
+                aw,bw=rng.randrange(1,ap+1),rng.randrange(1,bp+1);ah,bh=rng.randrange(1,9),rng.randrange(1,9)
+                left={a+y*ap+x for y in range(ah) for x in range(aw)}
+                right={b+y*bp+x for y in range(bh) for x in range(bw)}
+                self.assertEqual(f(a,ap,aw,ah,b,bp,bw,bh),bool(left&right))
+            self.assertFalse(f(0,64,16,32,32,64,16,32))
+            self.assertTrue(f(2**64-2,4,4,1,0,4,4,1))
 
 
 if __name__=='__main__':unittest.main()

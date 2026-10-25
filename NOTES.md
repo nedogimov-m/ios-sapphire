@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN real parent-buffer texture block built; fresh V26 staged — 2026-10-25
+
+Source base0cd8774 plus this completed related block. Implement the actual
+CoreAnimation-requested MTLBuffer texture factory as a Shared single-level2D
+colour alias of the parent's prepared original pages. Preserve/retain/return
+the parent, logical offset and row pitch; record parent readiness with view
+commands, release native view/surface before its parent/deallocator and report
+known aliases. Reject unsupported descriptors/ranges explicitly. Both ordinary
+and no-copy buffers use the actual existing Redfin IOSurfaceAddress mechanism;
+no CPU-copied independent texture stands in for a shared view.
+
+Track buffer-backed views in AIR. Resolve dirty converted peers before another
+view or raw buffer/vertex/index/compute/blit access; invalidate snapshots after
+parent writes. Only actual view writes flag a pending transition, preserving
+normal batching for immutable reads. Non64-byte offsets and wider-format row
+alignment use genuine bounded GPU layout conversion. Copied aliased rectangles
+are checked by exact row spans, including disjoint columns. Native probes cover
+two peer views, both GPU data directions in one command, aligned ordinary and
+unaligned external parents, logical/row guards and parent/deallocator lifetime.
+The diagnostic reserves most of48images for full-screen output0 through512draws/
+1024readback attempts, with at most12auxiliary images. It still changes timing.
+
+37 combined host cases PASS/no skips; exact native row-overlap code agrees with
+5000independent byte-ownership cases. Full fresh Mesa/AIR/native Metal/checker/
+shaders/actual20H392 API/signature build PASS on first build,
+research/redfin-metal-buffer-textures-v1/local20261025-172359/noCI, pairing
+1cb523a9960b569a940a4356b351386bec68ba5a9c3d8417ba29efa6c199d99a.
+Required native buffer/view/blit exports are present. Kernel unchanged/reused
+local20261025-134128/noCI7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V23 boot image dfb1957e3d12f7bee7386e5b39d2c3604c55a6237ac3d5247f1baadf74c46214,
+noncea2799db38c069112; complete loader/ADT/liveFDT/firmware/platform/DVFS/
+source-window/return preflight PASS.
+
+Fresh V26 from clean consistent HFSX/write_count973667:167ranges/
+23891968bytes/4new/zero freed. Complete preimages/signed-file/seal/readback and
+native readonly fsck PASS. V26 is PREPARED, NOT APPLIED at this checkpoint;
+V25 and older applied stages are stale. Policies keep app-launch jobs disabled
+and the explicit compositor observer enabled. UI/identities/credentials/logs
+are preserved. Next apply V26 once and collect one combined V23 run. Actual
+buffer textures/alias transitions and correct GUI remain unproven; no FPS or
+checkerboard fix is claimed. Broader Wi-Fi/power/thermal/sensors/Apple
+authorization remain open. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa2799db38c069112 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V22 native sharing/tails/mips PASS; compositor next requests buffer textures — 2026-10-25
 
 Source7c6128c, graphics local20261025-164824/noCI, unchanged kernel

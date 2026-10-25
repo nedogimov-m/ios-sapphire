@@ -1,5 +1,37 @@
 # HackiOS upstream review — 2026-10-22
 
+## Real parent-buffer textures and ordered alias visibility — 2026-10-25
+
+Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab. V22 proves original-page
+no-copy buffers and exposes the next actual CoreAnimation call: MTLBuffer's
+newTextureWithDescriptor:offset:bytesPerRow:. Re-read its upstream nil stub,
+native import/format mapping and Redfin's actual SweetSurface layout/wrapDelta.
+
+Create an actual Shared single-level2D colour view over the parent's prepared
+pages, with the requested offset/row layout and logical bounds. Retain/return
+the real parent, offset and pitch; retain its device and native surface. Track
+the parent with every command using the view, propagate known alias queries
+and release the view before its parent/deallocator. Unsupported descriptor kinds
+fail explicitly. No copied texture is presented as an alias.
+
+Native parent/view bookkeeping resolves dirty converted views before raw buffer
+or peer-view reads, invalidates converted snapshots after parent writes and
+preserves ordered render, compute, vertex/index and blit accesses. Only actual
+pending writes force an extra drain; immutable view reads keep normal batching.
+Offsets not64-byte aligned and wider-format pitch constraints use the genuine
+bounded GPU row converter. Reject overlapping copied rows against an independent
+byte-ownership model, allowing disjoint columns of aliased textures.
+
+Native probes cover two peer views over one parent, texture writes visible to a
+subsequent raw-buffer copy, raw writes visible back through that same texture in
+one command, exact outside/row guards, ordinary and external parents, nonzero
+unaligned offsets/pitches and retaining the parent until both views leave.
+The observer reserves most of its48image budget for full-screen output0 through
+512draws/1024readback attempts; at most12auxiliary images prevent small icon/blur
+passes consuming all captures before the corrupt lock screen. These diagnostic
+drains still cannot establish ordinary FPS or exclude timing-sensitive bugs.
+
 ## Real external pages, complete dword tails and asynchronous resource readiness — 2026-10-25
 
 Preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and kernel

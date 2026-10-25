@@ -86,6 +86,7 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
    if((source_buffer&&(!source_buffer->res||source_buffer->res->target!=PIPE_BUFFER||source_buffer->size>source_buffer->res->width0))||
       (destination_buffer&&(!destination_buffer->res||destination_buffer->res->target!=PIPE_BUFFER||destination_buffer->size>destination_buffer->res->width0)))
       return rwa_blit_fail(why,bytes,"blit buffer exceeds its native resource");
+   if(rwa_redfin_buffer_prepare(source_buffer,why,bytes)||rwa_redfin_buffer_prepare(destination_buffer,why,bytes))return -1;
    if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,bytes))return -1;
    static unsigned observations[RF_BLIT_INVALID];
    if(observations[request->operation]++<4)fprintf(stderr,
@@ -130,6 +131,19 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
       if(util_format_linear(source_texture->res->format)!=util_format_linear(destination_texture->res->format))goto invalid;
       bool aliases=source_texture->res==destination_texture->res||
          (source_texture->redfin_surface&&source_texture->redfin_surface==destination_texture->redfin_surface);
+      if(source_texture->buffer_parent&&destination_texture->buffer_parent&&
+         rwa_redfin_buffers_share(source_texture->buffer_parent,destination_texture->buffer_parent)) {
+         struct rwa_buffer *sp=source_texture->buffer_parent,*dp=destination_texture->buffer_parent;
+         uint64_t cpp=util_format_get_blocksize(source_texture->res->format);
+         uint64_t a=source_texture->buffer_offset+(uint64_t)source.y*source_texture->buffer_pitch+(uint64_t)source.x*cpp;
+         uint64_t b=destination_texture->buffer_offset+(uint64_t)destination.y*destination_texture->buffer_pitch+(uint64_t)destination.x*cpp;
+         if(sp->res!=dp->res&&!(sp->external_surface&&sp->external_surface==dp->external_surface)) {
+            a+=(uintptr_t)sp->map;b+=(uintptr_t)dp->map;
+         }
+         if(rwa_redfin_view_rows_overlap(a,source_texture->buffer_pitch,(uint32_t)(source.width*cpp),source.height,
+            b,destination_texture->buffer_pitch,(uint32_t)(destination.width*cpp),destination.height))
+            return rwa_blit_fail(why,bytes,"overlapping buffer-backed Metal texture copy");
+      }
       if(aliases&&request->source_level==request->destination_level&&
          source.x<destination.x+destination.width&&destination.x<source.x+source.width&&
          source.y<destination.y+destination.height&&destination.y<source.y+source.height&&
@@ -194,6 +208,7 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
       }
       rwa_redfin_linear_written(texture);result=0;
    }
+   if(!result&&destination_buffer)rwa_redfin_buffer_written(destination_buffer);
    if(!result&&!device->command_scope.active)result=rwa_redfin_linear_resolve_all(device,why,bytes);
    if(!result) {
       static uint64_t calls;uint64_t n=++calls;

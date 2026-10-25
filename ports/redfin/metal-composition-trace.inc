@@ -6,7 +6,7 @@
 static struct {
    bool checked,enabled;
    char boot[17];
-   unsigned draws,images,attempts,seen_count;
+   unsigned draws,images,attempts,aux_images,seen_count;
    struct {const struct rwa_texture *texture;uint32_t crc,alpha_crc;unsigned role;} seen[128];
 } redfin_composition_trace;
 
@@ -40,9 +40,11 @@ rwa_redfin_trace_crc(const uint8_t *bytes,size_t count)
 static void
 rwa_redfin_trace_texture(struct rwa_texture *texture,const char *role,unsigned slot,unsigned draw)
 {
-   if(!texture||redfin_composition_trace.images>=48||redfin_composition_trace.attempts>=512)return;
+   if(!texture||redfin_composition_trace.images>=48||redfin_composition_trace.attempts>=1024)return;
    struct rwa_device *device=texture->device;struct pipe_resource *resource=texture->res;
    enum pipe_format format=resource->format;
+   bool main_output=!strcmp(role,"OUTPUT")&&!slot&&resource->width0>=512&&resource->height0>=512;
+   if(!main_output&&redfin_composition_trace.aux_images>=12)return;
    if(format_is_depth_stencil(format)||util_format_get_blockwidth(format)!=1||
       util_format_get_blockheight(format)!=1||resource->nr_samples>1||resource->target!=PIPE_TEXTURE_2D)return;
    ++redfin_composition_trace.attempts;
@@ -126,7 +128,9 @@ rwa_redfin_trace_texture(struct rwa_texture *texture,const char *role,unsigned s
       line[at++]=alphabet[(value>>6)&63];line[at++]=alphabet[value&63];
    }
    line[at++]='\n';
-   if(write(STDERR_FILENO,line,at)==(ssize_t)at)++redfin_composition_trace.images;
+   if(write(STDERR_FILENO,line,at)==(ssize_t)at) {
+      ++redfin_composition_trace.images;if(!main_output)++redfin_composition_trace.aux_images;
+   }
    free(rgb);free(alpha);free(line);
 }
 static void
@@ -159,7 +163,7 @@ rwa_redfin_trace_stage(struct rwa_render *render,const struct air_shader_info *i
 static int
 rwa_redfin_trace_draw(struct rwa_render *render,const struct rwa_draw *draw,char *why,size_t why_size)
 {
-   if(!rwa_redfin_trace_selected()||redfin_composition_trace.draws>=256||redfin_composition_trace.images>=48)return 0;
+   if(!rwa_redfin_trace_selected()||redfin_composition_trace.draws>=512||redfin_composition_trace.images>=48)return 0;
    struct rwa_device *device=render->device;
    if(redfin_metal_scope_drain(&device->command_scope,command_scope_finish,device,why,why_size))return -1;
    unsigned number=++redfin_composition_trace.draws;

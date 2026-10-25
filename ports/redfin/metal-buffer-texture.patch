@@ -1,0 +1,101 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -110,7 +110,7 @@
+     */
+    bool software;
+    struct redfin_metal_command_scope command_scope;
+-   struct rwa_texture *linear_textures;
++   struct rwa_texture *linear_textures,*buffer_textures;
+    uint64_t linear_epoch,linear_copies[2];
+    void *linear_copy_cso,*linear_byte_copy_cso;
+ 
+@@ -217,6 +217,10 @@
+    uint64_t linear_epoch;
+    bool linear_dirty;
+    unsigned redfin_surface;
++   struct rwa_buffer *buffer_parent;
++   struct rwa_texture *buffer_next;
++   unsigned buffer_offset,buffer_pitch;
++   bool buffer_pending;
+ };
+ 
+ static int rwa_redfin_linear_import(struct rwa_texture *,const struct pipe_resource *,unsigned,unsigned,unsigned,char *,size_t);
+@@ -225,6 +229,10 @@
+ static int rwa_redfin_linear_resolve(struct rwa_texture *,char *,size_t);
+ static int rwa_redfin_linear_resolve_all(struct rwa_device *,char *,size_t);
+ static void rwa_redfin_linear_release(struct rwa_texture *);
++static int rwa_redfin_buffer_prepare(struct rwa_buffer *,char *,size_t);
++static int rwa_redfin_buffer_texture_prepare(struct rwa_texture *,char *,size_t);
++static void rwa_redfin_buffer_written(struct rwa_buffer *);
++static void rwa_redfin_buffer_texture_release(struct rwa_texture *);
+ 
+ /* A sampler is a Gallium state object and nothing more. The state it was built from is
+  * not kept: a refusal about a sampler happens while it is being created, where the
+@@ -1455,7 +1463,7 @@
+          free(texture);
+          return NULL;
+       }
+-      if(import->row_bytes%64) {
++      if(import->row_bytes%MAX2(64u,texel*16u)||(import->offset&63u)) {
+          if(device->software||depth_stencil) {
+             say(why,why_size,"unaligned IOSurface conversion requires native A620 colour storage");free(texture);return NULL;
+          }
+@@ -1556,6 +1564,7 @@
+    if (!texture)
+       return;
+    rwa_redfin_linear_release(texture);
++   rwa_redfin_buffer_texture_release(texture);
+    argbuf_scrub(texture->device, NULL, texture, NULL);
+    pipe_surface_reference(&texture->render_surface,NULL);
+    /* The view first: it holds a reference of its own on the resource. Nothing has to
+@@ -3193,6 +3202,7 @@
+ }
+ 
+ #include "redfin_metal_linear_copy.inc"
++#include "redfin_metal_buffer_texture.inc"
+ #include "redfin_metal_blit.inc"
+ 
+ int
+@@ -3660,6 +3670,18 @@
+            size_t why_size)
+ {
+    struct pipe_context *pipe = device->pipe;
++   /* Resolve parent-backed texture writes before any user compute state or
++    * constants are bound: internal row copies use their own compute bindings. */
++   for(unsigned i=0;i<info->num_resources;++i) {
++      const struct air_resource *r=&info->resources[i];
++      if(r->kind!=AIR_RESOURCE_DEVICE_BUFFER&&r->kind!=AIR_RESOURCE_CONSTANT_BUFFER)continue;
++      struct rwa_buffer *buffer=NULL;
++      if(r->argbuf_set!=~0u) {
++         struct rwa_texture *texture=NULL;struct rwa_sampler *sampler=NULL;size_t offset=0;
++         if(argbuf_member(r,table,table_count,name,&buffer,&offset,&texture,&sampler,why,why_size))return -1;
++      } else buffer=bindings->buffers[r->index];
++      if(rwa_redfin_buffer_prepare(buffer,why,why_size))return -1;
++   }
+    for(unsigned i=0;i<info->num_resources;++i) {
+       const struct air_resource *r=&info->resources[i];
+       if(r->kind!=AIR_RESOURCE_TEXTURE&&r->kind!=AIR_RESOURCE_IMAGE)continue;
+@@ -3754,8 +3776,10 @@
+             say(why,why_size,"SSBO descriptor would exceed the actual allocated dword tail");return -1;
+          }
+          num_ssbo = MAX2(num_ssbo, r->index + 1);
+-         if (r->write)
++         if (r->write) {
+             writable |= 1u << r->index;
++            rwa_redfin_buffer_written(b);
++         }
+          break;
+ 
+       case AIR_RESOURCE_CONSTANT_BUFFER: {
+@@ -6887,6 +6911,10 @@
+       if(rwa_redfin_linear_prepare(draw->color[i],why,why_size))return -1;
+    if(rwa_redfin_linear_prepare(draw->depth,why,why_size))return -1;
+ 
++   if(rwa_redfin_buffer_prepare(draw->index_buffer,why,why_size))return -1;
++   for(unsigned i=0;i<draw->vertex_stream_count;++i)
++      if(rwa_redfin_buffer_prepare(draw->vertex_streams[i].buffer,why,why_size))return -1;
++
+    /* Borrow the textures' stable base-level surfaces, retaining one reference
+     * for this draw and one for Gallium's framebuffer/dependency lifetime. */
+    struct pipe_surface *surf[PIPE_MAX_COLOR_BUFS] = { 0 };

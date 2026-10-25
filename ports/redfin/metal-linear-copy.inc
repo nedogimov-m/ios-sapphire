@@ -120,7 +120,9 @@ fail:
 static int
 rwa_redfin_linear_prepare(struct rwa_texture *texture,char *why,size_t why_size)
 {
-   if(!texture||!texture->linear_original)return 0;
+   if(!texture)return 0;
+   if(rwa_redfin_buffer_texture_prepare(texture,why,why_size))return -1;
+   if(!texture->linear_original)return 0;
    struct rwa_device *device=texture->device;
    /* A draw later in the same command reads the actual earlier shadow writes.
     * Resolve to the original only after the command's real rendering fence. */
@@ -136,10 +138,16 @@ rwa_redfin_linear_prepare(struct rwa_texture *texture,char *why,size_t why_size)
 static void
 rwa_redfin_linear_written(struct rwa_texture *texture)
 {
-   if(!texture||!texture->linear_original)return;
-   texture->linear_dirty=true;
-   for(struct rwa_texture *other=texture->device->linear_textures;other;other=other->linear_next)
-      if(other!=texture&&other->linear_surface==texture->linear_surface)other->linear_epoch=0;
+   if(!texture)return;
+   if(texture->linear_original) {
+      texture->linear_dirty=true;
+      for(struct rwa_texture *other=texture->device->linear_textures;other;other=other->linear_next)
+         if(other!=texture&&other->linear_surface==texture->linear_surface)other->linear_epoch=0;
+   }
+   if(texture->buffer_parent) {
+      texture->buffer_pending=true;
+      rwa_redfin_buffer_written(texture->buffer_parent);
+   }
 }
 static int
 rwa_redfin_linear_resolve(struct rwa_texture *texture,char *why,size_t why_size)
