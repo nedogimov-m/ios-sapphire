@@ -10,12 +10,18 @@ features whose final physical/manual checks need the user. Defer only those
 human-dependent actions/checks, and keep progressing on the rest. Do not wait
 for manual GUI feedback before continuing independent implementation/tests.
 
-Latest prepared block (2026-10-25, base222c4fa): native Security enforcement,
-actual own-PID Metal memory admission and native DT OSM max_cores6/2/2 are
-implemented.97selected checks and complete buildsPASS. Kernel local
-20261025-084355/noCI,36b98fbb...; V12 staged/readback/fsckPASS at clean
-generation801955 and V7/c539c81afb12dd77 preflightPASS. Apply V12 once, then
-collect one integrated run. No new physical Metal/TCC/OSM result yet.
+Latest verified block (2026-10-25, sourcebfdf8d0): V12 applied once/stale,
+V7/c539c81afb12dd77 has authenticated image/launchd proof, clean root810424
+and verified Fastboot. Actual Metal two queues x96compute commands/output/
+guards and4096IOSurface pixelsPASS, with a separately completed native GPU
+fence. System Metal is the next combined capture; full compatibility/UI FPS
+are unproved. Native Security validated1, but Photos/assetsd still abort.
+OSM now reaches1804.8/2208/2400MHz and thermal pressure actually lowers/
+restores all domains. Native Wi-Fi credential persistence repeats, actual
+autojoin still needs a real saved credential. Kernel local20261025-084355/
+noCI,36b98fbb...;97selected checksPASS. Readonly sensor inventory captured
+ADSP firmware/configs naming LSM6DSR/LIS2MDL/BMP380/TCS3701; native runtime
+identification/SSC/HID integration remain unfinished. Continue independently.
 
 ## Requested results
 

@@ -2,6 +2,16 @@
 
 ## Native entitlement enforcement, probe admission and Redfin OSM — 2026-10-25
 
+Hardware follow-up bfdf8d0/V7: paired906425b renderer now opens FD620 and
+passes192actual commands on two queues plus4096IOSurface pixels and native
+completed GPU-fence evidence. This admits testing the existing system mode;
+it does not establish complete Metal coverage. Native Security validated1
+and all three hardware OSM domains/thermal transitions are now observed.
+Remaining assetsd abort/TCC0 requires a native service fix, not an override.
+Readonly vendor-base configs identify driver candidates LSM6DSR/LIS2MDL/
+BMP380/TCS3701; preferred ADSP bring-up remains a protocol reference only,
+with Redfin's PAS1/40MiB reservation and native power/shared-memory bindings.
+
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and paired
 userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain the baseline.
 Adapt actual20H392 SecTaskEntitlementsValidated's native4201 requirement

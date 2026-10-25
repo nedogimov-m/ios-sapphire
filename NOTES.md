@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V7 genuine Metal compute/pixels and Gold/Prime PASS — 2026-10-25
+
+Sourcebfdf8d0; kernel local20261025-084355/noCI,
+36b98fbbcfab1582cbd22ea617bc8552cf66b4279f37416db2cee325922d0956.
+V12 applied once with all preimages saved,15ranges fully read back and clean
+unchanged journal/generation801955; never reuse V12. V7 imageb85fd91c...,
+noncec539c81afb12dd77 completes authenticated exact-image/nonce/launchd
+proof, userspace-alive/exit0, clean HFSX/not inconsistent/write_count810424
+and verified Fastboot. Native EAGL/shader/IOSurface/fencesPASS, zero Mesa
+submit failures/runtime retirement/panic. Phone246survives5/17s and
+SpringBoard26 remains stable; Photos247still aborts.
+
+First actual Metal PASS: native own-PID512MiB admission succeeds, paired
+AIR opens FD620, two concurrent queues each finish96nonce-varied compute
+commands with correct outputs/guards, followed by all4096actual IOSurface
+pixels. Native kernel separately records metal-check66's completed fence256.
+This proves real Metal compute/render through the A620, not system UI Metal
+or full feature compatibility. Next use the already-implemented system mode
+with this same kernel/bundle in one integrated capture. Probe's human-readable
+name still uses upstream pipe0 instead of native MSM_PIPE_3D0x10 and needs
+Redfin naming; do not infer absent hardware from that cosmetic fallback.
+
+Actual OSM domains now select normal1804.8/2208/2400MHz. Native thermal
+pressure briefly lowers all three and restores them;211samples have zero
+read errors, battery34.3..35.3C/hottest sampled43.4..63.2C. Native Security
+now returns validated1/flags26005201, but TCC preflight remains0 and assetsd
+still aborts. Correct the remaining native TCC/service cause; no bypass.
+Wi-Fi synthetic existing1/exact1 repeats, en0 appears31.5s after checker;
+firmware-ready38.7s/station42.3s after worker. Actual credential/autojoin and
+account authorization still require real user input later. Physical90Hz/full
+panel remains enabled; sustained UI FPS remains unmeasured.
+
+Separate readonly vendor-base sensor inventory returns verified Fastboot:
+26320896new bytes,30908416aggregate covered bytes,no disk writes. Native
+configs name LSM6DSR,LIS2MDL,BMP380,TCS3701 plus motion algorithms; ADSP
+mdt/nonzero segments and domain metadata are captured privately. These raw
+vendor_b-base configs do not prove current Virtual-A/B overlays or runtime
+sensor identity. ADSP/SSC and sensor/HID integration remain required.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xc539c81afb12dd77 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native validation, Metal memory and actual OSM fix built/staged — 2026-10-25
 
 Source base222c4fa plus this commit. Local kernel20261025-084355/noCI,

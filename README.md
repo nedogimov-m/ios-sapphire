@@ -84,6 +84,13 @@ The latest stable GPU image is
 `ports/redfin/out/gpu-panel-v1/redfin-xnu.img`.
 [Upstream assessment](ports/redfin/UPSTREAM.md).
 
+The latest authenticated platform capture also proves real Metal on A620:
+192compute commands across two queues and4096IOSurface pixels pass. System
+Metal discovery and sustained UI FPS are the next integration check. All
+three CPU domains now reach their native normal frequencies with observed
+thermal throttling/restoration; Photos still fails in its native assetsd/TCC
+path. Physical90Hz and credential persistence are independently observed.
+
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
 have complete, independently verified local backups. Android userdata has
