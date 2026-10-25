@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN original-page CPU-map/cache block built; fresh V28 staged — 2026-10-25
+
+Source base3ffa7d2 plus this complete related block. Retain the native fd_bo CPU
+mapping when importing a raw original-page buffer. This uses the existing
+Darwin clientMemoryForType/cache-type/CPU-writer contract, so its submissions
+cannot skip page maintenance merely because an IOSurface seed stayed unchanged
+or4ms have not elapsed. Failure drops the real BO; ordinary BO lifetime owns
+the map. Public no-copy contents still point to the caller's original pages;
+no pixel copy or delay is introduced. Existing alias sampler barriers remain.
+Native A8 sampling now covers both real640/pitch640 and549/pitch576 layouts,
+four immediate CPU seeds, row/prefix/tail guards and exact deallocator lifetime.
+
+Capture32auxiliary post-logo images beginning at draw30 and16real FINAL
+command targets. INPUTA explicitly shows native A8 alpha as grayscale, keeping
+other roles RGB; bounded later metadata continues without diagnostic drains
+once the readback budget is spent. These observations do not measure FPS.
+39 combined host cases PASS/no skips. Full fresh Mesa/AIR/native Metal/checker/
+shader/actual20H392 API/signature build PASS, research/redfin-metal-shared-cache-v1,
+local20261025-182124/noCI, pairing60fbb633a9fdb781ac599d1c8b41b62df54b5f6674069d9060c34d10592e4d77.
+Unchanged kernel reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V25 image39b59acb73fbe913e30bf11840f980a756630e45bb0911fb7b04ec7face07319, nonce5933bd0ea20fe4bf;
+complete native loader/ADT/liveFDT/firmware/power/DVFS/source-window/return
+preflight PASS. Fresh V28 from clean consistent HFSX/write_count1007047:
+192ranges/23183360bytes/0new/zero freed. Complete staged files, native
+signatures/seal/readback and readonly fsck PASS. V28 is PREPARED, NOT APPLIED;
+V27 and older applied stages are stale. Both app-launch policies stay disabled;
+Phone/Photos are outside these tests. Next apply once with complete live
+preimages/readback, then one combined V25 capture. Shared freshness and actual
+correct composition remain unproven. Broader goal remains open.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x5933bd0ea20fe4bf redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V24 native parent views PASS; repeated A8 reads stale; checkerboard is pre-display — 2026-10-25
 
 Source857651a, graphics local20261025-180921/noCI, pairing56c8240e96031f7eaaaf45e42e79ec220bdf96042ad55980eb03fb10ec8a48d9.

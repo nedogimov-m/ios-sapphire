@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Shared original-page cache contract and post-logo evidence — 2026-10-25
+
+Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab. V24 proves successful native
+parent views and the first correct A8 sample, followed by a stale immediate
+second sample. The actual completed compositor target already contains the
+checkerboard, before Redfin's native display scaling/packing.
+
+Review the existing fd_bo_map -> redwood_drm_map -> clientMemoryForType route:
+it establishes a real mapping with the surface's own cache type, marks CPU
+writers and bypasses the seed/4ms skip on native submits. Imported no-copy
+buffers otherwise keep only the original caller pointer and miss that contract.
+Retain the BO's genuine CPU map for those original pages, including import
+failure cleanup and normal BO unmap lifetime; never add a copy, forced sleep,
+or assume elapsed4ms makes CPU writes visible. Probe both observed640/pitch640
+and549/pitch576 layouts with four immediate fresh CPU seeds and exact guards.
+
+Reserve32auxiliary images for post-logo draws30..512 and16for actual FINAL
+targets; log later bounded draw metadata without forcing drains after image
+budget exhaustion. INPUTA observations explicitly show actual A8 alpha as
+grayscale, while the other roles preserve RGB. These diagnostic maps still
+change timing and cannot establish ordinary rendering FPS.
+
 ## Native BO views, actual A8 semantics and completed-frame evidence — 2026-10-25
 
 Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and

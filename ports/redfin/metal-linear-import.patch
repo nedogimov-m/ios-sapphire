@@ -9,7 +9,7 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
  #include "freedreno_screen.h"
  #include "freedreno_surface.h"
  #include "freedreno_util.h"
-@@ -1576,6 +1577,112 @@
+@@ -1576,6 +1577,119 @@
     return NULL;
  }
  
@@ -39,7 +39,14 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
 +   if(!is_a6xx(fd_screen(screen))||!surface)return NULL;
 +   struct winsys_handle handle={.type=WINSYS_HANDLE_TYPE_FD,.handle=surface,
 +      .modifier=DRM_FORMAT_MOD_LINEAR};
-+   return redfin_buffer_from_bo(screen,fd_screen_bo_from_handle(screen,&handle));
++   struct fd_bo *bo=fd_screen_bo_from_handle(screen,&handle);
++   /* Retain a real CPU mapping of these original pages. The existing Darwin
++    * clientMemoryForType path then records CPU writers and pays cache
++    * maintenance on EVERY native submit, even without an IOSurface seed bump.
++    * This map is owned/unmapped by the imported BO; it never copies pixels. */
++   if(!bo)return NULL;
++   if(!fd_bo_map(bo)){fd_bo_del(bo);return NULL;}
++   return redfin_buffer_from_bo(screen,bo);
 +}
 +struct pipe_resource *
 +redfin_freedreno_buffer_alias(struct pipe_screen *screen,struct pipe_resource *source,

@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 /* Actual CoreAnimation A8 dimensions/offset/pitch. The shader checks alpha
  * semantics as well as fresh shared CPU writes through the same native view. */
-static BOOL buffer_alpha_native(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce)
+static BOOL buffer_alpha_case(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce,
+    unsigned width,unsigned pitch,unsigned bytes)
 {
-    enum {width=640,height=358,pitch=640,offset=64,bytes=229376,outWidth=32,outHeight=16,outPitch=128};
+    enum {height=358,offset=64,outWidth=32,outHeight=16,outPitch=128};
     void *allocation=NULL;NSUInteger page=(NSUInteger)getpagesize();
     if(!page||posix_memalign(&allocation,page,bytes))return NO;
     uint8_t *original=allocation;memset(original,0xa5,bytes);
@@ -21,7 +22,7 @@ static BOOL buffer_alpha_native(id<MTLDevice> device,id<MTLLibrary> library,uint
         id<MTLRenderPipelineState> pipeline=raster_pipeline(device,library,@"redfin_alpha_sample_fragment",1,NO);
         id<MTLCommandQueue> queue=[device newCommandQueue];
         valid=parent&&view&&view.pixelFormat==MTLPixelFormatA8Unorm&&view.buffer==parent&&surface&&output&&pipeline&&queue;
-        for(unsigned phase=0;valid&&phase<2;++phase)@autoreleasepool {
+        for(unsigned phase=0;valid&&phase<4;++phase)@autoreleasepool {
             for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)
                 original[offset+y*pitch+x]=(uint8_t)((x*13+y*19+(uint32_t)nonce+phase*83)&255);
             MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];
@@ -51,6 +52,8 @@ static BOOL buffer_alpha_native(id<MTLDevice> device,id<MTLLibrary> library,uint
                 }
             }
         }
+        for(unsigned y=0;valid&&y<height;++y)for(unsigned x=width;valid&&x<pitch;++x)
+            valid=original[offset+y*pitch+x]==0xa5;
         for(unsigned i=0;valid&&i<offset;++i)valid=original[i]==0xa5;
         for(unsigned i=offset+height*pitch;valid&&i<bytes;++i)valid=original[i]==0xa5;
         [queue release];[pipeline release];[output release];[view release];[parent release];if(surface)CFRelease(surface);
@@ -58,6 +61,12 @@ static BOOL buffer_alpha_native(id<MTLDevice> device,id<MTLLibrary> library,uint
     BOOL done=!created||!dispatch_semaphore_wait(released,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC));
     valid=valid&&created&&done&&releaseRange&&releaseCount==1;
     if(done){free(allocation);dispatch_release(released);}
-    printf("REDFIN METAL A8 RESULT: boot=%016llx actual640x358-offset64-pitch640-alpha-sampling-two-CPU-seeds-and-guards=%u release-arrived=%u\n",
-        (unsigned long long)nonce,valid,done);return valid;
+    printf("REDFIN METAL A8 RESULT: boot=%016llx width=%u height=358 offset=64 pitch=%u parent-bytes=%u alpha-sampling-four-CPU-seeds-and-row-guards=%u release-arrived=%u\n",
+        (unsigned long long)nonce,width,pitch,bytes,valid,done);return valid;
+}
+static BOOL buffer_alpha_native(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce)
+{
+    BOOL original=buffer_alpha_case(device,library,nonce,640,640,229376);
+    BOOL actual=buffer_alpha_case(device,library,nonce^0x729f630bu,549,576,212992);
+    return original&&actual;
 }

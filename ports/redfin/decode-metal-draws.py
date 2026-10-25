@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Verify private native Metal draw readbacks and write PNGs below logs/."""
+"""Verify private native Metal draw readbacks and write PNGs below logs/.
+
+INPUTA records show the real A8 alpha channel as grayscale. Other roles keep RGB.
+"""
 import argparse
 import base64
 import json
@@ -10,7 +13,7 @@ import zlib
 
 ROOT=Path(__file__).resolve().parents[2]
 RECORD=re.compile(rb'REDFIN METAL DRAW IMAGE: boot=([0-9a-f]{16}) frame=([0-9]+) draw=([0-9]+) '
-    rb'role=(FINAL|OUTPUT|INPUTV|INPUTF) slot=([0-9]+) surface=([0-9]+) format=([0-9]+) '
+    rb'role=(FINAL|OUTPUT|INPUTV|INPUTF|INPUTA) slot=([0-9]+) surface=([0-9]+) format=([0-9]+) '
     rb'source=([0-9]+)x([0-9]+) width=([0-9]+) height=([0-9]+) raw=([0-9]+) '
     rb'crc32=([0-9a-f]{8}) data=([A-Za-z0-9+/]+)')
 

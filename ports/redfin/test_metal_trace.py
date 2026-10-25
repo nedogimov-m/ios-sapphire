@@ -38,6 +38,12 @@ class MetalTraceTests(unittest.TestCase):
         result=decoder.decode(record,'0123456789abcdef')
         self.assertEqual(result[0][0]['role'],'FINAL');self.assertEqual(result[0][0]['draw'],1724)
 
+    def test_alpha_observation_preserves_channel_role_and_actual_samples(self):
+        record=self.record().replace(b'role=OUTPUT',b'role=INPUTA').replace(b'format=80 ',b'format=1 ')
+        result=decoder.decode(record,'0123456789abcdef')
+        self.assertEqual(result[0][0]['role'],'INPUTA');self.assertEqual(result[0][0]['format'],1)
+        self.assertEqual(result[0][1],bytes(range(48)))
+
     def test_actual_native_crc_matches_independent_zlib_for_readback_lengths(self):
         native=(HERE/'metal-composition-trace.inc').read_text()
         function=re.search(r'static uint32_t\nrwa_redfin_trace_crc\(.*?\n\}',native,re.S).group()
