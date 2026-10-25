@@ -78,22 +78,23 @@ static BOOL compute(id<MTLDevice> device,id<MTLComputePipelineState> pipeline,ui
     [input release];[output release];[queue release];return valid;
 }
 
-static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask)
+static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL batch)
 {
     MTLPixelFormat format=mask ? MTLPixelFormatRG8Unorm : MTLPixelFormatBGRA8Unorm;
     unsigned bpe=mask ? 2 : 4,stride_bytes=64*bpe;
+    unsigned allocation=batch ? 32768 : 16384,payload=64*stride_bytes;
     NSDictionary *properties=@{(id)kIOSurfaceWidth:@64,(id)kIOSurfaceHeight:@64,
         (id)kIOSurfaceBytesPerElement:@(bpe),(id)kIOSurfaceBytesPerRow:@(stride_bytes),
-        (id)kIOSurfaceAllocSize:@16384,(id)kIOSurfacePixelFormat:@(mask ? 0x32433038 : 0x42475241),@"IOSurfaceIsGlobal":@YES};
+        (id)kIOSurfaceAllocSize:@(allocation),(id)kIOSurfacePixelFormat:@(mask ? 0x32433038 : 0x42475241),@"IOSurfaceIsGlobal":@YES};
     IOSurfaceRef surface=IOSurfaceCreate((CFDictionaryRef)properties);
     if (!surface || !IOSurfaceGetID(surface)) {if(surface)CFRelease(surface);return NO;}
     uint32_t initial_seed=0;
-    if (IOSurfaceGetAllocSize(surface)!=16384 || IOSurfaceLock(surface,0,&initial_seed)!=KERN_SUCCESS) {
+    if (IOSurfaceGetAllocSize(surface)!=allocation || IOSurfaceLock(surface,0,&initial_seed)!=KERN_SUCCESS) {
         CFRelease(surface);return NO;
     }
     void *initial=IOSurfaceGetBaseAddress(surface);
     if (!initial) {IOSurfaceUnlock(surface,0,&initial_seed);CFRelease(surface);return NO;}
-    memset(initial,0xa5,16384);
+    memset(initial,0xa5,allocation);
     if (IOSurfaceUnlock(surface,0,&initial_seed)!=KERN_SUCCESS) {CFRelease(surface);return NO;}
     MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:64 height:64 mipmapped:NO];
     desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
@@ -101,8 +102,16 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask)
     id<MTLTexture> texture=[(id)device newTextureWithDescriptor:desc iosurface:surface plane:0];
     MTLRenderPipelineDescriptor *shape=[[MTLRenderPipelineDescriptor alloc] init];
     shape.vertexFunction=[library newFunctionWithName:@"redfin_vertex"];
-    shape.fragmentFunction=[library newFunctionWithName:@"redfin_fragment"];
+    shape.fragmentFunction=[library newFunctionWithName:batch ? @"redfin_batch_fragment" : @"redfin_fragment"];
     shape.colorAttachments[0].pixelFormat=format;
+    if (batch) {
+        MTLRenderPipelineColorAttachmentDescriptor *color=shape.colorAttachments[0];
+        color.blendingEnabled=YES;
+        color.sourceRGBBlendFactor=MTLBlendFactorSourceAlpha;
+        color.destinationRGBBlendFactor=MTLBlendFactorOneMinusSourceAlpha;
+        color.sourceAlphaBlendFactor=MTLBlendFactorOne;
+        color.destinationAlphaBlendFactor=MTLBlendFactorOneMinusSourceAlpha;
+    }
     NSError *error=nil;
     id<MTLRenderPipelineState> pipeline=texture ? [device newRenderPipelineStateWithDescriptor:shape error:&error] : nil;
     id<MTLCommandQueue> queue=pipeline ? [device newCommandQueue] : nil;
@@ -115,12 +124,22 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask)
         pass.colorAttachments[0].texture=texture;
         pass.colorAttachments[0].loadAction=MTLLoadActionClear;
         pass.colorAttachments[0].storeAction=MTLStoreActionStore;
-        pass.colorAttachments[0].clearColor=MTLClearColorMake(1,0,0,1);
+        pass.colorAttachments[0].clearColor=batch ? MTLClearColorMake(0,0,0,0) : MTLClearColorMake(1,0,0,1);
         id<MTLRenderCommandEncoder> encoder=[command renderCommandEncoderWithDescriptor:pass];
         valid=encoder!=nil;
         if (valid) {
             [encoder setRenderPipelineState:pipeline];
-            [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+            if (batch) {
+                const float colors[3][4]={{1,0,0,0.5},{0,1,0,0.5},{0,0,1,0.5}};
+                for (unsigned layer=0;layer<3;++layer) {
+                    @autoreleasepool {
+                        /* The buffer created by set*Bytes must outlive this pool,
+                         * until the later command-buffer commit/final fence. */
+                        [encoder setFragmentBytes:colors[layer] length:sizeof(colors[layer]) atIndex:0];
+                        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+                    }
+                }
+            } else [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
             [encoder endEncoding];[command commit];[command waitUntilCompleted];
             valid=[command status]==MTLCommandBufferStatusCompleted && ![command error];
         }
@@ -134,11 +153,13 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask)
             valid=pixels && stride==stride_bytes && IOSurfaceGetWidth(surface)==64 && IOSurfaceGetHeight(surface)==64;
             for (unsigned y=0;valid && y<64;++y) for (unsigned x=0;valid && x<64;++x) {
                 const uint8_t *p=pixels+y*stride+x*bpe;
-                valid=mask ? (p[0]>=63 && p[0]<=65 && p[1]>=127 && p[1]<=129) :
+                valid=batch ? (p[0]>=127 && p[0]<=129 && p[1]>=63 && p[1]<=65 &&
+                     p[2]>=31 && p[2]<=33 && p[3]>=223 && p[3]<=225) :
+                    mask ? (p[0]>=63 && p[0]<=65 && p[1]>=127 && p[1]<=129) :
                     (p[0]>=190 && p[0]<=192 && p[1]>=127 && p[1]<=129 &&
                      p[2]>=63 && p[2]<=65 && p[3]==255);
             }
-            if (mask) for (unsigned at=8192;valid && at<16384;++at) valid=pixels[at]==0xa5;
+            for (unsigned at=payload;valid && at<allocation;++at) valid=pixels[at]==0xa5;
             if (IOSurfaceUnlock(surface,kIOSurfaceLockReadOnly,&seed)!=KERN_SUCCESS) valid=NO;
         }
     }
@@ -202,12 +223,13 @@ int main(void)
             if (dispatch_group_wait(group,dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC))) {
                 printf("REDFIN METAL CHECK: concurrent command queues timed out\n");return 1;
             }
-            BOOL pixels=first && second && render(device,library,NO);
-            BOOL masks=pixels && render(device,library,YES);
-            printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u\n",
-                (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels,(unsigned)masks);
+            BOOL pixels=first && second && render(device,library,NO,NO);
+            BOOL masks=pixels && render(device,library,YES,NO);
+            BOOL batches=masks && render(device,library,NO,YES);
+            printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u batch-pixels-and-guards=%u\n",
+                (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels,(unsigned)masks,(unsigned)batches);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
-            return masks ? 0 : 1;
+            return batches ? 0 : 1;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
             return 1;

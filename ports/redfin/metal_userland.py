@@ -221,6 +221,57 @@ def adapt_driver(text):
         '\t\trw_print("driver/compiler source pairing refused\\n");\n'
         '\t\tdlclose(mesa.handle); mesa.handle=NULL; return false;\n\t}\n'
         '\t*(void **)&mesa.device_open = dlsym(mesa.handle, "rwa_device_open");')
+    text = replace_once(text,'\tint (*finish)(struct rwa_device *, char *, size_t);',
+        '\tint (*finish)(struct rwa_device *, char *, size_t);\n'
+        '\tint (*commands_begin)(struct rwa_device *, char *, size_t);\n'
+        '\tint (*commands_end)(struct rwa_device *, char *, size_t);')
+    text = replace_once(text,'\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");',
+        '\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");\n'
+        '\t*(void **)&mesa.commands_begin = dlsym(mesa.handle, "rwa_commands_begin");\n'
+        '\t*(void **)&mesa.commands_end = dlsym(mesa.handle, "rwa_commands_end");')
+    text = replace_once(text,'if (mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||',
+        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL ||\n'
+        '\t    mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||')
+    text = replace_once(text,'- (void)commit\n{\n\tchar why[512] = { 0 };',
+        '- (void)commit\n{\n\tREDFIN_MESA_SCOPE;\n\tchar why[512] = { 0 };\n'
+        '\tif (_status>=RW_CB_COMMITTED) return;\n'
+        '\tif (mesa.commands_begin([[_queue device] mesaDevice],why,sizeof(why))) {\n'
+        '\t\t[self failWith:why];[self redwoodReturnSlot];[self redwoodDeliverHandlers];return;\n\t}\n\t@try {')
+    text = replace_once(text,'done:\n\t/* The queue\'s slot goes back here',
+        'done:;\n\t} @finally {\n'
+        '\t\tif (mesa.commands_end([[_queue device] mesaDevice],why,sizeof(why))) [self failWith:why];\n'
+        '\t\telse if (_status!=RW_CB_ERROR) {\n'
+        '\t\t\t_status=RW_CB_COMPLETED;\n'
+        '\t\t\tunsigned draws=0,computes=0;\n'
+        '\t\t\tfor (RedwoodMetalWork *work in _work) {if(work->render) ++draws;else ++computes;}\n'
+        '\t\t\tredfin_metal_completed(draws,computes);\n'
+        '\t\t}\n\t}\n'
+        '\t/* The queue\'s slot goes back here')
+    # retainedReferences:YES applies during encoding as well as execution.
+    # An autoreleased set*Bytes buffer must survive its encoder's pool.
+    text = replace_once(text,'NSMutableArray *_work;','NSMutableArray *_work;\n\tNSMutableArray *_redfinResources;')
+    text = replace_once(text,'\t_work = [[NSMutableArray alloc] init];',
+        '\t_work = [[NSMutableArray alloc] init];\n\t_redfinResources = [[NSMutableArray alloc] init];')
+    text = replace_once(text,'\t[_work release];','\t[_work release];\n\t[_redfinResources release];')
+    text = replace_once(text,'- (void)recordWork:(RedwoodMetalWork *)work\n{',
+        '- (void)redfinRetainResource:(id)resource\n{\n\tif (resource) [_redfinResources addObject:resource];\n}\n\n'
+        '- (void)recordWork:(RedwoodMetalWork *)work\n{')
+    require(text.count('_pipeline = state;')==2,'preferred compute/render pipeline binding changed')
+    text=text.replace('_pipeline = state;','_pipeline = state; [_commandBuffer redfinRetainResource:state];')
+    for slot,argument in [('buffers','buffer'),('textures','texture'),('samplers','sampler'),
+                          ('vertexBuffers','buffer'),('fragmentBuffers','buffer'),
+                          ('fragmentTextures','texture'),('fragmentSamplers','sampler')]:
+        line='\t_'+slot+'[index] = '+argument+';'
+        text=replace_once(text,line,line+'\n\t[_commandBuffer redfinRetainResource:'+argument+'];')
+    for line,argument in [('\t_depthStencilState = state;','state'),
+                          ('\t\t_color[i] = texture;','texture'),
+                          ('\t\t_depth = ztex != nil ? ztex : stex;','_depth'),
+                          ('\twork->indexBuffer = indexBuffer;','indexBuffer')]:
+        text=replace_once(text,line,line+'\n\t[_commandBuffer redfinRetainResource:'+argument+'];')
+    text=replace_once(text,'\twork->clearsStencil = _clearsStencil;',
+        '\twork->clearsStencil = _clearsStencil;\n'
+        '\t/* Load actions belong to the pass, once before its first draw. */\n'
+        '\t_clears = _clearsDepth = _clearsStencil = NO;')
     # Atomic calls on the one shared context, including void-returning functions.
     text = re.sub(r'\bmesa\.([a-z_]+)\(', r'RF_MESA(\1,', text)
     # The macro body itself must call the real table, not recurse into itself.
@@ -232,7 +283,7 @@ def adapt_driver(text):
         '\tif (!redfin_metal_abi_ready() || !redfin_metal_hardware_ready()) { [self release]; return nil; }\n'
         '\tensure_spi([self class]);')
     text = replace_once(text, '\t/* The struct Metal reads out of this device by raw pointer,',
-        '\tif (_gpu == IO_OBJECT_NULL || _mesa == NULL) { [self release]; return nil; }\n\n'
+        '\tif (_gpu == IO_OBJECT_NULL || _mesa == NULL || strcmp(RF_MESA(device_name,_mesa),"FD620")) { [self release]; return nil; }\n\n'
         '\t/* The struct Metal reads out of this device by raw pointer,')
     # Native Redfin msm rejects pipe0. The compiler already uses MSM_PIPE_3D;
     # the upstream's separate human-readable chip query must use it as well.
@@ -287,6 +338,12 @@ def adapt_drawable(text):
         '\t/* Native kCVPixelFormatType_TwoComponent8; AIR already uses R8G8. */\n'
         '\t{ 30, \'2C08\', 2, 0, "MTLPixelFormatRG8Unorm" },\n'
         '\t{ 31, \'2C08\', 2, 0, "MTLPixelFormatRG8Unorm_sRGB" },')
+    text = replace_once(text,'if (surface.pixelFormat != fourcc) {',
+        '/* Native QuartzCore uses LA08 for its two-channel glyph masks.\n'
+        '\t * Metal reads the same two bytes as R/G; retain the native bits. */\n'
+        '\tint rg8_alias=(want->pixel_format==30 || want->pixel_format==31) &&\n'
+        '\t    (surface.pixelFormat==\'LA08\' || surface.pixelFormat==\'2C08\') && bytes_per_pixel==2;\n'
+        '\tif (surface.pixelFormat != fourcc && !rg8_alias) {')
     for signature in ('rwd_import(void)','rwd_shared_connection(void)'):
         text=replace_once(text,signature+'\n{',signature+'\n{\n\tREDFIN_SURFACE_SCOPE;')
     text = replace_once(text, '\ttexture = import(mesa_device, want, (int)id, surface.offset, surface.rowBytes, why,\n\t    why_size);',

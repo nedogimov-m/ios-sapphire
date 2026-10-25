@@ -1,0 +1,150 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -75,6 +75,8 @@
+  */
+ #define RWA_MAX_TEXTURES 16
+ 
++#include "redfin_metal_command_scope.h"
++
+ struct rwa_device {
+    struct pipe_screen *screen;
+    struct pipe_context *pipe;
+@@ -101,6 +103,7 @@
+     * wrong (rwa_texture_from_surface).
+     */
+    bool software;
++   struct redfin_metal_command_scope command_scope;
+ 
+    /* What this screen requires of a buffer offset, per binding, read once. Only an
+     * argument buffer's member has an offset at all here (rwa_argbuf_encode_buffer), and
+@@ -3117,6 +3120,32 @@
+    return 0;
+ }
+ 
++/* A command buffer owns the recursive frontend mutex across this scope. A
++ * completed callback is never delivered until this real fence has succeeded. */
++static int
++command_scope_finish(void *opaque, char *why, size_t why_size)
++{
++   return finish_or_say_why(opaque, true, "Metal commands", why, why_size);
++}
++
++int
++rwa_commands_begin(struct rwa_device *device, char *why, size_t why_size)
++{
++   int error=redfin_metal_scope_begin(&device->command_scope);
++   if (error) say(why,why_size,"Metal command scope is already active or retired");
++   return error;
++}
++
++int
++rwa_commands_end(struct rwa_device *device, char *why, size_t why_size)
++{
++   int error=redfin_metal_scope_end(&device->command_scope,command_scope_finish,device,why,why_size);
++   if (!error) device->pipe->set_framebuffer_state(device->pipe,&(struct pipe_framebuffer_state){0});
++   else if (why && why_size && !why[0]) say(why,why_size,"Metal command scope retired after a failed completion");
++   return error;
++}
++
++
+ /* What the shader calls a texture slot, in the words a Metal programmer wrote it in,
+  * so that a refusal about a mismatch names both sides in one vocabulary.
+  */
+@@ -3853,6 +3882,8 @@
+                      char *why, size_t why_size)
+ {
+    struct rwa_device *device = compute->device;
++   if (redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,why_size))
++      return -1;
+    struct pipe_context *pipe = device->pipe;
+    const char *name = compute->info.entry_point ? compute->info.entry_point : "the shader";
+ 
+@@ -3930,7 +3961,8 @@
+     * and call it a result. rwa_finish is for a caller that wants to wait again, or to
+     * wait for work dispatched through another pipeline of the same device.
+     */
+-   int rc = finish_or_say_why(device, true, "dispatch", why, why_size);
++   int rc = redfin_metal_scope_complete(&device->command_scope,false,
++                                       command_scope_finish,device,why,why_size);
+    unbind_stage(device, PIPE_SHADER_COMPUTE, &bound);
+    return rc;
+ }
+@@ -5108,6 +5140,7 @@
+    struct air_shader_info finfo;
+    struct air_shader_info vinfo;      /* valid only when a vertex module was supplied */
+    bool generated_vertex;
++   bool raster_only; /* no storage/image/global writes visible to CPU validation */
+ 
+    struct rwa_render_shape shape;
+ 
+@@ -6171,6 +6204,9 @@
+    /* Compile both stages now. A failure here is a creation failure and says so; the
+     * stages are linked later, at the draw.
+     */
++   nir_shader_gather_info(fs,nir_shader_get_entrypoint(fs));
++   nir_shader_gather_info(vs,nir_shader_get_entrypoint(vs));
++   render->raster_only=!fs->info.writes_memory && !vs->info.writes_memory;
+    render->fs_cso = make_stage_cso(device, fs, why, why_size);
+    if (!render->fs_cso)
+       goto fail;
+@@ -6445,6 +6481,16 @@
+ {
+    struct rwa_device *device = render->device;
+    struct pipe_context *pipe = device->pipe;
++   if (redfin_metal_scope_prepare(&device->command_scope,render->raster_only,
++                                 command_scope_finish,device,why,why_size)) return -1;
++   /* Preserve GPU producer/consumer ordering without a CPU round trip. FD6
++    * implements this as actual CCU/cache flush/invalidate packets. */
++   if (device->command_scope.active && device->command_scope.pending) {
++      if (pipe->memory_barrier)
++         pipe->memory_barrier(pipe,PIPE_BARRIER_FRAMEBUFFER|PIPE_BARRIER_TEXTURE|PIPE_BARRIER_IMAGE);
++      else if (redfin_metal_scope_drain(&device->command_scope,command_scope_finish,device,why,why_size))
++         return -1;
++   }
+    const char *fname = render->finfo.entry_point ? render->finfo.entry_point
+                                                  : "the fragment shader";
+ 
+@@ -6971,7 +7017,8 @@
+     * come back (docs/air.md section 5). A link error between the stages, which ir3 only
+     * finds now, surfaces as this not finishing.
+     */
+-   rc = finish_or_say_why(device, true, "draw", why, why_size);
++   rc = redfin_metal_scope_complete(&device->command_scope,render->raster_only,
++                                   command_scope_finish,device,why,why_size);
+ 
+ unbind:
+    unbind_stage(device, PIPE_SHADER_FRAGMENT, &fbound);
+@@ -6982,11 +7029,11 @@
+     * a context still holding a surface of a freed resource is the same trap as a bound
+     * sampler state (rwa_sampler_destroy).
+     */
+-   pipe->set_framebuffer_state(pipe, &(struct pipe_framebuffer_state){ 0 });
++   if (!device->command_scope.active)
++      pipe->set_framebuffer_state(pipe, &(struct pipe_framebuffer_state){ 0 });
++   /* Gallium/batches may still hold the surface. Drop only our reference. */
+    for (unsigned i = 0; i < draw->color_count; i++)
+-      if (surf[i])
+-         pipe->surface_destroy(pipe, surf[i]);
+-   if (zsurf)
+-      pipe->surface_destroy(pipe, zsurf);
++      pipe_surface_reference(&surf[i],NULL);
++   pipe_surface_reference(&zsurf,NULL);
+    return rc;
+ }
+diff --git a/src/compiler/air/air_metal.h b/src/compiler/air/air_metal.h
+--- a/src/compiler/air/air_metal.h
++++ b/src/compiler/air/air_metal.h
+@@ -61,6 +61,12 @@
+  * ordinary case when the kernel was booted without gpu=1. */
+ struct rwa_device *rwa_device_open(char *why, size_t why_size);
+ void rwa_device_close(struct rwa_device *device);
++
++/* Opt-in Metal command-buffer scope. Caller serializes the entire scope.
++ * Raster-only draws can share the final real fence; ordinary calls and all
++ * compute/memory-writing shaders retain their immediate completion. */
++int rwa_commands_begin(struct rwa_device *device,char *why,size_t why_size);
++int rwa_commands_end(struct rwa_device *device,char *why,size_t why_size);
+ 
+ /* What the driver should call the GPU, as Mesa knows it ("Adreno 7c+ Gen 3"). Never NULL. */
+ const char *rwa_device_name(struct rwa_device *device);

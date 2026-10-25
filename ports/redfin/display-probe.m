@@ -22,7 +22,7 @@
 @property(nonatomic) io_connect_t framebuffer;
 @property(nonatomic) uint64_t nonce;
 @property(nonatomic) struct redfin_display_statistics first;
-@property(nonatomic) double began,last,maximum;
+@property(nonatomic) double origin,began,last,maximum;
 @property(nonatomic) unsigned callbacks,under12,under18,under35;
 @property(nonatomic) BOOL finished;
 - (void)tick:(CADisplayLink *)link;
@@ -60,31 +60,37 @@ static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_stat
 {
     if (self.finished) return;
     double now=link.timestamp;
-    if (!self.began) {self.began=now;self.last=now;}
-    else {
+    if (!self.origin) self.origin=now;
+    if (!self.began && now-self.origin>=2) {
+        struct redfin_display_statistics start={0};
+        if (!sample(self.framebuffer,self.nonce,&start)) {[self finish:YES];return;}
+        self.first=start;self.began=now;self.last=now;
+        probe_log(self.nonce,"measure-start warmup-seconds=2 ticks=%llu completed-presents=%llu gpu-presents=%llu",
+            (unsigned long long)start.ticks,(unsigned long long)start.presents,(unsigned long long)start.gpu_presents);
+    } else if (self.began) {
         double interval=now-self.last;self.last=now;
         if (interval>self.maximum) self.maximum=interval;
         if (interval>0 && interval<=0.0125) self.under12++;
         if (interval>0 && interval<=0.018) self.under18++;
         if (interval>0 && interval<=0.035) self.under35++;
     }
-    self.callbacks++;
+    if (self.began) self.callbacks++;
     [CATransaction begin];[CATransaction setDisableActions:YES];
-    double t=now-self.began;
+    double t=now-self.origin;
     for (unsigned i=0;i<self.squares.count;++i) {
         CALayer *square=self.squares[i];
         square.position=CGPointMake(187.5+120*sin(t*2.0+i),140+i*74+24*cos(t*3.0+i));
         square.transform=CATransform3DMakeRotation(t+i*0.25,0,0,1);
     }
     [CATransaction commit];
-    if (t>=10) [self finish:NO];
+    if (self.began && now-self.began>=10) [self finish:NO];
 }
 - (void)finish:(BOOL)timedOut
 {
     if (self.finished) return;
     self.finished=YES;[self.link invalidate];self.link=nil;
     struct redfin_display_statistics final={0};
-    BOOL valid=sample(self.framebuffer,self.nonce,&final) && final.ticks>self.first.ticks &&
+    BOOL valid=self.began && sample(self.framebuffer,self.nonce,&final) && final.ticks>self.first.ticks &&
         final.presents>=self.first.presents && final.gpu_presents>=self.first.gpu_presents &&
         final.panel_hz==self.first.panel_hz;
     mach_timebase_info_data_t scale={0};mach_timebase_info(&scale);
@@ -109,7 +115,7 @@ void redfin_display_probe_schedule(UIWindow *host,uint64_t nonce)
         strcmp(NSProcessInfo.processInfo.processName.UTF8String,"SpringBoard")) return;
     scheduled=YES;
     UIWindow *native_host=host;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,40*NSEC_PER_SEC),dispatch_get_main_queue(),^{
         UIWindow *parent=native_host;
         if (!parent || parent.screen!=UIScreen.mainScreen) return;
         io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("AppleCLCD"));

@@ -27,7 +27,7 @@ METHODS={
 }
 REFRESH_METHODS={'UIScreen':{'-maximumFramesPerSecond':'q16@0:8',
     '-_maximumFramesPerSecond':'q16@0:8','-_refreshRate':'d16@0:8','-_isMainScreen':'B16@0:8'},
-    'CADisplay':{'+mainDisplay':'@16@0:8','-refreshRate':'d16@0:8','-hardwareRefreshRate':'d16@0:8'}}
+    'CADisplay':{'+mainDisplay':'@16@0:8','-refreshRate':'d16@0:8','-hardwareRefreshRate':'d16@0:8','-heartbeatRate':'d16@0:8'}}
 
 
 def build(out,cache_path=None):

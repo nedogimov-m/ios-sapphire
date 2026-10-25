@@ -1,0 +1,78 @@
+diff --git a/bsd/kern/kern_proc.c b/bsd/kern/kern_proc.c
+--- a/bsd/kern/kern_proc.c
++++ b/bsd/kern/kern_proc.c
+@@ -3129,6 +3129,13 @@
+ }
+ #endif /* CONFIG_COREDUMP */
+ 
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <pexpert/pexpert.h>
++#include <arm64/redfin_gui_profile.h>
++#include "redfin_graphics_exec_scope.h"
++#endif
++
+ /* Code Signing related routines */
+ 
+ int
+@@ -3188,6 +3195,9 @@
+ 	unsigned char cdhash[SHA1_RESULTLEN];
+ 	audit_token_t token;
+ 	unsigned int upid = 0, uidversion = 0;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	bool redfin_tcc_observe=false;uint64_t redfin_tcc_nonce=0;
++#endif
+ 
+ 	forself = error = 0;
+ 
+@@ -3225,11 +3235,37 @@
+ 
+ 	upid = proc_getpid(pt);
+ 	uidversion = proc_pidversion(pt);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (ops==CS_OPS_STATUS || ops==CS_OPS_ENTITLEMENTS_BLOB ||
++	    ops==CS_OPS_DER_ENTITLEMENTS_BLOB || ops==CS_OPS_IDENTITY) {
++		char caller[32]={0},subject[32]={0};proc_selfname(caller,sizeof(caller));proc_name(upid,subject,sizeof(subject));
++		if (!strcmp(caller,"tccd") && (!strcmp(subject,"assetsd") || !strcmp(subject,"photos-init") ||
++		    !strcmp(subject,"MobileSlideShow") || !strcmp(subject,"Photos") || !strcmp(subject,"launchd"))) {
++			const char *arguments=PE_boot_args();unsigned bytes=0;
++			if (arguments) while (bytes<608 && arguments[bytes]) ++bytes;
++			static unsigned observed;
++			if (bytes<608 && redfin_diagnostic_requested(arguments,bytes+1) &&
++			    redfin_gpu_gui_profile(arguments,bytes+1,&redfin_tcc_nonce) &&
++			    __atomic_fetch_add(&observed,1,__ATOMIC_RELAXED)<256) {
++				redfin_tcc_observe=true;
++				printf("REDFIN TCC CSOPS: boot=%016llx caller=%d target=%u name=%s op=%d version=%u audit=%u bytes=%llu flags=%#x\n",
++				    (unsigned long long)redfin_tcc_nonce,proc_selfpid(),upid,subject,ops,uidversion,
++				    uaudittoken!=USER_ADDR_NULL,(unsigned long long)usersize,proc_getcsflags(pt));
++			}
++		}
++	}
++#endif
+ 	if (uaudittoken != USER_ADDR_NULL) {
+ 		error = copyin(uaudittoken, &token, sizeof(audit_token_t));
+ 		if (error != 0) {
+ 			goto out;
+ 		}
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++		if (redfin_tcc_observe)
++			printf("REDFIN TCC AUDIT: boot=%016llx target=%u supplied-pid=%u version=%u supplied-version=%u euid=%u auid=%u\n",
++			    (unsigned long long)redfin_tcc_nonce,upid,token.val[5],uidversion,token.val[7],token.val[1],token.val[0]);
++#endif
+ 		/* verify the audit token pid/idversion matches with proc */
+ 		if ((token.val[5] != upid) || (token.val[7] != uidversion)) {
+ 			error = ESRCH;
+@@ -3632,6 +3668,12 @@
+ 		break;
+ 	}
+ out:
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (redfin_tcc_observe)
++		printf("REDFIN TCC CSOPS RESULT: boot=%016llx target=%u op=%d error=%d\n",
++		    (unsigned long long)redfin_tcc_nonce,upid,ops,error);
++#endif
+ 	proc_rele(pt);
+ 	return error;
+ }

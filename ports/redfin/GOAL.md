@@ -1,176 +1,85 @@
 # Redfin user goal — 2026-10-25
 
-The same objective is active in `/goal`. Continue autonomously. Implement a
-complete coherent block, then run combined checks and an integrated hardware
-test. Do not boot/test between its individual implementation subtasks.
+The complete objective remains active in `/goal`. Work autonomously while
+the user sleeps; the phone stays connected. Implement a coherent complete
+block first, then combined checks and one integrated hardware run. Do not
+boot/test between individual implementation subtasks. Implement even the
+features whose final physical/manual checks need the user; defer only those
+human-dependent actions, and continue independent work.
 
-The user explicitly authorizes doing and testing everything independently;
-the phone stays connected. Implement every requested feature, including
-features whose final physical/manual checks need the user. Defer only those
-human-dependent actions/checks, and keep progressing on the rest. Do not wait
-for manual GUI feedback before continuing independent implementation/tests.
+## Latest checkpoint
 
-Latest system integration (2026-10-25, sourcef250187): V8/8be20a2f77380ee1
-has native system discovery/CoreAnimation Metal pipelines, completed native
-backboardd fences, a CRC-verified visible physical home frame, stable Phone/
-SpringBoard and repeated mode2 actual compute/pixelsPASS. Clean root818829/
-Fastboot. Photos/assetsd still abort; idle samples do not establish FPS.
-Next complete RG8/Metal-fence/native exception/animation-statistics block is
-built with29selected checksPASS. Kernel local20261025-091259/noCI ae5aae0d...;
-V13 staged438272bytes/24new/zero freed/readback/fsckPASS, not applied.
-V9/40cdadce6712794f system image/actual native loader preflightPASS. Apply
-V13 once, then one integrated capture. Sensors and authorization remain.
+Source base32d85db. V9/40cdadce6712794f has authenticated image/launchd
+proof, genuine Metal compute/BGRA/RG8 output/guards, surviving Phone and
+stable SpringBoard/backboardd. Clean root827459; V13 applied/stale.
+Automatic six-layer workload measured5.911completed physical fps versus
+59.973callback Hz. That is not the user's earlier30-40fps estimate.
+Photos/assetsd still fail; actual assetsd reason is TCCPhotosService denial.
 
-Earlier verified block (2026-10-25, sourcebfdf8d0): V12 applied once/stale,
-V7/c539c81afb12dd77 has authenticated image/launchd proof, clean root810424
-and verified Fastboot. Actual Metal two queues x96compute commands/output/
-guards and4096IOSurface pixelsPASS, with a separately completed native GPU
-fence. System Metal is the next combined capture; full compatibility/UI FPS
-are unproved. Native Security validated1, but Photos/assetsd still abort.
-OSM now reaches1804.8/2208/2400MHz and thermal pressure actually lowers/
-restores all domains. Native Wi-Fi credential persistence repeats, actual
-autojoin still needs a real saved credential. Kernel local20261025-084355/
-noCI,36b98fbb...;97selected checksPASS. Readonly sensor inventory captured
-ADSP firmware/configs naming LSM6DSR/LIS2MDL/BMP380/TCS3701; native runtime
-identification/SSC/HID integration remain unfinished. Continue independently.
+The complete next block is implemented/built: Metal command-buffer batching,
+actual final-fence completion, resource/surface lifetime and once-per-pass
+clears, native measured90Hz heartbeat, warmed animation statistics and
+native TCCD audit/Security evidence. All36selected host cases, native builds,
+actual20H392 imports/signatures and real loader preflight PASS. Kernel
+local20261025-095649/noCI6ce92eff...; V10/b199fc38b7166150 image950623ce...
+V14 fresh reversible host stage against827459 is not applied yet. Apply once
+and collect one complete autonomous run; assess actual render throughput,
+three-draw blended pixels and native TCCD results. Exact builds/args are in
+newest NOTES.md. Next implement the complete native sensor transport/event
+block. No new physical performance or Photos fix is claimed from host builds.
 
-## Requested results
+## Required results
 
 - Preserve working GUI, touch, Phone, Wi-Fi and internet.
-- Make system GPU rendering smooth and responsive; remove remaining driver
-  and presentation overhead. Integrate actual Adreno620 Metal support.
-- Fix Photos and related application failures, avoiding window-server resets,
-  loss of touch/GPU, black screens and kernel panics.
-- Reduce the roughly minute-long Wi-Fi startup. Persist network credentials
-  through native Keychain and reconnect automatically after reboot.
-- Use the complete physical screen. Account for the real camera cutout in
-  status-bar/time placement, without shrinking the entire UI below a top strip.
-- Switch the physical display to90Hz and verify actual refresh separately
-  from rendering FPS. A faster software notification timer alone is insufficient.
-- Keep the persistent real serial; add the correct model-number row. Complete
-  and verify the requirements for App Store/Apple ID with real authorization.
-- Fix power: real battery level/state, charging indication, cable/source
-  changes, actual charging and supported power/charging modes.
-- Fix thermald/thermalmonitord with real temperature inputs, thermal control
-  and overheating protection.
-- Support every actual Redfin sensor: accelerometer, gyroscope, compass/
-  magnetometer, proximity, ambient light, barometer and remaining sensors
-  established by the physical hardware inventory.
+- Finish true system GPU/Metal acceleration with smooth responsive UI and
+  verified completed frames; eliminate remaining submit/presentation costs,
+  kernel panics, black screens and loss of touch/GPU.
+- Repair Photos and related application/service failures without window-
+  server resets. Actual native assetsd/TCC failure remains under diagnosis.
+- Shorten roughly minute-long Wi-Fi startup; persist actual credentials in
+  native Keychain and reconnect after reboot. Native SecItem and synthetic
+  MobileWiFi markers already persist across boots; a real saved credential/
+  autojoin is not proved by those markers.
+- Fill the complete1080x2340panel and put the clock/status bar outside the
+  physical camera cutout. Full panel/inverse touch and repeated nondrifting
+  clock placement x53.35points are already observed.
+- Use true physical90Hz, separately from rendering FPS. TE11120us and native
+  DPU frame count already establish90Hz; app callback/render cadence still
+  requires the new native-period and batching capture.
+- Keep the permanent real serial and correct model row. Native serial/model
+  publication is observed. Finish App Store/Apple ID prerequisites with real
+  authorization/activation; a serial alone is not Apple activation.
+- Finish native QG/ADC5/SMB5 battery/charging/cable/source/power behavior.
+  Real readings/native full state are observed; actual charging/cable changes
+  remain to be confirmed when conditions permit.
+- Finish thermald/thermalmonitord from real TSENS26xx inputs and native OSM
+  control/overheat protection. All three domains reach1804.8/2208/2400MHz;
+  actual thermal pressure lowers/restores them. No fake temperatures.
+- Support every actual Redfin sensor: accelerometer, gyro, magnetometer/
+  compass, proximity, ambient light, barometer and remaining physical or
+  firmware-derived sensors established by inventory. Captured vendor-base
+  configs name LSM6DSR/LIS2MDL/BMP380/TCS3701; live DT also has VD6281.
+  ADSP PAS1/remote2, native SSC/registry and HID/CoreMotion integration remain
+  to implement and verify; raw configs do not prove runtime identity.
 
-## Confirmed checkpoint
+## Constraints and private state
 
-Source13e151f; results7938e0b. Local kernel build20261025-050146/noCI;
-known stable image `ports/redfin/out/gpu-panel-v1/redfin-xnu.img`.
-Authenticated boot026ce38e14155367 proves system Mesa/EAGL composition,
-over2400completed native A620 panel presentations, full private2527200pixel
-and guard checks, four64pixel physical-panel comparisons, no GPU retirement,
-submit failure, kernel panic or backboardd restart. Touch104/104, no errors.
-User confirms Phone works, Photos aborts, and estimates30–40fps with modest
-improvement but persistent judder/input delay. Stable60/90fps is not proved.
+Follow AGENTS.md, README.md and newest NOTES.md. Prefer the user's two
+HackiOS upstreams, adapt native Redfin hardware/20H392 ABI, and record exact
+reviewed pins in UPSTREAM.md. Commit completed changes and record builds,
+exact boot args, results and unfinished work at every milestone.
 
-Serial appears in About and MobileGestalt; its private digest matches the
-actual Pixel serial. A serial does not itself supply Apple activation.
-Metal, model-number publication, true90Hz, proper cutout layout, charging/
-thermal/sensor support and credential persistence remain unfinished.
+Only temporary `fastboot boot`; preserve boot/recovery, modem, persist, EFS,
+userdata and backups. Destructive operations need separate confirmation.
+Existing root updates are reversible, preimage-backed, fully readback-
+verified and require clean HFSX/native readonly fsck. Never reuse any applied
+stage or old root-generation snapshot. Write every newly allocated block,
+including zero blocks. Keep actual credentials, serials, raw logs, dumps and
+Apple artifacts outside git.
 
-## Current independent work and evidence
-
-Source a07a2ce, integrated gui-platform-v3 authenticated boot24640daa371b61c8.
-Kernel local20261025-062535/noCI (4c26d9c2...), unchanged from descriptorV2.
-Fresh V9 complete update has all25ranges/83blocks/339968bytes backed up and
-readback-verified; native readonly fsckPASS, one new block/zero freed.
-V9 is applied and must never be reused. Capture ends with clean root,
-write_count783850 and verified Fastboot. Exact args/builds/results are in
-newest NOTES. Private wrapping material must persist unchanged.
-
-Confirmed in this combined autonomous run: physical90Hz (TE16677->11120us,
-INTF21->32frames/350ms), complete1080x2340viewport/inverse touch, current
-90Hz-compatible EAGL installation, native shader/IOSurface and backboardd
-completed rendering/fences without GPU fault/Mesa submit failure or panic.
-Phone opens through native async LaunchServices and survives5/17s with
-stable SpringBoard. SecItem existing1/read0/exact1 proves reboot persistence.
-Time moves from x30 to53.35points outside the physical camera; measured
-repeated layouts show no cumulative drift. Actual serial/model publication
-remains valid. No human smoothness/cable/motion/account check is required yet.
-
-Outstanding linked userland work: Photos and assetsd abort, native creation
-now reaches the ordinary URL instance API but returns PhotosXPC4103 because
-the native assets service is unavailable. Symbolicate actual crashes and fix
-the service. UIKit still reports60maxFPS while panel TE proves90; publish the
-verified physical rate through the native app/display path. Check native
-MobileWiFi password persistence/autojoin and reduce radio startup latency.
-The synthetic SecItem proof alone does not prove an actual saved Wi-Fi key.
-
-Implement the next complete block before combined testing/new boot. Native
-power inventory is PM7250B/QG/ADC5/SMB5 and TSENS26xx, plus three standard
-OSM cpufreq-hw domains. Adapt these real interfaces and the preferred
-IOPMPowerSource/thermal notification model; do not substitute the mismatched
-Redwood PMIC/EPSS or generic RRADC/tsens-v2 layouts. Preferred new kernelHEAD
-d82c64a3a31cd27a0a0afbf6e213e467e44b1b4c and userlandHEADa79ff077... have
-been read-only reviewed; existing graphics references remain8e611870/906425b.
-Power/charging/thermals, all actual sensors, native Metal and real Apple
-account authorization remain mandatory. Defer only human-dependent actions.
-
-The next full source block is implemented and host-built: native Redfin
-QG/ADC5/SMB5 battery/charging, TSENS26xx/OSM temperature/frequency control,
-retained-RTC/UTC mapping, native thermal notifications and verified90Hz
-CADisplay periods/UIScreen caps. Native MobileWiFi password/readiness/TLS
-checks use a synthetic unjoined marker only. Actual assetsd TCC rejection
-is confirmed; native SecTask/TCC and daemon logging are added without a
-permission override. Do not claim Photos repaired until a real run proves it.
-All47distinct selected host casesPASS; local kernel20261025-072951/noCI,
-e3ae1202... is frozen. Complete signed/actual-import bundles and V10 private
-stage pass native readonly fsck. V10 is now fully backed-up/readback-verified and applied; no new iOS boot yet;
-31ranges/234blocks/958464bytes,55new/zero freed. Never reuse applied V10. The new optional power leaf now passes the strict
-native loader; fresh gui-platform-v5 preflight and35current host casesPASS.
-Next: one complete hardware capture. Next physical results, full Metal, every actual sensor and
-real account authorization remain unfinished; see newest NOTES.
-
-## Operating constraints
-
-Follow AGENTS.md, README.md and latest NOTES.md. Prefer the user's two
-HackiOS upstreams, adapt hardware/20H392 ABI and record reviewed commits in
-UPSTREAM.md. Commit completed work and record exact builds, args and results.
-Only temporary fastboot boot; preserve boot/recovery, modem/persist/EFS,
-userdata and backups. Confirm destructive operations separately.
-
-Private serial/config is `backup/redfin/ios-device-identity.json`; never print
-its value. Keep dumps, logs, secrets and Apple artifacts ignored. The V7
-new-zero-block installer bug was fixed: write ALL newly allocated blocks,
-including zeros, and verify complete files through their actual extents.
-Do not reuse V7, the pre-boot data-repair snapshot or applied V8. Use a fresh
-root generation for the next update; assess the current combined run first.
-
-The complete V5 platform run (source9cf831f, nonce54d29807ff094ae7) returns
-clean HFSX/write_count793497 and verified Fastboot. Native logs now show
-UIScreen90/1-90, real TSENS/battery/thermal notifications and valid calendar;
-Phone survives and SecItem remains persistent. MobileWiFi synthetic write/read
-is exact, but its next-boot persistence and real autojoin remain unproved.
-Charger fault0x2 pauses charging; adapt exact native SMB5 status/health before
-claiming charge. Photos still fails; replacement assetsd244survives.
-An AKS selector17log flood wraps initial RAM proof, so strict overall status
-is logs-collected/boot-id-missing, not PASS. Preserve startup/reduce the flood
-in the next complete block. Metal sources are being implemented, not tested.
-
-The next complete source block is now built/staged: actual20H392 Metal/AIR
-with isolated probe and system discovery, canonical native AKS state, RFH2
-startup preservation, exact native SMB5 health/modes and bounded native Photos
-XPC retries. All118selected host checks/native builds/imports/signaturesPASS.
-Kernel local20261025-081227/noCI 2d007818...; V11 full private stage passes
-native readonly fsck/readback,10919936bytes/2505new blocks/zero freed. V11 is
-not applied yet. Fresh gui-platform-v6/3355dc3b077fe229 preflightPASS. Next:
-apply V11 once, integrated hardware probe, then system Metal after actual
-compute/render success. Never infer full Metal feature support from its host
-build. Sensors and real account authorization remain required.
-
-V11 is now applied and stale; V6/3355dc3b077fe229 succeeds with preserved
-image/boot/launchd proof, GPU EAGL/shader/fences and clean root801955/Fastboot.
-Native MobileWiFi synthetic existing1/exact1 proves reboot persistence.
-SMB5 now correctly observes full1/no hard fault; actual charge/cable changes
-remain unverified while full. Metal ABI/port open passes, then native jetsam
-kills its helper before a result. Add actual native own-PID512MiB admission.
-Photos still fails: native Security validated0 because flags lack CS_KILL;
-correct native kill/enforcement, retaining TCC. Fix OSM max_cores6/2/2 from
-actual DT (domain CPU membership remains6/1/1). Implement this complete fix
-block before combined validation. Full Metal/UI, faster Wi-Fi, actual sensors
-and real Apple account authorization remain unfinished.
+Private identity is `backup/redfin/ios-device-identity.json`; persistent
+wrapping material is `backup/redfin/ios-keychain-material.json` and must not
+change. Native retained-RTC epoch mapping is
+`backup/redfin/ios-rtc-anchor.json`. Do not print their secret values.
+Manual smoothness, cable/motion and real account login stay deferred while
+independent implementation and hardware checks continue.

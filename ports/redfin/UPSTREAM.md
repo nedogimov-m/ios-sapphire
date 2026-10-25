@@ -1,5 +1,32 @@
 # HackiOS upstream review — 2026-10-22
 
+## Metal command-buffer completion and native TCCD evidence — 2026-10-25
+
+Re-reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+redwoodmetal.m's commit/draw/retainedReferences and tools/mesa/air/air_metal.c's
+per-draw finish/surface lifetime. Kernel references remain preferred
+8e61187098f2c26c5daee8f9f72b6416aa64b9ab; later native-platform review pins
+remain documented below. V9 proves real Metal192compute/BGRA/RG8 execution,
+but its automatic six-layer workload completes only5.911physical fps despite
+59.973callback Hz. Do not label a notification/callback rate as rendering FPS.
+
+Redfin extends the paired AIR/frontend contract with a serialized command
+scope: raster-only NIR (neither stage writes memory) can share the final real
+fence. FD6 framebuffer/texture/image barriers preserve GPU dependencies;
+compute, storage-writing stages and non-scoped callers still finish before
+CPU validation. Every scope exit drains prior work and a failed completion
+retires it. Gallium surface reference counting replaces premature direct
+destruction; the command buffer retains encoding resources across pools and
+clears attachments once per pass. A real three-draw alpha/pixel/guard probe
+and host producer/consumer/failure checks accompany the implementation.
+
+Actual20H392 CADisplay heartbeatRate is type/UUID-bound as a period, like its
+refreshRate; only the independently verified90Hz panel permits1/90. Native
+TCCD process/audit/CSOPS and Security batched-entitlement observations keep
+all native answers and failures. They distinguish the remaining assetsd
+permission cause without a fabricated entitlement, TCC bypass or suppressed
+exception. New behavior awaits a complete physical capture.
+
 ## System Metal/CoreAnimation and native RG8 adaptation — 2026-10-25
 
 V8 physically selects preferred906425b75e02b4f99eb5d7bb1ef7c9583472d772's

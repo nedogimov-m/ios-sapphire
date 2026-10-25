@@ -111,7 +111,9 @@ int main(void)
             printf("REDFIN GUI CHECK: boot=%s refused native LS ABI differs\n",nonce);return 3;
         }
         printf("REDFIN GUI CHECK: boot=%s opt-in=1 mobile=1 preparing native Phone/Photos opens\n",nonce);
-        sleep(65);
+        /* Leave the automatic render run and native WLAN startup separate
+         * from app opening, within the same bounded capture boot. */
+        sleep(95);
         pid_t spring=process("SpringBoard");
         if (spring<=0) {printf("REDFIN GUI CHECK: boot=%s SpringBoard-not-ready pid=%d\n",nonce,spring);return 4;}
         id workspace=((id (*)(id,SEL))objc_msgSend)(cls,sel_registerName("defaultWorkspace"));

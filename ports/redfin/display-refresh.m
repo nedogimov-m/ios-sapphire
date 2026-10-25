@@ -17,7 +17,7 @@
 #include "gui-profile.h"
 #include "graphics-exec-scope.h"
 
-static double (*ca_period)(id,SEL),(*ca_hardware)(id,SEL),(*ui_period)(id,SEL);
+static double (*ca_period)(id,SEL),(*ca_hardware)(id,SEL),(*ca_heartbeat)(id,SEL),(*ui_period)(id,SEL);
 static NSInteger (*ui_maximum)(id,SEL),(*ui_private_maximum)(id,SEL);
 static Class display_class;
 static unsigned verified_hz,observations;
@@ -92,6 +92,11 @@ static double redfin_ca_hardware(id object,SEL selector)
     if (!main_display(object)) return ca_hardware(object,selector);
     double period=1.0/90.0;refresh_log("CADisplay.hardwareRefreshRate",period,90);return period;
 }
+static double redfin_ca_heartbeat(id object,SEL selector)
+{
+    if (!main_display(object)) return ca_heartbeat(object,selector);
+    refresh_log("CADisplay.heartbeatRate",1.0/90.0,90);return 1.0/90.0;
+}
 static double redfin_ui_period(id object,SEL selector)
 {return main_screen(object) ? 1.0/90.0 : ui_period(object,selector);}
 static NSInteger redfin_ui_maximum(id object,SEL selector)
@@ -113,13 +118,18 @@ __attribute__((constructor)) static void redfin_refresh_install(void)
     display_class=objc_getClass("CADisplay");
     if (!method_abi(display_class,"mainDisplay","@16@0:8",YES) ||
         !method_abi(display_class,"refreshRate","d16@0:8",NO) ||
-        !method_abi(display_class,"hardwareRefreshRate","d16@0:8",NO)) return;
+        !method_abi(display_class,"hardwareRefreshRate","d16@0:8",NO) ||
+        !method_abi(display_class,"heartbeatRate","d16@0:8",NO)) return;
     Method period=class_getInstanceMethod(display_class,sel_registerName("refreshRate"));
     Method hardware=class_getInstanceMethod(display_class,sel_registerName("hardwareRefreshRate"));
-    if (!image_uuid(method_getImplementation(period),quartz) || !image_uuid(method_getImplementation(hardware),quartz)) return;
+    Method heartbeat=class_getInstanceMethod(display_class,sel_registerName("heartbeatRate"));
+    if (!image_uuid(method_getImplementation(period),quartz) || !image_uuid(method_getImplementation(hardware),quartz) ||
+        !image_uuid(method_getImplementation(heartbeat),quartz)) return;
     ca_period=(double (*)(id,SEL))method_getImplementation(period);
     ca_hardware=(double (*)(id,SEL))method_getImplementation(hardware);
+    ca_heartbeat=(double (*)(id,SEL))method_getImplementation(heartbeat);
     method_setImplementation(period,(IMP)redfin_ca_period);method_setImplementation(hardware,(IMP)redfin_ca_hardware);
+    method_setImplementation(heartbeat,(IMP)redfin_ca_heartbeat);
     Class screen=objc_getClass("UIScreen");
     if (!screen || !method_abi(screen,"_isMainScreen","B16@0:8",NO) ||
         !method_abi(screen,"maximumFramesPerSecond","q16@0:8",NO) ||

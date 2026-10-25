@@ -12,6 +12,61 @@ from ports.redfin.wifi_userland import _encode_same_size
 
 
 class MetalPlatformTests(unittest.TestCase):
+    def test_command_scope_fences_dependencies_and_failures_before_reuse(self):
+        # Exercise the actual adapter with writes that become visible only at a
+        # successful fence. Raster commands share a final fence; a following
+        # compute/CPU-validation boundary must first make their writes visible.
+        source=r'''
+#include <assert.h>
+#include "metal-command-scope.h"
+struct fake_gpu { unsigned pending,visible,waits; int error; };
+static int finish(void *context,char *why,size_t bytes) {
+ struct fake_gpu *g=context;(void)why;(void)bytes;++g->waits;
+ if(g->error)return g->error;
+ g->visible+=g->pending;g->pending=0;return 0;
+}
+int main(void) {
+ struct redfin_metal_command_scope s={0};struct fake_gpu g={0};
+ assert(!redfin_metal_scope_begin(&s));
+ assert(redfin_metal_scope_begin(&s)); /* nested scopes cannot steal a queue */
+ for(unsigned n=0;n<96;++n) {
+  assert(!redfin_metal_scope_prepare(&s,true,finish,&g,0,0));
+  ++g.pending;
+  assert(!redfin_metal_scope_complete(&s,true,finish,&g,0,0));
+ }
+ assert(!g.waits && !g.visible);
+ assert(!redfin_metal_scope_end(&s,finish,&g,0,0));
+ assert(g.waits==1 && g.visible==96 && !g.pending);
+ assert(!redfin_metal_scope_begin(&s));
+ ++g.pending;assert(!redfin_metal_scope_complete(&s,true,finish,&g,0,0));
+ assert(!redfin_metal_scope_prepare(&s,false,finish,&g,0,0));
+ assert(g.visible==97 && g.waits==2);
+ ++g.pending;assert(!redfin_metal_scope_complete(&s,false,finish,&g,0,0));
+ assert(g.visible==98 && g.waits==3);
+ assert(!redfin_metal_scope_end(&s,finish,&g,0,0));
+ /* Non-Metal callers retain immediate completion. */
+ ++g.pending;assert(!redfin_metal_scope_complete(&s,true,finish,&g,0,0));
+ assert(g.visible==99 && g.waits==4);
+ /* A partially encoded command still drains on scope exit. Failed GPU
+  * completion retires the context instead of allowing another submit. */
+ assert(!redfin_metal_scope_begin(&s));
+ ++g.pending;assert(!redfin_metal_scope_complete(&s,true,finish,&g,0,0));
+ g.error=-7;
+ assert(redfin_metal_scope_end(&s,finish,&g,0,0)==-7);
+ assert(g.visible==99 && g.pending==1 && g.waits==5 && !s.active);
+ assert(redfin_metal_scope_begin(&s));
+ assert(redfin_metal_scope_prepare(&s,true,finish,&g,0,0));
+ assert(redfin_metal_scope_complete(&s,true,finish,&g,0,0));
+ assert(g.waits==5);return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d);(p/'scope.c').write_text(source)
+            subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',
+                '-I'+str(Path(__file__).parent),str(p/'scope.c'),'-o',str(p/'scope')],
+                capture_output=True,check=True)
+            subprocess.run([str(p/'scope')],timeout=10,check=True,capture_output=True)
+
     def test_policy_requires_the_complete_runtime_and_has_distinct_probe_system_modes(self):
         for mode,wanted in [('probe',1),('system',2)]:
             tree=mkadt.node('device-tree',[],[mkadt.node('redfin-gpu-command',

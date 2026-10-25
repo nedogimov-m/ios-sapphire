@@ -16,3 +16,5 @@ vertex RedfinVertex redfin_vertex(uint index [[vertex_id]])
 }
 fragment float4 redfin_fragment()
 { return float4(0.25,0.5,0.75,1); }
+fragment float4 redfin_batch_fragment(constant float4 &color [[buffer(0)]])
+{ return color; }

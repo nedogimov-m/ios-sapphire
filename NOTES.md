@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V9 measured presentation bottleneck; complete Metal batching block built — 2026-10-25
+
+V9 source32d85db, kernel local20261025-091259/noCI ae5aae0d...,
+image62294b2b.../nonce40cdadce6712794f completes authenticated exact-image/
+nonce/launchd proof, userspace-alive, clean HFSX/not inconsistent/
+write_count827459 and verified Fastboot. Native Metal192compute commands,
+4096BGRA pixels and4096RG8 pixels/8192guard bytes PASS. Phone248survives;
+SpringBoard26/backboardd61 stay alive. Photos249still asserts because its
+assets data source has no section. Native assetsd repeatedly throws
+"assetsd requires TCCPhotosService access". No permission override is added.
+
+The automatic six-layer UIKit workload observes601callbacks at59.973Hz but
+only66completed physical GPU presents over11.166051s (5.911fps). This is a
+specific animated workload during startup, not the earlier user's30-40fps
+estimate or a sustained idle FPS claim. Native submit audit averages about
+1.85ms before GPU work; every upstream Metal draw currently fences on CPU.
+
+Complete new block: serialize each Metal command buffer, defer raster-only
+waits to a real final fence, preserve native FD6 cache barriers and immediate
+compute/memory-write completion, and permanently retire failed completions.
+Gallium surface references and Metal retained resources survive submission;
+load-action clears happen once per pass. Three alpha-blended draws with
+separate autorelease pools and guarded IOSurface pixels validate that path.
+Commit completion/status/handlers follow the actual final fence. The native
+90Hz heartbeat period is published only with the measured panel proof;
+animation now warms up2s and runs after WLAN/startup, before autonomous app
+opens. Native TCCD CSOPS/audit-token and actual batched Security responses
+are observed without altering the syscall results, policy or TCC database.
+The exception observer captures Security even when assetsd aborts immediately.
+
+36selected combined host cases PASS, including actual command-scope
+producer/consumer/failure boundaries. Complete native kernel, Mesa/AIR,
+Metal plugin, signed libraries/helpers, actual20H392 imports/signatures and
+real payload/live-FDT/ADT loader preflight PASS. Kernel
+local20261025-095649/noCI,6ce92eff092b24e7cdb1d12766e944c7343d01f0e4890e0fe20ecd451ba302ce.
+New V10 image950623ce6369dc60daf57484bb497e6fe7977f10c3204f21fd40009ae610882b,
+nonceb199fc38b7166150,system Metal. V14 is a fresh reversible host stage
+against clean827459; it has NOT been applied or booted at this checkpoint.
+Prior V13 is applied/stale; never reuse it. Next apply V14 once and run one
+combined capture, then implement the next complete native sensor block.
+Physical batching/smoothness/Photos improvements are not yet established.
+Sensors/SSC/HID and real account authorization remain unfinished.
+Exact V9 observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x40cdadce6712794f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Exact V10 planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb199fc38b7166150 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V8 system Metal selected; RG8/native observation/animation block ready — 2026-10-25
 
 V8 sourcef250187, same bfdf8d0 kernel local20261025-084355/noCI,
