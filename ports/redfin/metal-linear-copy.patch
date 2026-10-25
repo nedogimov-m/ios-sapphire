@@ -7,7 +7,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     struct redfin_metal_command_scope command_scope;
 +   struct rwa_texture *linear_textures;
 +   uint64_t linear_epoch,linear_copies[2];
-+   void *linear_copy_cso;
++   void *linear_copy_cso,*linear_byte_copy_cso;
  
     /* What this screen requires of a buffer offset, per binding, read once. Only an
      * argument buffer's member has an offset at all here (rwa_argbuf_encode_buffer), and
@@ -31,7 +31,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
  
  /* A sampler is a Gallium state object and nothing more. The state it was built from is
   * not kept: a refusal about a sampler happens while it is being created, where the
-@@ -583,6 +598,10 @@
+@@ -583,6 +598,14 @@
        return;
     if (device->default_sampler)
        device->pipe->delete_sampler_state(device->pipe, device->default_sampler);
@@ -39,10 +39,14 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
 +      device->pipe->bind_compute_state(device->pipe,NULL);
 +      device->pipe->delete_compute_state(device->pipe,device->linear_copy_cso);
 +   }
++   if(device->linear_byte_copy_cso) {
++      device->pipe->bind_compute_state(device->pipe,NULL);
++      device->pipe->delete_compute_state(device->pipe,device->linear_byte_copy_cso);
++   }
     device->pipe->destroy(device->pipe);
     device->screen->destroy(device->screen);
     free(device);
-@@ -1424,14 +1443,14 @@
+@@ -1424,14 +1447,14 @@
           free(texture);
           return NULL;
        }
@@ -65,7 +69,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
        }
  
        /*
-@@ -1524,6 +1543,7 @@
+@@ -1524,6 +1547,7 @@
  {
     if (!texture)
        return;
@@ -73,7 +77,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     argbuf_scrub(texture->device, NULL, texture, NULL);
     pipe_surface_reference(&texture->render_surface,NULL);
     /* The view first: it holds a reference of its own on the resource. Nothing has to
-@@ -1685,6 +1705,8 @@
+@@ -1685,6 +1709,8 @@
         !caller_stride(texture, &box, stride, &row, why, why_size))
        return -1;
  
@@ -82,7 +86,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     /* The slice stride is the region's own rows, because the contract has one stride: a
      * caller handing over a 3D region hands over a packed stack of its rows, which is
      * what -replaceRegion:...bytesPerRow:bytesPerImage: is given when bytesPerImage is
-@@ -1693,7 +1715,8 @@
+@@ -1693,7 +1719,8 @@
     texture->device->pipe->texture_subdata(texture->device->pipe, texture->res, level,
                                            PIPE_MAP_WRITE, &box, bytes, row,
                                            row * box.height);
@@ -92,7 +96,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
  }
  
  int
-@@ -1742,6 +1765,7 @@
+@@ -1742,6 +1769,7 @@
         !caller_stride(texture, &box, stride, &row, why, why_size))
        return -1;
  
@@ -100,7 +104,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     struct pipe_transfer *xfer = NULL;
     const uint8_t *map = pipe->texture_map(pipe, texture->res, level, PIPE_MAP_READ, &box,
                                            &xfer);
-@@ -3156,10 +3180,16 @@
+@@ -3156,10 +3184,16 @@
     return finish_or_say_why(opaque, true, "Metal commands", why, why_size);
  }
  
@@ -117,7 +121,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     if (error) say(why,why_size,"Metal command scope is already active or retired");
     return error;
  }
-@@ -3168,7 +3198,10 @@
+@@ -3168,7 +3202,10 @@
  rwa_commands_end(struct rwa_device *device, char *why, size_t why_size)
  {
     int error=redfin_metal_scope_end(&device->command_scope,command_scope_finish,device,why,why_size);
@@ -129,7 +133,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     else if (why && why_size && !why[0]) say(why,why_size,"Metal command scope retired after a failed completion");
     return error;
  }
-@@ -3614,6 +3647,17 @@
+@@ -3614,6 +3651,17 @@
             size_t why_size)
  {
     struct pipe_context *pipe = device->pipe;
@@ -147,7 +151,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
  
     /* Each buffer bound as whatever the shader declared the index to be. Metal has one
      * [[buffer(n)]] index space and Gallium has two, so a `constant` parameter is a UBO
-@@ -3759,6 +3803,7 @@
+@@ -3759,6 +3807,7 @@
           break;
  
        case AIR_RESOURCE_IMAGE:
@@ -155,7 +159,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
           images[r->index] = (struct pipe_image_view){
              .resource = t->res,
              .format = t->res->format,
-@@ -3976,6 +4021,7 @@
+@@ -3976,6 +4025,7 @@
                    bindings, table, table_count, name, &bound, why, why_size) != 0)
        return -1;
  
@@ -163,7 +167,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     struct pipe_grid_info grid = {
        .work_dim = 3,
        .block = { group_size[0], group_size[1], group_size[2] },
-@@ -6819,6 +6865,10 @@
+@@ -6819,6 +6869,10 @@
           return -1;
     }
  
@@ -174,7 +178,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     /* Borrow the textures' stable base-level surfaces, retaining one reference
      * for this draw and one for Gallium's framebuffer/dependency lifetime. */
     struct pipe_surface *surf[PIPE_MAX_COLOR_BUFS] = { 0 };
-@@ -7028,6 +7078,8 @@
+@@ -7028,6 +7082,8 @@
           .index_bias = index_size ? draw->base_vertex : 0,
        };
        pipe->draw_vbo(pipe, &info, 0, NULL, &sc, 1);
@@ -183,7 +187,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     }
  
     /* Waited for here, on the same grounds as a dispatch: a picture that was never drawn
-@@ -7037,6 +7089,7 @@
+@@ -7037,6 +7093,7 @@
      */
     rc = redfin_metal_scope_complete(&device->command_scope,render->raster_only,
                                     command_scope_finish,device,why,why_size);

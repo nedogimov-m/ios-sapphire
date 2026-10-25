@@ -7,9 +7,10 @@ extern struct pipe_resource *redfin_freedreno_buffer_alias(struct pipe_screen *,
     struct pipe_resource *,unsigned *,unsigned *);
 
 static void *
-rwa_redfin_copy_shader(struct rwa_device *device,char *why,size_t why_size)
+rwa_redfin_row_shader(struct rwa_device *device,unsigned bits,char *why,size_t why_size)
 {
-   if(device->linear_copy_cso)return device->linear_copy_cso;
+   void **slot=bits==8?&device->linear_byte_copy_cso:&device->linear_copy_cso;
+   if(*slot)return *slot;
    nir_builder b=nir_builder_init_simple_shader(MESA_SHADER_COMPUTE,device->nir_options,
       "Redfin native IOSurface row conversion");
    b.shader->info.workgroup_size[0]=64;b.shader->info.workgroup_size[1]=1;
@@ -20,20 +21,20 @@ rwa_redfin_copy_shader(struct rwa_device *device,char *why,size_t why_size)
       .align_mul=4,.align_offset=0,.range_base=4*i,.range=4);
    nir_def *id=nir_load_global_invocation_id(&b,32),*x=nir_channel(&b,id,0),*y=nir_channel(&b,id,1);
    nir_push_if(&b,nir_iand(&b,nir_ult(&b,x,parameters[0]),nir_ult(&b,y,parameters[1])));
-   nir_def *column=nir_ishl_imm(&b,x,2);
+   nir_def *column=bits==8?x:nir_ishl_imm(&b,x,2);
    nir_def *source=nir_iadd(&b,parameters[4],nir_iadd(&b,nir_imul(&b,y,parameters[2]),column));
    nir_def *destination=nir_iadd(&b,parameters[5],nir_iadd(&b,nir_imul(&b,y,parameters[3]),column));
-   nir_def *word=nir_load_ssbo(&b,1,32,nir_imm_int(&b,0),source,
-      .align_mul=4,.align_offset=0,.access=ACCESS_NON_WRITEABLE);
+   nir_def *word=nir_load_ssbo(&b,1,bits,nir_imm_int(&b,0),source,
+      .align_mul=bits/8,.align_offset=0,.access=ACCESS_NON_WRITEABLE);
    nir_store_ssbo(&b,word,nir_imm_int(&b,1),destination,
-      .align_mul=4,.align_offset=0,.write_mask=1,.access=ACCESS_NON_READABLE);
+      .align_mul=bits/8,.align_offset=0,.write_mask=1,.access=ACCESS_NON_READABLE);
    nir_pop_if(&b,NULL);
    nir_shader_gather_info(b.shader,nir_shader_get_entrypoint(b.shader));
    finalize_for_gallium(b.shader,device->screen);
-   device->linear_copy_cso=device->pipe->create_compute_state(device->pipe,
+   *slot=device->pipe->create_compute_state(device->pipe,
       &(struct pipe_compute_state){.ir_type=PIPE_SHADER_IR_NIR,.prog=b.shader});
-   if(!device->linear_copy_cso)say(why,why_size,"native GPU row-copy shader creation failed");
-   return device->linear_copy_cso;
+   if(!*slot)say(why,why_size,"native GPU row-copy shader creation failed");
+   return *slot;
 }
 
 static int
@@ -52,7 +53,7 @@ rwa_redfin_copy_rows(struct rwa_texture *texture,bool output,char *why,size_t wh
       source->width0,destination->width0)) {
       say(why,why_size,"native IOSurface row conversion escapes its actual buffers");return -1;
    }
-   void *shader=rwa_redfin_copy_shader(device,why,why_size);if(!shader)return -1;
+   void *shader=rwa_redfin_row_shader(device,32,why,why_size);if(!shader)return -1;
    if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,why_size))return -1;
    if(pipe->memory_barrier)pipe->memory_barrier(pipe,PIPE_BARRIER_ALL);
    const struct pipe_shader_buffer buffers[2]={

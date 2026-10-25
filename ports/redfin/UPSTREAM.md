@@ -1,5 +1,35 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual ordered Metal blits and raw-alias transfer metadata — 2026-10-25
+
+Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab. Re-reviewed redwoodmetal.m's
+unserved blit encoder, retained command work and genuine _MTLCommandEncoder
+init/endEncoding lifetime. V20 records actual CoreAnimation blit calls. Add a
+paired152-byte request ABI, retained ordered work and a real native encoder.
+Encoding never copies pixels or reports an unexecuted request complete; errors
+are delivered by the ordinary command-buffer completion/slot-cleanup path.
+
+Review Mesa25.0.7 FD6 clear_buffer/blit, raw aliases, NIR subword SSBO stores and
+transfer-helper format selection. One-byte FD6 fills avoid its alignment
+fallback. Copies use bounded native NIR byte/word rows and direct A6xx texture
+blits; buffer/texture transfers cross an actual aligned LINEAR staging texture.
+No generic Gallium CPU transfer fallback is used. Mipmaps use real GPU linear
+filtering. Bounds/device/overlap/format checks precede narrowing and GPU access;
+unserved advanced operations become actual command errors. Nonmultisample,
+uncompressed colour resources are supported; depth/compressed/3D mip generation
+and advanced fences/counters/indirect commands remain explicitly unsupported.
+
+V20's diagnostic-only CPU map reaches a bogus depth conversion because the
+raw PIPE_BUFFER constructor left internal_format at NONE although the external
+format is R8_UINT. Initialize the actual native internal format before layout
+setup. A regression executes that constructor and Mesa's real transfer-selection
+function; the old missing initializer must reproduce the conversion decision.
+Offscreen native checks exercise byte fills/copies/guards, two queued real
+buffer/texture/IOSurface roundtrips and mip levels, including source preservation
+and command failure/recovery. Hardware correctness and actual system rendering
+must still be established by the combined capture; Phone/Photos stay untouched.
+
 ## Publish native Scheduled only after genuine submission — 2026-10-25
 
 Preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and unchanged kernel

@@ -9,7 +9,7 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
  #include "freedreno_screen.h"
  #include "freedreno_surface.h"
  #include "freedreno_util.h"
-@@ -1576,6 +1577,60 @@
+@@ -1576,6 +1577,85 @@
     return NULL;
  }
  
@@ -25,6 +25,7 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
 +      .bind=PIPE_BIND_SHADER_BUFFER,.usage=PIPE_USAGE_DEFAULT};
 +   struct fd_resource *rsc=alloc_resource_struct(screen,&shape);
 +   if(!rsc){fd_bo_del(bo);return NULL;}
++   rsc->internal_format=PIPE_FORMAT_R8_UINT;
 +   fd_resource_layout_init(&rsc->b.b);
 +   fdl_layout_buffer(&rsc->layout,size);
 +   tc_buffer_disable_cpu_storage(&rsc->b.b);
@@ -53,6 +54,30 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
 +   struct pipe_resource *buffer=redfin_buffer_from_bo(screen,fd_bo_ref(rsc->bo));
 +   if(buffer){*pitch=fd_resource_pitch(rsc,0);*offset=(unsigned)start;}
 +   return buffer;
++}
++int
++redfin_freedreno_gpu_blit(struct pipe_context *pipe,const struct pipe_blit_info *info)
++{
++   if(!pipe||!info||!info->src.resource||!info->dst.resource||
++      info->src.resource->screen!=pipe->screen||info->dst.resource->screen!=pipe->screen||
++      !is_a6xx(fd_context(pipe)->screen))return -1;
++   fd_context_access_begin(fd_context(pipe));
++   bool emitted=fd_context(pipe)->blit&&fd_context(pipe)->blit(fd_context(pipe),info);
++   fd_context_access_end(fd_context(pipe));
++   return emitted?0:-1; /* deliberately no generic CPU fallback */
++}
++int
++redfin_freedreno_gpu_fill(struct pipe_context *pipe,struct pipe_resource *resource,
++    unsigned offset,unsigned bytes,uint8_t value)
++{
++   if(!pipe||!resource||resource->screen!=pipe->screen||!is_a6xx(fd_context(pipe)->screen)||
++      !pipe->clear_buffer||resource->target!=PIPE_BUFFER||offset>resource->width0||bytes>resource->width0-offset)return -1;
++   if(!bytes)return 0;
++   fd_context_access_begin(fd_context(pipe));
++   /* FD6's one-byte clear has no alignment fallback and preserves byte guards. */
++   pipe->clear_buffer(pipe,resource,offset,bytes,&value,1);
++   fd_context_access_end(fd_context(pipe));
++   return 0;
 +}
 +int
 +redfin_freedreno_alias_written(struct pipe_context *pipe,struct pipe_resource *resource)

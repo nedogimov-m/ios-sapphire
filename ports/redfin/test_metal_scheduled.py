@@ -75,7 +75,7 @@ static void redfin_metal_io_completed(const uint64_t *a,const uint64_t *b){(void
 @implementation TestQueue
 - (TestDevice *)device {static TestDevice *device;static dispatch_once_t once;dispatch_once(&once,^{device=[TestDevice new];});return device;}
 @end
-@interface RedwoodMetalWork : NSObject { @public id render;BOOL redfinClearOnly; }
+@interface RedwoodMetalWork : NSObject { @public id render;BOOL redfinClearOnly;struct {unsigned operation;} redfinBlit; }
 @end
 @implementation RedwoodMetalWork
 @end

@@ -6,9 +6,12 @@
 struct pipe_screen;
 struct pipe_resource;
 struct pipe_context;
+struct pipe_blit_info;
 struct pipe_resource *redfin_freedreno_import_buffer(struct pipe_screen *,unsigned);
 struct pipe_resource *redfin_freedreno_buffer_alias(struct pipe_screen *,struct pipe_resource *,unsigned *,unsigned *);
 int redfin_freedreno_alias_written(struct pipe_context *,struct pipe_resource *);
+int redfin_freedreno_gpu_blit(struct pipe_context *,const struct pipe_blit_info *);
+int redfin_freedreno_gpu_fill(struct pipe_context *,struct pipe_resource *,unsigned,unsigned,uint8_t);
 
 /* Bounds for the actual native layout, not a claim about sampler support.
  * V18 hardware rounds 480/4512-byte source rows to 512/4544. GPU buffer
