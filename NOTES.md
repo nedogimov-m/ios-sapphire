@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native GPU panel output proved; remaining cadence and userland work — 2026-10-25
+
+Source13e151f / local native build20261025-050146/noCI. Authenticated boot
+026ce38e14155367/image7981aae14f8105ffe0be92ec849754ad95f6dcd6b0d3e1dcfd7980be08b9e8ee.
+Actual A6202D check completes fence3 and compares all2527200private output
+pixels with zero mismatches/guard errors before panel mapping. First four
+physical frames pass64sample comparisons each. GPU panel presentations
+exceed2400, with one unsupported-swap fallback; startup logs one CPU present.
+Backboardd has actual completed fences through11520, EAGL frames2460, both
+shader/IOSurface passes and one event-server installation. No Mesa submit
+error, runtime retirement, kernel panic or backboardd restart. Touch finishes
+104contacts/releases, error/overflow0. Native clean shutdown replays the
+earlier pending journal; HFSX consistent/clean/write_count761257, six file
+logs captured read-only, verified Fastboot. Never reuse the pre-boot repair
+snapshot for further updates; the next fresh snapshot is V8.
+
+GPU panel work averages7805us at2400presents; the whole presenter averages
+13162us including queue/mutex/source work and startup. Full per-submit GPU
+audits still average3240us (V5:4467us), GPU timestamp3126us across the mixed
+render/presentation stream. User observes slightly smoother UI but estimates
+30–40fps, still jerky with slow response. This is not measured hardware
+vblank or stable60fps. Next complete performance work must reduce remaining
+read-only audit/presentation cost while retaining native completion/faults.
+
+The repaired Photos helper executes with native-flags0x26004003/platform1/
+admitted1 and verified512MiB limit. MobileGestalt serial is present and its
+private digest matches the physical Pixel serial; user confirms the About
+row. User requests the model-number row too. The helper refuses its native
+system-library URL guard before creation, so ready=0. No library-create
+success is claimed. User confirms Phone works and Photos still aborts;
+Photos244/246/247/275 and one early assetsd245 report require fresh native
+review. A later assetsd268 survives. Native URL/path classification is the
+next photo-bootstrap target, not a GPU/Metal assertion bypass.
+
+User also reports Wi-Fi credentials do not survive boots. Include native
+known-network/Keychain persistence in the next coherent performance/Photos/
+model block; no new password workaround or plaintext credential store exists.
+Metal and Apple account activation/login remain unfinished.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=2 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=60 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x026ce38e14155367 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete GPU panel block checked, built and preflighted; Photos bytes restored — 2026-10-25
 
 All122distinct selected host cases PASS. The first combined run exposed
