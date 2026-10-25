@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V22 native sharing/tails/mips PASS; compositor next requests buffer textures — 2026-10-25
+
+Source7c6128c, graphics local20261025-164824/noCI, unchanged kernel
+local20261025-134128/noCI7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V22 boot image4ad178244c2f21ed5c512955a6e02ddeec32fd1fc8842ba78ad4f676e7221ee1,
+nonce81b8c1387c02a459. Fresh root V25 applied once:177ranges/23842816bytes/
+5new/zero freed; full preimages/signed-file/readback/readonly fsck PASS.
+V25 is now applied/stale. Authenticated capture leaves clean consistent HFSX/
+write_count973667 and verified Fastboot. No kernel panic/runtime GPU fault;
+backboardd62 stays alive. App checker has no current nonce; no automatic app
+launches. User-confirmed Phone/Photos remain outside these tests.
+
+All previous192compute/raster/MRT/scissor/viewport/fetch/vertex/sampling/pitch/
+resolve probes still PASS. Byte-fill/copy/source/guards plus actual invalid-range
+callback/next-command recovery now PASS; both queued texture/IOSurface roundtrips
+PASS. Mips1and6 pass actual pixels/base preservation after allocating the genuine
+dword tail. All eight1/2/3/5/7/31/63/65-byte buffers pass both native fill/copy.
+GPU compute writes the caller's original cached external pages and reads fresh
+CPU writes from those same pages; surrounding pages, logical guard bytes and
+deallocator lifetime after caller release before commit PASS.26GMEM/35sysmem.
+
+Broader observer captures48CRC-verified real images through draw81, including
+private tiled inputs/attachments and correct initial clock/image data. Final
+physical frame/present12 still shows red/black checkerboard and cyan fills;
+do NOT claim graphical correctness or ordinary FPS from these diagnostics.
+The original CoreAnimation process requests16384-byte, page-aligned, Shared0
+no-copy buffers and now receives genuine original-page imports. Its next actual
+call is the explicitly unserved MTLBuffer newTextureWithDescriptor:offset:
+bytesPerRow:. No recorded compositor blit request executes yet. Implement that
+real buffer/texture alias with proper parent ownership/readiness and ordered
+buffer-to-texture visibility/resolve; include guarded bidirectional native probes
+in the next complete related block. Do not silently copy buffer-backed textures.
+Stable/correct system rendering and broader Wi-Fi/power/thermal/sensors/Apple
+authorization remain open. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x81b8c1387c02a459 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native external-buffer/completion/tail block built; fresh V25 staged — 2026-10-25
 
 Source base7577403 plus this complete related block. Allocate real native
