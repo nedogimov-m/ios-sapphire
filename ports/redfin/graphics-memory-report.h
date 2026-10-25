@@ -20,7 +20,12 @@ static inline void redfin_graphics_memory_report(const char *phase,unsigned ordi
     mach_msg_type_number_t count=TASK_VM_INFO_REV4_COUNT;
     kern_return_t status=task_info(mach_task_self(),TASK_VM_INFO,(task_info_t)&info,&count);
     int footprint_valid=status==KERN_SUCCESS && count>=TASK_VM_INFO_REV1_COUNT;
-    int limit_valid=footprint_valid && count>=TASK_VM_INFO_REV4_COUNT;
+    /* 8796 returns zero remaining bytes for every !isApp daemon, including
+     * backboardd and our checker. Field presence alone cannot establish a
+     * usable process limit. A zero also cannot distinguish an exhausted app.
+     */
+    int limit_valid=footprint_valid && count>=TASK_VM_INFO_REV4_COUNT &&
+        info.limit_bytes_remaining!=0;
     uint64_t footprint=footprint_valid?info.phys_footprint:0;
     uint64_t remaining=limit_valid?info.limit_bytes_remaining:0;
     uint64_t limit=limit_valid && remaining<=UINT64_MAX-footprint?footprint+remaining:0;

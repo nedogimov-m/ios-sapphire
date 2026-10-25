@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V31 shader memory fix survives full run; system pixels remain wrong — 2026-10-25
+
+Source818a049; graphics local20261025-214502/noCI,
+pairingade1b05cda9a3b93eee928cbcacadc434ecd6ab74d36082dc459fa6434254aa9.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V31 imageb9e6d8e316b566aaee48bde287df915c78fb19bccf090bd6ae8ea43587de3082,
+nonce98857fe8f8154d78. V34 applied once:214ranges/23420928bytes/4new/
+zero freed; complete preimages/file readback/signatures/readonly native fsck
+PASS. V34 is applied/stale; never reuse. Authenticated exact current boot
+reports userspace-alive/no kernel panic, clean consistent HFSX/write_count
+1101928 and verified Fastboot. Next fresh root stageV35/imageV32.
+
+Only one actual backboardd62: it remains alive for the whole178-second
+userspace interval and exits only when launchd kills it during the ordinary
+scheduled shutdown. No per-process-limit kill and no current compositor refusal
+is recorded. Native own-task footprint grows from about30MiB at pipeline1 to
+88048KiB at pipeline32. These are samples, not a full-run peak or FPS estimate.
+The kernel independently confirms the unchanged active/inactive/effective512MiB
+admission. All native32resource rounds,192compute commands, Bool/Bool3,
+raster/vertex/MRT/transfer/pitch/resolve/alias/A8 pixel/guard probes PASS after
+the original-stage release and NIR sweep. App-launch jobs remain disabled.
+
+37strict draw records pass bounds/base64/CRC; all3physical screenshots also
+pass exact sequence/base64/CRC after removing ONE unrelated leading IOKit log
+prefix from a derived transport view. Original capture remains intact; no
+pixel/payload/CRC edits. Clock and parts of the lock screen now appear, but
+green text, cyan fills and checkerboard blocks remain: this is not a correct GUI.
+No sustained rendering FPS claim is made. Next inspect the actual half-precision
+stage I/O and packed constant paths; current authored raster probes use float32
+and therefore do not establish correctness of Apple's half4 system shaders.
+
+Observer correction: TASK_VM_INFO's remaining-limit field is present but always
+zero for these daemons. Actual8796 memorystatus_available_memory_internal returns
+zero for !isApp, so adding footprint to that zero is NOT an effective-limit
+measurement. Mark zero unavailable in the next bundle; retain actual footprint
+and kernel512MiB evidence. No memory policy/entitlement/kernel change.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x98857fe8f8154d78 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN shader lifetime block built; fresh V34 prepared for V31 — 2026-10-25
 
 Source base4fe1804 plus this complete block. Preserve the already observed

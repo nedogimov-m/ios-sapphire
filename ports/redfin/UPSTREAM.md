@@ -24,7 +24,12 @@ actual parameter variants compile after sweeping, and repeated independent
 context release preserves validated surviving NIR. Fresh native build/actual
 ABI/signatures and34host cases pass. One combined native run remains pending;
 host allocator results do not establish the phone's process footprint or correct
-system rendering. No process limit, page check or kernel source changes.
+system rendering. V31 now proves one backboardd survives the complete178-second
+userspace run, with88048KiB sampled at pipeline32 and no jetsam/restart. All
+native GPU contracts pass after the lifetime change; actual system colours and
+checkerboard corruption remain. No process limit, page check or kernel changes.
+8796's remaining-limit SPI returns zero for !isApp daemons; that zero is marked
+unavailable rather than reported as a measured effective limit.
 
 ## Defined packed state before executable resource analysis — 2026-10-25
 
