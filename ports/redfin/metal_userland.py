@@ -231,6 +231,17 @@ static void redfin_metal_completed(unsigned draws,unsigned computes,uint64_t que
             (unsigned long long)redfin_phase_us(finishing,finished),
             (unsigned long long)redfin_phase_us(queued,finished));
 }
+static void redfin_metal_io_completed(const uint64_t before[4],const uint64_t after[4])
+{
+    if(!before||!after||!redfin_fence_boot[0])return;
+    for(unsigned i=0;i<4;++i)if(after[i]<before[i])return;
+    uint64_t count=__atomic_load_n(&redfin_fence_count,__ATOMIC_RELAXED);
+    if(count && (count<=4 || !(count&(count-1)) || !(count%120)))
+        rw_print("REDFIN METAL IO: boot=%s sequence=%llu actual-finish=1 io-scope=process submit-calls=%llu submit-io-us=%llu allocation-calls=%llu allocation-io-us=%llu\n",
+            redfin_fence_boot,(unsigned long long)count,
+            (unsigned long long)(after[0]-before[0]),(unsigned long long)((after[1]-before[1])/1000),
+            (unsigned long long)(after[2]-before[2]),(unsigned long long)((after[3]-before[3])/1000));
+}
 '''
 
 
@@ -262,14 +273,16 @@ def adapt_driver(text):
         '\tint (*finish)(struct rwa_device *, char *, size_t);\n'
         '\tint (*commands_begin)(struct rwa_device *, char *, size_t);\n'
         '\tint (*commands_end)(struct rwa_device *, char *, size_t);\n'
-        '\tint (*raster_statistics)(struct rwa_device *,uint64_t *,size_t);')
+        '\tint (*raster_statistics)(struct rwa_device *,uint64_t *,size_t);\n'
+        '\tint (*submission_statistics)(struct rwa_device *,uint64_t *,size_t);')
     text = replace_once(text,'\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");',
         '\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");\n'
         '\t*(void **)&mesa.commands_begin = dlsym(mesa.handle, "rwa_commands_begin");\n'
         '\t*(void **)&mesa.commands_end = dlsym(mesa.handle, "rwa_commands_end");\n'
-        '\t*(void **)&mesa.raster_statistics = dlsym(mesa.handle,"rwa_redfin_raster_stats");')
+        '\t*(void **)&mesa.raster_statistics = dlsym(mesa.handle,"rwa_redfin_raster_stats");\n'
+        '\t*(void **)&mesa.submission_statistics = dlsym(mesa.handle,"rwa_redfin_submission_stats");')
     text = replace_once(text,'if (mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||',
-        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL || mesa.raster_statistics == NULL ||\n'
+        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL || mesa.raster_statistics == NULL || mesa.submission_statistics == NULL ||\n'
         '\t    mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||')
     text = replace_once(text,'- (void)commit\n{\n\tchar why[512] = { 0 };',
         '- (void)commit\n{\n\tREDFIN_MESA_SCOPE;\n\tchar why[512] = { 0 };\n'
@@ -285,6 +298,10 @@ def adapt_driver(text):
         '\t\t\tunsigned draws=0,computes=0;\n'
         '\t\t\tfor (RedwoodMetalWork *work in _work) {if(work->render) ++draws;else ++computes;}\n'
         '\t\t\tredfin_metal_completed(draws,computes,_redfinQueuedTicks,redfin_worker_at,redfin_acquired_at,redfin_fence_at,mach_absolute_time());\n'
+        '\t\t\tif(redfin_io_start_valid && (draws||computes)) {\n'
+        '\t\t\t\tuint64_t redfin_io_end[4]={0};\n'
+        '\t\t\t\tif(!mesa.submission_statistics([[_queue device] mesaDevice],redfin_io_end,4))\n'
+        '\t\t\t\t\tredfin_metal_io_completed(redfin_io_start,redfin_io_end);\n\t\t\t}\n'
         '\t\t}\n\t}\n'
         '\t/* The queue\'s slot goes back here')
     # retainedReferences:YES applies during encoding as well as execution.
@@ -418,7 +435,9 @@ def adapt_execution(text):
         '\t\tredfin_metal_schedule(_redfinExecution,^{\n'
         '\t\t\t@autoreleasepool {[self redfinExecute];}\n\t\t});\n\t}\n}\n\n'
         '- (void)redfinExecute\n{\n\tuint64_t redfin_worker_at=mach_absolute_time();\n'
-        '\tREDFIN_MESA_SCOPE;\n\tuint64_t redfin_acquired_at=mach_absolute_time();')
+        '\tREDFIN_MESA_SCOPE;\n\tuint64_t redfin_acquired_at=mach_absolute_time();\n'
+        '\tuint64_t redfin_io_start[4]={0};\n'
+        '\tBOOL redfin_io_start_valid=RF_MESA(submission_statistics,[[_queue device] mesaDevice],redfin_io_start,4)==0;')
     text=replace_once(text,'done:;\n\t} @finally {',
         'done:;\n\t} @catch (NSException *exception) {\n'
         '\t\t[self failWith:exception.reason.UTF8String ?: "Metal execution raised an exception"];\n'

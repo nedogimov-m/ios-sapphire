@@ -9,6 +9,8 @@
 #include <sys/systm.h>
 #include <sys/redfin_wifi_gui.h>
 extern int redfin_gui_cpu0(void);
+extern void *redfin_gui_worker_enter(void);
+extern void redfin_gui_worker_leave(void *);
 extern int redfin_spmi_return_ready(void);
 extern bool redfin_touch_boot_lease_valid(unsigned);
 extern bool redfin_touch_boot_lease_held(unsigned);
@@ -60,10 +62,12 @@ bool redfin_wifi_gui_boot_id(uint64_t *epoch)
 }
 bool redfin_wifi_return_held(void)
 { return redfin_spmi_return_ready() == 1 || redfin_wifi_gui_ready(); }
-void redfin_wifi_gui_start(void)
+static void wifi_gui_start_bound(void)
 {
-    if (!redfin_wifi_gui_requested() || !redfin_gui_cpu0() ||
-        !redfin_touch_boot_lease_valid(2) || redfin_touch_rail_ready() != 1) return;
+    if (!redfin_wifi_gui_requested()) return;
+    if (!redfin_gui_cpu0()) {printf("REDFIN WIFI GUI: launch CPU0 affinity unavailable; no radio operation\n");return;}
+    if (!redfin_touch_boot_lease_valid(2)) {printf("REDFIN WIFI GUI: initial touch owner unavailable; no radio operation\n");return;}
+    if (redfin_touch_rail_ready()!=1) {printf("REDFIN WIFI GUI: retained touch rail unavailable; no radio operation\n");return;}
     unsigned expected = 0;
     if (!__atomic_compare_exchange_n(&wifi_gui_handoff, &expected, 3, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
     const char *args = PE_boot_args();
@@ -77,6 +81,16 @@ void redfin_wifi_gui_start(void)
     __atomic_store_n(&wifi_gui_handoff, 1, __ATOMIC_RELEASE);
     printf("REDFIN WIFI GUI: touch DRV2 setup complete; starting the serialized native radio worker\n");
     redfin_wifi_fw_start();
+}
+void redfin_wifi_gui_start(void)
+{
+    if(!redfin_wifi_gui_requested())return;
+    /* GPU startup may yield while creating its service threads. Re-establish
+     * CPU0 for this one metadata handoff, then restore the caller's affinity.
+     * All actual radio writes remain on the separate established CPU0 owner. */
+    void *previous=redfin_gui_worker_enter();
+    wifi_gui_start_bound();
+    redfin_gui_worker_leave(previous);
 }
 void redfin_wifi_gui_stop(void)
 {

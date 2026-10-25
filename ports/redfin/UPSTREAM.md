@@ -1569,3 +1569,30 @@ without inventing identities or samples. Firmware/calibration and extracted
 JSNs remain private. Google msm500b3a2059c1eec0fec08ec56add06320ea901a8
 `drivers/input/misc/vd6281/vd6281_module.c`/`i2c-qcom-geni.c` are reviewed
 for the still-unimplemented separate VD6281 path; SSC does not claim it.
+
+
+## Imported linear GMEM backing and native submission timing — 2026-10-25
+
+Preferred kernel `8e61187098f2c26c5daee8f9f72b6416aa64b9ab` and userland
+`906425b75e02b4f99eb5d7bb1ef7c9583472d772` remain the reviewed sources.
+Re-reviewed the latter's `tools/mesa/redwood-drm/redwood_drm.c` native
+IOKit call boundary and its paired AIR/Metal command execution. Observe
+actual allocation/submit calls without changing requests, results or fence
+semantics; snapshots are process totals, and encode time can include internal
+blocking submissions. The Redfin WLAN metadata handoff now explicitly
+preserves/restores CPU0 binding using the existing shared GUI owner helpers;
+all radio writes remain on its established separate CPU0 worker.
+
+Mesa 25.0.7, archive SHA256
+`592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6`,
+`src/freedreno/fdl/fd6_layout.c` explicitly requires a 16x4 GMEM transfer
+footprint. Imported linear storage in `freedreno_resource.c` instead records
+stride times actual height, while `a6xx/fd6_resource.cc` accepts the linear
+modifier without enforcing padded backing. For an attachment whose real
+allocation cannot cover the rounded four-row transfer, select actual A620
+sysmem rendering even when a debug GMEM request is set. Preserve the original
+BO mapping/guards and retain GMEM for sufficiently backed attachments. The
+native Metal checker exercises the observed 1065x282/BPR4288/1212416-byte
+shape and requires actual pixels, retained tail guards and counter-proven
+sysmem routing. Matching the previous fault to this old surface's BO remains
+a hypothesis until actual runtime evidence establishes it.

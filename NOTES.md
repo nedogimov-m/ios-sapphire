@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN imported GMEM bounds/CPU0 WLAN/native I/O block built; fresh V18 staged — 2026-10-25
+
+Source base f01af55 plus this complete block. Mesa now checks the actual
+four-row GMEM attachment footprint against each real linear BO allocation.
+Short imports use actual GPU sysmem rendering, including under forced GMEM;
+adequately backed attachments retain GMEM. No extra mapping/guard access or
+CPU raster fallback. Native Metal adds the exact observed1065x282/BPR4288/
+1212416-byte pixel/tail-guard/routing probe. Real IOKit allocation/submit
+counter snapshots distinguish encoding's internal blocked I/O from final
+finish time; counters are process totals, not per-command exclusive work.
+The WLAN metadata handoff explicitly preserves/restores CPU0 affinity through
+the existing GUI worker helpers; its original owner/rail/epoch checks remain.
+The kernel also correlates a future outside-BO fault with the closest actual
+preceding submitted allocation. These are implementations, not V16 hardware
+observations; the previous fault's surface identity remains unproved.
+
+132 combined host cases PASS/no skips. Full ordered-overlay kernel and fresh
+Mesa/AIR/native Metal/actual20H392 import/signature builds PASS. Kernel local
+20261025-132529/noCI, cd481eed02d8a608157b84ef1d897d21030285c62b2c7c408e786c408605dc33.
+Graphics research/redfin-metal-linear-v2; local20261025-132625/noCI.
+V16 image 51146b6e60908851e4c0b18409e693fd580e85502ab0cbfc8efda1e0a39ec606,
+nonceac28cc9debc84626. Real loader/ADT/liveFDT/firmware/nativeDVFS/
+128MiB window/return preflight PASS, Image130660976bytes. Physical90Hz and
+full-canvas settings are retained. No FPS improvement or sensor success claimed.
+
+Fresh V18 snapshot starts from clean consistent HFSX/write_count896391.
+Only paired graphics/Metal artifacts and native job cache are staged; all
+existing logs/identities/credentials remain intact. Full signed-file readback,
+seals and native readonly fsck PASS: 159ranges/25325568bytes/
+0new/zero freed blocks. V18 is PREPARED, NOT APPLIED at this
+checkpoint; V17 and older stages are applied/stale and must never be reused.
+Next apply V18 once and collect one combined autonomous V16 run. Sustained
+60/90render FPS, native FastRPC/SSC/HID/CoreMotion/directVD6281, actual saved
+Wi-Fi credential/autojoin, physical cable/motion and Apple authorization remain
+unfinished. Exact planned V16 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xac28cc9debc84626 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V15 exact unmapped GPU write captured; native profiling installed — 2026-10-25
 
 Source8ad81ae, local20261025-125153/noCI06f3b08b..., image55be5d4c...,

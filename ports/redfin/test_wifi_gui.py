@@ -26,15 +26,17 @@ class WiFiGUILeaseTests(unittest.TestCase):
 #include "gui-profile.h"
 static char args[608], alternative[608];
 static const char *live=args;
-static unsigned profiles,full_checks,held_checks,starts;
-static int cpu0,full,held,rail,up;
+static unsigned profiles,full_checks,held_checks,starts,binds,restores,bad_start;
+static int cpu0,full,held,rail,up,bind_ok;
 static const char *PE_boot_args(void){return live;}
 int redfin_gui_cpu0(void){return cpu0;}
+void *redfin_gui_worker_enter(void){unsigned before=cpu0;++binds;if(bind_ok)cpu0=1;return (void *)(uintptr_t)(before+1);}
+void redfin_gui_worker_leave(void *previous){++restores;cpu0=(int)(uintptr_t)previous-1;}
 int redfin_spmi_return_ready(void){return up;}
 bool redfin_touch_boot_lease_valid(unsigned mode){full_checks++;return mode==2 && full;}
 bool redfin_touch_boot_lease_held(unsigned mode){held_checks++;return mode==2 && held;}
 int redfin_touch_rail_ready(void){return rail;}
-void redfin_wifi_fw_start(void){starts++;}
+void redfin_wifi_fw_start(void){starts++;if(!cpu0)++bad_start;}
 static bool counted_profile(const char *a,unsigned n,uint64_t *epoch){
  profiles++;return redfin_wifi_gui_profile(a,n,epoch);
 }
@@ -45,15 +47,16 @@ static bool counted_profile(const char *a,unsigned n,uint64_t *epoch){
 void reset(const char *command){
  memset(args,0,sizeof(args));strncpy(args,command,sizeof(args)-1);
  memcpy(alternative,args,sizeof(args));live=args;
- profiles=full_checks=held_checks=starts=0;cpu0=full=held=rail=1;up=0;
+ profiles=full_checks=held_checks=starts=binds=restores=bad_start=0;cpu0=full=held=rail=bind_ok=1;up=0;
  wifi_gui_handoff=wifi_gui_bytes=0;wifi_gui_arguments=0;wifi_gui_epoch=0;
 }
 void fault(unsigned which){
  if(which==1)cpu0=0; if(which==2)held=0; if(which==3)full=0;
  if(which==4)rail=0; if(which==5)live=alternative;
  if(which==6)args[0]^=1; if(which==7)up=1;
+ if(which==8){bind_ok=0;cpu0=0;}
 }
-unsigned stat(unsigned which){const unsigned v[]={profiles,full_checks,held_checks,starts,wifi_gui_handoff};return which<5?v[which]:0;}
+unsigned stat(unsigned which){const unsigned v[]={profiles,full_checks,held_checks,starts,wifi_gui_handoff,binds,restores,bad_start};return which<8?v[which]:0;}
 int hot(unsigned count){for(unsigned i=0;i<count;i++)if(!redfin_wifi_gui_ready())return 0;return 1;}
 '''
         cls.lib = compile_shared(Path(cls.tmp.name), stub + source + wrapper, 'wifi_gui')
@@ -70,7 +73,7 @@ int hot(unsigned count){for(unsigned i=0;i<count;i++)if(!redfin_wifi_gui_ready()
         self.assertEqual(patched_source('bsd/dev/redfin_wifi_gui.c'), (HERE / 'wifi_gui.c').read_text())
         self.assertTrue(self.lib.redfin_wifi_gui_requested())
         self.assertFalse(self.lib.redfin_wifi_gui_ready())
-        for issue in (1, 3, 4):
+        for issue in (8, 3, 4):
             self.lib.reset(ARGS.encode())
             self.lib.fault(issue)
             self.lib.redfin_wifi_gui_start()
@@ -79,6 +82,17 @@ int hot(unsigned count){for(unsigned i=0;i<count;i++)if(!redfin_wifi_gui_ready()
         self.lib.redfin_wifi_gui_start()
         self.assertFalse(self.lib.redfin_wifi_gui_requested())
         self.assertEqual(self.lib.stat(3), 0)
+
+    def test_launch_rebinds_after_migration_and_restores_caller_affinity(self):
+        self.lib.fault(1)
+        self.lib.redfin_wifi_gui_start()
+        self.assertEqual((self.lib.stat(3),self.lib.stat(5),self.lib.stat(6),self.lib.stat(7)),(1,1,1,0))
+        self.assertFalse(self.lib.redfin_wifi_gui_ready(),'restored non-CPU0 caller has no radio write lease')
+
+    def test_every_early_refusal_restores_affinity_without_starting_a_radio_writer(self):
+        for issue in (3,4,8):
+            self.lib.reset(ARGS.encode());self.lib.fault(issue);self.lib.redfin_wifi_gui_start()
+            self.assertEqual((self.lib.stat(3),self.lib.stat(5),self.lib.stat(6)),(0,1,1))
 
     def test_hot_path_retains_epoch_without_reparsing_profile_or_touch_setup(self):
         self.lib.redfin_wifi_gui_start()

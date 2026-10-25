@@ -411,7 +411,16 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
                     i,bos[i].handle,b->address,b->size,address-b->address,b->surface!=NULL,b->clientMapped,b->flags,fsr);
                 break;
             }
-            if(!found)IOLog("REDFIN GPU FAULT BO: address=%#llx outside-submitted-BOs=1 count=%u FSR=%#x\n",address,r->nr_bos,fsr);
+            if(!found) {
+                gpu_buffer *previous=NULL;uint64_t end=0;
+                for(unsigned i=0;i<r->nr_bos;++i) {
+                    gpu_buffer *b=buffer(bos[i].handle);uint64_t limit=b->address+b->size;
+                    if(limit<=address&&limit>end){previous=b;end=limit;}
+                }
+                IOLog("REDFIN GPU FAULT BO: address=%#llx outside-submitted-BOs=1 count=%u FSR=%#x\n",address,r->nr_bos,fsr);
+                if(previous)IOLog("REDFIN GPU FAULT PRECEDING: VA=%#llx bytes=%llu end=%#llx gap=%llu surface=%u client-mapped=%u\n",
+                    previous->address,previous->size,end,address-end,previous->surface!=NULL,previous->clientMapped);
+            }
         }
     }
     gTiming.submitting+=gpuNow()-began;began=gpuNow();gTiming.submissions++;

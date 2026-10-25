@@ -1,0 +1,101 @@
+diff --git a/src/gallium/drivers/freedreno/freedreno_gmem.c b/src/gallium/drivers/freedreno/freedreno_gmem.c
+--- a/src/gallium/drivers/freedreno/freedreno_gmem.c
++++ b/src/gallium/drivers/freedreno/freedreno_gmem.c
+@@ -25,6 +25,7 @@
+ #include "freedreno_resource.h"
+ #include "freedreno_tracepoints.h"
+ #include "freedreno_util.h"
++#include "redfin_gmem_bounds.h"
+ 
+ /*
+  * GMEM is the small (ie. 256KiB for a200, 512KiB for a220, etc) tile buffer
+@@ -693,6 +694,28 @@
+    }
+ }
+ 
++/* FDL allocates four-row backing for native linear textures. IOSurface
++ * imports can provide only the actual rows; GMEM restore/resolve must never
++ * over-fetch into their guard. Direct GPU sysmem rendering remains valid. */
++static bool
++redfin_gmem_surface_fits(struct pipe_surface *surface)
++{
++   if (!surface) return true;
++   struct fd_resource *rsc=fd_resource(surface->texture);
++   unsigned level=surface->u.tex.level;
++   if (fd_resource_tile_mode(surface->texture,level)!=0) return true;
++   uint64_t offset=fd_resource_offset(rsc,level,surface->u.tex.first_layer);
++   unsigned rows=util_format_get_nblocksy(rsc->b.b.format,u_minify(rsc->b.b.height0,level));
++   bool fits=redfin_linear_gmem_fits(fd_bo_size(rsc->bo),offset,fd_resource_pitch(rsc,level),rows);
++   if (!fits) {
++      static unsigned notices;
++      unsigned n=__atomic_fetch_add(&notices,1,__ATOMIC_RELAXED);
++      if(n<8) fprintf(stderr,"REDFIN FD620 LINEAR BOUNDS: width=%u height=%u pitch=%u bytes=%u offset=%llu real-GPU-sysmem=1\n",
++         rsc->b.b.width0,rsc->b.b.height0,fd_resource_pitch(rsc,level),fd_bo_size(rsc->bo),(unsigned long long)offset);
++   }
++   return fits;
++}
++
+ void
+ fd_gmem_render_tiles(struct fd_batch *batch)
+ {
+@@ -752,6 +775,14 @@
+    if (batch->tessellation) {
+       assert(ctx->emit_sysmem_prep);
+       sysmem = true;
++   }
++
++   /* This is a backing-size requirement, including when a debug job asks
++    * for GMEM. Do not relax the kernel's actual mapped BO bounds. */
++   if (is_a6xx(ctx->screen) && !batch->nondraw) {
++      for (unsigned i=0;i<pfb->nr_cbufs;++i)
++         if (!redfin_gmem_surface_fits(pfb->cbufs[i])) sysmem=true;
++      if (!redfin_gmem_surface_fits(pfb->zsbuf)) sysmem=true;
+    }
+ 
+    fd_reset_wfi(batch);
+diff --git a/src/redwood-drm/redwood_drm.c b/src/redwood-drm/redwood_drm.c
+--- a/src/redwood-drm/redwood_drm.c
++++ b/src/redwood-drm/redwood_drm.c
+@@ -15,6 +15,8 @@
+ #include <IOKit/IOKitLib.h>
+ 
+ #include "xf86drm.h"
++#include "redfin_drm_profile.h"
++#include <time.h>
+ 
+ #define REDWOOD_GPU_SERVICE     "RedwoodGPU"
+ #define REDWOOD_GPU_SURFACE     0x7e            /* the request that is not Linux's */
+@@ -49,11 +51,33 @@
+ 	return dup(connection_fd);
+ }
+ 
++static uint64_t
++redfin_drm_now(void)
++{
++   struct timespec time;
++   if(clock_gettime(CLOCK_MONOTONIC,&time) || time.tv_sec<0) return 0;
++   return (uint64_t)time.tv_sec*UINT64_C(1000000000)+(uint64_t)time.tv_nsec;
++}
++
++__attribute__((visibility("default"))) int
++redfin_drm_profile_read(uint64_t *counts,size_t words)
++{
++   if(!counts || words!=4) return -1;
++   redfin_drm_profile_snapshot(counts);return 0;
++}
++
+ static int
+ call(unsigned number, void *data, size_t size)
+ {
+ 	size_t returned = size;
++	bool profile=(number==0x46 || number==0x42);
++	uint64_t started=profile?redfin_drm_now():0;
+ 	kern_return_t result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
++	if(profile) {
++		uint64_t finished=redfin_drm_now();
++		redfin_drm_profile_record(number,started && finished>=started?finished-started:0);
++	}
++
+ 
+ 	switch (result) {
+ 	case 0:

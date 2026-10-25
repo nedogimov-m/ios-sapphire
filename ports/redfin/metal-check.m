@@ -155,12 +155,13 @@ static BOOL native_gmem_statistics(id device,uint64_t counts[2])
     if(plugin)dlclose(plugin);return valid;
 }
 
-static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL batch)
+static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL batch,BOOL short_storage)
 {
     MTLPixelFormat format=mask ? MTLPixelFormatRG8Unorm : MTLPixelFormatBGRA8Unorm;
-    unsigned bpe=mask ? 2 : 4,stride_bytes=64*bpe;
-    unsigned allocation=batch ? 32768 : 16384,payload=64*stride_bytes;
-    NSDictionary *properties=@{(id)kIOSurfaceWidth:@64,(id)kIOSurfaceHeight:@64,
+    unsigned width=short_storage?1065:64,height=short_storage?282:64;
+    unsigned bpe=mask ? 2 : 4,stride_bytes=short_storage?4288:64*bpe;
+    unsigned allocation=short_storage?1212416:(batch ? 32768 : 16384),payload=height*stride_bytes;
+    NSDictionary *properties=@{(id)kIOSurfaceWidth:@(width),(id)kIOSurfaceHeight:@(height),
         (id)kIOSurfaceBytesPerElement:@(bpe),(id)kIOSurfaceBytesPerRow:@(stride_bytes),
         (id)kIOSurfaceAllocSize:@(allocation),(id)kIOSurfacePixelFormat:@(mask ? 0x32433038 : 0x42475241),@"IOSurfaceIsGlobal":@YES};
     IOSurfaceRef surface=IOSurfaceCreate((CFDictionaryRef)properties);
@@ -173,7 +174,7 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL ba
     if (!initial) {IOSurfaceUnlock(surface,0,&initial_seed);CFRelease(surface);return NO;}
     memset(initial,0xa5,allocation);
     if (IOSurfaceUnlock(surface,0,&initial_seed)!=KERN_SUCCESS) {CFRelease(surface);return NO;}
-    MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:64 height:64 mipmapped:NO];
+    MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:width height:height mipmapped:NO];
     desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
     desc.storageMode=MTLStorageModeShared;
     id<MTLTexture> texture=[(id)device newTextureWithDescriptor:desc iosurface:surface plane:0];
@@ -227,8 +228,8 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL ba
         if (valid) {
             const uint8_t *pixels=IOSurfaceGetBaseAddress(surface);
             size_t stride=IOSurfaceGetBytesPerRow(surface);
-            valid=pixels && stride==stride_bytes && IOSurfaceGetWidth(surface)==64 && IOSurfaceGetHeight(surface)==64;
-            for (unsigned y=0;valid && y<64;++y) for (unsigned x=0;valid && x<64;++x) {
+            valid=pixels && stride==stride_bytes && IOSurfaceGetWidth(surface)==width && IOSurfaceGetHeight(surface)==height;
+            for (unsigned y=0;valid && y<height;++y) for (unsigned x=0;valid && x<width;++x) {
                 const uint8_t *p=pixels+y*stride+x*bpe;
                 valid=batch ? (p[0]>=127 && p[0]<=129 && p[1]>=63 && p[1]<=65 &&
                      p[2]>=31 && p[2]<=33 && p[3]>=223 && p[3]<=225) :
@@ -300,16 +301,20 @@ int main(void)
             if (dispatch_group_wait(group,dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC))) {
                 printf("REDFIN METAL CHECK: concurrent command queues timed out\n");return 1;
             }
-            BOOL pixels=first && second && render(device,library,NO,NO);
-            BOOL masks=pixels && render(device,library,YES,NO);
-            BOOL batches=masks && render(device,library,NO,YES);
+            BOOL pixels=first && second && render(device,library,NO,NO,NO);
+            BOOL masks=pixels && render(device,library,YES,NO,NO);
+            BOOL batches=masks && render(device,library,NO,YES,NO);
             BOOL dependencies=batches&&render_dependency(device,library);
+            uint64_t before_short[2]={0},after_short[2]={0};
+            BOOL short_bounds=dependencies&&native_gmem_statistics(device,before_short)&&
+                render(device,library,NO,NO,YES)&&native_gmem_statistics(device,after_short)&&
+                after_short[0]==before_short[0]&&after_short[1]>before_short[1];
             uint64_t routes[2]={0};BOOL gmem=dependencies&&native_gmem_statistics(device,routes);
-            printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u batch-pixels-and-guards=%u dependency-pixels-and-guards=%u actual-gmem=%u gmem-batches=%llu sysmem-batches=%llu\n",
-                (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels,(unsigned)masks,(unsigned)batches,(unsigned)dependencies,(unsigned)gmem,
+            printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u batch-pixels-and-guards=%u dependency-pixels-and-guards=%u short-surface-pixels-guards-and-sysmem=%u actual-gmem=%u gmem-batches=%llu sysmem-batches=%llu\n",
+                (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels,(unsigned)masks,(unsigned)batches,(unsigned)dependencies,(unsigned)short_bounds,(unsigned)gmem,
                 (unsigned long long)routes[0],(unsigned long long)routes[1]);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
-            return gmem ? 0 : 1;
+            return gmem&&short_bounds ? 0 : 1;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
             return 1;

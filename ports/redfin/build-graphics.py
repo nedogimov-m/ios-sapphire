@@ -78,9 +78,11 @@ def main():
                            ('air-frontend.patch','air-ir3.patch','air-metal.patch')]
                 patch_count=len(inputs)
             inputs+=sorted((upstream/'tools/mesa/redwood-drm').iterdir())
+            inputs += [ROOT/'ports/redfin/graphics-linear-bounds.patch',
+                       ROOT/'ports/redfin/gmem-bounds.h',ROOT/'ports/redfin/drm-profile.h']
             if a.metal:
                 inputs+=sorted((upstream/'tools/mesa/air').iterdir())
-                inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch']
+                inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch',ROOT/'ports/redfin/metal-submission-profile.patch']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -90,11 +92,15 @@ def main():
                 with tarfile.open(archive) as t:t.extractall(work,filter='data')
                 for patch in inputs[:patch_count]:run(['patch','--batch','--forward','-p1','-i',patch],source)
                 shutil.copytree(upstream/'tools/mesa/redwood-drm',source/'src/redwood-drm')
+                shutil.copy2(ROOT/'ports/redfin/gmem-bounds.h',source/'src/gallium/drivers/freedreno/redfin_gmem_bounds.h')
+                shutil.copy2(ROOT/'ports/redfin/drm-profile.h',source/'src/redwood-drm/redfin_drm_profile.h')
+                run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/graphics-linear-bounds.patch'],source)
                 if a.metal:
                     shutil.copytree(upstream/'tools/mesa/air',source/'src/compiler/air')
                     shutil.copy2(ROOT/'ports/redfin/metal-command-scope.h',source/'src/compiler/air/redfin_metal_command_scope.h')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-command-scope.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-gmem.patch'],source)
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-submission-profile.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]

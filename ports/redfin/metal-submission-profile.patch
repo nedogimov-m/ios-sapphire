@@ -1,0 +1,38 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -77,6 +77,7 @@
+ 
+ #include "redfin_metal_command_scope.h"
+ extern void redfin_freedreno_raster_stats(struct pipe_context *,uint64_t[2]);
++extern int redfin_drm_profile_read(uint64_t *,size_t);
+ 
+ struct rwa_device {
+    struct pipe_screen *screen;
+@@ -596,6 +597,15 @@
+    /* The paired FD620 implementation reads the actual native counters. */
+ 
+    return 0;
++}
++
++/* Process totals at real command boundaries. This observes actual native
++ * IOKit calls, including synchronous submits made during draw encoding. */
++int
++rwa_redfin_submission_stats(struct rwa_device *device,uint64_t *counts,size_t words)
++{
++   if(!device || device->software || !counts || words!=4 || strcmp(rwa_device_name(device),"FD620")) return -1;
++   return redfin_drm_profile_read(counts,words);
+ }
+ 
+ const char *
+diff --git a/src/compiler/air/air_metal.h b/src/compiler/air/air_metal.h
+--- a/src/compiler/air/air_metal.h
++++ b/src/compiler/air/air_metal.h
+@@ -69,6 +69,7 @@
+ int rwa_commands_end(struct rwa_device *device,char *why,size_t why_size);
+ /* Counts actual GMEM/sysmem batches; caller serializes the device. */
+ int rwa_redfin_raster_stats(struct rwa_device *device,uint64_t *counts,size_t words);
++int rwa_redfin_submission_stats(struct rwa_device *device,uint64_t *counts,size_t words);
+ 
+ /* What the driver should call the GPU, as Mesa knows it ("Adreno 7c+ Gen 3"). Never NULL. */
+ const char *rwa_device_name(struct rwa_device *device);
