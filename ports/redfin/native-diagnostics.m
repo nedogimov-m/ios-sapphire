@@ -6,6 +6,7 @@
 #import <objc/runtime.h>
 #include <dlfcn.h>
 #include <execinfo.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
@@ -106,18 +107,28 @@ static void observe_authorization(bool query_tcc)
     if (entries) CFRelease(entries);
     if (keys) CFRelease(keys);
     if (remote) CFRelease(remote);
+    int (*pidpath)(audit_token_t *,void *,uint32_t)=
+        (int (*)(audit_token_t *,void *,uint32_t))dlsym(RTLD_DEFAULT,"proc_pidpath_audittoken");
+    char executable[1024]={0};errno=0;
+    int path_bytes=audit_status==KERN_SUCCESS && pidpath ? pidpath(&audit,executable,sizeof(executable)) : 0;
+    diagnostic_log("native-audit-pidpath bytes=%d error=%d absolute=%u",path_bytes,errno,
+        path_bytes>0 && executable[0]=='/');
     if (!query_tcc) return;
     void *tcc=dlopen("/System/Library/PrivateFrameworks/TCC.framework/TCC",RTLD_NOW|RTLD_LOCAL);
     long (*preflight)(CFStringRef)=tcc ? (long (*)(CFStringRef))dlsym(tcc,"tcc_authorization_preflight") : NULL;
     diagnostic_log("self-native-TCC-preflight=%ld",preflight ? preflight(CFSTR("kTCCServicePhotos")) : -1);
 }
 
+#include "native-tcc-observer.inc"
+
 __attribute__((constructor)) static void install_native_observation(void)
 {
     char args[1024]={0},path[1024]={0};size_t bytes=sizeof(args);uint32_t path_bytes=sizeof(path);
     if (sysctlbyname("kern.bootargs",args,&bytes,NULL,0) || !bytes || bytes>sizeof(args) ||
         !redfin_diagnostic_requested(args,(unsigned)bytes) || _NSGetExecutablePath(path,&path_bytes)) return;
-    if (redfin_diagnostic_executable(path)) {diagnostic_process="assetsd";diagnostic_photos=true;}
+    if (!strcmp(path,"/System/Library/Frameworks/AssetsLibrary.framework/Support/assetsd"))
+        {diagnostic_process="assetsd";diagnostic_photos=true;}
+    else if (!strcmp(path,"/System/Library/PrivateFrameworks/TCC.framework/Support/tccd")) diagnostic_process="tccd";
     else if (!strcmp(path,"/Applications/MobileSlideShow.app/MobileSlideShow")) {diagnostic_process="Photos";diagnostic_photos=true;}
     else if (!strcmp(path,"/System/Library/CoreServices/SpringBoard.app/SpringBoard")) diagnostic_process="SpringBoard";
     else if (!strcmp(path,"/Applications/MobilePhone.app/MobilePhone")) diagnostic_process="Phone";
@@ -132,6 +143,7 @@ __attribute__((constructor)) static void install_native_observation(void)
     if (!set_preprocessor) return;
     prior_exception=set_preprocessor(observe_exception);
     diagnostic_log("exception-observer-installed native-semantics-preserved=1");
+    if (!strcmp(diagnostic_process,"tccd")) install_native_tcc_observer();
     if (diagnostic_photos)
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
             @autoreleasepool {observe_authorization(true);}

@@ -197,6 +197,7 @@ def main():
                 plugin.mkdir(parents=True,exist_ok=True)
                 binary=plugin/'RedfinMetal'
                 run([*c,'-bundle','-O2','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
+                    '-Werror=incompatible-pointer-types','-Werror=incompatible-function-pointer-types',
                     '-I'+str(metal),metal/'redwoodmetal.m',metal/'redwooddrawable.m',
                     ROOT/'ports/redfin/metal-guard.m','-framework','Foundation',
                     '-framework','CoreFoundation','-framework','IOKit','-framework','Metal','-lobjc','-o',binary])

@@ -32,11 +32,12 @@ static inline bool redfin_ui_fullscreen(const char *args, unsigned bytes)
     return false;
 }
 /* Read-only native exception/authorization observations for an explicit
- * capture boot. Do not admit another daemon, writable path or ordinary boot. */
+ * capture boot. Only these exact system daemons are eligible. */
 static inline bool redfin_diagnostic_executable(const char *path)
 {
-    return path && !strcmp(path,
-        "/System/Library/Frameworks/AssetsLibrary.framework/Support/assetsd");
+    return path && (!strcmp(path,
+        "/System/Library/Frameworks/AssetsLibrary.framework/Support/assetsd") || !strcmp(path,
+        "/System/Library/PrivateFrameworks/TCC.framework/Support/tccd"));
 }
 static inline bool redfin_diagnostic_requested(const char *args,unsigned bytes)
 {

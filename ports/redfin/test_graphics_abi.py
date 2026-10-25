@@ -127,16 +127,17 @@ unsigned reference_count(void){return references;}
         for path in [b'missing-vnode',b'path-error',b'/'+b'a'*300]:
             self.assertEqual(self.call(self.args(),path),(103,0x1234,0))
 
-    def test_assetsd_observation_requires_its_exact_vnode_and_capture_profile(self):
-        path=b'/System/Library/Frameworks/AssetsLibrary.framework/Support/assetsd'
+    def test_native_daemon_observation_requires_its_exact_vnode_and_capture_profile(self):
         capture=self.args()+b' redfinscreen=1'
-        self.assertEqual(self.call(capture,path),(0,0xff,1))
-        self.assertEqual(self.call(self.args(),path),(103,0x1234,0))
-        for arguments in (self.args(1)+b' redfinscreen=1',self.args(2)+b' redfinscreen=1',
-                          capture+b' redfinscreen=1',capture+b' gpu=1'):
-            self.assertEqual(self.call(arguments,path),(103,0x1234,0))
-        for wrong in (b'assetsd',b'/tmp/assetsd',path+b'-other',
-                      b'/System/Library/PrivateFrameworks/TCC.framework/Support/tccd'):
+        for path in (b'/System/Library/Frameworks/AssetsLibrary.framework/Support/assetsd',
+                     b'/System/Library/PrivateFrameworks/TCC.framework/Support/tccd'):
+            self.assertEqual(self.call(capture,path),(0,0xff,1))
+            self.assertEqual(self.call(self.args(),path),(103,0x1234,0))
+            for arguments in (self.args(1)+b' redfinscreen=1',self.args(2)+b' redfinscreen=1',
+                              capture+b' redfinscreen=1',capture+b' gpu=1'):
+                self.assertEqual(self.call(arguments,path),(103,0x1234,0))
+        for wrong in (b'assetsd',b'/tmp/assetsd',path+b'-other',b'/tmp/tccd',b'tccd',
+                      b'/System/Library/PrivateFrameworks/TCC.framework/Support/tccd/plugin'):
             self.assertEqual(self.call(capture,wrong),(103,0x1234,0))
 
 

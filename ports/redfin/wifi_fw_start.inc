@@ -45,6 +45,8 @@ struct fw_start_map { IOMemoryDescriptor *memory; IOMemoryMap *map; uintptr_t ba
 struct fw_start_context {
     uint64_t boot_started_ns;
     bool interface_timed;
+    bool copy_window;
+    uint64_t copy_window_started_ns;
     fw_start_map mapping[FW_START_MAPS];
     rf_wifi_smp2p_session smp2p;
     rf_wifi_smp2p_ops smp_ops;
@@ -101,6 +103,7 @@ struct fw_start_context {
 };
 static fw_start_context fw_start;
 static void fw_start_timing(fw_start_context *,const char *);
+static uint64_t fw_start_ns(void *);
 static const uint8_t fw_start_bdf_digest[32] = {
     0x7b, 0x0a, 0xdd, 0x4f, 0x46, 0x9d, 0xf3, 0x9c, 0x0b, 0x26, 0x16, 0x75, 0x13, 0xda, 0x89, 0x31,
     0x41, 0x9e, 0x91, 0x7a, 0x4d, 0x90, 0x58, 0x25, 0x2c, 0x05, 0xe0, 0xf5, 0xcf, 0xfe, 0x7b, 0x90};
@@ -309,7 +312,20 @@ static int fw_start_check(void *opaque)
 {
     fw_start_context *context = (fw_start_context *)opaque;
     bool valid = context == &fw_start && context->active && !context->poisoned && ml_get_interrupts_enabled() &&
-        !fw_probe_check(&fw_probe, fw_probe.nonce) && fw_start_metadata_contract(context, false) &&
+        !fw_probe_check(&fw_probe, fw_probe.nonce);
+    if (valid && context->copy_window) {
+        /* The complete immutable hardware/DT contract brackets this one
+         * reset-held RAM copy. Keep live owner/CPU/boot/mapping, PAS phase,
+         * source/workspace hashes, bounds and every actual byte of readback
+         * checked throughout. No SCM, SMEM or device-control write is allowed
+         * in this window. Re-reading all unrelated WLAN DT tuples at each
+         * nested 64KiB copy callback costs millions of redundant lookups. */
+        uint64_t now=fw_start_ns(context);
+        valid=context->phase==FW_START_COPY && context->power && context->initialized &&
+            context->setup && context->reset && !context->auth_attempted && !context->authenticated &&
+            !context->locked && context->copy_window_started_ns && now>=context->copy_window_started_ns &&
+            now-context->copy_window_started_ns<=UINT64_C(30000000000);
+    } else if (valid) valid = fw_start_metadata_contract(context, false) &&
         (!context->power || !redfin_wifi_power_held()) &&
         (!context->transport_mode || fw_start_glink_contract()) &&
         (!context->host_mode || fw_start_assets_contract(context, false)) &&
@@ -1234,10 +1250,17 @@ static int fw_start_run(fw_start_context *context)
     error = fw_start_map_range(context, FW_START_MPSS);
     if (error) return error;
     context->phase = FW_START_COPY;
+    if (fw_start_check(context) || redfin_wifi_power_audit()) return EPERM;
     uint64_t copy_started_ns = fw_start_ns(context);
+    context->copy_window_started_ns=copy_started_ns;
+    context->copy_window=true;
     error = rf_wifi_fw_copy_segments(&fw_probe.boot.source, &fw_probe.boot.source_ops, &copy,
         context->readback, sizeof(context->readback));
-    IOLog("REDFIN WIFI START: segment copy result=%d chunks=%u elapsed_ms=%llu\n", error, context->copies,
+    context->copy_window=false;
+    int final_contract=fw_start_check(context);
+    if (!error) error=final_contract ? final_contract : redfin_wifi_power_audit();
+    IOLog("REDFIN WIFI START: segment copy result=%d chunks=%u chunk-bytes=%u outer-contract=%d elapsed_ms=%llu\n", error, context->copies,
+        REDFIN_MPSS_COPY_CHUNK,final_contract,
         (unsigned long long)((fw_start_ns(context) - copy_started_ns) / 1000000u));
     if (error) return error;
     fw_start_timing(context,"segments-copied");

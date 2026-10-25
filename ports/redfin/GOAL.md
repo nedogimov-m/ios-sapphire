@@ -20,10 +20,17 @@ is unfinished. Phone survives; window server stable; no GPU fault/panic.
 Photos/assetsd still fail. Native self/audit Security and TCCD's own actual
 DER/signing-ID/token checks succeed; native Photos preflight0/access assertion
 remains. Resolve actual policy/attribution without replacing native answers.
-WLAN starts late and guarded4KiB firmware copy takes15.03s; next implement
+WLAN starts late and guarded64KiB firmware copy takes15.03s; next implement
 its complete timing/copy improvement with the linked native sensor transport.
 SSC protocol codecs are in progress. ADSP/SSC/HID, remaining render/display
 throughput, real credential/autojoin and account authorization remain.
+The next complete async Metal/native TCCD/firmware-copy block is built with
+74selected host casesPASS (2optional checks skipped), all native imports/
+signatures and actual loader preflightPASS. Kernel local20261025-102326/noCI
+00fa3c57...; V11/7dca6c09263e4ae3 image43b7af06...; fresh V15 is staged against
+clean836288, not applied yet. Apply once and run one complete capture.
+Actual readonly persist provides115private sensor registry/calibration files;
+SSC codecs are in progress, not an integrated/proven sensor backend.
 Exact source/builds/boot args and results are in newest NOTES.md.
 
 ## Required results

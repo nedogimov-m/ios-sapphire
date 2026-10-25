@@ -1,5 +1,53 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full asynchronous Metal/native TCCD/firmware-copy block built and staged — 2026-10-25
+
+Source base9e798ac plus this implementation. Native Metal commit now enqueues
+on a real serial GCD worker and returns without waiting on the window-server
+thread. Queue slots/resources remain owned until actual final completion;
+waiters share that exact command's dispatch group, errors finalize only after
+cleanup, and late handlers are synchronized with the real completion state.
+Callback-queue ownership and native ivar lookup/counters are concurrency-safe;
+default callbacks run outside the GPU executor so they can submit and wait
+for another command. The preceding actual pixel/guard probes are retained.
+
+WLAN native64KiB copying now checks immutable unrelated DT contracts around
+the full bounded reset-held RAM-copy phase. Live CPU/worker/boot, mapping,
+reset/PAS phase, source/workspace hashes, range bounds and every byte of
+actual destination readback remain checked throughout. The full power/DT
+contract is rechecked before AUTH; failures cannot proceed. Earlier4KiB
+wording was incorrect: native chunks were already65536bytes. The measured
+15.03s copy includes redundant nested contracts; no new speed claim yet.
+
+Actual20H392 TCCD UUID78c8cbbeb0a33bf1accb52e15286b83c and native method
+encodings are reviewed. Exact capture-only TCCD insertion observes original
+entitlement decisions/attribution, returning every native result and error
+unchanged. Native pidpath/audit checks also report their real outcome.
+Existing CSOPS traces are bounded to32requests, not256. No permission grant,
+TCC answer/DB edit, entitlement fabrication or exception suppression is added.
+
+All74distinct selected host cases PASS (76run,2optional native-fixture
+checks skipped), including real GCD submit-before-fence/queue ordering and
+fault-injected native reset/owner/mapping/time-window/end-contract guards.
+Final Metal tests and full native builds/imports/signatures PASS after the
+concurrency review. Local kernel20261025-102326/noCI,
+00fa3c57d41dc53ef14a1faef1c3d1bd17ee81991b1364327b683a7abc2c2616.
+V11 image43b7af066006775966c9ba39d57b2b109f79e07c531ce834f8d1e834311796f8,
+nonce7dca6c09263e4ae3,full real loader/payload/ADT/live-FDT preflight PASS.
+Fresh V15 against clean836288: 20ranges/352256bytes,
+4new blocks/zero freed; complete native signed-bundle
+readback/readonly fsck PASS. V15 NOT applied or booted at this checkpoint.
+Next apply V15 once and collect one combined automatic run. V14 is stale.
+
+Independent sensor prerequisite: verified unmounted recovery read of32MiB
+physical persist, no disk writes, unchanged userdata header. The bounded
+readonly host parse yields115actual sensor-registry/calibration files,
+36619bytes, all kept private/mode0600. This is an actual persistence snapshot,
+not proof of runtime sensor identity. Native SSC wire codecs are implemented
+in the working tree but not yet integrated/built/tested as a complete sensor
+backend. ADSP/PAS1/remote2/SSC/HID and real Apple authorization remain required.
+Exact V11 planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7dca6c09263e4ae3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V10 Metal batches/pixels PASS; real animated13.899fps; native TCC evidence — 2026-10-25
 
 Source889e7d0; kernel local20261025-095649/noCI,
@@ -35,7 +83,7 @@ Native MobileWiFi synthetic existing1/exact1 persists again; no real saved
 credential or IPv4 is available in this autonomous run. WLAN worker starts
 at78.8s uptime; source verification2.18s, segment copy15.03s, FW_READY38.59s,
 station42.21s after worker. These measurements identify both late worker
-scheduling and excessive guarded4KiB copy overhead for the next complete
+scheduling and excessive repeated immutable-contract checks during64KiB copies for the next complete
 block. Sensor SSC wire codecs are now being implemented; actual ADSP/native
 sensor integration and real account authorization remain unfinished.
 Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb199fc38b7166150 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.

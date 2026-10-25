@@ -1,5 +1,37 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native asynchronous submission, completion lifetime and TCCD attribution — 2026-10-25
+
+Preferred graphics pins remain kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+and userland906425b75e02b4f99eb5d7bb1ef7c9583472d772. Re-reviewed the latter's
+native command/queue semaphore, callback queue and retained-reference paths.
+A real GCD serial executor keeps Gallium ordering across queues while commit
+returns promptly. Actual native completion controls groups, slots and late
+handlers; synchronized retained callback queues permit reconfiguration, and
+default callbacks run off the GPU executor. Native ivars are resolved by the
+already-validated names, without racy initialization flags. The complete
+native Metal/pixel/guard probe remains; no full Metal-feature claim is added.
+
+Read-only review of installed20H392 TCCD
+UUID78c8cbbeb0a33bf1accb52e15286b83c identifies native entitlement/attribution
+methods and exact type encodings, without using its instruction addresses
+at runtime. Capture-only observers call each original once and return its
+actual result/error; even observer failures cannot replace native policy.
+
+The source-verified Redfin PIL copy remains64KiB and fully byte-readback-
+verified. Immutable DT/power checks bracket only reset-held reserved-RAM
+copying; live ownership/maps/phase/source/plan remain checked inside it.
+The complete contract precedes AUTH again. Host faults cover changing owner,
+reset, mappings, time/phase and end-contract rejection; native hardware
+speed/behavior still awaits the next complete capture.
+
+Preferred redwood_adsp.c was read for PAS1/remote2/SMP2P/GLINK design. Its
+Redwood addresses/64MiB reservation are unsuitable for Redfin's actual
+0x89200000/40MiB reservation. Native sensor protocol references remain the
+recorded Qualcomm SSC/CHRE sources; actual115persist registry/calibration
+files are now inventoried privately. This is prerequisite research, not an
+implemented or physically verified sensor backend.
+
 ## Metal command-buffer completion and native TCCD evidence — 2026-10-25
 
 Re-reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772

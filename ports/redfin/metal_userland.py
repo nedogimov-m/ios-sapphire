@@ -173,6 +173,28 @@ static void redfin_metal_leave(int *locked) {(void)locked;redfin_metal_unlock();
 #define RF_MESA(member,...) ({ REDFIN_MESA_SCOPE; mesa.member(__VA_ARGS__); })
 '''
 
+EXECUTION = r'''
+/* A native -commit enqueues work; it must not wait for the GPU on the window
+ * server's submitting thread. One serial worker preserves Gallium's device
+ * ordering across native queues, while the command group's lifetime gives
+ * every waiter the same actual completion, including error exits. */
+#include <dispatch/dispatch.h>
+static pthread_once_t redfin_execution_once=PTHREAD_ONCE_INIT;
+static dispatch_queue_t redfin_execution_queue;
+static void redfin_execution_init(void)
+{
+    dispatch_queue_attr_t attr=dispatch_queue_attr_make_with_qos_class(
+        DISPATCH_QUEUE_SERIAL,QOS_CLASS_USER_INTERACTIVE,0);
+    redfin_execution_queue=dispatch_queue_create("com.redfin.metal.commands",attr);
+    if (!redfin_execution_queue) abort();
+}
+static void redfin_metal_schedule(dispatch_group_t group,dispatch_block_t work)
+{
+    if (!group || !work || pthread_once(&redfin_execution_once,redfin_execution_init)) abort();
+    dispatch_group_async(group,redfin_execution_queue,work);
+}
+'''
+
 FENCE_OBSERVATIONS = r'''
 /* Completion evidence is emitted only after Gallium's actual fence succeeds.
  * Keep callback/timer activity separate from commands that reached the GPU. */
@@ -201,7 +223,7 @@ def adapt_driver(text):
     text = replace_once(text, '#include "redwood_drawable.h"',
         '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include <pthread.h>\n'
         'extern int redfin_metal_abi_ready(void);\nextern int redfin_metal_hardware_ready(void);')
-    text = replace_once(text, 'static bool\nmesa_available(void)', LOCKING + FENCE_OBSERVATIONS + '\nstatic bool\nmesa_available(void)')
+    text = replace_once(text, 'static bool\nmesa_available(void)', LOCKING + EXECUTION + FENCE_OBSERVATIONS + '\nstatic bool\nmesa_available(void)')
     text = replace_once(text, 'mesa_available(void)\n{', 'mesa_available(void)\n{\n\tREDFIN_MESA_SCOPE;')
     # Diagnostics also run from independent native command queues.
     text = replace_once(text, 'rw_print(const char *fmt, ...)\n{',
@@ -324,7 +346,103 @@ def adapt_driver(text):
         '\tredfin_native_argument_encoder=method_getImplementation(class_getInstanceMethod(fn,sel_getUid("newArgumentEncoderWithBufferIndex:")));\n'
         '\tredfin_native_argument_encoder_reflection=method_getImplementation(class_getInstanceMethod(fn,sel_getUid("newArgumentEncoderWithBufferIndex:reflection:")));\n'
         '\tinstalled = YES;\n\tclass_replaceMethod(fn,')
+    text = adapt_execution(text)
     return text.replace('/redwood/', '/redfin/').replace('libredwoodair.dylib', 'libredfinair.dylib')
+
+
+def adapt_execution(text):
+    """Keep native asynchronous submission, completion and callback lifetimes."""
+    # Native queues can be created or reconfigured while the worker completes
+    # another buffer. Resolve the ABI-guarded ivars without a racy looked flag.
+    helpers={
+        'static dispatch_semaphore_t\nredwood_queue_semaphore(id queue)': '''
+    Class base=objc_getClass("_MTLCommandQueue");
+    Ivar ivar=base ? class_getInstanceVariable(base,"_commandBufferSemaphore") : NULL;
+    return ivar ? (dispatch_semaphore_t)object_getIvar(queue,ivar) : nil;
+''',
+        'static Ivar\nredwood_completion_ivar(void)': '''
+    Class base=objc_getClass("_MTLCommandQueue");
+    return base ? class_getInstanceVariable(base,"_completionQueue") : NULL;
+''',
+        'static void\nredwood_clear_semaphore_debt(id commandBuffer)': '''
+    Class base=objc_getClass("_MTLCommandBuffer");
+    Ivar ivar=base ? class_getInstanceVariable(base,"_needsCommandBufferSemaphoreSignal") : NULL;
+    if (ivar) *(unsigned char *)((char *)commandBuffer+ivar_getOffset(ivar))=0;
+''',
+    }
+    for signature,body in helpers.items():
+        start=text.index(signature+'\n{');end=text.index('\n}\n',start)+3
+        text=text[:start]+signature+'\n{'+body+'}\n'+text[end:]
+    text=replace_once(text,'\tNSUInteger _outstanding;', '\t_Atomic(NSUInteger) _outstanding;')
+    text=replace_once(text,'\tNSUInteger _made, _returned;', '\t_Atomic(NSUInteger) _made, _returned;')
+    text=replace_once(text,'\tNSUInteger _status;',
+        '\t_Atomic(NSUInteger) _status;\n\t_Atomic(BOOL) _redfinFinalized;\n\tdispatch_group_t _redfinExecution;')
+    text=replace_once(text,'\t[queue redwoodTookSlot];',
+        '\t[queue redwoodTookSlot];\n\t_redfinExecution=dispatch_group_create();\n'
+        '\tif (!_redfinExecution) {[self release];return nil;}')
+    text=replace_once(text,'\t[_redfinResources release];',
+        '\t[_redfinResources release];\n\tif (_redfinExecution) dispatch_release(_redfinExecution);')
+    text=replace_once(text,'\tif (_status>=RW_CB_COMMITTED) return;\n','')
+    text=replace_once(text,'- (void)commit\n{\n\tREDFIN_MESA_SCOPE;',
+        '- (void)commit\n{\n\t@synchronized(self) {\n'
+        '\t\tif (_status>=RW_CB_COMMITTED) return;\n\t\t_status=RW_CB_COMMITTED;\n'
+        '\t\tredfin_metal_schedule(_redfinExecution,^{\n'
+        '\t\t\t@autoreleasepool {[self redfinExecute];}\n\t\t});\n\t}\n}\n\n'
+        '- (void)redfinExecute\n{\n\tREDFIN_MESA_SCOPE;')
+    text=replace_once(text,'done:;\n\t} @finally {',
+        'done:;\n\t} @catch (NSException *exception) {\n'
+        '\t\t[self failWith:exception.reason.UTF8String ?: "Metal execution raised an exception"];\n'
+        '\t} @finally {')
+    text=replace_once(text,'[self failWith:why];[self redwoodReturnSlot];[self redwoodDeliverHandlers];return;',
+        '[self failWith:why];_redfinFinalized=YES;[self redwoodReturnSlot];[self redwoodDeliverHandlers];return;')
+    text=replace_once(text,'\t/* The queue\'s slot goes back here',
+        '\t_redfinFinalized=YES;\n\t/* The queue\'s slot goes back here')
+    start=text.index('- (void)waitUntilCompleted\n{');end=text.index('\n- (void)waitUntilScheduled { }',start)
+    text=text[:start]+'''- (void)waitUntilCompleted
+{
+    NSUInteger status=_status;
+    if (_redfinFinalized || status<RW_CB_COMMITTED) return;
+    /* The executing block leaves this group only after its real final GPU
+     * fence and every refusal/exception cleanup path. No caller may fence a
+     * different buffer on the same Gallium context on behalf of this one. */
+    dispatch_group_wait(_redfinExecution,DISPATCH_TIME_FOREVER);
+}
+'''+text[end:]
+    text=replace_once(text,'- (void)waitUntilScheduled { }',
+        '- (void)waitUntilScheduled {if (_status<RW_CB_SCHEDULED && _status>=RW_CB_COMMITTED) [self waitUntilCompleted];}')
+    # A late completed handler must still wait while work is only scheduled.
+    start=text.index('- (void)addCompletedHandler:');end=text.index('\n}\n',start)+3
+    method=text[start:end]
+    method=replace_once(method,'if (_status >= RW_CB_SCHEDULED)', 'if (_redfinFinalized)')
+    text=text[:start]+method+text[end:]
+    # Default callbacks run off the shared GPU executor as well: a callback
+    # may submit a different command buffer and wait for it without blocking
+    # the worker that must execute that next buffer.
+    text=replace_once(text,'\thandler(self);\n}',
+        '\tdispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{handler(self);});\n}')
+    text=replace_once(text,'\tdispatch_queue_t queue = [_queue redwoodCompletionQueue];',
+        '\tdispatch_queue_t queue=nil;\n\t@synchronized(_queue) {\n'
+        '\t\tqueue=[_queue redwoodCompletionQueue];\n\t\tif (queue) dispatch_retain(queue);\n\t}')
+    text=replace_once(text,'\t\tdispatch_async(queue, ^{ handler(self); });',
+        '\t\tdispatch_async(queue, ^{ handler(self); });\n\t\tdispatch_release(queue);')
+    for signature in ['- (void)addScheduledHandler:','- (void)addCompletedHandler:',
+                      '- (void)redwoodDeliverHandlers\n','- (void)failWith:',
+                      '- (void)setCompletionQueue:']:
+        start=text.index(signature);end=text.index('\n}\n',start)+3
+        method=text[start:end];brace=method.index('{')
+        method=method[:brace+1]+'\n\t@synchronized(self) {'+method[brace+1:-2]+'\t}\n}\n'
+        text=text[:start]+method+text[end:]
+    text=replace_once(text,'- (NSError *)error { return _error; }',
+        '- (NSError *)error {@synchronized(self) {return [[_error retain] autorelease];}}')
+    text=replace_once(text,'- (void)failWith:(const char *)reason\n{\n\t@synchronized(self) {',
+        '- (void)failWith:(const char *)reason\n{\n\t@synchronized(self) {\n\t[_error release];')
+    # The dispatch refusal also owns the same error-property synchronization.
+    needle='''\t\t\t_error = [[NSError errorWithDomain:@"RedwoodMetal" code:2
+\t\t\t\t\t\t  userInfo:@{ NSLocalizedDescriptionKey:
+\t\t\t\t\t\t\t      [NSString stringWithUTF8String:why] }]
+\t\t\t\t     retain];'''
+    text=replace_once(text,needle,'\t\t\t@synchronized(self) {\n'+needle+'\n\t\t\t}')
+    return text
 
 
 def adapt_drawable(text):

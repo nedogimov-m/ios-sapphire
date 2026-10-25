@@ -125,7 +125,7 @@ def build(out,cache_path=None):
     if not abi['compatible']:raise ValueError('native platform service imports unavailable on20H392')
     report=dict(success=True,abi=abi,mobile_wifi_uuid=uuid,synthetic_password_only=True,
                 source_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest()
-                    for n in ['thermald.c','network-check.m','native-diagnostics.m','graphics-exec-scope.h','gui-profile.h']},
+                    for n in ['thermald.c','network-check.m','native-diagnostics.m','native-tcc-observer.inc','graphics-exec-scope.h','gui-profile.h']},
                 sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.is_file() and p.name!='build.json'})
     (out/'build.json').write_text(json.dumps(report,indent=2)+'\n');return report
 
