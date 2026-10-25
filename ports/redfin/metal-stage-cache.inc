@@ -20,6 +20,7 @@ static void redfin_air_stage_release(struct redfin_air_stage *stage)
 {
    if(!stage||--stage->references)return;
    struct pipe_context *pipe=stage->device->pipe;
+   rwa_redfin_graphics_invalidate(stage->device);
    if(stage->vertex) {
       pipe->bind_vs_state(pipe,NULL);pipe->delete_vs_state(pipe,stage->cso);
    } else {

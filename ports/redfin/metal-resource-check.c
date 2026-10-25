@@ -1,3 +1,4 @@
+#include "metal-bindings.h"
 /* SPDX-License-Identifier: MIT */
 /* The same authored AIR contract runs on the Mac compiler and actual A620.
  * Host execution checks translation semantics; only a phone run proves GPU use.
@@ -37,6 +38,7 @@ redfin_resource_context(const char *path,uint64_t nonce,unsigned phase,uint64_t 
    struct rwa_sampler *samplers[2] = {NULL, NULL};
    unsigned completed = 0;
    int requirements = 0, missing_refused = 0, enabled_pixels = 0;
+   int scoped=0,scope_ok=1,lower_clean=0;uint64_t binding_stats[REDFIN_METAL_BINDING_WORDS]={0};
    if (!device)
       goto done;
    printf("REDFIN METAL RESOURCE: boot=%016llx backend=%s\n",
@@ -102,6 +104,7 @@ redfin_resource_context(const char *path,uint64_t nonce,unsigned phase,uint64_t 
       snprintf(why, sizeof(why), "active missing bindings were not refused before execution");
       goto done;
    }
+   if(phase) {if(rwa_commands_begin(device,why,sizeof(why)))goto done;scoped=1;}
    for (unsigned round = 0; round < 32; round++) {
       uint32_t seed = ((((uint32_t)nonce ^ (phase*0x9816e3f0u)) + (round / 8) * 0x13715af8u) & ~7u) | (round & 7);
       for (unsigned i = 0; i < 8; i++)
@@ -109,6 +112,7 @@ redfin_resource_context(const char *path,uint64_t nonce,unsigned phase,uint64_t 
       memset(output, 0xa5, 256);
       if (rwa_dispatch(compute, &bindings, groups, groups, why, sizeof(why)))
          goto done;
+      if(scoped) {output=rwa_buffer_map(buffers[0]);if(!output)goto done;}
       unsigned mode = seed & 7;
       int nearest = (mode & 4) || (mode & 1);
       const float expected[3] = {
@@ -163,12 +167,28 @@ redfin_resource_context(const char *path,uint64_t nonce,unsigned phase,uint64_t 
    memset(output, 0xa5, 256);
    if (rwa_dispatch(enabled, &full, groups, groups, why, sizeof(why)))
       goto done;
+   if(scoped) {output=rwa_buffer_map(buffers[0]);if(!output)goto done;}
    enabled_pixels = output[9] == (control[0] ^ 0x3f800000u) && output[10] == 0x101;
    for (unsigned i = 44; i < 256; i++)
       enabled_pixels &= ((uint8_t *)output)[i] == 0xa5;
    if (!enabled_pixels)
       snprintf(why, sizeof(why), "enabled high bindings returned incorrect output/guards");
+   if(scoped&&enabled_pixels) {
+      memset(output,0xa5,256);
+      if(rwa_dispatch(compute,&bindings,groups,groups,why,sizeof(why)))goto done;
+      output=rwa_buffer_map(buffers[0]);
+      lower_clean=output&&output[9]==0xa5a5a5a5u&&output[10]==0x100;
+      if(output)for(unsigned i=44;i<256;++i)lower_clean&=((uint8_t *)output)[i]==0xa5;
+   }
 done:
+   if(scoped&&rwa_commands_end(device,why,sizeof(why)))scope_ok=0;
+   if(device&&!rwa_redfin_binding_statistics(device,binding_stats,REDFIN_METAL_BINDING_WORDS)) {
+      scope_ok=scope_ok&&!binding_stats[10]&&!binding_stats[11];
+      if(phase)scope_ok=scope_ok&&lower_clean&&binding_stats[2]&&binding_stats[4];
+   } else scope_ok=0;
+   if(phase)printf("REDFIN METAL BINDING RESOURCE: boot=%016llx active-high-to-low=%u descriptor-skips=%llu stale-slots-cleared=%llu live-slots=%llu passed=%u\n",
+      (unsigned long long)nonce,lower_clean,(unsigned long long)binding_stats[2],(unsigned long long)binding_stats[4],
+      (unsigned long long)binding_stats[10],scope_ok);
    printf("REDFIN METAL RESOURCE RESULT: boot=%016llx rounds=%u private-branch-alias-sampler-phi-helper-null-global-bits-dynamic-lanes-guards=%u inactive-requirements=%u active-missing-refused=%u active-high-bindings-pixels-guards=%u%s%s\n",
           (unsigned long long)nonce, completed, completed == 32,
           requirements, missing_refused, enabled_pixels,
@@ -183,7 +203,7 @@ done:
    if (device) rwa_redfin_translation_cache_statistics(device,statistics,REDFIN_AIR_CACHE_STAT_WORDS);
    if (device) rwa_device_close(device);
    free(bitcode);
-   return completed == 32 && requirements && missing_refused && enabled_pixels;
+   return completed == 32 && requirements && missing_refused && enabled_pixels && scope_ok;
 }
 
 int redfin_metal_resource_check(const char *path,uint64_t nonce)

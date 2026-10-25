@@ -23,6 +23,8 @@ static void say(char *out,size_t bytes,const char *format,...)
 #include "compiler/air/redfin_metal_function_constants.inc"
 #include "compiler/air/redfin_metal_translation_cache.inc"
 #include "redfin_metal_cache_finalizer.inc"
+/* This compiler-only fixture has no graphics bindings to invalidate. */
+static void rwa_redfin_graphics_invalidate(struct rwa_device *device){(void)device;}
 #include "compiler/air/redfin_metal_stage_cache.inc"
 
 static void redfin_host_cache_require(bool valid,const char *reason)

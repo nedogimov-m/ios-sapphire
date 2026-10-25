@@ -1,5 +1,33 @@
 # HackiOS upstream review — 2026-10-22
 
+## Command-local descriptor and graphics state reuse — 2026-10-26
+
+Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR stage
+binding/unbinding and Mesa25.0.7 fd sampler/view/constant/blend/vertex setters.
+Unchanged native sampler/view/blend calls dirty state; AIR drops views/samplers
+after every draw but leaves old SSBO/UBO slots bound. Avoid that repeated work
+with exact command-local descriptor/CSO/dynamic/vertex reuse and explicit stale
+slot cleanup. This is a candidate cost from the real V40 encoding samples,
+not a claim that all remaining latency is explained. Kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+is unchanged; kernel submission remains synchronously completed.
+
+Resource/view cache entries own references. Sampler and pipeline deletion,
+stage-cache eviction and internal compute/blit helpers invalidate bindings
+before native pointers can become stale. A skipped vertex setter still consumes
+the caller's incoming references; a changed element state forces a later vertex
+setter. Always refresh constant buffers because shared mapped bytes may change
+with an identical descriptor. Clear all stages/vertex references on scope exit,
+including errors and legacy standalone calls; retain actual final fences,
+alias/CPU-consumer synchronization and original-page checks.
+
+43host integration cases and full paired native/actual20H392 ABI/signatures PASS.
+New actual-helper host coverage verifies native receiver slot/ref contracts;
+it does not execute shaders. Combined native tests require repeated binding
+skips with changing CPU data, error after a valid encoded draw, and sparse
+high-to-low resources inside the second real persistence context. Actual A620
+pixels/guards and system performance remain pending. No Phone/Photos auto-open
+or heavy capture is enabled.
+
 ## GPU-only ordering and actual CPU consumers — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR resource

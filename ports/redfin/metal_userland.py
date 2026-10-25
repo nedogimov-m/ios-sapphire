@@ -293,7 +293,7 @@ static void redfin_metal_io_completed(const uint64_t before[10],const uint64_t a
 
 def adapt_driver(text):
     text = replace_once(text, '#include "redwood_drawable.h"',
-        '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include "graphics-memory-report.h"\n#include "metal-translation-cache.h"\n#include "metal-ordering.h"\n#include <pthread.h>\n#include <mach/mach_time.h>\n'
+        '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include "graphics-memory-report.h"\n#include "metal-translation-cache.h"\n#include "metal-ordering.h"\n#include "metal-bindings.h"\n#include <pthread.h>\n#include <mach/mach_time.h>\n'
         'extern int redfin_metal_abi_ready(void);\nextern int redfin_metal_hardware_ready(void);')
     text = replace_once(text, 'static bool\nmesa_available(void)', LOCKING + EXECUTION + FENCE_OBSERVATIONS + '\nstatic bool\nmesa_available(void)')
     text = replace_once(text, 'mesa_available(void)\n{', 'mesa_available(void)\n{\n\tREDFIN_MESA_SCOPE;')
@@ -322,6 +322,7 @@ def adapt_driver(text):
         '\tint (*raster_statistics)(struct rwa_device *,uint64_t *,size_t);\n'
         '\tint (*translation_statistics)(struct rwa_device *,uint64_t *,size_t);\n'
         '\tint (*ordering_statistics)(struct rwa_device *,uint64_t *,size_t);\n'
+        '\tint (*binding_statistics)(struct rwa_device *,uint64_t *,size_t);\n'
         '\tint (*submission_statistics)(struct rwa_device *,uint64_t *,size_t);')
     text = replace_once(text,'\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");',
         '\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");\n'
@@ -330,9 +331,10 @@ def adapt_driver(text):
         '\t*(void **)&mesa.raster_statistics = dlsym(mesa.handle,"rwa_redfin_raster_stats");\n'
         '\t*(void **)&mesa.translation_statistics = dlsym(mesa.handle,"rwa_redfin_translation_cache_statistics");\n'
         '\t*(void **)&mesa.ordering_statistics = dlsym(mesa.handle,"rwa_redfin_ordering_statistics");\n'
+        '\t*(void **)&mesa.binding_statistics = dlsym(mesa.handle,"rwa_redfin_binding_statistics");\n'
         '\t*(void **)&mesa.submission_statistics = dlsym(mesa.handle,"rwa_redfin_submission_stats");')
     text = replace_once(text,'if (mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||',
-        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL || mesa.raster_statistics == NULL || mesa.translation_statistics == NULL || mesa.ordering_statistics == NULL || mesa.submission_statistics == NULL ||\n'
+        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL || mesa.raster_statistics == NULL || mesa.translation_statistics == NULL || mesa.ordering_statistics == NULL || mesa.binding_statistics == NULL || mesa.submission_statistics == NULL ||\n'
         '\t    mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||')
     text = replace_once(text,'- (void)commit\n{\n\tchar why[512] = { 0 };',
         '- (void)commit\n{\n\tREDFIN_MESA_SCOPE;\n\tchar why[512] = { 0 };\n'
@@ -352,6 +354,15 @@ def adapt_driver(text):
         '\t\t\t\tuint64_t redfin_io_end[10]={0};\n'
         '\t\t\t\tif(!mesa.submission_statistics([[_queue device] mesaDevice],redfin_io_end,10))\n'
         '\t\t\t\t\tredfin_metal_io_completed(redfin_io_start,redfin_io_end);\n\t\t\t}\n'
+        '\t\t\tif(redfin_binding_start_valid && (draws||computes)) {\n'
+        '\t\t\t\tuint64_t after[REDFIN_METAL_BINDING_WORDS]={0};\n'
+        '\t\t\t\tif(!mesa.binding_statistics([[_queue device] mesaDevice],after,REDFIN_METAL_BINDING_WORDS)) {\n'
+        '\t\t\t\t\tstatic uint64_t sequence;uint64_t n=++sequence;\n'
+        '\t\t\t\t\tif(n<=4||!(n&(n-1))||!(n%120))rw_print("REDFIN METAL BINDINGS: boot=%s sequence=%llu stage-requests=%llu descriptor-calls=%llu descriptor-skips=%llu constant-refreshes=%llu stale-slots=%llu graphics-calls=%llu graphics-skips=%llu vertex-calls=%llu vertex-skips=%llu live-stage-slots=%llu live-vertex-refs=%llu\\n",redfin_fence_boot,(unsigned long long)n,\n'
+        '\t\t\t\t\t\t(unsigned long long)(after[0]-redfin_binding_start[0]),(unsigned long long)(after[1]-redfin_binding_start[1]),(unsigned long long)(after[2]-redfin_binding_start[2]),(unsigned long long)(after[3]-redfin_binding_start[3]),\n'
+        '\t\t\t\t\t\t(unsigned long long)(after[4]-redfin_binding_start[4]),(unsigned long long)(after[6]-redfin_binding_start[6]),(unsigned long long)(after[7]-redfin_binding_start[7]),(unsigned long long)(after[8]-redfin_binding_start[8]),(unsigned long long)(after[9]-redfin_binding_start[9]),\n'
+        '\t\t\t\t\t\t(unsigned long long)after[10],(unsigned long long)after[11]);\n'
+        '\t\t\t\t}\n\t\t\t}\n'
         '\t\t\tif(redfin_order_start_valid && (draws||computes)) {\n'
         '\t\t\t\tuint64_t after[REDFIN_METAL_ORDERING_WORDS]={0};\n'
         '\t\t\t\tif(!mesa.ordering_statistics([[_queue device] mesaDevice],after,REDFIN_METAL_ORDERING_WORDS)) {\n'
@@ -519,6 +530,14 @@ int redfin_metal_ordering_statistics(id device,uint64_t *counts,size_t words)
         ![device isKindOfClass:[RedwoodMetalDevice class]] || !mesa.ordering_statistics) return -1;
     return mesa.ordering_statistics([device mesaDevice],counts,words);
 }
+int redfin_metal_binding_statistics(id device,uint64_t *counts,size_t words)
+{
+    REDFIN_MESA_SCOPE;
+    if (!counts || words!=REDFIN_METAL_BINDING_WORDS ||
+        ![device isKindOfClass:[RedwoodMetalDevice class]] || !mesa.binding_statistics) return -1;
+    return mesa.binding_statistics([device mesaDevice],counts,words);
+}
+
 '''
     return text.replace('/redwood/', '/redfin/').replace('libredwoodair.dylib', 'libredfinair.dylib')
 
@@ -568,7 +587,9 @@ def adapt_execution(text):
         '\tuint64_t redfin_io_start[10]={0};\n'
         '\tBOOL redfin_io_start_valid=RF_MESA(submission_statistics,[[_queue device] mesaDevice],redfin_io_start,10)==0;\n'
         '\tuint64_t redfin_order_start[REDFIN_METAL_ORDERING_WORDS]={0};\n'
-        '\tBOOL redfin_order_start_valid=RF_MESA(ordering_statistics,[[_queue device] mesaDevice],redfin_order_start,REDFIN_METAL_ORDERING_WORDS)==0;')
+        '\tBOOL redfin_order_start_valid=RF_MESA(ordering_statistics,[[_queue device] mesaDevice],redfin_order_start,REDFIN_METAL_ORDERING_WORDS)==0;\n'
+        '\tuint64_t redfin_binding_start[REDFIN_METAL_BINDING_WORDS]={0};\n'
+        '\tBOOL redfin_binding_start_valid=RF_MESA(binding_statistics,[[_queue device] mesaDevice],redfin_binding_start,REDFIN_METAL_BINDING_WORDS)==0;')
     text=replace_once(text,'done:;\n\t} @finally {',
         'done:;\n\t} @catch (NSException *exception) {\n'
         '\t\t[self failWith:exception.reason.UTF8String ?: "Metal execution raised an exception"];\n'

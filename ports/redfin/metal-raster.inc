@@ -10,14 +10,14 @@ rwa_redfin_apply_raster(struct rwa_render *render,const struct rwa_draw *draw,
    double x=0,y=0,w=width,h=height;
    double near=draw->depth_range?draw->depth_range[0]:0,far=draw->depth_range?draw->depth_range[1]:1;
    if(s&&(s->flags&1u)){x=s->viewport[0];y=s->viewport[1];w=s->viewport[2];h=s->viewport[3];near=s->viewport[4];far=s->viewport[5];}
-   pipe->set_viewport_states(pipe,0,1,&(struct pipe_viewport_state){
+   const struct pipe_viewport_state viewport={
       .scale={(float)(w/2),(float)(-h/2),(float)(far-near)},
-      .translate={(float)(x+w/2),(float)(y+h/2),(float)near}});
+      .translate={(float)(x+w/2),(float)(y+h/2),(float)near}};
    uint32_t clip[4];redfin_metal_scissor(s,width,height,clip);
-   pipe->set_scissor_states(pipe,0,1,&(struct pipe_scissor_state){
-      .minx=clip[0],.miny=clip[1],.maxx=clip[2],.maxy=clip[3]});
+   const struct pipe_scissor_state scissor={
+      .minx=clip[0],.miny=clip[1],.maxx=clip[2],.maxy=clip[3]};
    struct pipe_blend_color blend={0};if(s)memcpy(blend.color,s->blend_color,sizeof(blend.color));
-   pipe->set_blend_color(pipe,&blend);
+   rwa_redfin_bind_dynamic(render->device,&viewport,&scissor,&blend);
    struct pipe_rasterizer_state state;memset(&state,0,sizeof(state));
    state.cull_face=s&&s->cull==1?PIPE_FACE_FRONT:s&&s->cull==2?PIPE_FACE_BACK:PIPE_FACE_NONE;
    state.front_ccw=s&&s->winding;state.half_pixel_center=1;state.bottom_edge_rule=1;
@@ -33,7 +33,7 @@ rwa_redfin_apply_raster(struct rwa_render *render,const struct rwa_draw *draw,
    if(memcmp(&state,&render->redfin_raster_state,sizeof(state))) {
       void *next=pipe->create_rasterizer_state(pipe,&state);
       if(!next){say(why,why_size,"native Metal raster state allocation failed");return -1;}
-      void *previous=render->rast;pipe->bind_rasterizer_state(pipe,next);
+      void *previous=render->rast;rwa_redfin_bind_cso(render->device,RF_BIND_RASTER,next);
       render->rast=next;render->redfin_raster_state=state;
       if(previous)pipe->delete_rasterizer_state(pipe,previous);
    }

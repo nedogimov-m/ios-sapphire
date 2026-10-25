@@ -40,6 +40,7 @@ rwa_blit_native(struct rwa_device *device,struct pipe_resource *source,unsigned 
       .mask=util_format_get_mask(source->format),.filter=filter};
    if(filter==PIPE_TEX_FILTER_NEAREST&&util_format_linear(source->format)==util_format_linear(destination->format))
       info.src.format=info.dst.format=util_format_linear(source->format);
+   rwa_redfin_graphics_invalidate(device);
    if(redfin_freedreno_gpu_blit(device->pipe,&info))return rwa_blit_fail(why,bytes,"A620 declined this GPU blit; no CPU fallback");
    return rwa_blit_finish(device,why,bytes);
 }
@@ -67,6 +68,7 @@ rwa_blit_rows(struct rwa_device *device,struct pipe_resource *source,struct pipe
     * survive every deferred grid, including another row copy in this scope. */
    struct pipe_constant_buffer constants={0};
    if(rwa_redfin_constant_upload(device,&plan,sizeof(plan),&constants,why,bytes))return -1;
+   rwa_redfin_bindings_clear_stage(device,PIPE_SHADER_COMPUTE);
    pipe->bind_compute_state(pipe,shader);pipe->set_constant_buffer(pipe,PIPE_SHADER_COMPUTE,0,false,&constants);
    pipe_resource_reference(&constants.buffer,NULL);
    pipe->set_shader_buffers(pipe,PIPE_SHADER_COMPUTE,0,2,buffers,2);
@@ -111,6 +113,7 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
       if(!destination_buffer||!rwa_blit_range(destination,count,destination_buffer->size))goto invalid;
       if(request->operation==RF_BLIT_FILL) {
          if(!count)return 0;
+         rwa_redfin_graphics_invalidate(device);
          if(request->fill_value>255||redfin_freedreno_gpu_fill(pipe,destination_buffer->res,
             (unsigned)destination,(unsigned)count,(uint8_t)request->fill_value))goto invalid;
          result=rwa_blit_finish(device,why,bytes);

@@ -47,6 +47,7 @@ class MetalScheduledTests(unittest.TestCase):
 #include <stdint.h>
 #include <mach/mach_time.h>
 #include "metal-ordering.h"
+#include "metal-bindings.h"
 enum {RW_CB_COMMITTED=2,RW_CB_SCHEDULED=3,RW_CB_COMPLETED=4,RW_CB_ERROR=5};
 static dispatch_semaphore_t entered,release_fence;
 static unsigned fail_fence,fail_begin,visible;
@@ -60,7 +61,8 @@ static int end(void *d,char *why,size_t n){
 static int statistics(void *d,uint64_t *counts,size_t n){(void)d;memset(counts,0,n*8);return 0;}
 static struct {int (*commands_begin)(void *,char *,size_t);int (*commands_end)(void *,char *,size_t);
  int (*submission_statistics)(void *,uint64_t *,size_t);
- int (*ordering_statistics)(void *,uint64_t *,size_t);} mesa={begin,end,statistics,statistics};
+ int (*ordering_statistics)(void *,uint64_t *,size_t);
+ int (*binding_statistics)(void *,uint64_t *,size_t);} mesa={begin,end,statistics,statistics,statistics};
 static const char redfin_fence_boot[]="host-fence-fixture";
 static void rw_print(const char *format,...){(void)format;}
 static void redfin_metal_completed(unsigned a,unsigned b,uint64_t c,uint64_t d,uint64_t e,uint64_t f,uint64_t g)

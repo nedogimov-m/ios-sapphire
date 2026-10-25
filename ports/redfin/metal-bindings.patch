@@ -1,0 +1,353 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -80,6 +80,8 @@
+ 
+ #include "redfin_metal_command_scope.h"
+ #include "redfin_metal_ordering.h"
++#define REDFIN_METAL_BINDINGS_RUNTIME 1
++#include "redfin_metal_bindings.h"
+ #include "redfin_metal_raster.h"
+ #include "redfin_metal_linear_import.h"
+ #include "redfin_metal_blit.h"
+@@ -120,6 +122,9 @@
+    struct rwa_buffer *all_buffers;
+    uint64_t ordering[REDFIN_METAL_ORDERING_WORDS];
+    bool gpu_memory_pending;
++   struct redfin_metal_stage_bindings bindings[PIPE_SHADER_TYPES];
++   struct redfin_metal_graphics_bindings graphics_bindings;
++   uint64_t binding_stats[REDFIN_METAL_BINDING_WORDS];
+    struct rwa_texture *linear_textures,*buffer_textures;
+    uint64_t linear_epoch,linear_copies[2];
+    void *linear_copy_cso,*linear_byte_copy_cso;
+@@ -262,6 +267,8 @@
+ static void rwa_redfin_buffer_changed(struct rwa_buffer *,struct rwa_texture *,bool);
+ static void rwa_redfin_linear_cpu_written(struct rwa_texture *);
+ 
++#include "redfin_metal_bindings.inc"
++
+ 
+ /* A sampler is a Gallium state object and nothing more. The state it was built from is
+  * not kept: a refusal about a sampler happens while it is being created, where the
+@@ -647,6 +654,7 @@
+ {
+    if (!device)
+       return;
++   rwa_redfin_bindings_clear(device);
+    if (device->default_sampler)
+       device->pipe->delete_sampler_state(device->pipe, device->default_sampler);
+    if(device->linear_copy_cso) {
+@@ -2322,6 +2330,8 @@
+     * freed memory until something else is bound over it.
+     */
+    argbuf_scrub(sampler->device, NULL, NULL, sampler);
++   rwa_redfin_sampler_forget(sampler->device,sampler->cso);
++   rwa_redfin_sampler_forget(sampler->device,sampler->cso_compare);
+    sampler->device->pipe->delete_sampler_state(sampler->device->pipe, sampler->cso);
+    sampler->device->pipe->delete_sampler_state(sampler->device->pipe,
+                                                sampler->cso_compare);
+@@ -3106,6 +3116,7 @@
+ {
+    if (!compute)
+       return;
++   rwa_redfin_bindings_clear_stage(compute->device,PIPE_SHADER_COMPUTE);
+    if (compute->cso)
+       delete_compute_state(compute->device, compute->cso);
+    /* and the states built for the samplers the shader declared itself. Nothing is
+@@ -3283,6 +3294,7 @@
+ rwa_commands_end(struct rwa_device *device, char *why, size_t why_size)
+ {
+    if(!device->command_scope.active)return -1;
++   rwa_redfin_bindings_clear(device);
+    /* Queue the parent resolves before the one final CPU wait. Even a generic
+     * encoding failure must drain what it already emitted; a failed completion
+     * is never retried on this retired context. */
+@@ -3291,6 +3303,7 @@
+       if(rwa_redfin_linear_resolve_all(device,why,why_size))device->command_scope.failed=true;
+    }
+    int error=redfin_metal_scope_end(&device->command_scope,command_scope_finish,device,why,why_size);
++   rwa_redfin_bindings_clear(device);
+    if(!error)rwa_redfin_trace_end(device);
+    else if(why&&why_size&&!why[0])say(why,why_size,"Metal command scope retired after encoding/completion failure");
+    return error;
+@@ -3705,12 +3718,8 @@
+    return 0;
+ }
+ 
+-/* What bind_stage bound, so unbind_stage can take it all back once the fence is in. The
+- * buffers are not here on purpose: they are left bound and rebound by the next draw or
+- * dispatch, because Gallium holds a reference on a bound resource -- it is the sampler
+- * states and views, which it does not, that must not outlive the caller's next
+- * rwa_sampler_destroy or rwa_texture_destroy.
+- */
++/* Per-operation write targets. The device separately owns command-local
++ * Gallium bindings, including exact trailing-slot and exit/error cleanup. */
+ struct rwa_bound {
+    unsigned num_ssbo, num_views, num_images, num_samplers;
+    struct rwa_buffer *written_buffers[PIPE_MAX_SHADER_BUFFERS];
+@@ -3739,6 +3748,8 @@
+            size_t why_size)
+ {
+    struct pipe_context *pipe = device->pipe;
++   struct pipe_constant_buffer constants[PIPE_MAX_CONSTANT_BUFFERS]={0};
++   unsigned constant_mask=0,owned_constants=0;
+    /* Resolve parent-backed texture writes before any user compute state or
+     * constants are bound: internal row copies use their own compute bindings. */
+    for(unsigned i=0;i<info->num_resources;++i) {
+@@ -3747,9 +3758,9 @@
+       struct rwa_buffer *buffer=NULL;
+       if(r->argbuf_set!=~0u) {
+          struct rwa_texture *texture=NULL;struct rwa_sampler *sampler=NULL;size_t offset=0;
+-         if(argbuf_member(r,table,table_count,name,&buffer,&offset,&texture,&sampler,why,why_size))return -1;
++         if(argbuf_member(r,table,table_count,name,&buffer,&offset,&texture,&sampler,why,why_size))goto failed;
+       } else buffer=bindings->buffers[r->index];
+-      if(rwa_redfin_buffer_prepare(buffer,why,why_size))return -1;
++      if(rwa_redfin_buffer_prepare(buffer,why,why_size))goto failed;
+    }
+    for(unsigned i=0;i<info->num_resources;++i) {
+       const struct air_resource *r=&info->resources[i];
+@@ -3757,9 +3768,9 @@
+       struct rwa_texture *texture=NULL;
+       if(r->argbuf_set!=~0u) {
+          struct rwa_buffer *unused_buffer=NULL;struct rwa_sampler *unused_sampler=NULL;size_t unused_offset=0;
+-         if(argbuf_member(r,table,table_count,name,&unused_buffer,&unused_offset,&texture,&unused_sampler,why,why_size))return -1;
++         if(argbuf_member(r,table,table_count,name,&unused_buffer,&unused_offset,&texture,&unused_sampler,why,why_size))goto failed;
+       } else texture=bindings->textures[r->index];
+-      if(rwa_redfin_linear_prepare(texture,why,why_size))return -1;
++      if(rwa_redfin_linear_prepare(texture,why,why_size))goto failed;
+    }
+ 
+ 
+@@ -3799,7 +3810,7 @@
+       if (r->argbuf_set != ~0u) {
+          if (argbuf_member(r, table, table_count, name, &b, &boffset, &t, &sm, why,
+                            why_size) != 0)
+-            return -1;
++            goto failed;
+       } else {
+          switch (r->kind) {
+          case AIR_RESOURCE_DEVICE_BUFFER:
+@@ -3808,7 +3819,7 @@
+             /* and Metal's own offset on it, which check_bindings has already judged */
+             if (direct_buffer_offset(r, bindings, table, table_count, name, &boffset, why,
+                                      why_size) != 0)
+-               return -1;
++               goto failed;
+             break;
+          case AIR_RESOURCE_TEXTURE:
+          case AIR_RESOURCE_IMAGE:
+@@ -3828,7 +3839,7 @@
+          if (r->index >= ARRAY_SIZE(sb)) {
+             say(why, why_size, "%s binds a buffer at index %u, past the %u Gallium has "
+                                "slots for", name, r->index, (unsigned)ARRAY_SIZE(sb));
+-            return -1;
++            goto failed;
+          }
+          sb[r->index].buffer = b->res;
+          /* Metal's own `offset:`, for a member of a set and for a buffer argument
+@@ -3842,7 +3853,7 @@
+          size_t remaining=b->size-MIN2(b->size,boffset);
+          sb[r->index].buffer_size=(unsigned)((remaining+3)&~(size_t)3);
+          if(boffset>b->res->width0||sb[r->index].buffer_size>b->res->width0-boffset) {
+-            say(why,why_size,"SSBO descriptor would exceed the actual allocated dword tail");return -1;
++            say(why,why_size,"SSBO descriptor would exceed the actual allocated dword tail");goto failed;
+          }
+          num_ssbo = MAX2(num_ssbo, r->index + 1);
+          if (r->write) {
+@@ -3856,7 +3867,7 @@
+             say(why, why_size, "%s binds a constant buffer at index %u, past the %u "
+                                "Gallium has slots for", name, r->index,
+                 (unsigned)PIPE_MAX_CONSTANT_BUFFERS);
+-            return -1;
++            goto failed;
+          }
+          size_t left = b->size - MIN2(b->size, boffset);
+          /* A misaligned Metal constant is a real CPU byte consumer. Drain
+@@ -3873,11 +3884,12 @@
+             size_t want = r->size && r->size <= left ? r->size : left;
+ 
+             if(rwa_redfin_buffer_cpu_prepare(b,why,why_size)||
+-               rwa_redfin_constant_upload(device,(const char *)b->map+boffset,want,&cb,why,why_size))return -1;
++               rwa_redfin_constant_upload(device,(const char *)b->map+boffset,want,&cb,why,why_size))goto failed;
+             uploaded=true;
+          }
+-         pipe->set_constant_buffer(pipe, stage, r->index, false, &cb);
+-         if(uploaded)pipe_resource_reference(&cb.buffer,NULL);
++         if(owned_constants&(1u<<r->index))pipe_resource_reference(&constants[r->index].buffer,NULL);
++         constants[r->index]=cb;constant_mask|=1u<<r->index;
++         owned_constants=(owned_constants&~(1u<<r->index))|(uploaded?(1u<<r->index):0);
+          break;
+       }
+ 
+@@ -3893,7 +3905,7 @@
+                say(why, why_size, "%s would not make a sampler view of the %s bound at "
+                                   "texture %u", rwa_device_name(device), t->format_name,
+                    r->index);
+-               return -1;
++               goto failed;
+             }
+          }
+          views[r->index] = t->view;
+@@ -3934,7 +3946,7 @@
+                struct pipe_sampler_state st;
+                if (!sampler_state_from_air(&r->sampler, r->index, &as_metal, why, why_size) ||
+                    !sampler_state_from_metal(&as_metal, &st, why, why_size))
+-                  return -1;
++                  goto failed;
+                /* One state object and not two, unlike an API sampler: this word
+                 * belongs to this shader, so whether a shadow instruction reads it is
+                 * already known and the other object would never be bound.
+@@ -3954,7 +3966,7 @@
+                                         "own word says compare_func::none, which is not "
+                                         "one of MTLCompareFunction's eight: a sampler "
+                                         "that was not made to compare", name, r->index);
+-                     return -1;
++                     goto failed;
+                   }
+                   st.compare_mode = PIPE_TEX_COMPARE_R_TO_TEXTURE;
+                }
+@@ -3962,7 +3974,7 @@
+                if (!own_sampler[r->index]) {
+                   say(why, why_size, "%s would not make the sampler %s declares at index %u",
+                       rwa_device_name(device), name, r->index);
+-                  return -1;
++                  goto failed;
+                }
+             }
+             samplers[r->index] = own_sampler[r->index];
+@@ -3991,25 +4003,25 @@
+       samplers[i] = default_sampler(device);
+       if (!samplers[i]) {
+          say(why, why_size, "%s would not make a sampler at all", rwa_device_name(device));
+-         return -1;
++         goto failed;
+       }
+       num_samplers = MAX2(num_samplers, i + 1);
+    }
+ 
+-   if (num_ssbo)
+-      pipe->set_shader_buffers(pipe, stage, 0, num_ssbo, sb, writable);
+-   if (num_views)
+-      pipe->set_sampler_views(pipe, stage, 0, num_views, 0, false, views);
+-   if (num_images)
+-      pipe->set_shader_images(pipe, stage, 0, num_images, 0, images);
+-   if (num_samplers)
+-      pipe->bind_sampler_states(pipe, stage, 0, num_samplers, samplers);
++   rwa_redfin_bindings_stage(device,stage,constants,constant_mask,sb,num_ssbo,writable,
++      views,num_views,images,num_images,samplers,num_samplers);
++   for(unsigned i=0;i<PIPE_MAX_CONSTANT_BUFFERS;++i)
++      if(owned_constants&(1u<<i))pipe_resource_reference(&constants[i].buffer,NULL);
+ 
+    bound->num_ssbo = num_ssbo;
+    bound->num_views = num_views;
+    bound->num_images = num_images;
+    bound->num_samplers = num_samplers;
+    return 0;
++failed:
++   for(unsigned i=0;i<PIPE_MAX_CONSTANT_BUFFERS;++i)
++      if(owned_constants&(1u<<i))pipe_resource_reference(&constants[i].buffer,NULL);
++   return -1;
+ }
+ 
+ /* Record actual shader writes after launch/draw, never while merely binding
+@@ -4027,25 +4039,16 @@
+    return writes;
+ }
+ 
+-/* Take back the views, images and samplers once the fence is in, which is why it can be
+- * done at all: the caller's next call may be rwa_texture_destroy or rwa_sampler_destroy,
+- * and a Gallium context that still holds a sampler state is holding a pointer the next
+- * delete_sampler_state frees -- softpipe's is a plain FREE (sp_state_sampler.c). The
+- * buffers are left bound (see struct rwa_bound).
+- */
++/* A Metal command owns its immutable resources through actual completion.
++ * Keep stage bindings between its operations; scope exit clears ALL stages,
++ * including stale buffer/constant slots and partially encoded error paths.
++ * Legacy standalone calls still unbind before returning to their caller. */
+ static void
+ unbind_stage(struct rwa_device *device, enum pipe_shader_type stage,
+              const struct rwa_bound *bound)
+ {
+-   struct pipe_context *pipe = device->pipe;
+-   if (bound->num_views)
+-      pipe->set_sampler_views(pipe, stage, 0, 0, bound->num_views, false, NULL);
+-   if (bound->num_images)
+-      pipe->set_shader_images(pipe, stage, 0, 0, bound->num_images, NULL);
+-   if (bound->num_samplers) {
+-      void *none[RWA_MAX_TEXTURES] = { 0 };
+-      pipe->bind_sampler_states(pipe, stage, 0, bound->num_samplers, none);
+-   }
++   (void)bound;
++   if(!device->command_scope.active)rwa_redfin_bindings_clear_stage(device,stage);
+ }
+ 
+ int
+@@ -4890,6 +4893,7 @@
+     * leaves the context pointing at freed memory until something else is bound over it
+     * -- the same trap delete_compute_state is about.
+     */
++   rwa_redfin_graphics_invalidate(state->device);
+    state->device->pipe->bind_depth_stencil_alpha_state(state->device->pipe, NULL);
+    state->device->pipe->delete_depth_stencil_alpha_state(state->device->pipe, state->cso);
+    free(state);
+@@ -6557,6 +6561,7 @@
+    if (!render)
+       return;
+    struct pipe_context *pipe = render->device->pipe;
++   rwa_redfin_bindings_clear(render->device);
+ 
+    /* Unbound before deleted, each of them, for the reason delete_compute_state and
+     * rwa_sampler_destroy give: a Gallium context holds a pointer to the state bound in
+@@ -7002,22 +7007,21 @@
+       pipe_surface_reference(&zsurf,NULL);return -1;
+    }
+ 
+-   pipe->bind_blend_state(pipe, render->blend);
++   rwa_redfin_bind_cso(device,RF_BIND_BLEND,render->blend);
+    /* The caller's depth/stencil state, or the pipeline's zeroed one, which is Metal's
+     * behaviour with no MTLDepthStencilState set: no test and no write.
+     */
+-   pipe->bind_depth_stencil_alpha_state(pipe, draw->depth_stencil ? draw->depth_stencil->cso
+-                                                                  : render->dsa);
++   rwa_redfin_bind_cso(device,RF_BIND_DSA,draw->depth_stencil?draw->depth_stencil->cso:render->dsa);
+    /* Metal keeps the reference value on the encoder and not in the state object, so it
+     * is set per draw. Gallium's is one byte per face, which is the stencil buffer's
+     * width; Metal's is a uint32 and only those bits can match anything.
+     */
+-   pipe->set_stencil_ref(pipe, (struct pipe_stencil_ref){
++   rwa_redfin_bind_stencil(device, &(struct pipe_stencil_ref){
+       .ref_value = { (uint8_t)(draw->stencil_reference[0] & 0xff),
+                      (uint8_t)(draw->stencil_reference[1] & 0xff) } });
+-   pipe->bind_rasterizer_state(pipe, render->rast);
+-   pipe->bind_vs_state(pipe, render->vs_cso);
+-   pipe->bind_fs_state(pipe, render->fs_cso);
++   rwa_redfin_bind_cso(device,RF_BIND_RASTER,render->rast);
++   rwa_redfin_bind_cso(device,RF_BIND_VS,render->vs_cso);
++   rwa_redfin_bind_cso(device,RF_BIND_FS,render->fs_cso);
+ 
+    /*
+     * The vertex state, bound on BOTH paths and never NULL.
+@@ -7088,8 +7092,9 @@
+     * set_vertex_buffers rather than in draw_vbo. Neither driver here does, so the
+     * other order worked; it worked by permission and not by contract.
+     */
+-   pipe->bind_vertex_elements_state(pipe, render->velem);
+-   pipe->set_vertex_buffers(pipe, nvb, vbs);
++   rwa_redfin_bind_cso(device,RF_BIND_VELEM,render->velem);
++   rwa_redfin_bind_vertices(device,nvb,vbs);
++   if(render->generated_vertex)rwa_redfin_bindings_clear_stage(device,PIPE_SHADER_VERTEX);
+ 
+    struct rwa_bound fbound = { 0 }, vbound = { 0 };
+    int rc = -1;
+@@ -7190,8 +7195,10 @@
+     * a context still holding a surface of a freed resource is the same trap as a bound
+     * sampler state (rwa_sampler_destroy).
+     */
+-   if (!device->command_scope.active)
++   if (!device->command_scope.active) {
+       pipe->set_framebuffer_state(pipe, &(struct pipe_framebuffer_state){ 0 });
++      rwa_redfin_bindings_clear(device);
++   }
+    /* Gallium/batches may still hold the surface. Drop only our reference. */
+    for (unsigned i = 0; i < draw->color_count; i++)
+       pipe_surface_reference(&surf[i],NULL);

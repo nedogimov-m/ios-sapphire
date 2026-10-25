@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete command-local binding block built; A620 validation next — 2026-10-26
+
+Source base74d47d3 plus this block. Native graphics local20261026-014045/noCI,
+pairinge6df8198875235c747e2373699e315273ee88e5d9693c2a0fff145deff8b6992; full paired build/actual20H392
+ABI/signatures PASS. Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V41 image802a38873c113d38e7e71128da6d9150ae5289137f83f1e36563b638308c483e, nonce84956c28c04b3aa8;
+complete loader/ADT/liveFDT/firmware/power/DVFS/source-window/return preflight PASS.
+Fresh V44 read epoch is clean consistent HFSX/write_count1182852; no iOS boot or
+filesystem write occurred since V40. All earlier applied stages remain stale.
+
+Implement the whole related binding block before any device test. Keep exact
+native SSBO/view/image/sampler descriptors within a command, owning resource/view
+references and clearing trailing slots when requirements shrink. Constant buffers
+ALWAYS refresh: mapped bytes can change without a new descriptor. Cache exact
+immutable graphics CSO identities, dynamic raster state and vertex descriptors;
+consume every incoming vertex reference even when its native setter is skipped.
+A changed vertex-element state still forces the required later vertex-buffer
+call. Scope success/error/standalone return clear stage/vertex refs. Sampler/
+pipeline deletion, stage-cache eviction and internal row/native-blit transitions
+invalidate the right state rather than leaving dangling native pointers. Keep
+real GPU fences, alias barriers, CPU-consumer waits and original-page checks.
+
+43host integration cases PASS, including the actual binding helper with an
+ownership-counting receiver, sparse high-to-low slots, mutable constant refresh,
+CSO/vertex reuse and a separately retained native-batch resource through cleanup.
+Initial host fixture builds needed Mesa's generated-header path and full p_state
+header; add both and rerun the full43successfully. These host checks execute no
+shader or simulated A620 pixels. Existing shader translation is unchanged, so
+no unrelated31case instruction-compile matrix is repeated. Native checker adds
+2changing-input8draw reuse commands and a later invalid draw after real encoded
+work, requiring correct pixels/guards, actual skipped bindings and no live refs.
+The second actual resource context now runs its32rounds within a scope, reads
+through real CPU-consumer fences and switches high active bindings back to low;
+the first context retains the standalone synchronization contract. Device results
+PENDING. Correctness probes on only for this combined boot; Phone/Photos opens
+and all heavy image/parameter capture remain off. Broader goal and smooth UI FPS
+remain unfinished. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x84956c28c04b3aa8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V40 ordinary warm ordering verified; UI latency still open — 2026-10-26
 
 Source8ab2c89 (runtime57b155b); ordinary graphics local20261026-010624/noCI,
