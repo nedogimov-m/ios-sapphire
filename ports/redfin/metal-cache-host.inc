@@ -6,10 +6,13 @@
 #define REDFIN_AIR_CACHE_ENTRIES 2u
 #include "compiler/air/redfin_metal_translation_cache.h"
 #include "compiler/air/redfin_metal_function_constants.h"
+#include "pipe/p_screen.h"
 struct rwa_device {
    const nir_shader_compiler_options *nir_options;
    struct redfin_air_translation_cache translation_cache;
    struct redfin_air_stage_cache stage_cache;
+   struct pipe_context *pipe;
+   struct pipe_screen *screen;
 };
 static void say(char *out,size_t bytes,const char *format,...)
 {
@@ -17,9 +20,62 @@ static void say(char *out,size_t bytes,const char *format,...)
 }
 #include "compiler/air/redfin_metal_function_constants.inc"
 #include "compiler/air/redfin_metal_translation_cache.inc"
+#include "redfin_metal_cache_finalizer.inc"
+#include "compiler/air/redfin_metal_stage_cache.inc"
 
 static void redfin_host_cache_require(bool valid,const char *reason)
 { if(!valid)errx(1,"AIR template cache: %s",reason); }
+
+/* No shader executes here. The callback owns the actual finalized NIR as a
+ * state token, so allocation/deletion counts expose shared-state lifetimes.
+ * Native pixel probes separately use the real A620 Gallium callbacks. */
+static unsigned redfin_host_states_created,redfin_host_states_deleted;
+static void *redfin_host_bound[2];
+static void *redfin_host_state_create(struct pipe_context *pipe,const struct pipe_shader_state *state)
+{
+   redfin_host_cache_require(state->type==PIPE_SHADER_IR_NIR&&state->ir.nir,"real finalized NIR state");
+   nir_validate_shader(state->ir.nir,"state creation");++redfin_host_states_created;return state->ir.nir;
+}
+static void redfin_host_bind_vs(struct pipe_context *pipe,void *state) {redfin_host_bound[0]=state;}
+static void redfin_host_bind_fs(struct pipe_context *pipe,void *state) {redfin_host_bound[1]=state;}
+static void redfin_host_state_delete(struct pipe_context *pipe,void *state)
+{
+   redfin_host_cache_require(state&&state!=redfin_host_bound[0]&&state!=redfin_host_bound[1],"unbind before last-state deletion");
+   nir_validate_shader(state,"state deletion");++redfin_host_states_deleted;ralloc_free(state);
+}
+static void redfin_host_stages_run(struct rwa_device *device,nir_shader *first,nir_shader *second)
+{
+   struct pipe_context pipe={.create_vs_state=redfin_host_state_create,.create_fs_state=redfin_host_state_create,
+      .bind_vs_state=redfin_host_bind_vs,.bind_fs_state=redfin_host_bind_fs,
+      .delete_vs_state=redfin_host_state_delete,.delete_fs_state=redfin_host_state_delete};
+   struct pipe_screen screen={.caps={.fs_position_is_sysval=true}};
+   device->pipe=&pipe;device->screen=&screen;
+   char why[512]={0};redfin_host_states_created=redfin_host_states_deleted=0;
+   nir_shader_gather_info(first,nir_shader_get_entrypoint(first));
+   nir_shader_gather_info(second,nir_shader_get_entrypoint(second));
+   struct redfin_air_stage *a=redfin_air_stage_create(device,first,why,sizeof(why));
+   struct redfin_air_stage *b=redfin_air_stage_create(device,second,why,sizeof(why));
+   redfin_host_cache_require(a&&b&&a==b&&device->stage_cache.hits==1&&redfin_host_states_created==1,
+      "equivalent finalized stages reuse one state");
+   for(unsigned i=0;i<2;++i) {
+      nir_shader *different=nir_shader_clone(NULL,first);
+      different->info.label=ralloc_asprintf(different,"host eviction variant %u",i);
+      struct redfin_air_stage *variant=redfin_air_stage_create(device,different,why,sizeof(why));
+      redfin_host_cache_require(variant!=NULL,why);redfin_air_stage_release(variant);ralloc_free(different);
+   }
+   redfin_host_cache_require(device->stage_cache.evictions==1&&device->stage_cache.entries==2&&
+      redfin_host_states_deleted==0,"eviction preserves retained pipelines");
+   nir_validate_shader(a->cso,"retained real finalized NIR after stage eviction");
+   redfin_air_stage_cache_finish(&device->stage_cache);
+   redfin_host_cache_require(redfin_host_states_deleted==2,"cache teardown releases only unreferenced states");
+   redfin_air_stage_release(a);
+   redfin_host_cache_require(redfin_host_states_deleted==2,"independent pipeline reference");
+   if(b->vertex)pipe.bind_vs_state(&pipe,b->cso);else pipe.bind_fs_state(&pipe,b->cso);
+   redfin_air_stage_release(b);
+   redfin_host_cache_require(redfin_host_states_created==3&&redfin_host_states_deleted==3,"last pipeline releases shared state once");
+   device->pipe=NULL;device->screen=NULL;
+   printf("; AIR STAGE CACHE: real-finalizer=1 equivalent-state-hit=1 forced-LRU=1 surviving-pipelines=1 last-reference-release=1 callback-only-no-shader-execution=1\n");
+}
 
 static void redfin_host_cache_run(const void *bitcode,size_t bytes,
    const struct air_to_nir_options *options)
@@ -41,6 +97,8 @@ static void redfin_host_cache_run(const void *bitcode,size_t bytes,
    nir_shader *second=redfin_air_cached_translate(&device,second_owner,bitcode,bytes,NULL,&reverse,&second_info,why,sizeof(why));
    redfin_host_cache_require(second&&second!=first&&device.translation_cache.hits==1,"canonical reordered key hit with independent NIR");
    nir_validate_shader(second,"actual deserialized template");
+   if(first->info.stage==MESA_SHADER_VERTEX||first->info.stage==MESA_SHADER_FRAGMENT)
+      redfin_host_stages_run(&device,first,second);
    redfin_host_cache_require(first_info.entry_point&&second_info.entry_point&&
       first_info.entry_point!=second_info.entry_point&&!strcmp(first_info.entry_point,second_info.entry_point),"independent entry metadata");
    redfin_host_cache_require(first_info.num_resources==second_info.num_resources&&

@@ -139,6 +139,12 @@ def prepare_memory_probe(source):
 def prepare_cache_probe(source):
     path=source/'src/gallium/drivers/freedreno/ir3/ir3_cmdline.c'
     shutil.copy2(ROOT/'ports/redfin/metal-cache-host.inc',path.parent/'redfin_metal_cache_host.inc')
+    # Exercise the exact production finalizer and cache. Host callbacks own NIR
+    # tokens only; actual A620 state creation/pixels remain a native contract.
+    metal=(source/'src/compiler/air/air_metal.c').read_text()
+    begin=metal.index('static int\ntype_size_vec4(')
+    end=metal.index('static void redfin_air_cache_finish(',begin)
+    (path.parent/'redfin_metal_cache_finalizer.inc').write_text(metal[begin:end])
     text=path.read_text()
     point='static struct ir3_compiler *compiler;'
     text=replace_once(text,point,point+'\n#include "redfin_metal_cache_host.inc"')

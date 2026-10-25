@@ -64,7 +64,7 @@ static struct redfin_air_stage *redfin_air_stage_create(struct rwa_device *devic
    ++cache->misses;
    struct redfin_air_stage *stage=rzalloc(NULL,struct redfin_air_stage);
    if(!stage){blob_finish(&key);ralloc_free(clone);say(why,why_size,"out of memory owning a shader stage");return NULL;}
-   stage->device=device;stage->vertex=vertex;stage->references=1;
+   stage->device=device;stage->vertex=vertex;stage->references=1;stage->hash=hash;
    struct pipe_shader_state state={.type=PIPE_SHADER_IR_NIR,.ir.nir=clone};
    struct pipe_context *pipe=device->pipe;
    stage->cso=vertex?pipe->create_vs_state(pipe,&state):pipe->create_fs_state(pipe,&state);

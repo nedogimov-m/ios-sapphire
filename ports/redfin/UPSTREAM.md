@@ -1,5 +1,24 @@
 # HackiOS upstream review — 2026-10-22
 
+## Preserve stage lookup hash; retain more templates within the same payload cap — 2026-10-25
+
+V34 proves correct native raster/half/resource pixels but the new combined cache
+probe correctly fails: templates hit, yet even identical native pipelines never
+hit a stage. The inserted stage omitted its computed hash assignment; its full
+serialized bytes are not the problem. Save the hash alongside the owned key.
+No key comparison, shader semantics or resource checks are weakened.
+
+Raise the entry limit from32to64 while keeping each8MiB payload/key cap: actual
+backboardd has already evicted32templates by pipeline64 with only3.38MiB charged
+payload. Stage/GPU allocations remain outside that key-byte bound. The70variant
+native test still forces both LRUs to evict the two retained original pipelines.
+Add independent host state-allocation/refcount callbacks over the exact native
+finalizer and real NIR, proving a shared state hit, eviction lifetime and one
+last-reference deletion. No shader executes through those callbacks; actual
+A620 CSOs/pixels remain a separate native requirement.14modules and all19actual
+parameter sets pass these host contracts and instruction compilation. The
+complete native paired build/20H392 ABI/signatures pass; V35 is pending.
+
 ## Bounded shader preparation and immutable state reuse — 2026-10-25
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's

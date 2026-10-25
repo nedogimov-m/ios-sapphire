@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN stage lookup fixed; complete block rebuilt; fresh V38 prepared for V35 — 2026-10-25
+
+Source basec4a4899 plus this correction block. V34's zero stage hits come from
+not assigning the computed hash to the inserted stage; save it, retaining full
+byte equality and all shader semantics. Raise32to64entries without raising
+either8MiB charged-template/key cap: V34 has32template evictions at pipeline64
+with only3.38MiB charged payload. Bounds do not include all driver/GPU storage.
+
+Add host state callbacks over the exact production finalizer/real NIR: repeated
+stages must share one state, forced LRU must preserve both retained pipelines,
+and the last reference must unbind/delete exactly once. Callbacks execute no
+shader; the native70variant pixel/guard test remains separate.14NIR modules/
+A620 instruction compiles and all19actual parameter sets PASS the complete CPU
+and stage ownership/cache contracts. One private host build first refused an
+assignment to Mesa's const screen caps; use a designated initializer and retain
+that failed build evidence. Fresh full native/actual20H392 ABI/signatures PASS:
+research/redfin-metal-preparation-v2, local20261025-233008/noCI,
+pairinge635dd4c961177ff91d5fd912c8304d9e15d5065441fc8ad3ad72f5ced7fe3e1.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+
+Fresh V35 imageec04e5a95a052f272f1d9b40076e5bd58a3154cbe61f3c01bca82d50fc4f6e00,
+noncef8a202ff81ecbe62; full loader/ADT/liveFDT/firmware/power/DVFS/source-window/
+return preflight PASS, no screen/draw capture. Startup correctness jobs on;
+automatic Phone/Photos launches stay off. Fresh V38 from clean consistent HFSX/
+write_count1131754:178ranges/23207936bytes/zero new/zero freed; full staged
+files/readback/signatures/seal/native readonly fsck PASS. V38 PREPARED, NOT
+APPLIED; every older applied stage remains stale. Next apply once and collect
+one combined V35. V34 raster correctness is retained by observations; successful
+native state reuse/70variant lifetime and sustained FPS remain pending. Broader
+goal remains active. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xf8a202ff81ecbe62 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V34 templates hit; stage-cache correctness test FAIL — 2026-10-25
 
 Sourceefc1059; graphics local20261025-231820/noCI,

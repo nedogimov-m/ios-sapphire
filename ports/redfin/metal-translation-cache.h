@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #ifndef REDFIN_AIR_CACHE_ENTRIES
-#define REDFIN_AIR_CACHE_ENTRIES 32u
+#define REDFIN_AIR_CACHE_ENTRIES 64u
 #endif
 #define REDFIN_AIR_CACHE_BYTES (8u * 1024u * 1024u)
 #define REDFIN_AIR_CACHE_STAT_WORDS 11u

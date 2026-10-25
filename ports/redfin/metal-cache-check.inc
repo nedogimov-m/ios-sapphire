@@ -82,8 +82,9 @@ static BOOL preparation_cache_native(id<MTLDevice> device,id<MTLLibrary> library
     BOOL evicted=bounds&&after[4]>warm[4]&&after[10]>warm[10];
     BOOL survived=valid&&evicted&&cache_draw(queue,texture,surface,first,original,72)&&
         cache_draw(queue,texture,surface,second,original,73);
-    printf("REDFIN METAL CACHE RESULT: boot=%016llx duplicate-template-and-stage-hits=%u variants=%u bounded=%u template-evictions=%llu stage-evictions=%llu surviving-pipelines-pixels-guards=%u\n",
-        (unsigned long long)nonce,observed&&warm[0]>=before[0]+2&&warm[6]>=before[6]+2,rounds,bounds,
+    printf("REDFIN METAL CACHE RESULT: boot=%016llx duplicate-template-and-stage-hits=%u template-hits=%llu stage-hits=%llu variants=%u bounded=%u template-evictions=%llu stage-evictions=%llu surviving-pipelines-pixels-guards=%u\n",
+        (unsigned long long)nonce,observed&&warm[0]>=before[0]+2&&warm[6]>=before[6]+2,
+        (unsigned long long)(warm[0]-before[0]),(unsigned long long)(warm[6]-before[6]),rounds,bounds,
         (unsigned long long)(after[4]-before[4]),(unsigned long long)(after[10]-before[10]),survived);
     [queue release];[texture release];if(surface)CFRelease(surface);[second release];[first release];
     return survived&&rounds==70;
