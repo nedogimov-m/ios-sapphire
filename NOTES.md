@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V30 native packed-state/Bool contract PASS; backboardd hits a memory limit — 2026-10-25
+
+Source59dc5a3; graphics local20261025-211455/noCI,
+pairingf5dd3584165331a4a90697864f4d50d603fb36d3f58cac6be1aea8defc4734fb.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V30 image5bdc596693b60f1f85f2eca335ea4fffacd0e6708abd21ae6964afcfc4ab0be7,
+nonce7da016b8a3225eb9. V33 applied once:208ranges/23519232bytes/2new/
+zero freed; complete live preimages/readback/signatures/native readonly fsck
+PASS. V33 is applied/stale; never reuse. Authenticated current-boot collection
+restores startup/boot-ID proof (userspace-alive), reports no kernel panic,
+clean consistent HFSX/write_count1091583 and verified Fastboot.
+Phone/Photos automatic jobs remain disabled.
+
+Actual A620 scalar Bool false/true, Bool3 immutable snapshots/compute/guards
+and all32resource rounds PASS, including defined bytes next to undefined
+padding, inactive requirements and active high-binding pixels/guards. Earlier
+compute/raster/vertex/transfer/alias/A8 probes also PASS. Actual CoreAnimation
+no longer refuses buffer0 or attachment textures1/2. These are native contract
+results, not proof of correct system pixels or sustained rendering FPS.
+
+The system GUI is still incorrect: current physical capture is nearly flat
+lavender, and backboardd62/259/275 exit with the explicit launchd reason
+JETSAM_REASON_MEMORY_PERPROCESSLIMIT. backboardd291 ends during the ordinary
+scheduled shutdown. The 180-second shutdown explains the display going off;
+the user's earlier20.58.19 checkerboard photograph belongs to V29. Restarted
+clients still refuse original-page no-copy lookups; preserve these checks.
+Concatenated per-process draw sequences correctly fail the strict single-process
+decoder. Do not interpret that as pixel/CRC evidence.
+
+Next read the actual own-PID8796 memory properties in the scoped native loader,
+preserve higher limits, set only bounded deficient limits and verify readback.
+The existing plist requests512MiB and the kernel contains an admission adapter,
+but neither establishes the actual limit reached by these processes. The
+launchd50MB warning is not evidence of backboardd's specific limit. Use fresh
+root V34 from generation1091583 and fresh image V31 for the next coherent block.
+Correct rendering/performance and the broader goal remain open.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7da016b8a3225eb9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN defined packed state and native bool block built; V33 staged for V30 — 2026-10-25
 
 Source base60ae83b plus this coherent block. Run Mesa25.0.7's existing
