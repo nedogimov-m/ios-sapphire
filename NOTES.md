@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V15 exact unmapped GPU write captured; native profiling installed — 2026-10-25
+
+Source8ad81ae, local20261025-125153/noCI06f3b08b..., image55be5d4c...,
+nonce4938418972d89045. Fresh V17 applied exactly once with225verified ranges/
+22724608bytes/4new/zero freed blocks; complete preimages, written range and
+signed-file readback/native readonly fsck PASS. V17 is now applied/stale and
+must never be reused. Capture authenticates exact image/launchd/userspace,
+leaves clean HFSX/not inconsistent/write_count896391 and returns Fastboot.
+
+Actual owned fault before retirement: FSR0x80000402/FAR0x12509000/
+FSYNR0x60013 (write), completed306/issued307, owned L2 present/PTE0. The address
+is outside all23submitted BO bounds; native GX power remains held and CP
+fault/IRQ clear. This is a real unmapped write, not evidence of lost power.
+Backboardd62 faults afterward; SpringBoard restarts as259 and its warmed clip
+has282CPU presents/9.999822s=28.201fps,zeroGPU presents. Do not claim accelerated
+FPS or stability. Phone286 survives5/17s; Photos launch is accepted but no
+17s result was captured. The separate native192compute/BGRA/RG8/blend/
+dependency/guards still passes5GMEM/0sysmem.
+
+Native Metal phases now observed. One37draw command takes107855us encoding
+and7853us final finish; encoding can include internal batch submits/waits,
+so it is NOT pure CPU time. Earlier3draw first-use207754us encoding/14382us
+finish; simple warmed2draw4169us/5550us. Need count actual internal kernel
+submits to distinguish frontend work from synchronous flushes.
+
+No WLAN or ADSP startup messages occur in this run; no SFR observation can be
+claimed. The initial WLAN handoff silently requires CPU0 after GPU startup;
+make that metadata handoff explicitly preserve/restore CPU0 affinity and
+retain all touch/rail/epoch checks. No physical motion/CoreMotion data yet.
+
+Source diagnosis candidate: Mesa25.0.7 fd6_layout.c explicitly allocates a
+16x4 GMEM transfer margin, while imported linear resources do not enforce
+that backing size. Actual1065x282/BPR4288 surface has1212416bytes, below
+4288*284=1217792. Its possible last-row overrun matches a4KiB-guard fault,
+but the old capture does not prove its BO base. Implement a per-attachment
+size guard with true GPU sysmem routing and an exact-shape/native guard probe;
+retain GMEM for adequately backed resources. Do not widen a user's mapping or
+hide the fault. Further actual performance work and native SSC/FastRPC/VD6281,
+Wi-Fi credential/autojoin, cable/motion and Apple authorization remain pending.
+Exact V15 observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x4938418972d89045 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native GPU fault/Metal phase/ADSP SFR block built; fresh V17 staged — 2026-10-25
 
 Source base661bb6c plus this complete observation block. Preserve actual owned
