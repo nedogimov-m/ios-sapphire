@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V5 platform run collected cleanly; log wrap limits proof — 2026-10-25
+
+Source9cf831f; native kernel remains local20261025-072951/noCI,
+SHA256e3ae120285ac57d0bcb32d26ab55e3df520c9b2acb733b895685cb3fe5d739e0.
+Image gui-platform-v5 SHA25667a3226bc02a045b44d8a465111c24402e89cfd712b2382bb1a5d055ab96c62b,
+nonce54d29807ff094ae7. Temporary boot/automatic native shutdown/recovery
+complete; all13native file logs collected, clean HFSX/not inconsistent,
+write_count793497 and verified Fastboot. No additional root update was made.
+V10 is already applied and must never be reused.
+
+Encrypted RAM authenticates, but12565identical successful coreduetd AKS
+selector17requests fill the rolling console and erase initial boot-id/launchd
+proof. Runner correctly reports logs-collected, boot-id-missing and exit1,
+not userspace-alive/PASS. No full current system-render proof is inferred.
+The per-file native logs carry the expected nonce and are read from the
+verified clean root; distinguish these observations from strict RAM/image
+proof. Future authenticated immutable recovery captures skip the needless
+300s banner wait; strict freshness/result checks remain unchanged.
+
+Native file observations: UIScreen maximum90 and period1/90 with verified
+panel properties; thermal pressure0, actual hottest54.5..58.8C and battery
+33.9..34.6C, valid calendar. RAM tail shows QG4.440V, SOC100%, external1,
+zero sample errors through211samples and thermal control activity. Charge
+fault0x2 repeatedly pauses. Do not claim charge success: compare exact SMB5
+status7 AFP/soft/hard bits, status2 OV/native FV tolerance and actual enabled
+modes with Google's driver. Do not clear a fault or alter limits/protections.
+
+Native MobileWiFi synthetic unjoined Set/Copy succeeds/exact1; existing0
+requires its next reboot check. En0 appears28.4s after checker start, no IPv4
+or HTTPS here. Absolute boot-ms is retained-counter uptime, not time since
+kernel entry. User credentials/autojoin and faster startup remain unfinished.
+SecItem existing1/read0/exact1 repeats. Phone246survives5/17s, SpringBoard26
+stable; Photos still aborts. Helper SecTask native entitlement1, flags
+0x26004001/error0 but TCC preflight0. No authorization override is made.
+Assetsd242aborts; replacement244survives to shutdown. Investigate startup
+readiness/native library retries instead of assuming every assetsd failed.
+Native daemon stdout supplies no further cause beyond the initial exception.
+
+Next complete block: preferred native Metal/AIR/actual20H392 ABI, canonical
+native AKS/no-passcode state and bounded logging, SMB5 native health/state,
+Photos readiness/retry, preserved startup evidence and Wi-Fi persistence.
+All actual sensors and real account authorization also remain required.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x54d29807ff094ae7 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V10 applied; native-power loader contract and fresh preflight — 2026-10-25
 
 Source base8ea43b8; V10 has now been applied, not merely staged. All31ranges/

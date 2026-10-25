@@ -116,3 +116,14 @@ new-zero-block installer bug was fixed: write ALL newly allocated blocks,
 including zeros, and verify complete files through their actual extents.
 Do not reuse V7, the pre-boot data-repair snapshot or applied V8. Use a fresh
 root generation for the next update; assess the current combined run first.
+
+The complete V5 platform run (source9cf831f, nonce54d29807ff094ae7) returns
+clean HFSX/write_count793497 and verified Fastboot. Native logs now show
+UIScreen90/1-90, real TSENS/battery/thermal notifications and valid calendar;
+Phone survives and SecItem remains persistent. MobileWiFi synthetic write/read
+is exact, but its next-boot persistence and real autojoin remain unproved.
+Charger fault0x2 pauses charging; adapt exact native SMB5 status/health before
+claiming charge. Photos still fails; replacement assetsd244survives.
+An AKS selector17log flood wraps initial RAM proof, so strict overall status
+is logs-collected/boot-id-missing, not PASS. Preserve startup/reduce the flood
+in the next complete block. Metal sources are being implemented, not tested.
