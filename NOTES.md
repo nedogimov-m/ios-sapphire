@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN actual GPU row-conversion/resolve/alias block built; fresh V21 staged — 2026-10-25
+
+Source base6d4844e plus this complete related block. Remove the disproved
+unaligned-sampler opt-in. Import original IOSurface pages only as a bounded
+raw PIPE_BUFFER; keep standard freedreno sampler/attachment import constraints.
+An aligned native LINEAR texture has a genuine shared-BO buffer alias. A native
+NIR compute grid copies exact pixel rows, with32-bit bounds-checked offsets,
+from the original and back for actual writes. Both alias transitions pay real
+GPU fences/barriers; native resource-valid/dirty metadata changes only after
+actual successful completion under the existing serialized nonthreaded context.
+
+Per-command refresh/ordered output resolve covers raster, clear-only, shader
+image and CPU texture API paths. Peer wrappers of one IOSurface resolve an
+actual dirty predecessor and invalidate old snapshots. Native compute bindings
+are restored after internal conversion. Validate all pass clear values before
+any clear can create pending work. Offscreen probes now check both incoming
+480/4512pitches twice, both unaligned outputs and a distinct wrapper sampling
+an earlier write within the same command, with actual original/source/tail
+checks. No CPU pixel conversion/rasterization or mapping widening is introduced.
+These are implementations; no native success or corrected screen is claimed yet.
+
+49combined host cases PASS/no skips. Full fresh Mesa/AIR/native Metal/shader/
+signature/actual20H392 API build PASS, research/redfin-metal-rowcopy-v3,
+local20261025-144506/noCI. V1 was superseded by added alias coherency; V2 failed
+the driver's context-ownership annotation and is not installable. The final
+private entry uses native access annotations under the proven AIR mutex and
+context_create(flags0) ownership, retaining the full thread-safety check.
+Kernel unchanged/reused local20261025-134128/noCI,
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V19 image ed5c11cb2213273a4a28ed050c15a412b8b9e46c5d5c41fd27aa13ad8cc4bc96; native loader/ADT/
+liveFDT/firmware/power/DVFS/source-window/return preflight PASS.
+
+Fresh V21 starts clean/consistent HFSX/write_count926210. Complete file
+preimages, native signed-file/seal/readback and readonly fsck PASS:
+156ranges/24932352bytes/5new/zero freed blocks. Preserve the already-built
+UI/refresh adapter and all identities, credentials and existing logs. V21 is
+PREPARED, NOT APPLIED at this checkpoint; V20 and older are applied/stale.
+Next apply once and collect one combined V19 run, including actual GUI frames.
+Stable60/90render FPS, other Metal semantics and the broader platform goal
+remain unfinished. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb1c75bbb3addb0a7 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V18 native raster/MRT/fetch PASS; unaligned sampling is wrong on hardware — 2026-10-25
 
 Source86e313d, reused local20261025-134128/noCI7fadbcd8..., V18 image

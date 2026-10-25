@@ -9,38 +9,64 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
  #include "freedreno_screen.h"
  #include "freedreno_surface.h"
  #include "freedreno_util.h"
-@@ -1552,6 +1553,20 @@
-    else
-       rsc->layout.pitchalign = MAX2(rsc->layout.pitchalign, 5);
+@@ -1576,6 +1577,60 @@
+    return NULL;
+ }
  
-+   /* Opt-in from paired AIR only. A6xx's sampler has an explicit byte
-+    * pitch, while its render/resolve paths need 64-byte alignment. */
-+   if (usage & REDFIN_LINEAR_SAMPLER_USAGE) {
-+      if (!is_a6xx(screen) || usage!=REDFIN_LINEAR_SAMPLER_USAGE ||
-+          handle->modifier!=DRM_FORMAT_MOD_LINEAR || tmpl->target!=PIPE_TEXTURE_2D ||
-+          tmpl->last_level || tmpl->array_size!=1 || tmpl->nr_samples>1 ||
-+          (tmpl->bind&(PIPE_BIND_RENDER_TARGET|PIPE_BIND_DEPTH_STENCIL|PIPE_BIND_SHADER_IMAGE)) ||
-+          util_format_get_blockwidth(tmpl->format)!=1 || util_format_get_blockheight(tmpl->format)!=1 ||
-+          !redfin_linear_sampler_fits(prsc->width0,prsc->height0,rsc->layout.cpp,
-+             handle->stride,handle->offset,fd_bo_size(rsc->bo)))
-+         goto fail;
-+      rsc->layout.pitchalign=0;
-+   }
++/* Owns the supplied reference. These raw buffer aliases are never sampled
++ * or bound as framebuffers. The paired AIR pays real fences across aliases. */
++static struct pipe_resource *
++redfin_buffer_from_bo(struct pipe_screen *screen,struct fd_bo *bo)
++{
++   uint32_t size=bo?fd_bo_size(bo):0;
++   if(!size){if(bo)fd_bo_del(bo);return NULL;}
++   const struct pipe_resource shape={.target=PIPE_BUFFER,.format=PIPE_FORMAT_R8_UINT,
++      .width0=size,.height0=1,.depth0=1,.array_size=1,
++      .bind=PIPE_BIND_SHADER_BUFFER,.usage=PIPE_USAGE_DEFAULT};
++   struct fd_resource *rsc=alloc_resource_struct(screen,&shape);
++   if(!rsc){fd_bo_del(bo);return NULL;}
++   fd_resource_layout_init(&rsc->b.b);
++   fdl_layout_buffer(&rsc->layout,size);
++   tc_buffer_disable_cpu_storage(&rsc->b.b);
++   fd_resource_set_bo(rsc,bo);rsc->b.is_shared=true;rsc->valid=true;
++   util_range_add(&rsc->b.b,&rsc->valid_buffer_range,0,size);
++   return &rsc->b.b;
++}
++struct pipe_resource *
++redfin_freedreno_import_buffer(struct pipe_screen *screen,unsigned surface)
++{
++   if(!is_a6xx(fd_screen(screen))||!surface)return NULL;
++   struct winsys_handle handle={.type=WINSYS_HANDLE_TYPE_FD,.handle=surface,
++      .modifier=DRM_FORMAT_MOD_LINEAR};
++   return redfin_buffer_from_bo(screen,fd_screen_bo_from_handle(screen,&handle));
++}
++struct pipe_resource *
++redfin_freedreno_buffer_alias(struct pipe_screen *screen,struct pipe_resource *source,
++    unsigned *pitch,unsigned *offset)
++{
++   if(!source||source->screen!=screen||!pitch||!offset||!is_a6xx(fd_screen(screen))||
++      source->target!=PIPE_TEXTURE_2D||source->last_level||source->array_size!=1||source->nr_samples>1)return NULL;
++   struct fd_resource *rsc=fd_resource(source);
++   if(!rsc->bo||fd_resource_tile_mode(source,0)||fd_resource_ubwc_enabled(rsc,0))return NULL;
++   uint64_t start=fd_resource_offset(rsc,0,0);
++   if(start>UINT32_MAX)return NULL;
++   struct pipe_resource *buffer=redfin_buffer_from_bo(screen,fd_bo_ref(rsc->bo));
++   if(buffer){*pitch=fd_resource_pitch(rsc,0);*offset=(unsigned)start;}
++   return buffer;
++}
++int
++redfin_freedreno_alias_written(struct pipe_context *pipe,struct pipe_resource *resource)
++{
++   if(!pipe||!resource||resource->screen!=pipe->screen||!is_a6xx(fd_context(pipe)->screen))return -1;
++   /* Private AIR uses context_create(flags=0), holds its recursive frontend
++    * gate, and has paid the real fence. There is no threaded-context worker. */
++   fd_context_access_begin(fd_context(pipe));
++   fd_resource(resource)->valid=true;
++   fd_context_all_dirty(fd_context(pipe));
++   fd_context_access_end(fd_context(pipe));
++   return 0;
++}
 +
-    if (rsc->layout.pitch0 < (prsc->width0 * rsc->layout.cpp) ||
-        fd_resource_pitch(rsc, 0) != rsc->layout.pitch0)
-       goto fail;
-diff --git a/src/freedreno/fdl/fd6_view.c b/src/freedreno/fdl/fd6_view.c
---- a/src/freedreno/fdl/fd6_view.c
-+++ b/src/freedreno/fdl/fd6_view.c
-@@ -241,7 +241,9 @@
-       A6XX_TEX_CONST_1_WIDTH(width) | A6XX_TEX_CONST_1_HEIGHT(height) |
-       COND(is_mutable, A6XX_TEX_CONST_1_MUTABLEEN);
-    view->descriptor[2] =
--      A6XX_TEX_CONST_2_PITCHALIGN(layout->pitchalign - 6) |
-+      /* Single-level linear sampler imports retain a byte pitch. The
-+       * implicit mip alignment is unused there; do not underflow it. */
-+      A6XX_TEX_CONST_2_PITCHALIGN(layout->pitchalign>=6?layout->pitchalign-6:0) |
-       A6XX_TEX_CONST_2_PITCH(pitch) |
-       A6XX_TEX_CONST_2_TYPE(fdl6_tex_type(args->type, false));
-    view->descriptor[3] = A6XX_TEX_CONST_3_ARRAY_PITCH(layer_size);
+ bool
+ fd_render_condition_check(struct pipe_context *pctx)
+ {

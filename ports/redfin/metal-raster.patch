@@ -10,50 +10,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
  extern void redfin_freedreno_raster_stats(struct pipe_context *,uint64_t[2]);
  extern int redfin_drm_profile_read(uint64_t *,size_t);
  
-@@ -203,6 +205,7 @@
-     * lenient one.
-     */
-    bool shader_read, shader_write;
-+   bool redfin_sampler_only; /* imported byte pitch cannot be an RB destination */
- };
- 
- /* A sampler is a Gallium state object and nothing more. The state it was built from is
-@@ -1422,14 +1425,17 @@
-          free(texture);
-          return NULL;
-       }
--      if (import->row_bytes % 64 != 0) {
--         say(why, why_size, "IOSurface %d has %u bytes a row, which is not a multiple of "
--                            "64: this GPU lays out a row aligned to that and its import "
--                            "refuses a pitch it would have to change (the kernel's own "
--                            "surfaces are aligned to 64 already)", import->id,
--             import->row_bytes);
--         free(texture);
--         return NULL;
-+      texture->redfin_sampler_only=(import->row_bytes%64)!=0;
-+      if(texture->redfin_sampler_only) {
-+         if(write||depth_stencil||
-+            !redfin_linear_sampler_fits(width,height,texel,import->row_bytes,import->offset,UINT64_MAX)) {
-+            say(why,why_size,"IOSurface %d byte pitch %u cannot be imported for storage writes or depth, or has an invalid sampler layout",
-+                import->id,import->row_bytes);free(texture);return NULL;
-+         }
-+         /* Descriptors may advertise render usage for every client surface.
-+          * Keep the actual unaligned allocation sampler-only: the RB pitch
-+          * register cannot represent it, unlike TEX_CONST_2's byte pitch. */
-+         templ.bind&=~(PIPE_BIND_RENDER_TARGET|PIPE_BIND_DEPTH_STENCIL|PIPE_BIND_SHADER_IMAGE);
-       }
- 
-       /*
-@@ -1454,7 +1460,7 @@
-       }
- 
-       texture->res = device->screen->resource_from_handle(device->screen, &templ, &whandle,
--                                                          PIPE_HANDLE_USAGE_FRAMEBUFFER_WRITE);
-+         texture->redfin_sampler_only?REDFIN_LINEAR_SAMPLER_USAGE:PIPE_HANDLE_USAGE_FRAMEBUFFER_WRITE);
-       if (!texture->res) {
-          /*
-           * Everything this side could check has been checked, so no reason is invented
-@@ -5185,6 +5191,7 @@
+@@ -5185,6 +5187,7 @@
      */
     void *vs_cso, *fs_cso;
     void *blend, *dsa, *rast, *velem;
@@ -61,27 +18,16 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     struct pipe_resource *vbuf;        /* the full-screen quad, for the generated stage */
  
     /* What the vertex descriptor was turned into, empty for a stage that fetches no
-@@ -6485,6 +6492,10 @@
- attachment_shape_fits(const struct rwa_texture *t, unsigned samples, const char *what,
-                       char *why, size_t why_size)
- {
-+   if(t->redfin_sampler_only) {
-+      say(why,why_size,"%s has an unaligned IOSurface byte pitch and is sampler-only; RB_MRT_PITCH cannot represent it",what);
-+      return false;
-+   }
-    unsigned want_type = samples > 1 ? RWA_TYPE_2D_MULTISAMPLE : RWA_TYPE_2D;
-    if (t->shape.type != want_type) {
-       say(why, why_size, "%s is a %s and a pass of %u sample%s per pixel renders into a %s",
-@@ -6514,6 +6525,8 @@
-          texture->res,&(struct pipe_surface){.format=texture->res->format});
+@@ -6515,6 +6518,8 @@
     return texture->render_surface;
  }
-+
-+#include "redfin_metal_raster.inc"
  
++#include "redfin_metal_raster.inc"
++
  int
  rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
-@@ -6851,30 +6864,10 @@
+                 char *why, size_t why_size)
+@@ -6851,30 +6856,10 @@
     }
     pipe->set_framebuffer_state(pipe, &fb);
  

@@ -124,8 +124,14 @@ static BOOL render_byte_pitch(id<MTLDevice> device,id<MTLLibrary> library,uint32
     IOSurfaceRef source=raster_surface(width,height,source_pitch,source_bytes);
     IOSurfaceRef destination=raster_surface(width,height,destination_pitch,destination_bytes);
     id<MTLTexture> input=raster_texture(device,source),output=raster_texture(device,destination);
+    BOOL alias_test=(destination_pitch%64)!=0;
+    unsigned alias_pitch=(width*4+63)&~63u;
+    IOSurfaceRef alias_readback=alias_test?raster_surface(width,height,alias_pitch,destination_bytes):NULL;
+    id<MTLTexture> alias=alias_test?raster_texture(device,destination):nil;
+    id<MTLTexture> alias_output=alias_test?raster_texture(device,alias_readback):nil;
     id<MTLRenderPipelineState> pipeline=raster_pipeline(device,library,@"redfin_position_sample_fragment",1,NO);
-    id<MTLCommandQueue> queue=[device newCommandQueue];BOOL valid=source&&destination&&input&&output&&pipeline&&queue;
+    id<MTLCommandQueue> queue=[device newCommandQueue];BOOL valid=source&&destination&&input&&output&&pipeline&&queue&&
+        (!alias_test||(alias&&alias_output));
     for(unsigned round=0;valid&&round<2;++round) {
         uint32_t seed=0;uint32_t value=nonce+round*0x9e3779b9u;
         valid=IOSurfaceLock(source,0,&seed)==KERN_SUCCESS;
@@ -144,12 +150,23 @@ static BOOL render_byte_pitch(id<MTLDevice> device,id<MTLLibrary> library,uint32
             if(valid) {
                 [encoder setRenderPipelineState:pipeline];[encoder setFragmentTexture:input atIndex:0];
                 [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-                [encoder endEncoding];valid=raster_complete(command,"byte-pitch-sample");
+                [encoder endEncoding];
+                if(alias_test) {
+                    MTLRenderPassDescriptor *next=[MTLRenderPassDescriptor renderPassDescriptor];
+                    next.colorAttachments[0].texture=alias_output;next.colorAttachments[0].loadAction=MTLLoadActionClear;
+                    next.colorAttachments[0].storeAction=MTLStoreActionStore;
+                    id<MTLRenderCommandEncoder> reader=[command renderCommandEncoderWithDescriptor:next];valid=reader!=nil;
+                    if(valid) {
+                        [reader setRenderPipelineState:pipeline];[reader setFragmentTexture:alias atIndex:0];
+                        [reader drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[reader endEncoding];
+                    }
+                }
+                if(valid)valid=raster_complete(command,"byte-pitch-sample-and-alias");
             }
         }
-        IOSurfaceRef surfaces[2]={source,destination};
-        const unsigned pitches[2]={source_pitch,destination_pitch},allocations[2]={source_bytes,destination_bytes};
-        for(unsigned i=0;valid&&i<2;++i) {
+        IOSurfaceRef surfaces[3]={source,destination,alias_readback};
+        const unsigned pitches[3]={source_pitch,destination_pitch,alias_pitch},allocations[3]={source_bytes,destination_bytes,destination_bytes};
+        for(unsigned i=0;valid&&i<(alias_test?3u:2u);++i) {
             valid=IOSurfaceLock(surfaces[i],kIOSurfaceLockReadOnly,&seed)==KERN_SUCCESS;
             if(valid) {
                 const uint8_t *pixels=IOSurfaceGetBaseAddress(surfaces[i]);valid=pixels!=NULL;
@@ -168,9 +185,10 @@ static BOOL render_byte_pitch(id<MTLDevice> device,id<MTLLibrary> library,uint32
                 if(IOSurfaceUnlock(surfaces[i],kIOSurfaceLockReadOnly,&seed)!=KERN_SUCCESS)valid=NO;
             }
         }
-        printf("REDFIN METAL BYTE PITCH: width=%u height=%u source-pitch=%u round=%u same-import=1 actual-pixels-source-and-guards=%u\n",
-            width,height,source_pitch,round,valid);
+        printf("REDFIN METAL BYTE PITCH: width=%u height=%u source-pitch=%u destination-pitch=%u round=%u same-import=1 alias-after-write=%u actual-pixels-source-and-guards=%u\n",
+            width,height,source_pitch,destination_pitch,round,alias_test,valid);
     }
     [queue release];[pipeline release];[input release];[output release];
+    [alias release];[alias_output release];if(alias_readback)CFRelease(alias_readback);
     if(source)CFRelease(source);if(destination)CFRelease(destination);return valid;
 }

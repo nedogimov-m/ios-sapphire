@@ -1,5 +1,32 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual A620 row-layout conversion and native alias ownership — 2026-10-25
+
+Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab. V18 disproves direct480/4512-byte
+sampling on this A620: row1 reads x8 instead of x0. Register bit fields did not
+establish supported hardware alignment. Remove the sampler opt-in and preserve
+ordinary freedreno import/view constraints completely.
+
+Re-reviewed Mesa25.0.7 freedreno_resource.c native fd_bo ownership/layout/range
+setup, fd_memory_barrier, fd_context access annotations and AIR's NIR finalizer,
+real completion scopes and bindings. A paired raw PIPE_BUFFER import keeps the
+actual IOSurface BO extent. A genuinely aligned LINEAR texture and a native
+buffer alias share its actual separate BO. A bounded NIR compute grid copies
+pixel rows in either direction with32-bit aligned accesses and exact bounds;
+no pixel map/copy/raster operation on the CPU is introduced. All alias
+transitions pay real native GPU fences and Gallium barriers. Content-valid and
+dirty state are updated only after successful actual writes, under AIR's existing
+serialized nonthreaded context ownership. No kernel/DMA permission expansion.
+
+Per-command refresh and real output resolve preserve ordered passes, empty-pass
+clears and native retained lifetimes. Distinct texture wrappers of one IOSurface
+resolve a dirty predecessor and invalidate peer snapshots before reads. Native
+compute pipelines/constants are rebound after internal conversion. The new
+checker covers both exact incoming pitches twice, unaligned render outputs,
+and a second wrapper reading an earlier write in the same command buffer.
+Native hardware success and actual corrected GUI remain pending that capture.
+
 ## Native Metal raster/load actions and byte-pitch sources — 2026-10-25
 
 Re-reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772:

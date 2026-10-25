@@ -49,20 +49,29 @@ assert(redfin_metal_raster_valid(&s));redfin_metal_scissor(&s,64,64,rect);
 assert(rect[0]==64&&rect[1]==64&&rect[2]==64&&rect[3]==64);
 ''')
 
-    def test_real_source_pitches_fit_only_their_actual_allocation(self):
+    def test_real_source_layouts_and_copy_extents_fit_only_their_actual_allocation(self):
         self.native(r'''
-assert(redfin_linear_sampler_fits(120,32,4,480,0,16384));
-assert(redfin_linear_sampler_fits(1125,9,4,4512,0,65536));
-assert(!redfin_linear_sampler_fits(120,32,4,480,0,15359));
-assert(!redfin_linear_sampler_fits(120,32,4,480,1024,16383));
-assert(!redfin_linear_sampler_fits(121,32,4,480,0,16384));
-assert(!redfin_linear_sampler_fits(120,32,4,481,0,16384));
-assert(!redfin_linear_sampler_fits(120,32,4,480,1,16384));
-assert(!redfin_linear_sampler_fits(120,32,4,480,UINT64_MAX-31,16384));
-assert(!redfin_linear_sampler_fits(UINT32_MAX,UINT32_MAX,16,0x3ffff0,0,UINT64_MAX));
-assert(!redfin_linear_sampler_fits(1,1,4,0x400000,0,UINT64_MAX));
-assert(!redfin_linear_sampler_fits(0,1,4,480,0,16384));
-assert(!redfin_linear_sampler_fits(1,0,4,480,0,16384));
+assert(redfin_linear_layout_fits(120,32,4,480,0,16384));
+assert(redfin_linear_layout_fits(1125,9,4,4512,0,65536));
+assert(!redfin_linear_layout_fits(120,32,4,480,0,15359));
+assert(!redfin_linear_layout_fits(120,32,4,480,1024,16383));
+assert(!redfin_linear_layout_fits(121,32,4,480,0,16384));
+assert(!redfin_linear_layout_fits(120,32,4,481,0,16384));
+assert(!redfin_linear_layout_fits(120,32,4,480,1,16384));
+assert(!redfin_linear_layout_fits(120,32,4,480,UINT64_MAX-31,16384));
+assert(!redfin_linear_layout_fits(UINT32_MAX,UINT32_MAX,16,0x3ffff0,0,UINT64_MAX));
+assert(!redfin_linear_layout_fits(0,1,4,480,0,16384));
+assert(!redfin_linear_layout_fits(1,0,4,480,0,16384));
+struct redfin_linear_copy_plan p={0};
+assert(redfin_linear_copy_plan_make(&p,480,32,480,512,0,0,16384,32768));
+assert(p.words==120&&p.rows==32&&p.source_pitch==480&&p.destination_pitch==512);
+assert(redfin_linear_copy_plan_make(&p,4500,9,4512,4544,0,0,65536,65536));
+assert(!redfin_linear_copy_plan_make(&p,480,32,480,512,0,0,15359,32768));
+assert(!redfin_linear_copy_plan_make(&p,480,32,480,512,0,0,16384,16351));
+assert(!redfin_linear_copy_plan_make(&p,480,32,480,512,2,0,16384,32768));
+assert(!redfin_linear_copy_plan_make(&p,481,32,480,512,0,0,16384,32768));
+assert(!redfin_linear_copy_plan_make(&p,480,UINT32_MAX,480,512,0,0,UINT64_MAX,UINT64_MAX));
+assert(!redfin_linear_copy_plan_make(&p,480,32,480,512,UINT64_MAX-3,0,UINT64_MAX,32768));
 ''')
 
 

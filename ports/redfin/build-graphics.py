@@ -82,7 +82,7 @@ def main():
                        ROOT/'ports/redfin/gmem-bounds.h',ROOT/'ports/redfin/drm-profile.h']
             if a.metal:
                 inputs+=sorted((upstream/'tools/mesa/air').iterdir())
-                inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch',ROOT/'ports/redfin/metal-submission-profile.patch',ROOT/'ports/redfin/metal-attachment-cache.patch',ROOT/'ports/redfin/metal-raster.patch',ROOT/'ports/redfin/metal-raster.h',ROOT/'ports/redfin/metal-raster.inc',ROOT/'ports/redfin/metal-linear-import.patch',ROOT/'ports/redfin/metal-linear-import.h']
+                inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch',ROOT/'ports/redfin/metal-submission-profile.patch',ROOT/'ports/redfin/metal-attachment-cache.patch',ROOT/'ports/redfin/metal-raster.patch',ROOT/'ports/redfin/metal-raster.h',ROOT/'ports/redfin/metal-raster.inc',ROOT/'ports/redfin/metal-linear-import.patch',ROOT/'ports/redfin/metal-linear-import.h',ROOT/'ports/redfin/metal-linear-copy.patch',ROOT/'ports/redfin/metal-linear-copy.inc']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -108,6 +108,8 @@ def main():
                     for directory in ('src/compiler/air','src/gallium/drivers/freedreno'):
                         shutil.copy2(ROOT/'ports/redfin/metal-linear-import.h',source/directory/'redfin_metal_linear_import.h')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-linear-import.patch'],source)
+                    shutil.copy2(ROOT/'ports/redfin/metal-linear-copy.inc',source/'src/compiler/air/redfin_metal_linear_copy.inc')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-linear-copy.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]

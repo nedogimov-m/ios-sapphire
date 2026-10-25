@@ -512,8 +512,8 @@ def adapt_execution(text):
 
 
 def adapt_drawable(text):
-    # Rendering needs a 64-byte pitch; source sampling does not. AIR and
-    # freedreno separately bound and restrict these imports to shader reads.
+    # Accept the actual native row pitch. Paired AIR converts unaligned
+    # IOSurfaces through bounded GPU buffer copies into genuine textures.
     first=text.index('\t/*\n\t * a6xx\'s minimum pitchalign is 6')
     last=text.index('\tuint64_t least;',first)
     text=text[:first]+text[last:]

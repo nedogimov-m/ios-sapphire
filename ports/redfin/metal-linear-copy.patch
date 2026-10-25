@@ -1,0 +1,193 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -108,6 +108,9 @@
+     */
+    bool software;
+    struct redfin_metal_command_scope command_scope;
++   struct rwa_texture *linear_textures;
++   uint64_t linear_epoch,linear_copies[2];
++   void *linear_copy_cso;
+ 
+    /* What this screen requires of a buffer offset, per binding, read once. Only an
+     * argument buffer's member has an offset at all here (rwa_argbuf_encode_buffer), and
+@@ -205,7 +208,19 @@
+     * lenient one.
+     */
+    bool shader_read, shader_write;
++   struct pipe_resource *linear_original,*linear_shadow_buffer;
++   struct rwa_texture *linear_next;
++   unsigned linear_pitch,linear_offset,linear_shadow_pitch,linear_shadow_offset,linear_surface;
++   uint64_t linear_epoch;
++   bool linear_dirty;
+ };
++
++static int rwa_redfin_linear_import(struct rwa_texture *,const struct pipe_resource *,unsigned,unsigned,unsigned,char *,size_t);
++static int rwa_redfin_linear_prepare(struct rwa_texture *,char *,size_t);
++static void rwa_redfin_linear_written(struct rwa_texture *);
++static int rwa_redfin_linear_resolve(struct rwa_texture *,char *,size_t);
++static int rwa_redfin_linear_resolve_all(struct rwa_device *,char *,size_t);
++static void rwa_redfin_linear_release(struct rwa_texture *);
+ 
+ /* A sampler is a Gallium state object and nothing more. The state it was built from is
+  * not kept: a refusal about a sampler happens while it is being created, where the
+@@ -583,6 +598,10 @@
+       return;
+    if (device->default_sampler)
+       device->pipe->delete_sampler_state(device->pipe, device->default_sampler);
++   if(device->linear_copy_cso) {
++      device->pipe->bind_compute_state(device->pipe,NULL);
++      device->pipe->delete_compute_state(device->pipe,device->linear_copy_cso);
++   }
+    device->pipe->destroy(device->pipe);
+    device->screen->destroy(device->screen);
+    free(device);
+@@ -1424,14 +1443,14 @@
+          free(texture);
+          return NULL;
+       }
+-      if (import->row_bytes % 64 != 0) {
+-         say(why, why_size, "IOSurface %d has %u bytes a row, which is not a multiple of "
+-                            "64: this GPU lays out a row aligned to that and its import "
+-                            "refuses a pitch it would have to change (the kernel's own "
+-                            "surfaces are aligned to 64 already)", import->id,
+-             import->row_bytes);
+-         free(texture);
+-         return NULL;
++      if(import->row_bytes%64) {
++         if(device->software||depth_stencil) {
++            say(why,why_size,"unaligned IOSurface conversion requires native A620 colour storage");free(texture);return NULL;
++         }
++         if(rwa_redfin_linear_import(texture,&templ,(unsigned)import->id,import->offset,import->row_bytes,why,why_size)) {
++            free(texture);return NULL;
++         }
++         return texture;
+       }
+ 
+       /*
+@@ -1524,6 +1543,7 @@
+ {
+    if (!texture)
+       return;
++   rwa_redfin_linear_release(texture);
+    argbuf_scrub(texture->device, NULL, texture, NULL);
+    pipe_surface_reference(&texture->render_surface,NULL);
+    /* The view first: it holds a reference of its own on the resource. Nothing has to
+@@ -1685,6 +1705,8 @@
+        !caller_stride(texture, &box, stride, &row, why, why_size))
+       return -1;
+ 
++   if(rwa_redfin_linear_prepare(texture,why,why_size))return -1;
++
+    /* The slice stride is the region's own rows, because the contract has one stride: a
+     * caller handing over a 3D region hands over a packed stack of its rows, which is
+     * what -replaceRegion:...bytesPerRow:bytesPerImage: is given when bytesPerImage is
+@@ -1693,7 +1715,8 @@
+    texture->device->pipe->texture_subdata(texture->device->pipe, texture->res, level,
+                                           PIPE_MAP_WRITE, &box, bytes, row,
+                                           row * box.height);
+-   return 0;
++   rwa_redfin_linear_written(texture);
++   return texture->device->command_scope.active?0:rwa_redfin_linear_resolve(texture,why,why_size);
+ }
+ 
+ int
+@@ -1742,6 +1765,7 @@
+        !caller_stride(texture, &box, stride, &row, why, why_size))
+       return -1;
+ 
++   if(rwa_redfin_linear_prepare(texture,why,why_size))return -1;
+    struct pipe_transfer *xfer = NULL;
+    const uint8_t *map = pipe->texture_map(pipe, texture->res, level, PIPE_MAP_READ, &box,
+                                           &xfer);
+@@ -3156,10 +3180,16 @@
+    return finish_or_say_why(opaque, true, "Metal commands", why, why_size);
+ }
+ 
++#include "redfin_metal_linear_copy.inc"
++
+ int
+ rwa_commands_begin(struct rwa_device *device, char *why, size_t why_size)
+ {
+    int error=redfin_metal_scope_begin(&device->command_scope);
++   if(!error) {
++      if(device->linear_epoch==UINT64_MAX) {device->command_scope.active=false;device->command_scope.failed=true;error=-1;}
++      else ++device->linear_epoch;
++   }
+    if (error) say(why,why_size,"Metal command scope is already active or retired");
+    return error;
+ }
+@@ -3168,7 +3198,10 @@
+ rwa_commands_end(struct rwa_device *device, char *why, size_t why_size)
+ {
+    int error=redfin_metal_scope_end(&device->command_scope,command_scope_finish,device,why,why_size);
+-   if (!error) device->pipe->set_framebuffer_state(device->pipe,&(struct pipe_framebuffer_state){0});
++   if(!error) {
++      device->pipe->set_framebuffer_state(device->pipe,&(struct pipe_framebuffer_state){0});
++      error=rwa_redfin_linear_resolve_all(device,why,why_size);
++   }
+    else if (why && why_size && !why[0]) say(why,why_size,"Metal command scope retired after a failed completion");
+    return error;
+ }
+@@ -3614,6 +3647,17 @@
+            size_t why_size)
+ {
+    struct pipe_context *pipe = device->pipe;
++   for(unsigned i=0;i<info->num_resources;++i) {
++      const struct air_resource *r=&info->resources[i];
++      if(r->kind!=AIR_RESOURCE_TEXTURE&&r->kind!=AIR_RESOURCE_IMAGE)continue;
++      struct rwa_texture *texture=NULL;
++      if(r->argbuf_set!=~0u) {
++         struct rwa_buffer *unused_buffer=NULL;struct rwa_sampler *unused_sampler=NULL;size_t unused_offset=0;
++         if(argbuf_member(r,table,table_count,name,&unused_buffer,&unused_offset,&texture,&unused_sampler,why,why_size))return -1;
++      } else texture=bindings->textures[r->index];
++      if(rwa_redfin_linear_prepare(texture,why,why_size))return -1;
++   }
++
+ 
+    /* Each buffer bound as whatever the shader declared the index to be. Metal has one
+     * [[buffer(n)]] index space and Gallium has two, so a `constant` parameter is a UBO
+@@ -3759,6 +3803,7 @@
+          break;
+ 
+       case AIR_RESOURCE_IMAGE:
++         if(r->write)rwa_redfin_linear_written(t);
+          images[r->index] = (struct pipe_image_view){
+             .resource = t->res,
+             .format = t->res->format,
+@@ -3976,6 +4021,7 @@
+                   bindings, table, table_count, name, &bound, why, why_size) != 0)
+       return -1;
+ 
++   pipe->bind_compute_state(pipe,cso); /* row conversion may have used its own compute state */
+    struct pipe_grid_info grid = {
+       .work_dim = 3,
+       .block = { group_size[0], group_size[1], group_size[2] },
+@@ -6819,6 +6865,10 @@
+          return -1;
+    }
+ 
++   for(unsigned i=0;i<draw->color_count;++i)
++      if(rwa_redfin_linear_prepare(draw->color[i],why,why_size))return -1;
++   if(rwa_redfin_linear_prepare(draw->depth,why,why_size))return -1;
++
+    /* Borrow the textures' stable base-level surfaces, retaining one reference
+     * for this draw and one for Gallium's framebuffer/dependency lifetime. */
+    struct pipe_surface *surf[PIPE_MAX_COLOR_BUFS] = { 0 };
+@@ -7028,6 +7078,8 @@
+          .index_bias = index_size ? draw->base_vertex : 0,
+       };
+       pipe->draw_vbo(pipe, &info, 0, NULL, &sc, 1);
++      for(unsigned i=0;i<draw->color_count;++i)rwa_redfin_linear_written(draw->color[i]);
++      rwa_redfin_linear_written(draw->depth);
+    }
+ 
+    /* Waited for here, on the same grounds as a dispatch: a picture that was never drawn
+@@ -7037,6 +7089,7 @@
+     */
+    rc = redfin_metal_scope_complete(&device->command_scope,render->raster_only,
+                                    command_scope_finish,device,why,why_size);
++   if(!rc&&!device->command_scope.active)rc=rwa_redfin_linear_resolve_all(device,why,why_size);
+ 
+ unbind:
+    unbind_stage(device, PIPE_SHADER_FRAGMENT, &fbound);
