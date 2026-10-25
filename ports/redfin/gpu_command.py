@@ -15,6 +15,7 @@ POLICY = (5, 0x06020001, 275000000, 64, 5, 14, 32, 3, 0, 0x401, 0xFFFFFFFF, 0,
           13, 0x100000, 0x1000, 0x1000000, 0x8000, 0x1100000, 0x1200000, 500, 0, 1, 9999999)
 RANGES = (0x3D00000, 0x40000, 0x18220000, 0x10000)
 RUNTIME_POLICY = (1, 0x06020001, 512, 128, 1024, 128, 500, 0x10000, 0x100000, 1)
+METAL_POLICY = (1, 0x06020001, 128 << 20, 1)
 DDR_KBPS = (0, 400000, 800000, 1200000, 1804800, 2188000, 2724000, 3072000,
             4068000, 5412000, 6220000, 7216000, 8371200)
 FILES = {'sqe': ('/firmware/a650_sqe.fw', 31632),
@@ -27,6 +28,17 @@ def add_runtime_contract(tree):
     if len(selected) != 1 or selected[0].prop('runtime-policy'):
         raise ValueError('GPU runtime requires exactly one complete native command contract')
     selected[0].props.append(('runtime-policy', 0, mkadt.u32(*RUNTIME_POLICY)))
+
+
+def add_metal_contract(tree, mode):
+    """Probe registers only in its helper; system enables native discovery."""
+    if mode not in ('probe', 'system'):
+        raise ValueError('Metal mode must be probe or system')
+    selected = [n for n in tree.children if n.name == 'redfin-gpu-command']
+    if (len(selected) != 1 or selected[0].prop('runtime-policy') != mkadt.u32(*RUNTIME_POLICY) or
+            any(k == 'metal-policy' for k, _, _ in selected[0].props)):
+        raise ValueError('Metal requires one complete unmodified native GPU runtime')
+    selected[0].props.append(('metal-policy', 0, mkadt.u32(*METAL_POLICY, 1 if mode == 'probe' else 2)))
 
 
 def load_assets(inventory):

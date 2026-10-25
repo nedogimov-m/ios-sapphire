@@ -59,6 +59,26 @@ static inline bool redfin_power_valid(const struct redfin_power_sample *s)
         (s->present==0 || s->present==1) && (s->external==0 || s->external==1) &&
         (!s->charging || (s->present && s->external && !s->full && !s->charger_faults));
 }
+/* Google's SMB5 health path uses hard temperature bits3:2; AFP bits1:0
+ * and soft JEITA bits5:4 are not hard faults. A latched BAT_OV indication
+ * is an actual overvoltage only at least40mV above the valid native float
+ * setting (smblib_get_prop_batt_health). No status/protection bit is cleared. */
+static inline uint32_t redfin_smb5_faults(uint8_t status2,uint8_t status7,
+    int32_t voltage_uv,int32_t float_uv)
+{
+    uint32_t faults=(uint32_t)(status7&12u)<<8;
+    if ((status2&2u) && (float_uv<3600000 || float_uv>4450000 ||
+            voltage_uv>=float_uv+40000)) faults|=2u;
+    return faults;
+}
+static inline void redfin_smb5_state(struct redfin_power_sample *s,
+    uint8_t status1,uint8_t status5)
+{
+    unsigned state=status1&7u;
+    s->full=s->external && (state==0 || state==5);
+    s->charging=s->present && s->external && state>=1 && state<=4 &&
+        (status5&7u) && !s->charger_faults;
+}
 /* A measured seed plus elapsed, measured current; never estimate SOC from
  * terminal voltage. Preserve fractional charge between samples. Long/missing
  * samples are refused rather than integrated as though the last current held. */

@@ -38,6 +38,7 @@ def main():
     p.add_argument('--upstream',type=Path,default=ROOT/'research/hackios-upstream/userland')
     p.add_argument('--work-dir',type=Path,default=ROOT/'research/redfin-graphics')
     p.add_argument('--cache',type=Path,default=DEFAULT_CACHE,help='actual installed arm64 dyld cache and paired .symbols')
+    p.add_argument('--metal',action='store_true',help='also build the paired native Metal/AIR driver in this private work tree')
     a=p.parse_args();work=a.work_dir.resolve();work.mkdir(parents=True,exist_ok=True)
     upstream=a.upstream.resolve()
     actual=subprocess.check_output(['git','-C',upstream,'rev-parse','HEAD'],text=True).strip()
@@ -71,7 +72,13 @@ def main():
                      'https://archive.mesa3d.org/mesa-'+VERSION+'.tar.xz'])
             if hashlib.sha256(archive.read_bytes()).hexdigest()!=SHA256:raise ValueError('Mesa archive SHA256 mismatch')
             inputs=[upstream/'tools/mesa'/name for name in PATCHES]
+            patch_count=len(inputs)
+            if a.metal:
+                inputs += [upstream/'tools/mesa'/name for name in
+                           ('air-frontend.patch','air-ir3.patch','air-metal.patch')]
+                patch_count=len(inputs)
             inputs+=sorted((upstream/'tools/mesa/redwood-drm').iterdir())
+            if a.metal:inputs+=sorted((upstream/'tools/mesa/air').iterdir())
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -79,8 +86,9 @@ def main():
                 raise ValueError('graphics input changed; use another --work-dir to retain the old build')
             if not source.exists():
                 with tarfile.open(archive) as t:t.extractall(work,filter='data')
-                for patch in inputs[:len(PATCHES)]:run(['patch','--batch','--forward','-p1','-i',patch],source)
+                for patch in inputs[:patch_count]:run(['patch','--batch','--forward','-p1','-i',patch],source)
                 shutil.copytree(upstream/'tools/mesa/redwood-drm',source/'src/redwood-drm')
+                if a.metal:shutil.copytree(upstream/'tools/mesa/air',source/'src/compiler/air')
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -154,6 +162,78 @@ def main():
                     if dependency in FRAMEWORK_NAMES:
                         run(['install_name_tool','-change',dependency,FRAMEWORK_NAMES[dependency],target])
                 run(['codesign','--force','--sign','-',target])
+            metal_artifacts=[]
+            if a.metal:
+                from ports.redfin.metal_userland import prepare as prepare_metal
+                # ABI identity binds both libraries to all compiler/driver inputs.
+                metal_sources=[upstream/'userland/src'/name for name in
+                               ('redwoodmetal.m','redwooddrawable.m','redwood_drawable.h')]
+                metal_sources += [ROOT/'ports/redfin'/name for name in
+                                  ('metal_userland.py','metal-guard.m','metal-check.m','metal-check.metal')]
+                pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
+                metal=work/'metal'
+                result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)
+                # Compile the same contract marker into the AIR library itself.
+                marker=source/'src/compiler/air/redfin_pairing.c'
+                marker.write_text('const char *rwa_redfin_contract(void);\nconst char *rwa_redfin_contract(void){return "'+pairing+'";}\n')
+                meson_file=source/'src/gallium/drivers/freedreno/meson.build'
+                before="files('../../../compiler/air/air_metal.c'),"
+                after="files('../../../compiler/air/air_metal.c', '../../../compiler/air/redfin_pairing.c'),"
+                content=meson_file.read_text()
+                if before in content:
+                    if content.count(before)!=1:raise ValueError('unreviewed AIR target')
+                    meson_file.write_text(content.replace(before,after))
+                elif content.count(after)!=1:raise ValueError('AIR pairing target absent')
+                run(['ninja','-C',build,'src/gallium/drivers/freedreno/libredwoodair.dylib'])
+                air=bundle/'lib/libredfinair.dylib'
+                shutil.copy2(build/'src/gallium/drivers/freedreno/libredwoodair.dylib',air)
+                run(['install_name_tool','-id','/redfin/lib/libredfinair.dylib',air])
+                plugin=bundle/'System/Library/Extensions/RedfinMetal.bundle'
+                plugin.mkdir(parents=True,exist_ok=True)
+                binary=plugin/'RedfinMetal'
+                run([*c,'-bundle','-O2','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
+                    '-I'+str(metal),metal/'redwoodmetal.m',metal/'redwooddrawable.m',
+                    ROOT/'ports/redfin/metal-guard.m','-framework','Foundation',
+                    '-framework','CoreFoundation','-framework','IOKit','-framework','Metal','-lobjc','-o',binary])
+                import plistlib
+                (plugin/'Info.plist').write_bytes(plistlib.dumps(dict(
+                    CFBundleIdentifier='com.redfin.metal',CFBundleName='RedfinMetal',
+                    CFBundleExecutable='RedfinMetal',CFBundlePackageType='BNDL',
+                    CFBundleInfoDictionaryVersion='6.0',CFBundleVersion='1',
+                    CFBundleSupportedPlatforms=['iPhoneOS'],NSPrincipalClass='RedwoodMetalDevice')))
+                for target in (air,binary):
+                    dependencies=run(['otool','-L',target],capture=True)
+                    for line in dependencies.splitlines()[1:]:
+                        dependency=line.strip().split(' ',1)[0]
+                        if dependency in FRAMEWORK_NAMES:
+                            run(['install_name_tool','-change',dependency,FRAMEWORK_NAMES[dependency],target])
+                        elif 'libglapi.' in dependency:
+                            run(['install_name_tool','-change',dependency,'/redfin/lib/libglapi.0.dylib',target])
+                    run(['codesign','--force','--sign','-',target])
+                    run(['codesign','--verify','--strict',target])
+                checker=bundle/'bin/metal-check'
+                run([*c,'-O2','-fblocks','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
+                    '-I'+str(ROOT/'ports/redfin'),ROOT/'ports/redfin/metal-check.m',
+                    '-framework','Foundation','-framework','Metal','-framework','CoreFoundation',
+                    '-framework','IOKit','-framework','IOSurface','-lobjc','-o',checker])
+                dependencies=run(['otool','-L',checker],capture=True)
+                for line in dependencies.splitlines()[1:]:
+                    dependency=line.strip().split(' ',1)[0]
+                    if dependency in FRAMEWORK_NAMES:
+                        run(['install_name_tool','-change',dependency,FRAMEWORK_NAMES[dependency],checker])
+                run(['codesign','--force','--sign','-',checker])
+                run(['codesign','--verify','--strict',checker])
+                shader=bundle/'lib/redfin-check.metallib'
+                run(['xcrun','--sdk','iphoneos','metal','-target','air64-apple-ios16.0',
+                    '-std=ios-metal2.4','-c',ROOT/'ports/redfin/metal-check.metal','-o',metal/'check.air'])
+                run(['xcrun','--sdk','iphoneos','metallib',metal/'check.air','-o',shader])
+                if shader.read_bytes()[:4]!=b'MTLB':raise ValueError('native Metal shader library absent')
+                from ports.redfin.metal_userland import job as metal_job,JOB_PATH as METAL_JOB,LOG_PATH as METAL_LOG
+                check_job=bundle/METAL_JOB.lstrip('/');check_job.parent.mkdir(parents=True,exist_ok=True)
+                check_job.write_bytes(plistlib.dumps(metal_job(),fmt=plistlib.FMT_BINARY,sort_keys=False))
+                check_log=bundle/'metal-log-initial';check_log.write_text('REDFIN native Metal/AIR; hardware observations follow.\n')
+                metal_artifacts=[air,binary,checker]
+                result['metal_pairing_sha256']=pairing
             launch=bundle/'System/Library/LaunchDaemons'
             launch.mkdir(parents=True,exist_ok=True)
             shutil.copy2(ROOT/'ports/redfin/gpu-render-job.plist',launch/'com.redfin.gpu-render.plist')
@@ -161,9 +241,21 @@ def main():
             if old_job.is_file():old_job.unlink()  # old build output only, never a root/device path
             shutil.copy2(upstream/'LICENSE',bundle/'UPSTREAM-LICENSE')
             with Cache(a.cache) as cache:
-                proof=audit_bundle(cache,[executable,*sorted((bundle/'lib').glob('*.dylib'))])
+                proof=audit_bundle(cache,[executable,*sorted((bundle/'lib').glob('*.dylib')),*[p for p in metal_artifacts if p.parent!=bundle/'lib']])
             (work/'abi-check.json').write_text(json.dumps(proof,indent=2)+'\n')
             if not proof['compatible']:raise ValueError('actual iOS graphics imports missing; see abi-check.json')
+            if a.metal:
+                selected=[(air,'/redfin/lib/'+air.name,0,0o644),
+                    (binary,'/System/Library/Extensions/RedfinMetal.bundle/RedfinMetal',0,0o755),
+                    (plugin/'Info.plist','/System/Library/Extensions/RedfinMetal.bundle/Info.plist',0,0o644),
+                    (plugin/'_CodeSignature/CodeResources','/System/Library/Extensions/RedfinMetal.bundle/_CodeSignature/CodeResources',0,0o644),
+                    (checker,'/redfin/bin/metal-check',0,0o755),(shader,'/redfin/lib/'+shader.name,0,0o644),
+                    (check_job,METAL_JOB,0,0o644),(check_log,METAL_LOG,501,0o600)]
+                metal_manifest=dict(success=True,actual_abi_compatible=True,pairing_sha256=pairing,
+                    max_buffer_bytes=128<<20,files={target:dict(source=str(source.relative_to(bundle)),
+                        uid=uid,mode=mode,sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+                        for source,target,uid,mode in selected})
+                (bundle/'metal-build.json').write_text(json.dumps(metal_manifest,indent=2)+'\n')
             result['actual_abi_compatible']=True
             result.update(success=True,sdk=str(sdk),input_sha256=fingerprint,bundle=str(bundle),
                 gui_profile_sha256=hashlib.sha256((ROOT/'ports/redfin/gui-profile.h').read_bytes()).hexdigest(),

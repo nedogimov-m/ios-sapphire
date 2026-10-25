@@ -1,5 +1,68 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete Metal/AIR and platform-readiness block built/staged — 2026-10-25
+
+Source base3b646c3; complete implementation precedes combined validation/new
+hardware boot. Preferred userland906425b's real Metal/AIR renderer is adapted
+for A620 and native20H392: non-fragile superclass/type/UUID/ivar guards,
+128MiB actual buffer maximum, profile1, paired30compiler exports/source
+identity, serialized shared Gallium context/imports/destruction and native
+behavior preserved for other devices' MTLFunctions. No20F66 instruction
+addresses, prototype256MiB limit or software GPU fallback is imported.
+Probe mode registers a native device only inside the helper; separately
+implemented system mode publishes the bundle through IOAcceleratorES only
+when the actual A620 runtime is ready. Both are opt-in ADT policies.
+
+Own native Metal checker compiles with Apple's installed toolchain and uses
+ordinary Metal/MTLAddDevice,192nonce-varied compute commands on two queues,
+actual outputs/guard words and4096IOSurface pixels. A shader/library failure
+prints its real NSError. The complete signed bundle includes native Info.plist
+AND its CodeResources seal. Core graphics/Keychain/private identity material
+remain paired with the existing installed GL path. This is not a full Metal
+compatibility claim: upstream heaps/blits/events/resolve/viewport limitations
+remain; first physical Metal execution has not happened yet.
+
+Native AKS state now follows preferred MiniAppleKeyStore's canonical DER SET,
+sr/ss6/sls3 no-passcode/unlocked semantics; diagnostics retain first requests
+and powers of two. Private alternate RFH2 log preserves the first256KiB (or
+one quarter for a smaller bank) and its recent tail, while primary stays DBGC.
+Host decode marks the omitted middle explicitly and retains strict nonce proof.
+Immutable authenticated recovery capture skips needless banner waiting.
+SMB5 health now follows Google's actual hard-temperature bits and measured
+40mV-over-native-FV rule; AFP/soft JEITA are distinguished without clearing
+status/protections. Full/inhibit/charging modes and status5 enables are read.
+Native charge FV/FCC/JEITA/timer guards remain. Photos retries only native
+XPC-unavailable/interrupted creation using fresh ordinary URL instances;
+SecTask validation/signing identity are observed, with no TCC policy/DB edit.
+Read-only current TCC main/WAL integrityPASS; no Photos decision rows exist.
+
+All118selected current host casesPASS, including real mutex concurrency/
+recursive/void cleanup, exact native DER/descriptor failures, native SMB5
+edges, actual RFH2 writer/decoder wrap/corrupt cursors, SMP/loader/return and
+unchanged platform policies. Metal/AIR/native helper+PhotosV5 actual imports
+and strict signaturesPASS. New kernel local20261025-081227/noCI,
+SHA2562d00781838236f4182fa35ab99b71f021d5e0c299433b475debdc045f8ce055f,
+frozen research/redfin-gpu/kernel-metal-platform-v1. Complete source overlays
+reverse-validate in their recorded order. Earlier compile finds only a missing
+DT-plane header; corrected complete native buildPASS.
+
+Fresh V11 metadata read from clean/unmounted root write_count793497. Stage
+passes full file readback/signatures, native readonly fsck and allocation
+checks:10919936bytes/2505new blocks/zero freed; files are in one native extent
+where newly allocated. Host stager explicitly admits the complete Metal
+bundle and bounds AIR to16MiB, all other targets to4MiB; existing allocations
+and all user/Keychain/TCC/runtime data are preserved. Rejected private clones
+never touched the phone. Stage caught missing signing resources and now
+verifies the full native signed bundle, rather than a detached executable.
+V11 is staged, not applied yet; recovery is verified and idle.
+
+Fresh gui-platform-v6 imageSHA256e99afc1fdf1d7538c9aa4b45e5eb27c0a1809022a26e89955f7420620d300e55,
+nonce3355dc3b077fe229, native loader/ADT/FDT/firmware/private material/return/
+Metal probe contract preflightPASS. Next: backed-up V11 apply, one integrated
+run, then system mode only after the real Metal compute/render result. Native
+sensor support and real account authorization remain required; human checks
+stay deferred. Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3355dc3b077fe229 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V5 platform run collected cleanly; log wrap limits proof — 2026-10-25
 
 Source9cf831f; native kernel remains local20261025-072951/noCI,

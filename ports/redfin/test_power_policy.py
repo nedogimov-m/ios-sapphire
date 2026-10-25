@@ -34,6 +34,8 @@ int valid(struct redfin_power_sample *s){return redfin_power_valid(s);}
 int pressure(int hot,int batt,unsigned previous){return redfin_thermal_pressure(hot,batt,previous);}
 int charge(struct redfin_power_sample *s,unsigned fv,unsigned fcc,unsigned timer,unsigned jeita){return redfin_charger_enable_allowed(s,fv,fcc,timer,jeita);}
 int pause_charge(struct redfin_power_sample *s){return redfin_charger_must_pause(s);}
+unsigned faults(unsigned a,unsigned b,int voltage,int fv){return redfin_smb5_faults(a,b,voltage,fv);}
+void charging_state(struct redfin_power_sample *s,unsigned status,unsigned enabled){redfin_smb5_state(s,status,enabled);}
 int integrate(struct redfin_power_sample *s,uint64_t ns){return redfin_soc_update(&tracker,s,ns);}
 void reset_tracker(void){tracker=(struct redfin_soc_tracker){0};}
 ''')
@@ -47,6 +49,8 @@ void reset_tracker(void){tracker=(struct redfin_soc_tracker){0};}
         cls.lib.valid.argtypes=cls.lib.pause_charge.argtypes=[C.POINTER(Sample)]
         cls.lib.charge.argtypes=[C.POINTER(Sample),C.c_uint,C.c_uint,C.c_uint,C.c_uint]
         cls.lib.integrate.argtypes=[C.POINTER(Sample),C.c_uint64]
+        cls.lib.faults.argtypes=[C.c_uint,C.c_uint,C.c_int,C.c_int];cls.lib.faults.restype=C.c_uint
+        cls.lib.charging_state.argtypes=[C.POINTER(Sample),C.c_uint,C.c_uint]
 
     def sample(self):
         return Sample(1,C.sizeof(Sample),63,4000000,-1000000,30000,5000,1,0,0,0,0,
@@ -93,6 +97,26 @@ void reset_tracker(void){tracker=(struct redfin_soc_tracker){0};}
         self.assertEqual(self.lib.pressure(40000,55000,0),4)
         self.assertEqual(self.lib.pressure(40000,53000,4),4)
         self.assertEqual(self.lib.pressure(40000,40000,1),0)
+
+    def test_native_smb5_health_distinguishes_afp_jeita_and_measured_overvoltage(self):
+        # AFP and soft JEITA indications are not the native hard-health bits.
+        for status7 in [0,1,2,3,0x10,0x20,0x30,0x33]:
+            self.assertEqual(self.lib.faults(0,status7,4440000,4450000),0)
+        for hard in [4,8,12]:
+            self.assertEqual(self.lib.faults(0,hard,4000000,4400000),hard<<8)
+        self.assertEqual(self.lib.faults(2,0,4439999,4400000),0)
+        self.assertEqual(self.lib.faults(2,0,4440000,4400000),2)
+        for invalid in [0,3599999,4450001]:
+            self.assertEqual(self.lib.faults(2,0,4000000,invalid),2)
+        s=self.sample();s.external=1
+        for state in range(8):
+            self.lib.charging_state(C.byref(s),state,7)
+            self.assertEqual(s.full,int(state in (0,5)))
+            self.assertEqual(s.charging,int(state in (1,2,3,4)))
+        self.lib.charging_state(C.byref(s),3,0);self.assertEqual(s.charging,0)
+        s.faults=2;self.lib.charging_state(C.byref(s),3,7);self.assertEqual(s.charging,0)
+        s.faults=0;s.external=0;self.lib.charging_state(C.byref(s),5,7)
+        self.assertEqual((s.full,s.charging),(0,0))
 
     def test_current_integration_preserves_fraction_and_never_spans_an_unknown_gap(self):
         self.lib.reset_tracker();s=self.sample()

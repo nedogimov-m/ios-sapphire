@@ -19,12 +19,14 @@
 #include <IOKit/IOUserClient.h>
 #include <IOKit/IOKitKeys.h>
 #include <IOKit/IOPlatformExpert.h>
+#include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOLib.h>
 #include <IOKit/IOLocks.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/errno.h>
 #include <kern/clock.h>
+#include <libkern/c++/OSData.h>
 #include <mach/mach_time.h>
 #include "RedfinGPUService.h"
 #include "RedfinGPURuntime.h"
@@ -81,6 +83,46 @@ static IOReturn gpuError(int error)
     default:return kIOReturnIOError;
     }
 }
+
+/* Native Metal is opt-in and bound to the same A620 runtime. Probe mode
+ * exposes no system driver; system mode publishes only after actual readiness.
+ * No registry property grants clients permission to change this boot policy. */
+static unsigned redfin_metal_mode(void)
+{
+    static const uint32_t expected[]={1,0x06020001,128u<<20,1};
+    IORegistryEntry *node=IORegistryEntry::fromPath("/redfin-gpu-command",gIODTPlane);
+    if (!node) return 0;
+    OSData *data=OSDynamicCast(OSData,node->getProperty("metal-policy"));
+    uint32_t contract[5]={0};
+    bool valid=data && data->getLength()==sizeof(contract);
+    if (valid) memcpy(contract,data->getBytesNoCopy(),sizeof(contract));
+    node->release();
+    return valid && !memcmp(contract,expected,sizeof(expected)) &&
+        (contract[4]==1 || contract[4]==2) ? contract[4] : 0;
+}
+static IOService *gMetalAccelerator;
+static uint32_t gMetalPublished;
+extern "C" void RedfinMetalConfigure(void *accelerator)
+{
+    if (redfin_metal_mode()!=2) return;
+    if (accelerator) {
+        IOService *service=(IOService *)accelerator,*expected=NULL;
+        service->retain();
+        if (!__atomic_compare_exchange_n(&gMetalAccelerator,&expected,service,false,
+                __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) service->release();
+    }
+    IOService *service=__atomic_load_n(&gMetalAccelerator,__ATOMIC_ACQUIRE);
+    if (!service || !redfin_gpu_ready()) return;
+    uint32_t expected=0;
+    if (!__atomic_compare_exchange_n(&gMetalPublished,&expected,1,false,
+            __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) return;
+    service->setProperty("MetalPluginClassName","RedwoodMetalDevice");
+    service->setProperty("RedfinMetalRuntimeABI",1,32);
+    /* Set the name last: Metal discovery reads it before the class name. */
+    service->setProperty("MetalPluginName","RedfinMetal");
+    IOLog("REDFIN METAL: native plugin discovery enabled for ready A620, ABI1/profile1/128MiB\n");
+}
+
 class RedwoodGPU:public IOService {
     OSDeclareDefaultStructors(RedwoodGPU);
 public:
@@ -92,6 +134,7 @@ bool RedwoodGPU::start(IOService *provider)
     if(!redfin_gpu_ready() || !IOService::start(provider))return false;
     setName("RedwoodGPU");setProperty(kIOUserClientClassKey,"RedwoodGPUUserClient");
     setProperty("chip-id",0x06020001,32);setProperty("RedfinRuntimeABI",1,32);
+    if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
     registerService();return true;
 }
 void RedfinGPUStart(void)
@@ -106,6 +149,7 @@ void RedfinGPUStart(void)
     else {
         IOLog("REDFIN GPU SERVICE: RedwoodGPU msm1.7 ready, native A620; synchronous actual fences\n");
         IOLog("REDFIN GPU SERVICE: client-bound fence evidence enabled\n");
+        RedfinMetalConfigure(NULL);
     }
     gpu->release();
 }

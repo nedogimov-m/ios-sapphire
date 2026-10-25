@@ -22,6 +22,14 @@ static const struct target targets[]={
     {"/redfin/lib/libredfin-graphics.dylib",0,0644},
     {"/redfin/lib/libredfin-eagl.dylib",0,0644},
     {"/redfin/lib/libredfin-refresh.dylib",0,0644},
+    {"/redfin/lib/libredfinair.dylib",0,0644},
+    {"/redfin/lib/redfin-check.metallib",0,0644},
+    {"/redfin/bin/metal-check",0,0755},
+    {"/System/Library/Extensions/RedfinMetal.bundle/RedfinMetal",0,0755},
+    {"/System/Library/Extensions/RedfinMetal.bundle/Info.plist",0,0644},
+    {"/System/Library/Extensions/RedfinMetal.bundle/_CodeSignature/CodeResources",0,0644},
+    {"/System/Library/LaunchDaemons/com.redfin.metal-check.plist",0,0644},
+    {"/private/var/mobile/Library/Logs/redfin-metal-check.log",501,0600},
     {"/System/Library/LaunchDaemons/com.redfin.photos-init.plist",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.gui-check.plist",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.thermald.plist",0,0644},
@@ -44,7 +52,7 @@ static const struct target targets[]={
 static int stage_contiguous(Volume *volume,uint32_t needed)
 {
     uint32_t total=volume->volumeHeader->totalBlocks;
-    if (total!=4194304 || !needed || needed>1024) return 0;
+    if (total!=4194304 || !needed || needed>4096) return 0;
     size_t bytes=(total+7u)/8u;unsigned char *bitmap=malloc(bytes);
     if (!bitmap) return 0;
     if (!READ(volume->allocationFile,0,bytes,bitmap)) {free(bitmap);return 0;}
@@ -58,6 +66,32 @@ static int stage_contiguous(Volume *volume,uint32_t needed)
         }
     }
     free(bitmap);return 0;
+}
+
+static int metal_directory(Volume *volume,int resources)
+{
+    const char *parent="/System/Library/Extensions";
+    static const char *paths[]={"/System/Library/Extensions/RedfinMetal.bundle",
+        "/System/Library/Extensions/RedfinMetal.bundle/_CodeSignature"};
+    HFSPlusCatalogRecord *record=getRecordFromPath(parent,volume,NULL,NULL);
+    if (!record || record->recordType!=kHFSPlusFolderRecord) {free(record);return 0;}
+    HFSPlusCatalogFolder *folder=(HFSPlusCatalogFolder *)record;
+    int valid=folder->permissions.ownerID==0 && folder->permissions.groupID==0;
+    free(record);if (!valid) return 0;
+    for (unsigned i=0;i<(resources ? 2u : 1u);++i) {
+        const char *path=paths[i];
+        record=getRecordFromPath(path,volume,NULL,NULL);
+        if (!record) {
+            if (!newFolder(path,volume) || !chmodFile(path,0755,volume) || !chownFile(path,0,0,volume)) return 0;
+            record=getRecordFromPath(path,volume,NULL,NULL);
+        }
+        if (!record || record->recordType!=kHFSPlusFolderRecord) {free(record);return 0;}
+        folder=(HFSPlusCatalogFolder *)record;
+        valid=folder->permissions.ownerID==0 && folder->permissions.groupID==0 &&
+            (folder->permissions.fileMode&07777)==0755;
+        free(record);if (!valid) return 0;
+    }
+    return 1;
 }
 int main(int argc,char **argv)
 {
@@ -74,7 +108,12 @@ int main(int argc,char **argv)
             if (!strcmp(targets[j].path,argv[i+1])) target=&targets[j];
         if (!target) return 7;
         struct stat source;
-        if (lstat(argv[i],&source) || !S_ISREG(source.st_mode) || source.st_size<=0 || source.st_size>4*1024*1024) return 8;
+        uint64_t maximum=!strcmp(target->path,"/redfin/lib/libredfinair.dylib") ? 16u*1024*1024 : 4u*1024*1024;
+        if (lstat(argv[i],&source) || !S_ISREG(source.st_mode) || source.st_size<=0 || (uint64_t)source.st_size>maximum) return 8;
+        int metal_resource=!strcmp(target->path,"/System/Library/Extensions/RedfinMetal.bundle/_CodeSignature/CodeResources");
+        if ((!strcmp(target->path,"/System/Library/Extensions/RedfinMetal.bundle/RedfinMetal") ||
+             !strcmp(target->path,"/System/Library/Extensions/RedfinMetal.bundle/Info.plist") || metal_resource) &&
+            !metal_directory(volume,metal_resource)) return 18;
         HFSPlusCatalogRecord *record=getRecordFromPath(target->path,volume,NULL,NULL);
         uint32_t old_id=0,old_blocks=0;HFSPlusExtentRecord old_extents;
         memset(old_extents,0,sizeof(old_extents));

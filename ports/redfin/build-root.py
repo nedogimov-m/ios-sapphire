@@ -19,7 +19,7 @@ import subprocess
 import sys
 import checkpoint_userland
 import photos_userland
-from ports.redfin import ui_userland,gui_check_userland,platform_userland
+from ports.redfin import ui_userland,gui_check_userland,platform_userland,metal_userland
 import wifi_userland
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -364,6 +364,8 @@ class Builder:
                 self.manifest["gui_check"] = gui_check_userland.prepare_root(target,self.metadata,self.args.gui_check_bundle)
             if self.args.platform_bundle:
                 self.manifest['native_platform']=platform_userland.prepare_root(target,self.metadata,self.args.platform_bundle)
+            if self.args.metal_bundle:
+                self.manifest['native_metal']=metal_userland.prepare_root(target,self.metadata,self.args.metal_bundle)
             owners = []
             for relative, metadata in self.metadata.items():
                 destination = target / relative
@@ -415,6 +417,7 @@ def main(argv=None):
     parser.add_argument("--ui-bundle",type=Path,help="verified native full-panel/status-bar adapter from ui_userland.py")
     parser.add_argument("--gui-check-bundle",type=Path,help="verified native opt-in app checker from gui_check_userland.py")
     parser.add_argument('--platform-bundle',type=Path,help='verified native thermal/network platform services from platform_userland.py')
+    parser.add_argument('--metal-bundle',type=Path,help='complete native Metal/AIR bundle from build-graphics.py --metal')
     parser.add_argument("--reuse-mounts", type=Path, help="use existing read-only ownership-enabled os/systemos/appos mounts; leaves these external mounts attached")
     args = parser.parse_args(argv)
     if (ROOT / "research").resolve() not in args.out.resolve().parents:

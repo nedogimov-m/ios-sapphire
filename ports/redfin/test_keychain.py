@@ -3,6 +3,7 @@ import ctypes as C
 import errno
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -36,7 +37,6 @@ typedef unsigned IOReturn;
 enum {kIOReturnSuccess=0,kIOReturnBadArgument=1,kIOReturnNotReady=2,
  kIOReturnNotPermitted=3,kIOReturnNoSpace=4,kIOReturnUnderrun=5};
 #define SWEET_AKS_SYSTEM_HANDLE 0
-#define SWEET_AKS_LOCK_STATE 4
 class OSData {public:std::vector<uint8_t> bytes;unsigned refs=1;
  OSData(const uint8_t *p,size_t n):bytes(p,p+n){} unsigned getLength(){return (unsigned)bytes.size();}
  void *getBytesNoCopy(){return bytes.data();}void retain(){++refs;}void release(){--refs;}};
@@ -129,7 +129,8 @@ class KeychainTests(unittest.TestCase):
         der='static uint32_t\nsweet_aks_der_pair'+text.split('static uint32_t\nsweet_aks_der_pair',1)[1].split('\n}\n',1)[0]+'\n}\n'
         state='static IOReturn\nsweet_aks_device_state'+text.split('static IOReturn\nsweet_aks_device_state',1)[1].split('\n}\n',1)[0]+'\n}\n'
         source=root/'keychain.cpp';library=root/'keychain.dylib'
-        source.write_text(AES+NATIVE+(HERE/'keychain-runtime.inc').read_text()+helper+der+state+WRAPPERS)
+        native_state=re.search(r'^#define SWEET_AKS_LOCK_STATE\s+0x[0-9a-f]+$',text,re.M).group()
+        source.write_text(AES+NATIVE+native_state+'\n'+(HERE/'keychain-runtime.inc').read_text()+helper+der+state+WRAPPERS)
         result=subprocess.run(['c++','-std=c++17','-O2','-shared','-fPIC','-Wall','-Wextra','-Werror',
             '-Wno-misleading-indentation','-I',str(root),str(source),'-o',str(library)],capture_output=True,text=True)
         if result.returncode:raise RuntimeError(result.stderr)
@@ -211,6 +212,22 @@ class KeychainTests(unittest.TestCase):
                 (1|2|128,7,[2,1,1,0]),(1|2|256,8,[1,1,1,0]),(1|2|512,8,[2,2,1,1])]:
             self.assertEqual(self.transform(0,bytes(range(32)),flags=flags)[0],wanted)
             self.assertEqual([self.lib.wire_metric(i) for i in range(4)],counts)
+
+    def test_native_state_is_a_canonical_der_set_with_no_passcode_and_first_unlock(self):
+        self.seed();out=C.create_string_buffer(4096);actual=C.c_uint()
+        self.assertEqual(self.lib.descriptor_state(out,4096,0,C.byref(actual)),0)
+        data=bytes(out)[:actual.value]
+        self.assertEqual(data[:2],bytes([0x31,len(data)-2]))
+        at=2;entries=[];values={}
+        while at<len(data):
+            self.assertEqual(data[at],0x30);end=at+2+data[at+1]
+            entries.append(data[at:end]);self.assertEqual(data[at+2],0x0c)
+            length=data[at+3];key=data[at+4:at+4+length].decode()
+            integer=data[at+4+length:end]
+            self.assertEqual(integer[:2],b'\x02\x01');self.assertEqual(len(integer),3)
+            self.assertNotIn(key,values);values[key]=integer[2];at=end
+        self.assertEqual(at,len(data));self.assertEqual(entries,sorted(entries))
+        self.assertEqual(values,dict(sb=0,sr=0,ss=6,sas=0,sfa=0,sgs=0,sls=3,sgpe=0,srcd=0))
 
     def test_private_material_permissions_identity_and_exclusive_creation(self):
         with tempfile.TemporaryDirectory() as d:

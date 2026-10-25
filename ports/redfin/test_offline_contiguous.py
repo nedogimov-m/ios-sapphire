@@ -30,7 +30,7 @@ unsigned run(unsigned scenario,unsigned needed){
  memset(bitmap,255,sizeof(bitmap));short_read=scenario==3;
  struct header h={4194304,1234};Volume volume={&h,bitmap};
  if(scenario==2)h.totalBlocks--;
- for(unsigned b=300;b<600;b++)if(scenario!=1 || !(b%2))bitmap[b/8]&=(unsigned char)~(0x80u>>(b%8));
+ for(unsigned b=300;b<(scenario==4?10000u:600u);b++)if(scenario!=1 || !(b%2))bitmap[b/8]&=(unsigned char)~(0x80u>>(b%8));
  if(!stage_contiguous(&volume,needed))return h.nextAllocation==1234?0:999;
  return h.nextAllocation;
 }
@@ -41,7 +41,9 @@ unsigned run(unsigned scenario,unsigned needed){
 
     def test_complete_run_is_selected_and_short_fragmented_or_unbounded_inputs_preserve_hint(self):
         self.assertEqual(self.lib.run(0,18),300)
-        for scenario,needed in [(1,18),(2,18),(3,18),(0,0),(0,1025),(0,300)]:
+        self.assertEqual(self.lib.run(4,2500),300)
+        self.assertEqual(self.lib.run(4,4096),300)
+        for scenario,needed in [(1,18),(2,18),(3,18),(0,0),(0,1025),(0,300),(4,4097)]:
             self.assertEqual(self.lib.run(scenario,needed),0)
 
 

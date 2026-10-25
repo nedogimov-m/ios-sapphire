@@ -127,3 +127,14 @@ claiming charge. Photos still fails; replacement assetsd244survives.
 An AKS selector17log flood wraps initial RAM proof, so strict overall status
 is logs-collected/boot-id-missing, not PASS. Preserve startup/reduce the flood
 in the next complete block. Metal sources are being implemented, not tested.
+
+The next complete source block is now built/staged: actual20H392 Metal/AIR
+with isolated probe and system discovery, canonical native AKS state, RFH2
+startup preservation, exact native SMB5 health/modes and bounded native Photos
+XPC retries. All118selected host checks/native builds/imports/signaturesPASS.
+Kernel local20261025-081227/noCI 2d007818...; V11 full private stage passes
+native readonly fsck/readback,10919936bytes/2505new blocks/zero freed. V11 is
+not applied yet. Fresh gui-platform-v6/3355dc3b077fe229 preflightPASS. Next:
+apply V11 once, integrated hardware probe, then system Metal after actual
+compute/render success. Never infer full Metal feature support from its host
+build. Sensors and real account authorization remain required.

@@ -1,5 +1,34 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual native Metal/AIR and platform readiness — 2026-10-25
+
+Re-reviewed preferred kernel8e611870 MiniIOMobileFramebuffer's native Metal
+bundle discovery and MiniAppleKeyStore's canonical DER state. Userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 supplies redwoodmetal.m,
+redwooddrawable.m and the AIR frontend/IR3/Metal patches over Mesa25.0.7.
+Redfin uses the native A620 msm/IOSurface ABI and128MiB kernel allocation
+bound, derives every superclass selector/UUID/ivar type from actual20H392,
+and serializes the one Gallium context across concurrent native queues.
+No20F66 addresses or foreign target-device architecture are copied. Source
+pairing/export checks reject a mismatched compiler. Native MTLFunction
+fallbacks keep the previous implementation for another device. Probe and
+system discovery are both implemented with separate exact ADT modes; neither
+is claimed physically working from a host build alone. Upstream's explicit
+unsupported API/features remain visible and are not advertised as complete.
+
+MiniAppleKeyStore's ss6/sls3/sr and canonical SET ordering replace inherited
+ss4/sls0/unordered state; wrap material and native AES integrity are unchanged.
+Google500b3a2059c1ee smb5-reg.h/smblib_get_prop_batt_health is authoritative:
+status7 hard bits3:2 differ from AFP1:0/soft JEITA5:4, and a BAT_OV indication
+is evaluated against measured voltage at native FV+40mV. Status5 actual
+enables distinguish charging. Native limits, JEITA/safety and unknown-data
+pause guards remain. Initial assetsd242fails while replacement244survives;
+Photos bootstrap retries only native XPC service failure, preserving TCC and
+native library creation/upgrade. RFH2 alternate capture and bounded AKS logs
+preserve the evidence that the current noisy state requests had overwritten.
+All118current selected host cases and complete native builds pass; the next
+combined physical probe must decide actual Metal/Photos/charge behavior.
+
 ## Native Redfin power/thermal/clock and measured app refresh — 2026-10-25
 
 Read-only review of preferred kernelHEAD

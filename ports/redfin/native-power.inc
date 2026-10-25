@@ -278,7 +278,7 @@ static void power_clock(IORegistryEntry *node)
 static int power_battery(struct redfin_power_sample *s)
 {
     *s=(struct redfin_power_sample){};s->version=RF_POWER_ABI;s->bytes=sizeof(*s);
-    uint8_t header[2]={},qg_status=0,raw[2]={},mono=0,chg[2]={},temp_status=0,batif=0,path=0,usb=0,dc=0;
+    uint8_t header[2]={},qg_status=0,raw[2]={},mono=0,chg[2]={},temp_status=0,enabled=0,fv=0,batif=0,path=0,usb=0,dc=0;
     int e=power_read(P_QG,0x4804,header,2);if (e) return e;
     if (header[0]!=0x0d || (header[1]!=3 && header[1]!=4)) return ENOTSUP;
     if ((e=power_byte(P_QG,0x4808,&qg_status)) || (e=power_byte(P_BATIF,0x1210,&batif))) return e;
@@ -295,12 +295,20 @@ static int power_battery(struct redfin_power_sample *s)
     if (!redfin_adc5_battery_temp(adc,&s->temperature_mc)) return ERANGE;
     s->valid|=RF_POWER_TEMP;
     if ((e=power_read(P_CHGR,0x1006,chg,2)) || (e=power_byte(P_CHGR,0x100d,&temp_status)) ||
+        (e=power_byte(P_CHGR,0x100b,&enabled)) || (e=power_byte(P_CHGR,0x1070,&fv)) ||
         (e=power_byte(P_DCDC,0x110b,&path)) || (e=power_byte(P_USB,0x1310,&usb)) ||
         (e=power_byte(P_DC,0x1410,&dc))) return e;
     s->wireless=(dc&0x10) && (path&8);s->external=(path&1) && ((usb&0x10) || s->wireless);
-    s->charger_faults=(chg[1]&6)|(temp_status&0x3f);unsigned status=chg[0]&7;
-    s->full=s->external && status==5;
-    s->charging=s->present && s->external && status>=1 && status<=4 && !s->charger_faults;
+    int32_t float_uv=3600000+fv*10000;
+    s->charger_faults=redfin_smb5_faults(chg[1],temp_status,s->voltage_uv,float_uv);
+    redfin_smb5_state(s,chg[0],enabled);
+    static uint32_t previous_status=UINT32_MAX;
+    uint32_t packed=chg[0]|((uint32_t)chg[1]<<8)|((uint32_t)temp_status<<16)|((uint32_t)enabled<<24);
+    if (packed!=previous_status) {
+        previous_status=packed;
+        IOLog("REDFIN SMB5 STATUS: raw1=%#x raw2=%#x raw5=%#x raw7=%#x native-FV-uV=%d actual-V-uV=%d hard-faults=%#x full=%d charging=%d\n",
+            chg[0],chg[1],enabled,temp_status,float_uv,s->voltage_uv,s->charger_faults,s->full,s->charging);
+    }
     s->valid|=RF_POWER_CHARGER;
     if (!power_read(P_SDAM,0xb168,raw,2)) {
         unsigned full=redfin_power_u16(raw);
@@ -320,7 +328,9 @@ static void power_charge_policy(const struct redfin_power_sample *s)
 {
     if (redfin_charger_must_pause(s)) {
         int e=power_bit(0x1043,1,true);
-        IOLog("REDFIN CHARGE GUARD: paused=1 valid=%u temp-mC=%d fault=%#x error=%d\n",redfin_power_valid(s),s->temperature_mc,s->charger_faults,e);
+        static unsigned reports;
+        if (e || reports++<2 || !(reports&(reports-1)))
+            IOLog("REDFIN CHARGE GUARD: paused=1 valid=%u temp-mC=%d fault=%#x error=%d\n",redfin_power_valid(s),s->temperature_mc,s->charger_faults,e);
         return;
     }
     if (!s->external || s->full) return;
@@ -328,7 +338,11 @@ static void power_charge_policy(const struct redfin_power_sample *s)
     if (power_byte(P_CHGR,0x1070,&fv) || power_byte(P_CHGR,0x1061,&fcc) ||
         power_byte(P_CHGR,0x10a0,&timer) || power_byte(P_CHGR,0x1090,&jeita)) return;
     bool permitted=redfin_charger_enable_allowed(s,3600000+fv*10000,fcc*50000,timer,jeita);
-    if (!permitted) return;
+    if (!permitted) {
+        static unsigned refused;
+        if (refused++<2) IOLog("REDFIN CHARGE ADMISSION: permitted=0 FV-uV=%u FCC-uA=%u timer=%#x JEITA=%#x inherited-limits=1\n",3600000+fv*10000,fcc*50000,timer,jeita);
+        return;
+    }
     int e=power_bit(0x1042,1,true);if (!e) e=power_bit(0x1043,1,false);
     static unsigned reports;
     if (e || reports++<2) IOLog("REDFIN CHARGE POLICY: enable-request=1 error=%d FV-uV=%u FCC-uA=%u inherited-limits=1 JEITA=1 safety-timer=1\n",e,3600000+fv*10000,fcc*50000);

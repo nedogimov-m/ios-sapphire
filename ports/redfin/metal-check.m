@@ -1,0 +1,187 @@
+/* SPDX-License-Identifier: MIT */
+/* Native Metal registration, actual GPU compute and shared IOSurface draw.
+ * Probe policy keeps registration local to this process. System policy uses
+ * ordinary Metal discovery. Neither a software renderer nor a nil device passes. */
+#import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+#import <objc/message.h>
+#import <objc/runtime.h>
+#include <IOKit/IOKitLib.h>
+#include <dlfcn.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/sysctl.h>
+#include <unistd.h>
+#include "iosurface-abi.h"
+#include "gui-profile.h"
+
+@interface NSObject (RedfinMetalSurface)
+- (id)newTextureWithDescriptor:(MTLTextureDescriptor *)descriptor iosurface:(IOSurfaceRef)surface plane:(NSUInteger)plane;
+@end
+
+static int registry_number(io_service_t service,CFStringRef key)
+{
+    CFTypeRef value=IORegistryEntryCreateCFProperty(service,key,NULL,0);int number=0;
+    if (value && CFGetTypeID(value)==CFNumberGetTypeID())
+        (void)CFNumberGetValue(value,kCFNumberIntType,&number);
+    if (value) CFRelease(value);
+    return number;
+}
+
+static BOOL compute(id<MTLDevice> device,id<MTLComputePipelineState> pipeline,uint32_t seed)
+{
+    id<MTLCommandQueue> queue=[device newCommandQueue];
+    id<MTLBuffer> output=[device newBufferWithLength:128*sizeof(uint32_t) options:MTLResourceStorageModeShared];
+    id<MTLBuffer> input=[device newBufferWithLength:sizeof(uint32_t) options:MTLResourceStorageModeShared];
+    BOOL valid=queue && output && input;
+    for (unsigned round=0;valid && round<96;++round) {
+        @autoreleasepool {
+            uint32_t nonce=seed+round*0x9e3779b9u;
+            uint32_t *words=[output contents],*in=[input contents];
+            if (!words || !in) {valid=NO;break;}
+            for (unsigned i=0;i<128;++i) words[i]=0xcafed00du;
+            *in=nonce;
+            id<MTLCommandBuffer> command=[queue commandBuffer];
+            id<MTLComputeCommandEncoder> encoder=[command computeCommandEncoder];
+            if (!command || !encoder) {valid=NO;break;}
+            [encoder setComputePipelineState:pipeline];
+            [encoder setBuffer:output offset:0 atIndex:0];
+            [encoder setBuffer:input offset:0 atIndex:1];
+            [encoder dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(64,1,1)];
+            [encoder endEncoding];[command commit];[command waitUntilCompleted];
+            valid=[command status]==MTLCommandBufferStatusCompleted && ![command error];
+            if (!valid) printf("REDFIN METAL COMPUTE: round=%u status=%lu error=%s\n",round,
+                (unsigned long)command.status,command.error ? command.error.description.UTF8String : "none");
+            for (unsigned i=0;valid && i<128;++i) {
+                uint32_t expected=i<64 ? (i^nonce)*1664525u+1013904223u : 0xcafed00du;
+                if (words[i]!=expected) {
+                    printf("REDFIN METAL COMPUTE: round=%u index=%u actual=%08x expected=%08x\n",round,i,words[i],expected);
+                    valid=NO;
+                }
+            }
+        }
+    }
+    [input release];[output release];[queue release];return valid;
+}
+
+static BOOL render(id<MTLDevice> device,id<MTLLibrary> library)
+{
+    NSDictionary *properties=@{(id)kIOSurfaceWidth:@64,(id)kIOSurfaceHeight:@64,
+        (id)kIOSurfaceBytesPerElement:@4,(id)kIOSurfaceBytesPerRow:@256,
+        (id)kIOSurfaceAllocSize:@16384,(id)kIOSurfacePixelFormat:@(0x42475241),@"IOSurfaceIsGlobal":@YES};
+    IOSurfaceRef surface=IOSurfaceCreate((CFDictionaryRef)properties);
+    if (!surface || !IOSurfaceGetID(surface)) {if(surface)CFRelease(surface);return NO;}
+    MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:64 height:64 mipmapped:NO];
+    desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
+    desc.storageMode=MTLStorageModeShared;
+    id<MTLTexture> texture=[(id)device newTextureWithDescriptor:desc iosurface:surface plane:0];
+    MTLRenderPipelineDescriptor *shape=[[MTLRenderPipelineDescriptor alloc] init];
+    shape.vertexFunction=[library newFunctionWithName:@"redfin_vertex"];
+    shape.fragmentFunction=[library newFunctionWithName:@"redfin_fragment"];
+    shape.colorAttachments[0].pixelFormat=MTLPixelFormatBGRA8Unorm;
+    NSError *error=nil;
+    id<MTLRenderPipelineState> pipeline=texture ? [device newRenderPipelineStateWithDescriptor:shape error:&error] : nil;
+    id<MTLCommandQueue> queue=pipeline ? [device newCommandQueue] : nil;
+    id<MTLCommandBuffer> command=[queue commandBuffer];
+    BOOL valid=texture && pipeline && command && !error;
+    if (!valid) printf("REDFIN METAL RENDER: texture=%u pipeline=%u command=%u error=%s\n",
+        texture!=nil,pipeline!=nil,command!=nil,error ? error.description.UTF8String : "none");
+    if (valid) {
+        MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];
+        pass.colorAttachments[0].texture=texture;
+        pass.colorAttachments[0].loadAction=MTLLoadActionClear;
+        pass.colorAttachments[0].storeAction=MTLStoreActionStore;
+        pass.colorAttachments[0].clearColor=MTLClearColorMake(1,0,0,1);
+        id<MTLRenderCommandEncoder> encoder=[command renderCommandEncoderWithDescriptor:pass];
+        valid=encoder!=nil;
+        if (valid) {
+            [encoder setRenderPipelineState:pipeline];
+            [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+            [encoder endEncoding];[command commit];[command waitUntilCompleted];
+            valid=[command status]==MTLCommandBufferStatusCompleted && ![command error];
+        }
+    }
+    if (valid) {
+        uint32_t seed=0;
+        valid=IOSurfaceLock(surface,kIOSurfaceLockReadOnly,&seed)==KERN_SUCCESS;
+        if (valid) {
+            const uint8_t *pixels=IOSurfaceGetBaseAddress(surface);
+            size_t stride=IOSurfaceGetBytesPerRow(surface);
+            valid=pixels && stride==256 && IOSurfaceGetWidth(surface)==64 && IOSurfaceGetHeight(surface)==64;
+            for (unsigned y=0;valid && y<64;++y) for (unsigned x=0;valid && x<64;++x) {
+                const uint8_t *p=pixels+y*stride+x*4;
+                valid=p[0]>=190 && p[0]<=192 && p[1]>=127 && p[1]<=129 &&
+                    p[2]>=63 && p[2]<=65 && p[3]==255;
+            }
+            if (IOSurfaceUnlock(surface,kIOSurfaceLockReadOnly,&seed)!=KERN_SUCCESS) valid=NO;
+        }
+    }
+    [queue release];[pipeline release];
+    [shape.vertexFunction release];[shape.fragmentFunction release];
+    [shape release];[texture release];CFRelease(surface);
+    return valid;
+}
+
+int main(void)
+{
+    @autoreleasepool {
+        setvbuf(stdout,NULL,_IOLBF,0);
+        char args[608]={0};size_t bytes=sizeof(args);uint64_t nonce=0;
+        if (sysctlbyname("kern.bootargs",args,&bytes,NULL,0) || bytes>sizeof(args) ||
+            !redfin_gpu_gui_profile(args,(unsigned)bytes,&nonce)) return 0;
+        io_service_t gpu=0;
+        for (unsigned i=0;i<120 && !gpu;++i) {
+            gpu=IOServiceGetMatchingService(0,IOServiceMatching("RedwoodGPU"));
+            if (!gpu) sleep(1);
+        }
+        int mode=gpu ? registry_number(gpu,CFSTR("RedfinMetalPolicy")) : 0;
+        if (gpu) IOObjectRelease(gpu);
+        if (mode!=1 && mode!=2) return 0;
+        printf("REDFIN METAL CHECK BOOT: %016llx mode=%d pid=%d\n",(unsigned long long)nonce,mode,getpid());
+        @try {
+            /* This initializes Metal's real device array before private registration. */
+            id<MTLDevice> device=MTLCreateSystemDefaultDevice();
+            if (mode==1 && device==nil) {
+                NSBundle *bundle=[NSBundle bundleWithPath:@"/System/Library/Extensions/RedfinMetal.bundle"];
+                NSError *error=nil;
+                if (![bundle loadAndReturnError:&error]) {printf("REDFIN METAL CHECK: bundle failed code=%ld\n",(long)error.code);return 1;}
+                Class cls=[bundle classNamed:@"RedwoodMetalDevice"];
+                io_service_t accelerator=IOServiceGetMatchingService(0,IOServiceMatching("IOAcceleratorES"));
+                id candidate=cls && accelerator ? ((id (*)(id,SEL,io_service_t))objc_msgSend)([cls alloc],sel_registerName("initWithAcceleratorPort:"),accelerator) : nil;
+                if (accelerator) IOObjectRelease(accelerator);
+                void (*add)(id)=(void (*)(id))dlsym(RTLD_DEFAULT,"MTLAddDevice");
+                if (!candidate || !add) {[candidate release];printf("REDFIN METAL CHECK: native registration unavailable\n");return 1;}
+                add(candidate);[candidate release];device=MTLCreateSystemDefaultDevice();
+            }
+            if (!device || strcmp(class_getName(object_getClass(device)),"RedwoodMetalDevice") ||
+                [device maxBufferLength]!=(128ULL<<20)) {
+                printf("REDFIN METAL CHECK: native A620 device/bounds absent\n");return 1;
+            }
+            NSError *error=nil;
+            id<MTLLibrary> library=[device newLibraryWithFile:@"/redfin/lib/redfin-check.metallib" error:&error];
+            id<MTLFunction> function=[library newFunctionWithName:@"redfin_affine"];
+            id<MTLComputePipelineState> pipeline=function ? [device newComputePipelineStateWithFunction:function error:&error] : nil;
+            if (!library || !pipeline || error) {
+                printf("REDFIN METAL CHECK: native library/pipeline failed code=%ld error=%s\n",
+                    (long)error.code,error ? error.description.UTF8String : "none");return 1;
+            }
+            __block BOOL first=NO,second=NO;
+            dispatch_group_t group=dispatch_group_create();
+            dispatch_queue_t concurrent=dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0);
+            dispatch_group_async(group,concurrent,^{@autoreleasepool{first=compute(device,pipeline,(uint32_t)nonce);}});
+            dispatch_group_async(group,concurrent,^{@autoreleasepool{second=compute(device,pipeline,(uint32_t)(nonce>>32)^0xa5a5a5a5u);}});
+            if (dispatch_group_wait(group,dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC))) {
+                printf("REDFIN METAL CHECK: concurrent command queues timed out\n");return 1;
+            }
+            BOOL pixels=first && second && render(device,library);
+            printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u\n",
+                (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels);
+            [pipeline release];[function release];[library release];dispatch_release(group);[device release];
+            return pixels ? 0 : 1;
+        } @catch (NSException *exception) {
+            printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
+            return 1;
+        }
+    }
+}

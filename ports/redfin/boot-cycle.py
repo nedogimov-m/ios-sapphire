@@ -290,13 +290,19 @@ def extract_ring(raw, offset=CONSOLE_OFFSET, length=CONSOLE_LENGTH):
         raise ValueError("truncated ramoops console region")
     signature, start, size = struct.unpack_from("<III", raw, offset)
     capacity = length - 12
-    if signature != 0x43474244 or start >= capacity or size > capacity:
+    if signature not in (0x43474244, 0x32484652) or start >= capacity or size > capacity:
         raise ValueError("invalid DBGC signature/cursor/size")
     data = raw[offset + 12:offset + length]
     if size < capacity:
         if start != size:
             raise ValueError("inconsistent partial DBGC ring cursor")
         return data[:size]
+    if signature == 0x32484652:  # RFH2: immutable startup prefix plus rolling tail
+        prefix = min(0x40000, capacity // 4)
+        if not prefix or start < prefix:
+            raise ValueError("invalid RFH2 startup-prefix cursor")
+        return (data[:prefix] + b"\n[REDFIN RAMLOG GAP: startup prefix followed by recent tail]\n" +
+                data[start:] + data[prefix:start])
     return data[start:] + data[:start]
 
 
@@ -656,7 +662,11 @@ class Cycle:
             captured.update(self.pstore("after"))
             current = b"\n".join(data for name, data in captured.items()
                                    if self.manifest["files"][name]["sha256"] not in before_hashes)
-            if userspace_evidence(current)["pid1_alive"] or b"[REDFIN RAMLOG v1" in current or time.monotonic() >= deadline:
+            # Authenticated offline-recovery RAM is an immutable completed
+            # capture. Waiting for a banner lost to a wrapped ring cannot add
+            # evidence; retain the usual strict freshness/result checks below.
+            if ((recovery and authenticated) or userspace_evidence(current)["pid1_alive"] or
+                    b"[REDFIN RAMLOG v1" in current or time.monotonic() >= deadline):
                 break
             time.sleep(2)
         expected_boot_id = self.manifest.get("xnu_return", {}).get("boot_id")

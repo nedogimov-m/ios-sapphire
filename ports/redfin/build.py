@@ -100,6 +100,7 @@ def main():
     p.add_argument('--gmu-firmware-start', action='store_true', help='native A620 PDC/RSC/CM3 start and fresh HFI version ACK after complete owned memory preparation; isolated md0 only')
     p.add_argument('--gpu-command-start', action='store_true', help='complete A620 GMU/power/SMMU/SQE/signed PAS13 and fresh GPU memory-write commands; isolated md0 only')
     p.add_argument('--gpu-gui', action='store_true', help='complete A620 command proof and persistent Mesa/IOSurface service in the bounded GUI8/WLAN profile')
+    p.add_argument('--metal-mode', choices=('probe','system'), help='paired native Metal: isolated helper or system discovery; requires --gpu-gui')
     p.add_argument('--gpu-assets-inventory', type=Path, help='private captured native firmware inventory binding a650 SQE and signed a620 zap for --gpu-command-start')
     p.add_argument('--gmu-fw-file', type=Path, help='private native A620 GMU firmware for the memory profile')
     p.add_argument('--gmu-fw-sha256', help='recorded SHA256 of that firmware')
@@ -142,6 +143,8 @@ def main():
     p.add_argument('--watchdog-seconds', type=int, default=28,
         help='hardware reset after this many seconds (+3 s bite margin) for XNU runs')
     a = p.parse_args()
+    if a.metal_mode and not a.gpu_gui:
+        p.error('--metal-mode requires --gpu-gui')
     if a.gpu_gui:
         a.wifi_gui = True
         if not (a.gpu_assets_inventory and a.gmu_fw_file and a.gmu_fw_sha256):
@@ -503,6 +506,9 @@ def main():
                     if a.gpu_gui:
                         from gpu_command import add_runtime_contract
                         add_runtime_contract(tree)
+                        if a.metal_mode:
+                            from gpu_command import add_metal_contract
+                            add_metal_contract(tree,a.metal_mode)
             except ValueError as error:
                 p.error(str(error))
         if a.wifi_native_probe:
@@ -857,6 +863,8 @@ def main():
         manifest['gpu_power_probe'] = True
     if a.gpu_gui:
         manifest['gpu_gui'] = True
+    if a.metal_mode:
+        manifest['metal_mode'] = a.metal_mode
     if a.gmu_tcm_probe:
         manifest['gmu_tcm_probe'] = True
     if a.gpu_smmu_probe:

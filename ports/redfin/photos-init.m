@@ -129,6 +129,9 @@ authorization_proof(const char *nonce)
     CFTypeRef (*copy)(CFTypeRef,CFStringRef,CFErrorRef *)=security ?
         (CFTypeRef (*)(CFTypeRef,CFStringRef,CFErrorRef *))dlsym(security,"SecTaskCopyValueForEntitlement") : NULL;
     uint32_t (*flags)(CFTypeRef)=security ? (uint32_t (*)(CFTypeRef))dlsym(security,"SecTaskGetCodeSignStatus") : NULL;
+    Boolean (*validated)(CFTypeRef)=security ? (Boolean (*)(CFTypeRef))dlsym(security,"SecTaskEntitlementsValidated") : NULL;
+    CFStringRef (*identity)(CFTypeRef,CFErrorRef *)=security ?
+        (CFStringRef (*)(CFTypeRef,CFErrorRef *))dlsym(security,"SecTaskCopySigningIdentifier") : NULL;
     CFTypeRef task=task_create ? task_create(NULL) : NULL;
     CFErrorRef error=NULL;CFTypeRef allow=task && copy ? copy(task,CFSTR("com.apple.private.tcc.allow"),&error) : NULL;
     BOOL entitled=allow && CFGetTypeID(allow)==CFArrayGetTypeID() &&
@@ -136,10 +139,15 @@ authorization_proof(const char *nonce)
     void *tcc=dlopen("/System/Library/PrivateFrameworks/TCC.framework/TCC",RTLD_NOW|RTLD_LOCAL);
     long (*preflight)(CFStringRef,CFDictionaryRef)=tcc ? (long (*)(CFStringRef,CFDictionaryRef))dlsym(tcc,"tcc_authorization_preflight") : NULL;
     long authorization=preflight ? preflight(CFSTR("kTCCServicePhotos"),NULL) : -1;
+    CFErrorRef identity_error=NULL;
+    CFStringRef signing=task && identity ? identity(task,&identity_error) : NULL;
+    BOOL identity_matches=signing && CFEqual(signing,CFSTR("com.redfin.photos-init"));
     struct timeval now={};gettimeofday(&now,NULL);
-    printf("REDFIN PHOTO AUTHORIZATION: boot=%s SecTask=%u flags=%#x native-photos-entitlement=%u entitlement-error=%ld TCC-preflight=%ld calendar-valid=%u\n",
+    printf("REDFIN PHOTO AUTHORIZATION: boot=%s SecTask=%u flags=%#x native-photos-entitlement=%u entitlement-error=%ld TCC-preflight=%ld calendar-valid=%u validated=%d signing-identity=%u identity-error=%ld\n",
         nonce,task!=NULL,task && flags ? flags(task) : 0,entitled,error ? (long)CFErrorGetCode(error) : 0,
-        authorization,(uint64_t)now.tv_sec>=1577836800ULL);
+        authorization,(uint64_t)now.tv_sec>=1577836800ULL,task && validated ? validated(task) : -1,
+        identity_matches,identity_error ? (long)CFErrorGetCode(identity_error) : 0);
+    if (signing) CFRelease(signing);if (identity_error) CFRelease(identity_error);
     if (allow) CFRelease(allow);if (error) CFRelease(error);if (task) CFRelease(task);
 }
 
@@ -215,12 +223,25 @@ int main(void)
                  * passing it to the class well-known API is an API misuse.
                  * The instance path creates/opens/upgrades using Apple's own
                  * options/error handling, including an already-existing store. */
-                library=((id (*)(id,SEL,id))objc_msgSend)([photo alloc],
-                    sel_registerName("initWithPhotoLibraryURL:"),url);
-                BOOL ready=library && ((BOOL (*)(id,SEL,id,NSError **))objc_msgSend)(library,
-                    sel_registerName("createOrUpgradeLibraryUsingOptions:error:"),nil,&error);
-                printf("REDFIN PHOTO INIT SYSTEM URL: ready=%u native-instance=1 error=%s\n",
-                    ready,error ? error.description.UTF8String : "none");
+                BOOL ready=NO;
+                for (unsigned attempt=1;attempt<=6;++attempt) {
+                    error=nil;
+                    library=((id (*)(id,SEL,id))objc_msgSend)([photo alloc],
+                        sel_registerName("initWithPhotoLibraryURL:"),url);
+                    ready=library && ((BOOL (*)(id,SEL,id,NSError **))objc_msgSend)(library,
+                        sel_registerName("createOrUpgradeLibraryUsingOptions:error:"),nil,&error);
+                    printf("REDFIN PHOTO INIT SYSTEM URL: ready=%u native-instance=1 attempt=%u error=%s\n",
+                        ready,attempt,error ? error.description.UTF8String : "none");
+                    if (ready) break;
+                    /* The first assetsd can lose its startup race with TCC.
+                     * Retry only a native XPC interruption/unavailable service;
+                     * never retry a library/schema/authorization failure. Each
+                     * attempt uses a fresh native instance and the same URL. */
+                    BOOL transient=([error.domain isEqualToString:PHPhotosErrorDomain] && error.code==4103) ||
+                        ([error.domain isEqualToString:NSCocoaErrorDomain] && (error.code==4097 || error.code==4099));
+                    if (!transient || attempt==6) break;
+                    library=nil;sleep(3);authorization_proof(nonce);
+                }
                 if (!ready) return 8;
             } else if (!existing) {
                 BOOL created=((BOOL (*)(id,SEL,NSInteger,NSError **))objc_msgSend)(photo,

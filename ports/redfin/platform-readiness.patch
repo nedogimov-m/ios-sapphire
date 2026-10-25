@@ -1,0 +1,174 @@
+diff --git a/iokit/Kernel/arm/SweetKeyStore.cpp b/iokit/Kernel/arm/SweetKeyStore.cpp
+--- a/iokit/Kernel/arm/SweetKeyStore.cpp
++++ b/iokit/Kernel/arm/SweetKeyStore.cpp
+@@ -61,7 +61,7 @@
+  * aks lock state bits (aks_get_lock_state): bit 2 is "unlocked since boot"
+  * (MobileKeyBag MKBDeviceUnlockedSinceBoot); clear lock bits = unlocked.
+  */
+-#define SWEET_AKS_LOCK_STATE    0x4
++#define SWEET_AKS_LOCK_STATE    0x6
+ #include "RedfinKeychain.inc"
+ 
+ class AppleKeyStore : public IOService {
+@@ -156,8 +156,11 @@
+ 		const char *key;
+ 		uint8_t value;
+ 	} fields[] = {
+-		{ "ss", SWEET_AKS_LOCK_STATE }, { "sls", 0 }, { "sb", 0 }, { "sfa", 0 },
+-		{ "sgs", 0 }, { "sas", 0 }, { "sgpe", 0 }, { "srcd", 0 },
++		/* DER SET order, then native no-passcode/unlocked state. Preferred
++		 * MiniAppleKeyStore uses ss6/sls3 and includes the sr field. */
++		{ "sb", 0 }, { "sr", 0 }, { "ss", SWEET_AKS_LOCK_STATE },
++		{ "sas", 0 }, { "sfa", 0 }, { "sgs", 0 }, { "sls", 3 },
++		{ "sgpe", 0 }, { "srcd", 0 },
+ 	};
+ 	uint8_t buf[128];
+ 	uint32_t n = 2;
+@@ -254,10 +257,16 @@
+ 		break;
+ 	}
+ 
+-	char name[32];
+-	proc_selfname(name, sizeof(name));
+-	IOLog("SWEET AKS: %s sel %u arg0 %llu in %u/%u out %u/%u -> 0x%x\n", name, selector,
+-	    arg0, in_scalars, in_struct, out_scalars, out_struct, ret);
++	/* Per-selector first observations and powers of two retain diagnostics
++	 * without copying thousands of identical state replies to the console. */
++	static uint64_t reports[128];
++	uint64_t count=selector<128 ? __atomic_add_fetch(&reports[selector],1,__ATOMIC_RELAXED) : 1;
++	if (count<=4 || !(count&(count-1))) {
++		char name[32]={0};
++		proc_selfname(name, sizeof(name));
++		IOLog("SWEET AKS: %s sel %u arg0 %llu in %u/%u out %u/%u -> 0x%x count=%llu\n", name, selector,
++		    arg0, in_scalars, in_struct, out_scalars, out_struct, ret, count);
++	}
+ 	return ret;
+ }
+ #endif /* SWEET */
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -710,6 +710,7 @@
+ };
+ static struct redfin_ramlog *redfin_logs[2];
+ static uint32_t redfin_log_capacity[2];
++static uint32_t redfin_log_prefix[2];
+ static unsigned redfin_log_count;
+ static volatile uint32_t *redfin_watchdog_reset;
+ static uint64_t redfin_watchdog_deadline,redfin_watchdog_last,redfin_watchdog_frequency;
+@@ -867,10 +868,11 @@
+  for(unsigned i=0;i<redfin_log_count;i++) {
+   struct redfin_ramlog *log=redfin_logs[i];
+   uint32_t capacity=redfin_log_capacity[i],start=log->start,size=log->size;
+-  if(start>=capacity || size>capacity) continue;
++  uint32_t prefix=redfin_log_prefix[i];
++  if(start>=capacity || size>capacity || (size==capacity && start<prefix)) continue;
+   log->data[start]=(unsigned char)c;
+   redfin_log_barrier();
+-  if(++start==capacity) start=0;
++  if(++start==capacity) start=prefix;
+   log->start=start;
+   if(size<capacity) log->size=size+1;
+  }
+@@ -960,7 +962,10 @@
+   mapped[i]->signature=0;
+   mapped[i]->start=mapped[i]->size=0;
+   redfin_log_barrier();
+-  mapped[i]->signature=0x43474244;
++  /* Keep the Linux-compatible first bank. The private alternate console
++   * preserves startup evidence even when verbose daemons wrap its tail. */
++  redfin_log_prefix[i]=i==1 ? (capacity[i]/4<0x40000 ? capacity[i]/4 : 0x40000) : 0;
++  mapped[i]->signature=redfin_log_prefix[i] ? 0x32484652 : 0x43474244;
+   redfin_logs[i]=mapped[i];
+   redfin_log_capacity[i]=capacity[i];
+  }
+diff --git a/iokit/Kernel/arm/RedfinPower.inc b/iokit/Kernel/arm/RedfinPower.inc
+--- a/iokit/Kernel/arm/RedfinPower.inc
++++ b/iokit/Kernel/arm/RedfinPower.inc
+@@ -278,7 +278,7 @@
+ static int power_battery(struct redfin_power_sample *s)
+ {
+     *s=(struct redfin_power_sample){};s->version=RF_POWER_ABI;s->bytes=sizeof(*s);
+-    uint8_t header[2]={},qg_status=0,raw[2]={},mono=0,chg[2]={},temp_status=0,batif=0,path=0,usb=0,dc=0;
++    uint8_t header[2]={},qg_status=0,raw[2]={},mono=0,chg[2]={},temp_status=0,enabled=0,fv=0,batif=0,path=0,usb=0,dc=0;
+     int e=power_read(P_QG,0x4804,header,2);if (e) return e;
+     if (header[0]!=0x0d || (header[1]!=3 && header[1]!=4)) return ENOTSUP;
+     if ((e=power_byte(P_QG,0x4808,&qg_status)) || (e=power_byte(P_BATIF,0x1210,&batif))) return e;
+@@ -295,12 +295,20 @@
+     if (!redfin_adc5_battery_temp(adc,&s->temperature_mc)) return ERANGE;
+     s->valid|=RF_POWER_TEMP;
+     if ((e=power_read(P_CHGR,0x1006,chg,2)) || (e=power_byte(P_CHGR,0x100d,&temp_status)) ||
++        (e=power_byte(P_CHGR,0x100b,&enabled)) || (e=power_byte(P_CHGR,0x1070,&fv)) ||
+         (e=power_byte(P_DCDC,0x110b,&path)) || (e=power_byte(P_USB,0x1310,&usb)) ||
+         (e=power_byte(P_DC,0x1410,&dc))) return e;
+     s->wireless=(dc&0x10) && (path&8);s->external=(path&1) && ((usb&0x10) || s->wireless);
+-    s->charger_faults=(chg[1]&6)|(temp_status&0x3f);unsigned status=chg[0]&7;
+-    s->full=s->external && status==5;
+-    s->charging=s->present && s->external && status>=1 && status<=4 && !s->charger_faults;
++    int32_t float_uv=3600000+fv*10000;
++    s->charger_faults=redfin_smb5_faults(chg[1],temp_status,s->voltage_uv,float_uv);
++    redfin_smb5_state(s,chg[0],enabled);
++    static uint32_t previous_status=UINT32_MAX;
++    uint32_t packed=chg[0]|((uint32_t)chg[1]<<8)|((uint32_t)temp_status<<16)|((uint32_t)enabled<<24);
++    if (packed!=previous_status) {
++        previous_status=packed;
++        IOLog("REDFIN SMB5 STATUS: raw1=%#x raw2=%#x raw5=%#x raw7=%#x native-FV-uV=%d actual-V-uV=%d hard-faults=%#x full=%d charging=%d\n",
++            chg[0],chg[1],enabled,temp_status,float_uv,s->voltage_uv,s->charger_faults,s->full,s->charging);
++    }
+     s->valid|=RF_POWER_CHARGER;
+     if (!power_read(P_SDAM,0xb168,raw,2)) {
+         unsigned full=redfin_power_u16(raw);
+@@ -320,7 +328,9 @@
+ {
+     if (redfin_charger_must_pause(s)) {
+         int e=power_bit(0x1043,1,true);
+-        IOLog("REDFIN CHARGE GUARD: paused=1 valid=%u temp-mC=%d fault=%#x error=%d\n",redfin_power_valid(s),s->temperature_mc,s->charger_faults,e);
++        static unsigned reports;
++        if (e || reports++<2 || !(reports&(reports-1)))
++            IOLog("REDFIN CHARGE GUARD: paused=1 valid=%u temp-mC=%d fault=%#x error=%d\n",redfin_power_valid(s),s->temperature_mc,s->charger_faults,e);
+         return;
+     }
+     if (!s->external || s->full) return;
+@@ -328,7 +338,11 @@
+     if (power_byte(P_CHGR,0x1070,&fv) || power_byte(P_CHGR,0x1061,&fcc) ||
+         power_byte(P_CHGR,0x10a0,&timer) || power_byte(P_CHGR,0x1090,&jeita)) return;
+     bool permitted=redfin_charger_enable_allowed(s,3600000+fv*10000,fcc*50000,timer,jeita);
+-    if (!permitted) return;
++    if (!permitted) {
++        static unsigned refused;
++        if (refused++<2) IOLog("REDFIN CHARGE ADMISSION: permitted=0 FV-uV=%u FCC-uA=%u timer=%#x JEITA=%#x inherited-limits=1\n",3600000+fv*10000,fcc*50000,timer,jeita);
++        return;
++    }
+     int e=power_bit(0x1042,1,true);if (!e) e=power_bit(0x1043,1,false);
+     static unsigned reports;
+     if (e || reports++<2) IOLog("REDFIN CHARGE POLICY: enable-request=1 error=%d FV-uV=%u FCC-uA=%u inherited-limits=1 JEITA=1 safety-timer=1\n",e,3600000+fv*10000,fcc*50000);
+diff --git a/iokit/Kernel/arm/RedfinPowerPolicy.h b/iokit/Kernel/arm/RedfinPowerPolicy.h
+--- a/iokit/Kernel/arm/RedfinPowerPolicy.h
++++ b/iokit/Kernel/arm/RedfinPowerPolicy.h
+@@ -59,6 +59,26 @@
+         (s->present==0 || s->present==1) && (s->external==0 || s->external==1) &&
+         (!s->charging || (s->present && s->external && !s->full && !s->charger_faults));
+ }
++/* Google's SMB5 health path uses hard temperature bits3:2; AFP bits1:0
++ * and soft JEITA bits5:4 are not hard faults. A latched BAT_OV indication
++ * is an actual overvoltage only at least40mV above the valid native float
++ * setting (smblib_get_prop_batt_health). No status/protection bit is cleared. */
++static inline uint32_t redfin_smb5_faults(uint8_t status2,uint8_t status7,
++    int32_t voltage_uv,int32_t float_uv)
++{
++    uint32_t faults=(uint32_t)(status7&12u)<<8;
++    if ((status2&2u) && (float_uv<3600000 || float_uv>4450000 ||
++            voltage_uv>=float_uv+40000)) faults|=2u;
++    return faults;
++}
++static inline void redfin_smb5_state(struct redfin_power_sample *s,
++    uint8_t status1,uint8_t status5)
++{
++    unsigned state=status1&7u;
++    s->full=s->external && (state==0 || state==5);
++    s->charging=s->present && s->external && state>=1 && state<=4 &&
++        (status5&7u) && !s->charger_faults;
++}
+ /* A measured seed plus elapsed, measured current; never estimate SOC from
+  * terminal voltage. Preserve fractional charge between samples. Long/missing
+  * samples are refused rather than integrated as though the last current held. */

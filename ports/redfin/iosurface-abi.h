@@ -24,5 +24,7 @@ extern size_t IOSurfaceGetBytesPerRowOfPlane(IOSurfaceRef,size_t);
 extern void *IOSurfaceGetBaseAddressOfPlane(IOSurfaceRef,size_t);
 extern kern_return_t IOSurfaceLock(IOSurfaceRef,uint32_t,uint32_t *);
 extern kern_return_t IOSurfaceUnlock(IOSurfaceRef,uint32_t,uint32_t *);
+#ifndef IOSURFACE_TYPES_H
 enum {kIOSurfaceLockReadOnly=1};
+#endif
 #endif
