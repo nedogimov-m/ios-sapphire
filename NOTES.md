@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V27 actual function specialization PASS; AIR resource locals are next — 2026-10-25
+
+Source1c9e5c2, graphics local20261025-190743/noCI, unchanged kernel
+local20261025-134128/noCI7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V27 image0ded6a914c7690097c4ecd71e541b7d112a74f14b0ee30d9a2df0193e9b35bff, nonce3210370b8664982d.
+V30 applied once:14ranges/270336bytes/zero new/zero freed; complete live
+preimages/readback/signatures/native readonly fsck PASS. V30 is now applied/
+stale; never reuse. Authenticated capture returns clean consistent HFSX/
+write_count1040953 and verified Fastboot. No kernel panic/runtime GPU fault;
+no Phone/Photos automatic launches.
+
+All prior native compute/raster/vertex/transfer/parent/A8 probes PASS. The new
+required-value refusal, distinct hashes, immutable float4/uchar3, absent versus
+provided-zero, argument-buffer compute, async/descriptor paths and separate
+vertex/fragment pixels/guards ALL PASS on actual A620. The concrete factory
+fix eliminates the abstract-object exception.
+
+Actual CoreAnimation now receives58values for fixed_frag_lph_cph and4for
+fixed_vert_lph_spc. Its initial pipeline fails in AIR at a pointer store into
+private memory (block0/instruction2/op16); CoreAnimation aborts backboardd for
+failed pipeline construction, repeatedly. No real compositor draws/screens
+complete; GUI remains unavailable. The actual shader stores sampler references
+in two private cells, casts/selects them and DOES read/sample them later, so
+simply deleting those stores is invalid. Reproduce this exact refusal on a
+Mac-host build of the same AIR sources (software backend used for compilation
+only), allowing complete frontend work before the next phone run.
+
+Implement typed private resource references/selection/callee transfer and
+preserve actual module-global initializers; ordinary scratch promotion via
+Mesa's nir_lower_scratch_to_var can fold compile-time global state. Keep
+unsupported raw device-address stores explicit. This is planned work, not
+observed corrected rendering; broader goal stays open.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3210370b8664982d redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V26 abstract-function failure diagnosed; concrete native clone built/V30 staged — 2026-10-25
 
 V26 used sourcedc606c5, imagecb8fff0e00849033a0c6eaf21ae0f7c9304830031fd596c808dcb7e28e991417,
