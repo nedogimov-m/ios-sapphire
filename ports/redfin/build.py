@@ -113,6 +113,8 @@ def main():
     p.add_argument('--wifi-glink-start', action='store_true', help='native MPSS startup followed by GLINK/IPCRTR and QRTR service discovery')
     p.add_argument('--wifi-host-services', action='store_true', help='native GLINK with captured WLAN assets, pd-mapper and RAM-only TFTP')
     p.add_argument('--wifi-assets-inventory', type=Path, help='private captured base-vendor host-inventory.json for --wifi-host-services')
+    p.add_argument('--sensor-capture', type=Path, help='private readonly native ADSP capture directory; requires composed GUI Wi-Fi')
+    p.add_argument('--sensor-registry', type=Path, help='private readonly persist registry directory paired with --sensor-capture')
     p.add_argument('--wifi-host-module-inventory', type=Path, help='private observed modem RF-config module inventory for RAM-only TFTP')
     p.add_argument('--wifi-fw-plan', type=Path, help='original native firmware plan binding the extra module to the main MPSS bundle/source')
     p.add_argument('--wifi-rmtfs-inventory', type=Path, help='verified private read-only EFS inventory; enables volatile RMTFS with --wifi-host-services')
@@ -158,6 +160,8 @@ def main():
         a.smp_gui = True
         a.wifi_snoc_start = a.wifi_snoc_mission = a.wifi_snoc_observe = True
         a.wifi_wlan_bdf_download = a.wifi_wlan_power = a.wifi_wlfw_setup = a.wifi_host_services = True
+    if bool(a.sensor_capture) != bool(a.sensor_registry) or (a.sensor_capture and not (a.kernel and a.gpu_gui and a.wifi_host_services)):
+        p.error('native sensors require paired captures and the composed GUI/WLAN worker')
     if a.display_fit and not a.smp_gui:
         p.error('--display-fit requires the strict --smp-gui profile')
     if a.gpu_command_start:
@@ -773,6 +777,15 @@ def main():
                 at, size = struct.unpack_from('<QQ', payload, 32)
                 (out / 'redfin.adt').write_bytes(payload[at:at + size])
                 (out / 'wifi-fw-source.json').write_text(json.dumps(firmware_report, indent=2) + '\n')
+                if a.sensor_capture:
+                    import sensor_assets
+                    sensor_data, sensor_report = sensor_assets.pack(a.sensor_capture, a.sensor_registry, a.dtb.read_bytes())
+                    (out / 'sensor-assets.bundle').write_bytes(sensor_data)
+                    payload = sensor_assets.insert(payload, sensor_data, sensor_report)
+                    (out / 'payload.bin').write_bytes(payload)
+                    at, size = struct.unpack_from('<QQ', payload, 32)
+                    (out / 'redfin.adt').write_bytes(payload[at:at + size])
+                    (out / 'sensor-assets.json').write_text(json.dumps(sensor_report, indent=2) + '\n')
             except (ValueError, OSError, subprocess.SubprocessError) as error:
                 p.error(str(error))
     (out / 'config.h').write_text(f'#define DIAG_SPLASH {int(a.splash)}\n'
@@ -920,6 +933,9 @@ def main():
         manifest['wifi_snoc_start'] = True
     if a.wifi_gui:
         manifest['wifi_gui'] = True
+    if a.sensor_capture:
+        manifest['sensors'] = sensor_report
+        manifest['sha256']['sensor-assets.bundle'] = sensor_report['sha256']
     if a.wifi_power_probe:
         manifest['wifi_power_probe'] = True
     if diagnostic_prearm:

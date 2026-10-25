@@ -18,3 +18,5 @@ fragment float4 redfin_fragment()
 { return float4(0.25,0.5,0.75,1); }
 fragment float4 redfin_batch_fragment(constant float4 &color [[buffer(0)]])
 { return color; }
+fragment float4 redfin_dependency_fragment(texture2d<float,access::read> source [[texture(0)]])
+{ return source.read(uint2(0,0)); }

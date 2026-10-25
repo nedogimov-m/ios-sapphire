@@ -285,6 +285,33 @@ class GUILoaderTests(unittest.TestCase):
             values=list(VALUES);values[i]^=1;raw=make(values)
             self.assertEqual(lib.tree3(raw,len(raw)),0,i)
 
+    def test_native_sensor_source_is_typed_bounded_and_gui3_only(self):
+        from sensor_assets import CONTRACT
+        def make(props=None,duplicate=False,children=()):
+            tree=self.gui_tree()
+            tree.children += [self.mk.node(name,[]) for name in (
+                'redfin-wifi','redfin-wifi-native','redfin-wifi-power','redfin-wifi-start','redfin-wifi-glink',
+                'redfin-wifi-wlfw','redfin-wifi-wlan','redfin-wifi-snoc','redfin-rmtfs','redfin-wifi-dma',
+                'redfin-wifi-assets','redfin-wifi-fw','redfin-gpu','redfin-gpu-power','redfin-gmu','redfin-gpu-smmu','redfin-gpu-command')]
+            if props is not None:tree.children += [self.mk.node('redfin-sensors',props,list(children))]*(2 if duplicate else 1)
+            return self.adt.serialize(tree)
+        properties=[('source-path',b'/redfin/firmware/native-sensors.bundle\0'),('bundle-bytes',self.mk.u64(21630640)),
+            ('bundle-sha256',bytes(range(32))),('live-fdt-verified',self.mk.u32(1)),('source-contract',self.mk.u32(*CONTRACT)),
+            ('hardware-reg',self.mk.u64(0x89200000,0x2800000,0x80900000,0x200000,0x1f40000,0x20000,0x408000,0x1000))]
+        lib=self.libs['gui']
+        raw=make(properties);self.assertEqual(lib.tree3(raw,len(raw)),1)
+        self.assertEqual(lib.tree2(raw,len(raw)),0)
+        for index in range(len(properties)):
+            raw=make(properties[:index]+properties[index+1:]);self.assertEqual(lib.tree3(raw,len(raw)),0)
+            raw=make(properties+[properties[index]]);self.assertEqual(lib.tree3(raw,len(raw)),0)
+        for key,value in [('source-path',b'/redfin/firmware/other\0'),('bundle-bytes',self.mk.u64(33*1024**2)),
+                          ('bundle-sha256',bytes(32)),('live-fdt-verified',self.mk.u32(0)),
+                          ('source-contract',self.mk.u32(*([1]*len(CONTRACT)))),
+                          ('hardware-reg',self.mk.u64(0x86700000,0x4000000,0x80900000,0x200000,0x1f40000,0x20000,0x408000,0x1000))]:
+            p=[(k,value if k==key else v) for k,v in properties];raw=make(p);self.assertEqual(lib.tree3(raw,len(raw)),0,key)
+        raw=make(properties,True);self.assertEqual(lib.tree3(raw,len(raw)),0)
+        raw=make(properties,children=[self.mk.node('unknown',[])]);self.assertEqual(lib.tree3(raw,len(raw)),0)
+
     def test_optional_native_power_contract_is_exact_and_gui3_only(self):
         from ports.redfin.platform_power import VALUES
         import struct

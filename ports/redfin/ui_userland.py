@@ -54,7 +54,7 @@ def build(out,cache_path=None):
     command=['xcrun','--sdk','iphoneos','clang','-arch','arm64','-isysroot',sdk,
         '-miphoneos-version-min=16.0','-O2','-fblocks','-fobjc-arc','-Wall','-Wextra','-Werror',
         '-Wno-deprecated-declarations','-dynamiclib','-install_name',LIBRARY,
-        '-DREDFIN_UIKIT_UUID_BYTES='+define,'-I',str(HERE),str(HERE/'statusbar-cutout.m'),str(HERE/'native-diagnostics.m'),
+        '-DREDFIN_UIKIT_UUID_BYTES='+define,'-I',str(HERE),str(HERE/'statusbar-cutout.m'),str(HERE/'native-diagnostics.m'),str(HERE/'native-tcc-probe.m'),
         str(HERE/'display-probe.m'),'-framework','UIKit','-framework','Foundation',
         '-framework','CoreGraphics','-framework','QuartzCore','-framework','IOKit','-o',str(library)]
     with (out/'build.log').open('wb') as log:

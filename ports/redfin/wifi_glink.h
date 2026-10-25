@@ -34,6 +34,7 @@ struct rf_glink_ops {
 };
 struct rf_glink_intent { uint32_t id, bytes, busy, present; };
 struct rf_glink {
+    uint32_t remote_host,bound_host; /* zero keeps established MPSS host1; ADSP is2 */
     uint32_t attempted, poisoned, partition, bytes, descriptor, tx, rx, rx_bytes;
     uint32_t head, tail, features, version, asked, acknowledged, channel, open, offered;
     uint32_t fill, remaining, heard, sent, packets, stores;
@@ -58,6 +59,8 @@ static inline int rf_gl_gate(struct rf_glink *s, const struct rf_glink_ops *o)
 {
     if (!s || !o || !o->smem || !o->check || !o->lock || !o->unlock || !o->write32 ||
         !o->barrier || !o->kick || !o->packet) return RF_GL_ARGUMENT;
+    uint32_t remote=s->remote_host?s->remote_host:1;
+    if(remote>2 || (s->attempted && s->bound_host!=remote))return RF_GL_ARGUMENT;
     if (s->poisoned) return RF_GL_CHANGED;
     if (o->check(o->context)) { s->poisoned = 1; return RF_GL_PLATFORM; }
     return 0;
@@ -75,7 +78,7 @@ static inline int rf_gl_find(struct rf_glink *s, const struct rf_glink_ops *o,
     uint32_t location[3], uint32_t lengths[3], struct redfin_smem_report *report)
 {
     if (rf_gl_gate(s, o)) return RF_GL_PLATFORM;
-    if (redfin_smem_inspect(o->smem, REDFIN_SMEM_BYTES, report) != REDFIN_SMEM_OK ||
+    if (redfin_smem_inspect_host(o->smem, REDFIN_SMEM_BYTES, s->remote_host?s->remote_host:1, report) != REDFIN_SMEM_OK ||
         !report->modem_partition) return RF_GL_LAYOUT;
     if (s->partition && (s->partition != report->partition_offset || s->bytes != report->partition_bytes))
         return rf_gl_changed(s, 1, report->partition_offset, s->bytes, report->partition_bytes);
@@ -122,6 +125,7 @@ static inline int rf_gl_allocate(struct rf_glink *s, const struct rf_glink_ops *
 static inline int rf_gl_init(struct rf_glink *s, const struct rf_glink_ops *o)
 {
     if (rf_gl_gate(s, o) || s->attempted) return RF_GL_ARGUMENT;
+    s->bound_host=s->remote_host?s->remote_host:1;
     s->attempted = 1;
     if (o->lock(o->context)) return RF_GL_PLATFORM;
     uint32_t at[3], sizes[3]; struct redfin_smem_report r = RF_GL_ZERO;

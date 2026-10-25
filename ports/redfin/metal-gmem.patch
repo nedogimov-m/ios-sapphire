@@ -1,0 +1,86 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -76,6 +76,7 @@
+ #define RWA_MAX_TEXTURES 16
+ 
+ #include "redfin_metal_command_scope.h"
++extern void redfin_freedreno_raster_stats(struct pipe_context *,uint64_t[2]);
+ 
+ struct rwa_device {
+    struct pipe_screen *screen;
+@@ -582,6 +583,19 @@
+    device->screen->destroy(device->screen);
+    free(device);
+    glsl_type_singleton_decref();
++}
++
++/* Read actual freedreno route counters after the caller's real final fence.
++ * This is a native FD620-only diagnostic, never a rendering-rate estimate. */
++int
++rwa_redfin_raster_stats(struct rwa_device *device, uint64_t *counts, size_t words)
++{
++   if (!device || !counts || words!=2 || device->software ||
++       strcmp(rwa_device_name(device),"FD620")) return -1;
++   redfin_freedreno_raster_stats(device->pipe,counts);
++   /* The paired FD620 implementation reads the actual native counters. */
++
++   return 0;
+ }
+ 
+ const char *
+@@ -6483,14 +6497,11 @@
+    struct pipe_context *pipe = device->pipe;
+    if (redfin_metal_scope_prepare(&device->command_scope,render->raster_only,
+                                  command_scope_finish,device,why,why_size)) return -1;
+-   /* Preserve GPU producer/consumer ordering without a CPU round trip. FD6
+-    * implements this as actual CCU/cache flush/invalidate packets. */
+-   if (device->command_scope.active && device->command_scope.pending) {
+-      if (pipe->memory_barrier)
+-         pipe->memory_barrier(pipe,PIPE_BARRIER_FRAMEBUFFER|PIPE_BARRIER_TEXTURE|PIPE_BARRIER_IMAGE);
+-      else if (redfin_metal_scope_drain(&device->command_scope,command_scope_finish,device,why,why_size))
+-         return -1;
+-   }
++   /* Ordinary render-target writes/sampler reads use Gallium's resource
++    * dependency graph, including FD6's tile restore/resolve/cache packets.
++    * Unconditionally issuing a shader-memory barrier after every raster-only
++    * draw forces batch flushes and defeats GMEM. Memory-writing stages and
++    * CPU validation still drain through command_scope_prepare above. */
+    const char *fname = render->finfo.entry_point ? render->finfo.entry_point
+                                                  : "the fragment shader";
+ 
+diff --git a/src/compiler/air/air_metal.h b/src/compiler/air/air_metal.h
+--- a/src/compiler/air/air_metal.h
++++ b/src/compiler/air/air_metal.h
+@@ -67,6 +67,8 @@
+  * compute/memory-writing shaders retain their immediate completion. */
+ int rwa_commands_begin(struct rwa_device *device,char *why,size_t why_size);
+ int rwa_commands_end(struct rwa_device *device,char *why,size_t why_size);
++/* Counts actual GMEM/sysmem batches; caller serializes the device. */
++int rwa_redfin_raster_stats(struct rwa_device *device,uint64_t *counts,size_t words);
+ 
+ /* What the driver should call the GPU, as Mesa knows it ("Adreno 7c+ Gen 3"). Never NULL. */
+ const char *rwa_device_name(struct rwa_device *device);
+diff --git a/src/gallium/drivers/freedreno/freedreno_context.c b/src/gallium/drivers/freedreno/freedreno_context.c
+--- a/src/gallium/drivers/freedreno/freedreno_context.c
++++ b/src/gallium/drivers/freedreno/freedreno_context.c
+@@ -23,6 +23,19 @@
+ #include "freedreno_tracepoints.h"
+ #include "util/u_trace_gallium.h"
+ 
++/* Kept within the native driver so AIR does not depend on private driver
++ * headers/include directories. The caller serializes the paired context. */
++void redfin_freedreno_raster_stats(struct pipe_context *pipe,uint64_t counts[2]);
++void
++redfin_freedreno_raster_stats(struct pipe_context *pipe,uint64_t counts[2])
++{
++   struct fd_context *ctx=fd_context(pipe);
++   fd_context_access_begin(ctx);
++   counts[0]=ctx->stats.batch_gmem;
++   counts[1]=ctx->stats.batch_sysmem;
++   fd_context_access_end(ctx);
++}
++
+ static void
+ fd_context_flush(struct pipe_context *pctx, struct pipe_fence_handle **fencep,
+                  unsigned flags) in_dt

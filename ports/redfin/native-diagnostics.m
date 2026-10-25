@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include "gui-profile.h"
 #include "graphics-exec-scope.h"
+#include "native-tcc-probe.h"
 
 static char diagnostic_nonce[17];
 static const char *diagnostic_process;
@@ -41,6 +42,8 @@ static void diagnostic_log(const char *format,...)
     int fd=open("/private/var/mobile/Library/Logs/redfin-ui.log",O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW,0600);
     if (fd>=0) {(void)write(fd,line,length);close(fd);}
 }
+static void authorization_reply(const char *line,void *context)
+{(void)context;diagnostic_log("%s",line);}
 
 static id observe_exception(id exception)
 {
@@ -117,6 +120,7 @@ static void observe_authorization(bool query_tcc)
     void *tcc=dlopen("/System/Library/PrivateFrameworks/TCC.framework/TCC",RTLD_NOW|RTLD_LOCAL);
     long (*preflight)(CFStringRef)=tcc ? (long (*)(CFStringRef))dlsym(tcc,"tcc_authorization_preflight") : NULL;
     diagnostic_log("self-native-TCC-preflight=%ld",preflight ? preflight(CFSTR("kTCCServicePhotos")) : -1);
+    redfin_native_tcc_probe(authorization_reply,NULL);
 }
 
 #include "native-tcc-observer.inc"

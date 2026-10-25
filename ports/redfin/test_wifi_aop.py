@@ -22,7 +22,7 @@ class Snapshot(C.Structure):
 
 class Session(C.Structure):
     _fields_ = [('baseline', Snapshot)] + [(name, C.c_uint32) for name in
-                ('attempted', 'open', 'poisoned', 'load_state', 'stores', 'notifications')]
+                ('attempted', 'open', 'poisoned', 'load_state', 'stores', 'notifications','adsp_load_state')]
     _fields_ += [('error', C.c_int)]
 
 
@@ -126,6 +126,17 @@ class WifiAopTests(unittest.TestCase):
         cls.library.rf_wifi_aop_observe.argtypes = [C.POINTER(Ops), C.POINTER(Snapshot)]
         cls.library.rf_wifi_aop_open.argtypes = [C.POINTER(Session), C.POINTER(Ops)]
         cls.library.rf_wifi_aop_load_state.argtypes = [C.POINTER(Session), C.POINTER(Ops), C.c_int]
+        cls.library.rf_wifi_aop_adsp_state.argtypes = [C.POINTER(Session), C.POINTER(Ops), C.c_int]
+
+    def test_modem_and_adsp_share_the_mailbox_but_keep_separate_acknowledged_lifecycles(self):
+        bus=Bus(opened=True);session=Session()
+        self.assertEqual(self.library.rf_wifi_aop_open(C.byref(session),C.byref(bus.ops)),0)
+        self.assertEqual(self.library.rf_wifi_aop_load_state(C.byref(session),C.byref(bus.ops),1),0)
+        self.assertEqual(self.library.rf_wifi_aop_adsp_state(C.byref(session),C.byref(bus.ops),1),0)
+        self.assertEqual((session.load_state,session.adsp_load_state),(1,1))
+        self.assertNotEqual(self.library.rf_wifi_aop_adsp_state(C.byref(session),C.byref(bus.ops),1),0)
+        self.assertEqual(self.library.rf_wifi_aop_adsp_state(C.byref(session),C.byref(bus.ops),0),0)
+        self.assertEqual((session.load_state,session.adsp_load_state),(1,2))
 
     def observe(self, bus):
         snapshot = Snapshot()
@@ -343,12 +354,14 @@ class WifiAopTests(unittest.TestCase):
             self.assertLess(sum(frames), 2048)
 
     def test_kernel_overlay_contains_the_same_native_transport(self):
+        from test_overlay_sources import sensor_overlay
         patch = (HERE / 'wifi-aop.patch').read_text()
         for source, destination in [('wifi_aop.h', 'redfin_wifi_aop.h'),
                                     ('wifi_aop.c', 'redfin_wifi_aop.c')]:
             section = patch.split('+++ b/bsd/dev/' + destination + '\n', 1)[1]
             section = section.split('diff --git ', 1)[0]
             actual = ''.join(line[1:] for line in section.splitlines(keepends=True) if line.startswith('+'))
+            actual=sensor_overlay(actual,'bsd/dev/'+destination)
             expected = (HERE / source).read_text().replace('#include "wifi_aop.h"',
                                                           '#include "redfin_wifi_aop.h"')
             self.assertEqual(actual, expected)

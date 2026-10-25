@@ -9,6 +9,15 @@ human-dependent actions, and continue independent work.
 
 ## Latest checkpoint
 
+V12 implementation/build milestone: native GMEM routing/dependency probe,
+actual TCC reply observation and complete PAS1/host2/SSC/registry/HID path
+are built. Kernel local20261025-113137/bffe7c0d...; V12/d15ba0e2...;
+nonce ecd67b63b06f7279 passes the complete real-image preflight. V16 is freshly
+staged against845261 with full readback/signatures/readonly fsck,5315new/zero
+freed blocks; not yet applied or booted. Next one integrated capture. All
+physical sensor/CoreMotion, new FPS/Photos results and direct VD6281 remain
+unproved/unfinished. Previous observed baseline follows.
+
 Source1c510c9; local kernel20261025-102326/noCI00fa3c57...;
 V11/7dca6c09263e4ae3 passes authenticated image/launchd/userspace proof,
 clean root845261 and verified Fastboot. V15 applied/stale, never reuse.

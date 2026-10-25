@@ -82,8 +82,8 @@ redfin_smem_result(struct redfin_smem_report *report, struct redfin_smem_report 
 }
 
 static inline enum redfin_smem_status
-redfin_smem_inspect(const volatile uint8_t *data, size_t length,
-                    struct redfin_smem_report *report)
+redfin_smem_inspect_host(const volatile uint8_t *data, size_t length,
+                    uint32_t remote_host, struct redfin_smem_report *report)
 {
     const uint32_t toc = REDFIN_SMEM_BYTES - 0x1000u;
     uint32_t offsets[REDFIN_SMEM_MAX_PARTITIONS], sizes[REDFIN_SMEM_MAX_PARTITIONS];
@@ -97,7 +97,7 @@ redfin_smem_inspect(const volatile uint8_t *data, size_t length,
     if (!report) return REDFIN_SMEM_LENGTH;
     out.entry_index = out.other_index = REDFIN_SMEM_INDEX_NONE;
     *report = out;
-    if (!data || length != REDFIN_SMEM_BYTES) return REDFIN_SMEM_LENGTH;
+    if (!data || length != REDFIN_SMEM_BYTES || (remote_host!=1 && remote_host!=2)) return REDFIN_SMEM_LENGTH;
     out.version = redfin_smem_u32(data + 0x40u + 7u * 4u);
     if (redfin_smem_u32(data + 0xc0u) != 1 || redfin_smem_u32(data + 0xccu))
         return redfin_smem_result(report, &out, REDFIN_SMEM_UNINITIALIZED, REDFIN_SMEM_DETAIL_NONE);
@@ -137,7 +137,7 @@ redfin_smem_inspect(const volatile uint8_t *data, size_t length,
                 return redfin_smem_result(report, &out, REDFIN_SMEM_PARTITION, REDFIN_SMEM_ENTRY_OVERLAP);
             }
         }
-        if (hosts == 0x00010000u || hosts == 0x00000001u) {
+        if (hosts == remote_host<<16 || hosts == remote_host) {
             if (out.modem_partition) {
                 out.other_index = modem_index;
                 out.other_offset = out.partition_offset; out.other_bytes = out.partition_bytes;
@@ -208,4 +208,9 @@ redfin_smem_inspect(const volatile uint8_t *data, size_t length,
         return redfin_smem_result(report, &out, REDFIN_SMEM_CHANGED, REDFIN_SMEM_DETAIL_NONE);
     return redfin_smem_result(report, &out, REDFIN_SMEM_OK, REDFIN_SMEM_DETAIL_NONE);
 }
+/* Keep the established APPS/MPSS interface and report layout unchanged. The
+ * legacy modem_partition field means the selected private heap for host2. */
+static inline enum redfin_smem_status
+redfin_smem_inspect(const volatile uint8_t *data,size_t bytes,struct redfin_smem_report *report)
+{return redfin_smem_inspect_host(data,bytes,1,report);}
 #endif

@@ -1453,3 +1453,33 @@ request the ordinary no-passcode transition and preserve authorization or
 lock failures in the result. No passcode bypass, schema synthesis or
 account operation is added. App/window-server survival still needs a real run.
 
+
+
+## Native GMEM and Redfin SSC integration review — 2026-10-25
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+`bsd/dev/redwood_adsp.c` and shared Wi-Fi/AOP/SMEM ownership. Retain its native
+PAS/ready/GLINK/QRTR sequence and avoid LPASS MMIO. Redfin instead uses its
+actual40MiB reservation0x89200000, PAS1, remote2,443/429 and IPCC3/0,3/2.
+One existing CPU0 WLAN owner services both remotes; typed LCX/LMX votes preserve
+CMD-DB/inherited floors and use the established RSC/AOP manager. Foreign TCS
+and modem heap state remain intact. Firmware uses readonly private root bytes,
+complete hash checks/readback and actual signed PAS authentication; a failed
+phase cannot publish sensors or retry uncertain hardware.
+
+Preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 remains the
+AIR/Metal/EAGL source. Mesa25.0.7 native freedreno GMEM/resource dependencies
+and actual batch counters replace Redfin's forced sysmem/per-draw barrier.
+Counters are read only under the paired serialized context after its real
+fence, using freedreno's own context-access discipline. The two-pass guarded
+pixel probe validates actual producer/consumer visibility on the device.
+
+SSC wire contracts reviewed from Qualcomm definitions at
+Rivko/android-firmware-qti-sdm67020bb8ae36c93fc16bbadda0e0a83f930c0c8a271
+and Android CHRE77beed6007208e42009a789eab55df13f9069e0b see/sns_qmi_client.
+QMI400/v1, native protobuf SUID discovery, real attribute/rate/availability,
+registry fragment readback, integer-only units and counter epochs are adapted
+without inventing identities or samples. Firmware/calibration and extracted
+JSNs remain private. Google msm500b3a2059c1eec0fec08ec56add06320ea901a8
+`drivers/input/misc/vd6281/vd6281_module.c`/`i2c-qcom-geni.c` are reviewed
+for the still-unimplemented separate VD6281 path; SSC does not claim it.

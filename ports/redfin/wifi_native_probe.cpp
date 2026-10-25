@@ -178,6 +178,11 @@ struct wf_power_context {
     uint32_t wlan_held;
     void *wlan_context;
     int (*wlan_policy)(void *);
+    bool adsp_attempted, adsp_busy;
+    uint32_t adsp_held, adsp_selector[2];
+    rf_cmddb_resource adsp_resource[2];
+    void *adsp_context;
+    int (*adsp_policy)(void *);
 };
 static wf_power_context wf_power;
 
@@ -349,6 +354,13 @@ static bool wf_power_tables(wf_power_context *context, bool capture)
                 a->aux_bytes != b->aux_bytes || a->priority[0] != b->priority[0] || a->priority[1] != b->priority[1]) return false;
         }
     }
+    if(context->adsp_attempted)for(unsigned i=0;i<2;++i) {
+        static const uint8_t names[2][8]={"lcx.lvl","lmx.lvl"};
+        rf_cmddb_resource fresh={};
+        if(rf_cmddb_lookup((const volatile uint8_t *)context->base[WFP_DB],RF_CMDDB_BYTES,
+            names[i],RF_CMDDB_ARC,&fresh)!=RF_CMDDB_OK||
+            memcmp(&fresh,&context->adsp_resource[i],sizeof(fresh)))return false;
+    }
     return !wf_power_check(context);
 }
 
@@ -406,19 +418,20 @@ static bool wf_power_snapshot(wf_power_context *context, bool compare, bool skip
 }
 
 static unsigned wf_power_targets(const wf_power_context *context)
-{ return context->wlan_busy ? 3u + RF_WIFI_BW_COUNT + context->wlan_plan.votes : context->firmware ? 3u + RF_WIFI_BW_COUNT : 3u; }
+{ return context->adsp_busy ? 66u : context->wlan_busy ? 3u + RF_WIFI_BW_COUNT + context->wlan_plan.votes : context->firmware ? 3u + RF_WIFI_BW_COUNT : 3u; }
 static uint32_t wf_power_address(wf_power_context *context, unsigned target)
 {
-    return target < 3 ? wf_arc_address[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bcm[target - 3u].address :
+    return target >=64 ? context->adsp_resource[target-64].address : target < 3 ? wf_arc_address[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bcm[target - 3u].address :
         context->wlan_plan.vote[target - 3u - RF_WIFI_BW_COUNT].address;
 }
 static uint32_t wf_power_data(wf_power_context *context, unsigned target)
 {
-    return target < 3 ? wf_arc_selector[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bandwidth[target - 3u] :
+    return target >=64 ? context->adsp_selector[target-64] : target < 3 ? wf_arc_selector[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bandwidth[target - 3u] :
         context->wlan_plan.vote[target - 3u - RF_WIFI_BW_COUNT].value;
 }
 static bool wf_power_child_live(wf_power_context *context)
-{ return !context->wlan_busy || (context->wlan_policy && context->wlan_context && !context->wlan_policy(context->wlan_context)); }
+{ return (!context->wlan_busy || (context->wlan_policy && context->wlan_context && !context->wlan_policy(context->wlan_context))) &&
+    (!context->adsp_busy || (context->adsp_policy && context->adsp_context && !context->adsp_policy(context->adsp_context))); }
 
 static bool wf_power_rsc_guard(wf_power_context *context)
 {
@@ -445,7 +458,8 @@ static int wf_power_store(wf_power_context *context, unsigned unit, uint32_t off
         wf_power_check(context) || !wf_power_rsc_guard(context) || !wf_power_tables(context, false) ||
         !wf_power_child_live(context)) return EPERM;
     if (unit == WFP_RSC) {
-        if (context->phase != WFP_ARC || context->target >= wf_power_targets(context) || context->step >= 13) return EPERM;
+        if (context->phase != WFP_ARC || context->target >= wf_power_targets(context) ||
+            (context->adsp_busy && context->target < 64) || context->step >= 13) return EPERM;
         static const uint32_t offsets[13] = {
             0xd30, 0xd34, 0xd38, 0xd10, 0xd1c, 0xd14, 0xd14, 0xd14, 0xd14, 0xd14, 0xd1c, 0xd10, 0xd08};
         const uint32_t values[13] = {0x10108, wf_power_address(context, context->target), wf_power_data(context, context->target),
@@ -507,7 +521,7 @@ static bool wf_power_sync(wf_power_context *context, uint32_t offset, uint32_t v
 
 static int wf_power_vote(wf_power_context *context, unsigned target)
 {
-    if (target >= wf_power_targets(context) || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
+    if (target >= wf_power_targets(context) || (context->adsp_busy && target<64) || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
         !wf_power_child_live(context) ||
         wf_power_word(context, WFP_RSC, 0xd04u) || !wf_power_word(context, WFP_RSC, 0xd18u)) return EBUSY;
     context->target = target; context->step = 0;
@@ -530,12 +544,15 @@ static int wf_power_vote(wf_power_context *context, unsigned target)
     if (!complete) return ETIMEDOUT;
     if (target < 3) context->held |= 1u << target;
     else if (target < 3u + RF_WIFI_BW_COUNT) context->bandwidth_held |= 1u << (target - 3u);
+    else if(target>=64)context->adsp_held|=1u<<(target-64);
     else context->wlan_held |= 1u << (target - 3u - RF_WIFI_BW_COUNT);
     if (target < 3)
         IOLog("REDFIN WIFI POWER: ARC address=%#x selector=%u held=1 polls=%u IRQ=%#x CMD=%#x\n",
             wf_arc_address[target], wf_arc_selector[target], context->polls, context->irq, context->command_status);
     else if (target < 3u + RF_WIFI_BW_COUNT) IOLog("REDFIN WIFI POWER: BCM address=%#x value=%#x held=1 polls=%u IRQ=%#x CMD=%#x\n",
         wf_power_address(context, target), wf_power_data(context, target), context->polls, context->irq, context->command_status);
+    else if(target>=64)IOLog("REDFIN SENSORS: ARC address=%#x selector=%u accepted=1 IRQ=%#x CMD=%#x\n",
+        wf_power_address(context,target),wf_power_data(context,target),context->irq,context->command_status);
     else IOLog("REDFIN WIFI WLAN: VRM vote=%u address=%#x value=%u accepted=1 polls=%u IRQ=%#x CMD=%#x\n",
         target - 3u - RF_WIFI_BW_COUNT, wf_power_address(context, target), wf_power_data(context, target),
         context->polls, context->irq, context->command_status);
@@ -663,6 +680,8 @@ extern "C" int redfin_wifi_power_held(void)
     if (base_held && context->wlan_busy && context->wlan_attempted && context->wlan_resources_valid &&
         context->wlan_policy && context->wlan_context && context->phase == WFP_ARC &&
         context->wlan_plan.votes && context->wlan_plan.votes <= RF_WLAN_MAX_VOTES && wf_power_rsc_guard(context)) return 0;
+    if(base_held&&context->adsp_busy&&context->adsp_attempted&&context->adsp_context&&
+        context->adsp_policy&&context->phase==WFP_ARC&&wf_power_rsc_guard(context))return 0;
     return base_held && context->phase == WFP_AOP_ON &&
         wf_power_word(context, WFP_RSC, 0xd04u) == 0 &&
         wf_power_word(context, WFP_RSC, 0xd14u) == 0 &&
@@ -674,6 +693,45 @@ extern "C" int redfin_wifi_power_audit(void)
 {
     return !redfin_wifi_power_held() && wf_power_tables(&wf_power, false) &&
         wf_power_rsc_guard(&wf_power) ? 0 : EPERM;
+}
+
+/* Called only by the established CPU0 WLAN owner, between radio polls. All
+ * AOP/RSC operations remain on that same thread; there is no second writer.
+ * LCX/LMX selectors are decoded from actual CMD-DB and preserve foreign floors.
+ * Votes remain held until the complete platform resets, even on failure. */
+extern "C" int redfin_sensor_power_start(void *child,int (*policy)(void *))
+{
+    wf_power_context *c=&wf_power;
+    if(!child||!policy||c->adsp_attempted||!c->wlan_powered||c->wlan_busy||
+        redfin_wifi_power_audit()||policy(child))return EPERM;
+    static const uint8_t names[2][8]={"lcx.lvl","lmx.lvl"};
+    for(unsigned i=0;i<2;++i) {
+        rf_cmddb_resource *r=&c->adsp_resource[i];
+        if(rf_cmddb_lookup((const volatile uint8_t *)c->base[WFP_DB],RF_CMDDB_BYTES,names[i],RF_CMDDB_ARC,r)!=RF_CMDDB_OK||
+            r->type!=RF_CMDDB_ARC||r->aux_version!=0x1000||r->address%4)return ENXIO;
+        int selector=wf_selector(r,384);if(selector<0)return ENXIO;
+        c->adsp_selector[i]=(uint32_t)selector;
+        for(unsigned slot=1;slot<8;++slot)for(unsigned command=0;command<c->commands;++command) {
+            const wf_slot *s=&c->inherited[slot];if(!(s->enabled&(1u<<command)))continue;
+            if((s->command[command][1]&~3u)!=r->address)continue;
+            uint32_t held=s->command[command][2];
+            if(s->command[command][1]!=r->address||!(s->command[command][0]&(1u<<16))||
+                held>=r->level_count||(!r->levels[held]&&held))return EPERM;
+            if(held>c->adsp_selector[i])c->adsp_selector[i]=held;
+        }
+    }
+    if(c->adsp_resource[0].address==c->adsp_resource[1].address)return EPERM;
+    c->adsp_attempted=true;c->adsp_context=child;c->adsp_policy=policy;
+    if(!wf_power_tables(c,false)||!wf_power_rsc_guard(c))return EPERM;
+    c->adsp_busy=true;c->phase=WFP_ARC;
+    int error=wf_power_vote(c,64);if(!error)error=wf_power_vote(c,65);
+    if(!error){c->phase=WFP_AOP_ON;c->adsp_busy=false;}
+    const rf_wifi_aop_ops operations={c,wf_power_check,wf_power_aop_read,wf_power_aop_write,wf_power_aop_notify,wf_power_pause};
+    if(!error)error=rf_wifi_aop_adsp_state(&c->aop,&operations,1);
+    if(!error&&(c->adsp_held!=3||redfin_wifi_power_audit()||policy(child)))error=EPERM;
+    if(error)c->poisoned=true;
+    IOLog("REDFIN SENSORS: native power result=%d ARC=%#x AOP=%u same-worker=1 retained=1\n",error,c->adsp_held,c->aop.adsp_load_state);
+    return error;
 }
 
 static bool wf_wlan_platform(bool power)

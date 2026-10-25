@@ -476,7 +476,33 @@ static int smp_key_well_formed(const volatile unsigned char *p)
 }
 
 /* GUI-only leaves. A GUI tree is never admitted by the md0 command profile. */
-enum { RF_GUI_DISPLAY = 8, RF_GUI_TOUCH, RF_GUI_UFS, RF_GUI_FBCON, RF_GUI_POWER };
+enum { RF_GUI_DISPLAY = 8, RF_GUI_TOUCH, RF_GUI_UFS, RF_GUI_FBCON, RF_GUI_POWER, RF_GUI_SENSOR };
+static int gui_sensor_property(const volatile unsigned char *key,
+    const volatile unsigned char *value,uint32_t len,unsigned *seen)
+{
+    unsigned bit=0;
+    if(smp_key(key,"source-path")) {
+        bit=1;if(!smp_string(value,len,"/redfin/firmware/native-sensors.bundle"))return 0;
+    }else if(smp_key(key,"bundle-bytes")) {
+        bit=2;if(len!=8||quad(value)<64||quad(value)>32u*1024u*1024u)return 0;
+    }else if(smp_key(key,"bundle-sha256")) {
+        bit=4;if(len!=32)return 0;unsigned nonzero=0;
+        for(unsigned i=0;i<32;++i)nonzero|=value[i];
+        if(!nonzero)return 0;
+    }else if(smp_key(key,"live-fdt-verified")) {
+        bit=8;if(len!=4||word(value,0)!=1)return 0;
+    }else if(smp_key(key,"source-contract")) {
+        static const uint32_t expected[10]={1,1,2,443,429,3,0,2,384,384};
+        bit=16;if(len!=sizeof(expected))return 0;
+        for(unsigned i=0;i<10;++i)if(word(value+4*i,0)!=expected[i])return 0;
+    }else if(smp_key(key,"hardware-reg")) {
+        static const uint64_t expected[8]={0x89200000,0x2800000,0x80900000,0x200000,0x1f40000,0x20000,0x408000,0x1000};
+        bit=32;if(len!=sizeof(expected))return 0;
+        for(unsigned i=0;i<8;++i)if(quad(value+8*i)!=expected[i])return 0;
+    }else return 0;
+    if(*seen&bit)return 0;
+    *seen|=bit;return 1;
+}
 static int gui_power_property(const volatile unsigned char *key,
     const volatile unsigned char *value, unsigned len, unsigned *seen)
 {
@@ -558,7 +584,7 @@ finish:
     *seen |= bit; return 1;
 }
 
-static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, int gui)
+static int adt_valid_smp_mode_sensors(const volatile unsigned char *b, uint64_t size, int gui,unsigned *sensor_present)
 {
     enum { ROOT = 1, CHOSEN, CPUS, CPU, ARMIO, GIC, LEAF };
     static const char root_names[][24] = {
@@ -569,7 +595,7 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
         "redfin-wifi-glink", "redfin-wifi-wlfw", "redfin-wifi-wlan", "redfin-wifi-snoc",
         "redfin-rmtfs", "redfin-wifi-dma", "redfin-wifi-assets", "redfin-wifi-fw",
         "redfin-gpu", "redfin-gpu-power", "redfin-gmu", "redfin-gpu-smmu", "redfin-gpu-command",
-        "redfin-power"
+        "redfin-power", "redfin-sensors"
     };
     static const char cpu_u32[][24] = {
         "reg", "cpu-id", "cluster-id", "cluster-type", "die-cluster-id",
@@ -587,12 +613,14 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
                 if (REDFIN_SMP_CPUS != 2 && REDFIN_SMP_CPUS != 8) return 0;
                 for (unsigned i = 0; i < REDFIN_SMP_CPUS; i++)
                     for (unsigned j = 0; j < i; j++) if (handles[i] == handles[j]) return 0;
-                return off == size && cpus == REDFIN_SMP_CPUS && (root_seen & 15) == 15 &&
+                int valid=off == size && cpus == REDFIN_SMP_CPUS && (root_seen & 15) == 15 &&
                     (!gui || (gui == 3 ?
                         (root_seen & ((1U << 30) - 1)) == (1U << 30) - 1 :
                         root_seen == (1U << (gui == 2 ? 25 : 13)) - 1)) &&
                     arm_seen == (gui ? 3U : 1U) &&
                     (chosen_children & 1) && chosen_children <= 3;
+                if(valid&&sensor_present)*sensor_present=root_seen>>31;
+                return valid;
             }
             depth--;
         }
@@ -617,7 +645,7 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
                     kind = ROOT;
                 } else if (depth == 1 && kinds[depth] == ROOT) {
                     unsigned n = 0;
-                    unsigned count = gui == 3 ? 31 : gui == 2 ? 25 : gui ? 13 : 10;
+                    unsigned count = gui == 3 ? 32 : gui == 2 ? 25 : gui ? 13 : 10;
                     for (; n < count; n++)
                         if (smp_string(value, len, root_names[n])) break;
                     if (n == count || (root_seen & (1U << n))) return 0;
@@ -625,6 +653,7 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
                     kind = n == 0 ? CHOSEN : n == 1 ? CPUS : n == 2 ? ARMIO : LEAF;
                     if (gui && n >= 10 && n < 13) kind = n == 10 ? RF_GUI_TOUCH : n == 11 ? RF_GUI_UFS : RF_GUI_FBCON;
                     if (gui == 3 && n == 30) kind = RF_GUI_POWER;
+                    if (gui == 3 && n == 31) kind = RF_GUI_SENSOR;
                 } else if (depth == 2 && kinds[depth] == CPUS) {
                     char name[5] = {'c', 'p', 'u', (char)('0' + cpus), 0};
                     if (cpus >= REDFIN_SMP_CPUS || !smp_string(value, len, name)) return 0;
@@ -652,6 +681,8 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
                 if (smp_key(key, "name")) return 0;
                 if (kind == RF_GUI_POWER) {
                     if (!gui_power_property(key, value, len, &seen)) return 0;
+                } else if(kind==RF_GUI_SENSOR) {
+                    if(!gui_sensor_property(key,value,len,&seen))return 0;
                 } else if (kind >= RF_GUI_DISPLAY) {
                     if (!gui_property(kind, key, value, len, &seen)) return 0;
                 } else if (kind == CPU) {
@@ -696,10 +727,13 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
         if ((kind == RF_GUI_DISPLAY && seen != 0x7ff && !(gui == 3 && seen == 0xfff)) || (kind == RF_GUI_TOUCH && seen != 127) ||
             (kind == RF_GUI_UFS && seen != 1) || (kind == RF_GUI_FBCON && seen != 0x87)) return 0;
         if (kind == RF_GUI_POWER && seen != 1 && seen != 3) return 0;
+        if(kind==RF_GUI_SENSOR&&seen!=63)return 0;
         if (kind == CPU) cpus++;
         depth++; pending[depth] = children; kinds[depth] = kind;
     }
 }
+static int adt_valid_smp_mode(const volatile unsigned char *b,uint64_t size,int gui)
+{return adt_valid_smp_mode_sensors(b,size,gui,NULL);}
 
 static int adt_valid_smp(const volatile unsigned char *b, uint64_t size)
 { return adt_valid_smp_mode(b, size, 0); }
@@ -770,8 +804,21 @@ static const char *validate(const void *data, uint64_t size, uint64_t image,
     int gui = REDFIN_GUI_BUILD_READY && redfin_gui_profile(p->command, sizeof(p->command), NULL);
     int wifi_gui = gui && redfin_wifi_gui_profile(p->command, sizeof(p->command), NULL);
     int gpu_gui = gui && redfin_gpu_gui_profile(p->command, sizeof(p->command), NULL);
-    if (!(smp ? (gui ? adt_valid_smp_mode(tree, p->adt_size, gpu_gui ? 3 : wifi_gui ? 2 : 1) : adt_valid_smp(tree, p->adt_size)) :
+    unsigned sensors=0;
+    if (!(smp ? (gui ? adt_valid_smp_mode_sensors(tree, p->adt_size, gpu_gui ? 3 : wifi_gui ? 2 : 1,&sensors) : adt_valid_smp(tree, p->adt_size)) :
         adt_valid_up(tree, p->adt_size, mpidr, p->phys, p->memory))) return "ADT CPU or RAM mismatch";
+    if(sensors) {
+        unsigned found=0,in_ram=0;
+        for(unsigned i=0;i<hw->banks;++i)if(hw->memory[i].base<=0x89200000ULL&&
+            hw->memory[i].base+hw->memory[i].size>=0x8ba00000ULL)in_ram++;
+        for(unsigned i=0;i<hw->reservations;++i) {
+            struct region r=hw->reserved[i];
+            if(r.base==0x89200000ULL&&r.size==0x2800000ULL)found++;
+            else if(overlap(r.base,r.size,0x89200000ULL,0x2800000ULL))return "ADSP reservation alias";
+        }
+        if(found!=1||in_ram!=1||overlap(0x89200000ULL,0x2800000ULL,image,image_end-image)||
+            overlap(0x89200000ULL,0x2800000ULL,dtb,dtb_size))return "ADSP native reservation/source overlap";
+    }
     if (!rmtfs_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "RMTFS RAM ownership";
     if (!wifi_dma_plan(p, hw, image, image_end - image, dtb, dtb_size, q)) return "WLAN DMA RAM ownership";
     return NULL;

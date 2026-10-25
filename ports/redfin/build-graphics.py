@@ -80,7 +80,7 @@ def main():
             inputs+=sorted((upstream/'tools/mesa/redwood-drm').iterdir())
             if a.metal:
                 inputs+=sorted((upstream/'tools/mesa/air').iterdir())
-                inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h']
+                inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -94,6 +94,7 @@ def main():
                     shutil.copytree(upstream/'tools/mesa/air',source/'src/compiler/air')
                     shutil.copy2(ROOT/'ports/redfin/metal-command-scope.h',source/'src/compiler/air/redfin_metal_command_scope.h')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-command-scope.patch'],source)
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-gmem.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]

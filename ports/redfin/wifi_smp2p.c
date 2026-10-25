@@ -23,6 +23,12 @@ struct smp_heap {
     uint32_t out, out_bytes, in, in_bytes;
     uint32_t out_cached, in_cached, glink;
 };
+static uint32_t remote_pid(const struct rf_wifi_smp2p_session *s)
+{return s->remote_pid?s->remote_pid:1u;}
+static uint32_t input_item(const struct rf_wifi_smp2p_session *s)
+{return remote_pid(s)==2?443u:RF_WIFI_SMP2P_IN;}
+static uint32_t output_item(const struct rf_wifi_smp2p_session *s)
+{return remote_pid(s)==2?429u:RF_WIFI_SMP2P_OUT;}
 
 static int valid_ops(const struct rf_wifi_smp2p_ops *o)
 {
@@ -32,6 +38,7 @@ static int valid_ops(const struct rf_wifi_smp2p_ops *o)
 }
 static int gate(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *o)
 {
+    if(remote_pid(s)>2 || (s->attempted && s->bound_pid!=remote_pid(s)))return RF_WIFI_SMP2P_STATE;
     int error = o->check(o->context);
     if (error) s->platform_error = error;
     return error ? RF_WIFI_SMP2P_PLATFORM : RF_WIFI_SMP2P_OK;
@@ -43,17 +50,17 @@ static int poison(struct rf_wifi_smp2p_session *s, int error)
 }
 static uint32_t word(const struct rf_wifi_smp2p_ops *o, uint32_t offset)
 { return redfin_smem_u32(o->smem + offset); }
-static int observe_item(struct smp_heap *h, uint32_t item, uint32_t data, uint32_t bytes, int cached)
+static int observe_item(const struct rf_wifi_smp2p_session *s, struct smp_heap *h, uint32_t item, uint32_t data, uint32_t bytes, int cached)
 {
-    if (item == RF_WIFI_SMP2P_OUT) {
+    if (item == output_item(s)) {
         if (h->out) return RF_WIFI_SMP2P_SMEM;
         h->out = data; h->out_bytes = bytes; h->out_cached = cached != 0;
     }
-    if (item == RF_WIFI_SMP2P_IN) {
+    if (item == input_item(s)) {
         if (h->in) return RF_WIFI_SMP2P_SMEM;
         h->in = data; h->in_bytes = bytes; h->in_cached = cached != 0;
     }
-    if ((item == RF_WIFI_SMP2P_OUT || item == RF_WIFI_SMP2P_IN) && (data % 4u || bytes != RF_WIFI_SMP2P_BYTES))
+    if ((item == output_item(s) || item == input_item(s)) && (data % 4u || bytes != RF_WIFI_SMP2P_BYTES))
         return RF_WIFI_SMP2P_SMEM;
     return RF_WIFI_SMP2P_OK;
 }
@@ -67,7 +74,7 @@ static int heap(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
     struct redfin_smem_report report;
     int error = gate(s, o);
     if (error) return error;
-    enum redfin_smem_status status = redfin_smem_inspect(o->smem, o->smem_bytes, &report);
+    enum redfin_smem_status status = redfin_smem_inspect_host(o->smem, o->smem_bytes, remote_pid(s), &report);
     if (status == REDFIN_SMEM_CHANGED) return RF_WIFI_SMP2P_UNSTABLE;
     if (status != REDFIN_SMEM_OK || !report.modem_partition) return RF_WIFI_SMP2P_SMEM;
     h->partition = report.partition_offset; h->bytes = report.partition_bytes;
@@ -84,7 +91,7 @@ static int heap(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
         uint32_t header = redfin_smem_u16(entry + 10), remaining = h->free_u - cursor - 16u;
         if (redfin_smem_u16(entry) != 0xa5a5u || !size || padding >= size ||
             header > remaining || size > remaining - header) return RF_WIFI_SMP2P_SMEM;
-        error = observe_item(h, redfin_smem_u16(entry + 2), h->partition + cursor + 16u + header, size - padding, 0);
+        error = observe_item(s, h, redfin_smem_u16(entry + 2), h->partition + cursor + 16u + header, size - padding, 0);
         if (error) return error;
         cursor += 16u + header + size;
     }
@@ -101,7 +108,7 @@ static int heap(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
             if (redfin_smem_u16(entry) != 0xa5a5u || !size || padding >= size || size > cursor - h->free_c)
                 return RF_WIFI_SMP2P_SMEM;
             uint32_t data = cursor - size;
-            error = observe_item(h, redfin_smem_u16(entry + 2), h->partition + data, size - padding, 1);
+            error = observe_item(s, h, redfin_smem_u16(entry + 2), h->partition + data, size - padding, 1);
             if (error) return error;
             if (data == h->free_c) break;
             if (data <= h->free_c + line) return RF_WIFI_SMP2P_SMEM;
@@ -128,7 +135,7 @@ static int own(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *
     uint32_t free_u = word(o, s->partition + 12u), free_c = word(o, s->partition + 16u);
     if (!s->data || s->data < s->partition + 48u ||
         s->data > s->partition + s->partition_bytes - RF_WIFI_SMP2P_PADDED ||
-        word(o, s->entry) != (RF_WIFI_SMP2P_OUT << 16 | 0xa5a5u) ||
+        word(o, s->entry) != (output_item(s) << 16 | 0xa5a5u) ||
         word(o, s->entry + 4u) != RF_WIFI_SMP2P_PADDED || word(o, s->entry + 8u) != 4u ||
         word(o, s->entry + 12u) || word(o, s->partition) != 0x54525024u ||
         word(o, s->partition + 4u) != s->hosts ||
@@ -205,6 +212,7 @@ int rf_wifi_smp2p_prepare(struct rf_wifi_smp2p_session *s, const struct rf_wifi_
 {
     if (!s || !valid_ops(o)) return RF_WIFI_SMP2P_ARGUMENT;
     if (s->attempted || s->stage != RF_WIFI_SMP2P_IDLE) return RF_WIFI_SMP2P_STATE;
+    s->bound_pid=remote_pid(s);
     s->attempted = 1; s->stage = RF_WIFI_SMP2P_PREPARING;
     int error = gate(s, o);
     if (!error && o->pas_reset(o->context)) error = RF_WIFI_SMP2P_STATE;
@@ -224,16 +232,16 @@ int rf_wifi_smp2p_prepare(struct rf_wifi_smp2p_session *s, const struct rf_wifi_
         for (unsigned i = 0; i < 12; ++i) s->toc[i] = word(o, h.toc_entry + 4u * i);
         s->entry = h.partition + h.free_u; s->data = s->entry + 16u;
         for (unsigned i = 0; i < RF_WIFI_SMP2P_WORDS; ++i) s->own[i] = 0;
-        s->own[0] = SMP_MAGIC; s->own[1] = 0x100u; s->own[2] = 1u << 16;
-        s->own[3] = 16u | 2u << 16;
+        s->own[0] = SMP_MAGIC; s->own[1] = 0x100u; s->own[2] = remote_pid(s) << 16;
+        s->own[3] = 16u | (remote_pid(s)==2?1u:2u) << 16;
         for (unsigned i = 0; i < 4; ++i) {
             s->own[5u + i] = text_word("master-kernel", 13, 4u * i);
-            s->own[10u + i] = text_word("ipa", 3, 4u * i);
+            if(remote_pid(s)==1)s->own[10u + i] = text_word("ipa", 3, 4u * i);
         }
         /* Data has invalid version until allocation metadata is published. */
         for (unsigned i = 0; i < RF_WIFI_SMP2P_WORDS && !error; ++i)
             error = put_initial(s, o, s->data + 4u * i, s->own[i]);
-        const uint32_t header[4] = {RF_WIFI_SMP2P_OUT << 16 | 0xa5a5u, RF_WIFI_SMP2P_PADDED, 4, 0};
+        const uint32_t header[4] = {output_item(s) << 16 | 0xa5a5u, RF_WIFI_SMP2P_PADDED, 4, 0};
         for (unsigned i = 0; i < 4 && !error; ++i) error = put_initial(s, o, s->entry + 4u * i, header[i]);
         if (!error) error = barrier(s, o);
         if (!error && o->pas_reset(o->context)) error = RF_WIFI_SMP2P_STATE;
@@ -284,7 +292,7 @@ static int peer(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops 
     for (unsigned i = 0; i < RF_WIFI_SMP2P_BYTES / 4u; ++i) second[i] = word(o, h.in + 4u * i);
     for (unsigned i = 0; i < RF_WIFI_SMP2P_BYTES / 4u; ++i) if (first[i] != second[i]) return RF_WIFI_SMP2P_UNSTABLE;
     if (!(first[1] & 255u)) return s->peer_seen ? RF_WIFI_SMP2P_RESTART : RF_WIFI_SMP2P_UNSTABLE;
-    if (first[0] != SMP_MAGIC || (first[1] & 255u) != 1u || first[2] != 1u ||
+    if (first[0] != SMP_MAGIC || (first[1] & 255u) != 1u || first[2] != remote_pid(s) ||
         (first[3] & 65535u) != 16u || first[3] >> 16 > 16u || (first[4] & ~3u))
         return RF_WIFI_SMP2P_BAD_PEER;
     uint32_t features = first[1] >> 8 & 1u, restart = first[4] & 1u, valid = first[3] >> 16;

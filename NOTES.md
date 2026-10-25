@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete GMEM/native SSC/Photos-reply block built; fresh V16 staged — 2026-10-25
+
+Source base e736166 plus this implementation. Physical V11 remains the last
+observation; V12 is not yet applied or booted at this checkpoint. Remove the
+loader's forced sysmem path, permit native automatic GMEM and retain actual
+FD620 route counters. The paired Metal probe forces GMEM and validates two
+render passes with a real render-target-to-texture dependency, complete pixels
+and guard bytes. Ordinary Gallium dependencies replace the unconditional
+per-draw framebuffer/image barrier; storage-writing stages still fence.
+No FPS improvement is claimed before the integrated capture.
+
+Native sensor path now implements source-verified ADSP/PAS1, exact Redfin
+0x89200000/40MiB, shared same-worker RSC/AOP ownership, native host2 SMP2P/
+GLINK/QRTR, actual JSN domains and bounded TFTP, SSC discovery, persisted
+registry writes plus actual native readback, attributes/stream configuration,
+validated timestamps/samples, per-source HID caches/rate controls and source
+withdrawal. The private package has164records/21630640bytes,112actual JSON
+groups/123bounded registry fragments, preserving ver/type/value and subgroup
+links. It is read once from the exact readonly root file and SHA-verified
+before PAS, avoiding enlargement of the bounded ABL source image. Kernel and
+shim both validate exact contracts; the shim additionally rejects native ADSP
+reservation/source overlap. Firmware must actually pass native PAS before any
+sensor is published. This is implementation/build evidence, not physical ADSP,
+sensor identity or CoreMotion success. Direct VD6281 remains to implement.
+
+Capture-only Photos/native diagnostics now request the installed TCC
+framework's own nonprompting preflight and record its actual authorization
+record/NSError. Native decisions, entitlement policy, exception and database
+are preserved. The new CoreMotion/HID observer records actual availability,
+authorization and samples; it fabricates none.
+
+153selected host cases:151PASS/2optional-native-fixture skips; additional
+38shim/FDT/SSC cases PASS. Complete native kernel, Mesa/AIR/plugin, helpers,
+actual20H392 imports, signatures and readback bundle seal PASS. Kernel local
+20261025-113137/noCI,
+bffe7c0d63758ccc7477b677bfcb24df51503e62f126486fd112a8278f3b6d7d.
+V12 image d15ba0e2b7cfc0885e9cc9458505d8627efce51c60a49f2df6b2d32e65aff22a,
+nonce ecd67b63b06f7279, complete real Image/payload/ADT/live-FDT preflight PASS.
+Fresh V16 against clean845261:213ranges/47251456bytes,5315new blocks/zero
+freed, all complete-file reads/signatures and native readonly fsck PASS.
+V16 is prepared, NOT applied at this checkpoint; V15 remains applied/stale.
+Next apply V16 once and collect one combined autonomous run. Sustained60/90fps,
+Photos, actual SSC/CoreMotion, VD6281, real credential/autojoin, cable/motion
+and actual Apple authorization remain unfinished.
+Exact V12 planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xecd67b63b06f7279 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V11 asynchronous native Metal and firmware-copy result; TCCD permits Photos — 2026-10-25
 
 Source1c510c9; kernel local20261025-102326/noCI00fa3c57...; image43b7af06...

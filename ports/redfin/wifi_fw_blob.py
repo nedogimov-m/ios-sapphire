@@ -39,7 +39,7 @@ def aligned(value, alignment):
     return (value + alignment - 1) & -alignment
 
 
-def payload_info(data, *, gui_packets=False):
+def payload_info(data, *, gui_packets=False, firmware_present=False):
     require(HEADER <= len(data) <= MAX_PAYLOAD, 'payload outside implementation bound')
     magic, version, count = struct.unpack_from('<8sII', data)
     require(magic == b'SWEETXNU' and version == 1 and 1 <= count < 64, 'unsupported payload ABI or no segment slot')
@@ -97,8 +97,10 @@ def payload_info(data, *, gui_packets=False):
             chosen[0].prop('dram-size') == mkadt.u64(memory), 'ADT and payload RAM differ')
     maps = [child for child in chosen[0].children if child.name == 'memory-map']
     require(len(maps) == 1, 'payload requires one memory-map node')
-    require(not any(child.name == 'redfin-wifi-fw' for child in root.children) and
-            maps[0].prop('RedfinWiFiFirmware') is None, 'payload already contains a firmware source')
+    firmware_nodes = [child for child in root.children if child.name == 'redfin-wifi-fw']
+    require((len(firmware_nodes) == 1 and maps[0].prop('RedfinWiFiFirmware') is not None) if firmware_present else
+            (not firmware_nodes and maps[0].prop('RedfinWiFiFirmware') is None),
+            'payload firmware-source presence differs from requested composition')
     return {'virt': virt, 'entry': entry, 'end': end, 'physical': physical, 'memory': memory,
             'segments': segments, 'root': root, 'memory_map': maps[0]}
 

@@ -1,0 +1,1824 @@
+diff --git a/iokit/bsddev/redfin_wifi_smem.h b/iokit/bsddev/redfin_wifi_smem.h
+--- a/iokit/bsddev/redfin_wifi_smem.h
++++ b/iokit/bsddev/redfin_wifi_smem.h
+@@ -82,8 +82,8 @@
+ }
+ 
+ static inline enum redfin_smem_status
+-redfin_smem_inspect(const volatile uint8_t *data, size_t length,
+-                    struct redfin_smem_report *report)
++redfin_smem_inspect_host(const volatile uint8_t *data, size_t length,
++                    uint32_t remote_host, struct redfin_smem_report *report)
+ {
+     const uint32_t toc = REDFIN_SMEM_BYTES - 0x1000u;
+     uint32_t offsets[REDFIN_SMEM_MAX_PARTITIONS], sizes[REDFIN_SMEM_MAX_PARTITIONS];
+@@ -97,7 +97,7 @@
+     if (!report) return REDFIN_SMEM_LENGTH;
+     out.entry_index = out.other_index = REDFIN_SMEM_INDEX_NONE;
+     *report = out;
+-    if (!data || length != REDFIN_SMEM_BYTES) return REDFIN_SMEM_LENGTH;
++    if (!data || length != REDFIN_SMEM_BYTES || (remote_host!=1 && remote_host!=2)) return REDFIN_SMEM_LENGTH;
+     out.version = redfin_smem_u32(data + 0x40u + 7u * 4u);
+     if (redfin_smem_u32(data + 0xc0u) != 1 || redfin_smem_u32(data + 0xccu))
+         return redfin_smem_result(report, &out, REDFIN_SMEM_UNINITIALIZED, REDFIN_SMEM_DETAIL_NONE);
+@@ -137,7 +137,7 @@
+                 return redfin_smem_result(report, &out, REDFIN_SMEM_PARTITION, REDFIN_SMEM_ENTRY_OVERLAP);
+             }
+         }
+-        if (hosts == 0x00010000u || hosts == 0x00000001u) {
++        if (hosts == remote_host<<16 || hosts == remote_host) {
+             if (out.modem_partition) {
+                 out.other_index = modem_index;
+                 out.other_offset = out.partition_offset; out.other_bytes = out.partition_bytes;
+@@ -208,4 +208,9 @@
+         return redfin_smem_result(report, &out, REDFIN_SMEM_CHANGED, REDFIN_SMEM_DETAIL_NONE);
+     return redfin_smem_result(report, &out, REDFIN_SMEM_OK, REDFIN_SMEM_DETAIL_NONE);
+ }
++/* Keep the established APPS/MPSS interface and report layout unchanged. The
++ * legacy modem_partition field means the selected private heap for host2. */
++static inline enum redfin_smem_status
++redfin_smem_inspect(const volatile uint8_t *data,size_t bytes,struct redfin_smem_report *report)
++{return redfin_smem_inspect_host(data,bytes,1,report);}
+ #endif
+diff --git a/iokit/Kernel/arm/redfin_wifi_glink.h b/iokit/Kernel/arm/redfin_wifi_glink.h
+--- a/iokit/Kernel/arm/redfin_wifi_glink.h
++++ b/iokit/Kernel/arm/redfin_wifi_glink.h
+@@ -34,6 +34,7 @@
+ };
+ struct rf_glink_intent { uint32_t id, bytes, busy, present; };
+ struct rf_glink {
++    uint32_t remote_host,bound_host; /* zero keeps established MPSS host1; ADSP is2 */
+     uint32_t attempted, poisoned, partition, bytes, descriptor, tx, rx, rx_bytes;
+     uint32_t head, tail, features, version, asked, acknowledged, channel, open, offered;
+     uint32_t fill, remaining, heard, sent, packets, stores;
+@@ -58,6 +59,8 @@
+ {
+     if (!s || !o || !o->smem || !o->check || !o->lock || !o->unlock || !o->write32 ||
+         !o->barrier || !o->kick || !o->packet) return RF_GL_ARGUMENT;
++    uint32_t remote=s->remote_host?s->remote_host:1;
++    if(remote>2 || (s->attempted && s->bound_host!=remote))return RF_GL_ARGUMENT;
+     if (s->poisoned) return RF_GL_CHANGED;
+     if (o->check(o->context)) { s->poisoned = 1; return RF_GL_PLATFORM; }
+     return 0;
+@@ -75,7 +78,7 @@
+     uint32_t location[3], uint32_t lengths[3], struct redfin_smem_report *report)
+ {
+     if (rf_gl_gate(s, o)) return RF_GL_PLATFORM;
+-    if (redfin_smem_inspect(o->smem, REDFIN_SMEM_BYTES, report) != REDFIN_SMEM_OK ||
++    if (redfin_smem_inspect_host(o->smem, REDFIN_SMEM_BYTES, s->remote_host?s->remote_host:1, report) != REDFIN_SMEM_OK ||
+         !report->modem_partition) return RF_GL_LAYOUT;
+     if (s->partition && (s->partition != report->partition_offset || s->bytes != report->partition_bytes))
+         return rf_gl_changed(s, 1, report->partition_offset, s->bytes, report->partition_bytes);
+@@ -122,6 +125,7 @@
+ static inline int rf_gl_init(struct rf_glink *s, const struct rf_glink_ops *o)
+ {
+     if (rf_gl_gate(s, o) || s->attempted) return RF_GL_ARGUMENT;
++    s->bound_host=s->remote_host?s->remote_host:1;
+     s->attempted = 1;
+     if (o->lock(o->context)) return RF_GL_PLATFORM;
+     uint32_t at[3], sizes[3]; struct redfin_smem_report r = RF_GL_ZERO;
+diff --git a/bsd/dev/redfin_wifi_smp2p.h b/bsd/dev/redfin_wifi_smp2p.h
+--- a/bsd/dev/redfin_wifi_smp2p.h
++++ b/bsd/dev/redfin_wifi_smp2p.h
+@@ -61,6 +61,7 @@
+ };
+ 
+ struct rf_wifi_smp2p_session {
++    uint32_t remote_pid,bound_pid; /* zero/default1 MPSS; native ADSP/PAS1 host2 */
+     uint32_t attempted, stage, poisoned, allocator_locked;
+     int error, platform_error;
+     uint32_t partition, partition_bytes, cacheline, entry, data;
+diff --git a/bsd/dev/redfin_wifi_smp2p.c b/bsd/dev/redfin_wifi_smp2p.c
+--- a/bsd/dev/redfin_wifi_smp2p.c
++++ b/bsd/dev/redfin_wifi_smp2p.c
+@@ -23,6 +23,12 @@
+     uint32_t out, out_bytes, in, in_bytes;
+     uint32_t out_cached, in_cached, glink;
+ };
++static uint32_t remote_pid(const struct rf_wifi_smp2p_session *s)
++{return s->remote_pid?s->remote_pid:1u;}
++static uint32_t input_item(const struct rf_wifi_smp2p_session *s)
++{return remote_pid(s)==2?443u:RF_WIFI_SMP2P_IN;}
++static uint32_t output_item(const struct rf_wifi_smp2p_session *s)
++{return remote_pid(s)==2?429u:RF_WIFI_SMP2P_OUT;}
+ 
+ static int valid_ops(const struct rf_wifi_smp2p_ops *o)
+ {
+@@ -32,6 +38,7 @@
+ }
+ static int gate(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *o)
+ {
++    if(remote_pid(s)>2 || (s->attempted && s->bound_pid!=remote_pid(s)))return RF_WIFI_SMP2P_STATE;
+     int error = o->check(o->context);
+     if (error) s->platform_error = error;
+     return error ? RF_WIFI_SMP2P_PLATFORM : RF_WIFI_SMP2P_OK;
+@@ -43,17 +50,17 @@
+ }
+ static uint32_t word(const struct rf_wifi_smp2p_ops *o, uint32_t offset)
+ { return redfin_smem_u32(o->smem + offset); }
+-static int observe_item(struct smp_heap *h, uint32_t item, uint32_t data, uint32_t bytes, int cached)
+-{
+-    if (item == RF_WIFI_SMP2P_OUT) {
++static int observe_item(const struct rf_wifi_smp2p_session *s, struct smp_heap *h, uint32_t item, uint32_t data, uint32_t bytes, int cached)
++{
++    if (item == output_item(s)) {
+         if (h->out) return RF_WIFI_SMP2P_SMEM;
+         h->out = data; h->out_bytes = bytes; h->out_cached = cached != 0;
+     }
+-    if (item == RF_WIFI_SMP2P_IN) {
++    if (item == input_item(s)) {
+         if (h->in) return RF_WIFI_SMP2P_SMEM;
+         h->in = data; h->in_bytes = bytes; h->in_cached = cached != 0;
+     }
+-    if ((item == RF_WIFI_SMP2P_OUT || item == RF_WIFI_SMP2P_IN) && (data % 4u || bytes != RF_WIFI_SMP2P_BYTES))
++    if ((item == output_item(s) || item == input_item(s)) && (data % 4u || bytes != RF_WIFI_SMP2P_BYTES))
+         return RF_WIFI_SMP2P_SMEM;
+     return RF_WIFI_SMP2P_OK;
+ }
+@@ -67,7 +74,7 @@
+     struct redfin_smem_report report;
+     int error = gate(s, o);
+     if (error) return error;
+-    enum redfin_smem_status status = redfin_smem_inspect(o->smem, o->smem_bytes, &report);
++    enum redfin_smem_status status = redfin_smem_inspect_host(o->smem, o->smem_bytes, remote_pid(s), &report);
+     if (status == REDFIN_SMEM_CHANGED) return RF_WIFI_SMP2P_UNSTABLE;
+     if (status != REDFIN_SMEM_OK || !report.modem_partition) return RF_WIFI_SMP2P_SMEM;
+     h->partition = report.partition_offset; h->bytes = report.partition_bytes;
+@@ -84,7 +91,7 @@
+         uint32_t header = redfin_smem_u16(entry + 10), remaining = h->free_u - cursor - 16u;
+         if (redfin_smem_u16(entry) != 0xa5a5u || !size || padding >= size ||
+             header > remaining || size > remaining - header) return RF_WIFI_SMP2P_SMEM;
+-        error = observe_item(h, redfin_smem_u16(entry + 2), h->partition + cursor + 16u + header, size - padding, 0);
++        error = observe_item(s, h, redfin_smem_u16(entry + 2), h->partition + cursor + 16u + header, size - padding, 0);
+         if (error) return error;
+         cursor += 16u + header + size;
+     }
+@@ -101,7 +108,7 @@
+             if (redfin_smem_u16(entry) != 0xa5a5u || !size || padding >= size || size > cursor - h->free_c)
+                 return RF_WIFI_SMP2P_SMEM;
+             uint32_t data = cursor - size;
+-            error = observe_item(h, redfin_smem_u16(entry + 2), h->partition + data, size - padding, 1);
++            error = observe_item(s, h, redfin_smem_u16(entry + 2), h->partition + data, size - padding, 1);
+             if (error) return error;
+             if (data == h->free_c) break;
+             if (data <= h->free_c + line) return RF_WIFI_SMP2P_SMEM;
+@@ -128,7 +135,7 @@
+     uint32_t free_u = word(o, s->partition + 12u), free_c = word(o, s->partition + 16u);
+     if (!s->data || s->data < s->partition + 48u ||
+         s->data > s->partition + s->partition_bytes - RF_WIFI_SMP2P_PADDED ||
+-        word(o, s->entry) != (RF_WIFI_SMP2P_OUT << 16 | 0xa5a5u) ||
++        word(o, s->entry) != (output_item(s) << 16 | 0xa5a5u) ||
+         word(o, s->entry + 4u) != RF_WIFI_SMP2P_PADDED || word(o, s->entry + 8u) != 4u ||
+         word(o, s->entry + 12u) || word(o, s->partition) != 0x54525024u ||
+         word(o, s->partition + 4u) != s->hosts ||
+@@ -205,6 +212,7 @@
+ {
+     if (!s || !valid_ops(o)) return RF_WIFI_SMP2P_ARGUMENT;
+     if (s->attempted || s->stage != RF_WIFI_SMP2P_IDLE) return RF_WIFI_SMP2P_STATE;
++    s->bound_pid=remote_pid(s);
+     s->attempted = 1; s->stage = RF_WIFI_SMP2P_PREPARING;
+     int error = gate(s, o);
+     if (!error && o->pas_reset(o->context)) error = RF_WIFI_SMP2P_STATE;
+@@ -224,16 +232,16 @@
+         for (unsigned i = 0; i < 12; ++i) s->toc[i] = word(o, h.toc_entry + 4u * i);
+         s->entry = h.partition + h.free_u; s->data = s->entry + 16u;
+         for (unsigned i = 0; i < RF_WIFI_SMP2P_WORDS; ++i) s->own[i] = 0;
+-        s->own[0] = SMP_MAGIC; s->own[1] = 0x100u; s->own[2] = 1u << 16;
+-        s->own[3] = 16u | 2u << 16;
++        s->own[0] = SMP_MAGIC; s->own[1] = 0x100u; s->own[2] = remote_pid(s) << 16;
++        s->own[3] = 16u | (remote_pid(s)==2?1u:2u) << 16;
+         for (unsigned i = 0; i < 4; ++i) {
+             s->own[5u + i] = text_word("master-kernel", 13, 4u * i);
+-            s->own[10u + i] = text_word("ipa", 3, 4u * i);
++            if(remote_pid(s)==1)s->own[10u + i] = text_word("ipa", 3, 4u * i);
+         }
+         /* Data has invalid version until allocation metadata is published. */
+         for (unsigned i = 0; i < RF_WIFI_SMP2P_WORDS && !error; ++i)
+             error = put_initial(s, o, s->data + 4u * i, s->own[i]);
+-        const uint32_t header[4] = {RF_WIFI_SMP2P_OUT << 16 | 0xa5a5u, RF_WIFI_SMP2P_PADDED, 4, 0};
++        const uint32_t header[4] = {output_item(s) << 16 | 0xa5a5u, RF_WIFI_SMP2P_PADDED, 4, 0};
+         for (unsigned i = 0; i < 4 && !error; ++i) error = put_initial(s, o, s->entry + 4u * i, header[i]);
+         if (!error) error = barrier(s, o);
+         if (!error && o->pas_reset(o->context)) error = RF_WIFI_SMP2P_STATE;
+@@ -284,7 +292,7 @@
+     for (unsigned i = 0; i < RF_WIFI_SMP2P_BYTES / 4u; ++i) second[i] = word(o, h.in + 4u * i);
+     for (unsigned i = 0; i < RF_WIFI_SMP2P_BYTES / 4u; ++i) if (first[i] != second[i]) return RF_WIFI_SMP2P_UNSTABLE;
+     if (!(first[1] & 255u)) return s->peer_seen ? RF_WIFI_SMP2P_RESTART : RF_WIFI_SMP2P_UNSTABLE;
+-    if (first[0] != SMP_MAGIC || (first[1] & 255u) != 1u || first[2] != 1u ||
++    if (first[0] != SMP_MAGIC || (first[1] & 255u) != 1u || first[2] != remote_pid(s) ||
+         (first[3] & 65535u) != 16u || first[3] >> 16 > 16u || (first[4] & ~3u))
+         return RF_WIFI_SMP2P_BAD_PEER;
+     uint32_t features = first[1] >> 8 & 1u, restart = first[4] & 1u, valid = first[3] >> 16;
+diff --git a/bsd/dev/redfin_wifi_aop.h b/bsd/dev/redfin_wifi_aop.h
+--- a/bsd/dev/redfin_wifi_aop.h
++++ b/bsd/dev/redfin_wifi_aop.h
+@@ -31,6 +31,7 @@
+ struct rf_wifi_aop_session {
+     struct rf_wifi_aop_snapshot baseline;
+     uint32_t attempted, open, poisoned, load_state, stores, notifications;
++    uint32_t adsp_load_state;
+     int error;
+ };
+ 
+@@ -68,6 +69,8 @@
+  * can make an uncertain delivery appear successful. Keep the lease quarantined.
+  */
+ int rf_wifi_aop_load_state(struct rf_wifi_aop_session *, const struct rf_wifi_aop_ops *, int on);
++/* Same serialized mailbox, separately tracked actual ADSP image lifecycle. */
++int rf_wifi_aop_adsp_state(struct rf_wifi_aop_session *, const struct rf_wifi_aop_ops *, int on);
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/bsd/dev/redfin_wifi_aop.c b/bsd/dev/redfin_wifi_aop.c
+--- a/bsd/dev/redfin_wifi_aop.c
++++ b/bsd/dev/redfin_wifi_aop.c
+@@ -221,17 +221,22 @@
+     return RF_WIFI_AOP_OK;
+ }
+ 
+-int rf_wifi_aop_load_state(struct rf_wifi_aop_session *s,
+-    const struct rf_wifi_aop_ops *ops, int on)
++static int load_state(struct rf_wifi_aop_session *s,
++    const struct rf_wifi_aop_ops *ops, int on, int adsp)
+ {
+     static const char on_text[RF_WIFI_AOP_MESSAGE_BYTES] =
+         "{class: image, res: load_state, name: modem, val: on}";
+     static const char off_text[RF_WIFI_AOP_MESSAGE_BYTES] =
+         "{class: image, res: load_state, name: modem, val: off}";
++    static const char adsp_on[RF_WIFI_AOP_MESSAGE_BYTES] =
++        "{class: image, res: load_state, name: adsp, val: on}";
++    static const char adsp_off[RF_WIFI_AOP_MESSAGE_BYTES] =
++        "{class: image, res: load_state, name: adsp, val: off}";
+     if (!s || !valid_ops(ops, 1) || (on != 0 && on != 1)) return RF_WIFI_AOP_ARGUMENT;
+-    if (!s->open || s->poisoned || s->load_state != (on ? 0u : 1u)) return RF_WIFI_AOP_STATE;
++    uint32_t *state=adsp?&s->adsp_load_state:&s->load_state;
++    if (!s->open || s->poisoned || *state != (on ? 0u : 1u)) return RF_WIFI_AOP_STATE;
+     uint32_t box = s->baseline.word[AOP_OUR_BOX / 4u], value;
+-    const char *text = on ? on_text : off_text;
++    const char *text = adsp ? (on ? adsp_on : adsp_off) : (on ? on_text : off_text);
+     int error = connected(s, ops);
+     if (!error) error = rd(ops, box, &value);
+     if (!error && value) error = RF_WIFI_AOP_BUSY;
+@@ -254,7 +259,11 @@
+     AOP_STEP(notify(s, ops));
+     AOP_STEP(poll_word(s, ops, box, 0, RF_WIFI_AOP_TX_MS));
+     AOP_STEP(connected(s, ops));
+-    s->load_state = on ? 1u : 2u;
++    *state = on ? 1u : 2u;
+ #undef AOP_STEP
+     return RF_WIFI_AOP_OK;
+ }
++int rf_wifi_aop_load_state(struct rf_wifi_aop_session *s,const struct rf_wifi_aop_ops *ops,int on)
++{return load_state(s,ops,on,0);}
++int rf_wifi_aop_adsp_state(struct rf_wifi_aop_session *s,const struct rf_wifi_aop_ops *ops,int on)
++{return load_state(s,ops,on,1);}
+diff --git a/iokit/Kernel/arm/RedfinWiFiProbe.cpp b/iokit/Kernel/arm/RedfinWiFiProbe.cpp
+--- a/iokit/Kernel/arm/RedfinWiFiProbe.cpp
++++ b/iokit/Kernel/arm/RedfinWiFiProbe.cpp
+@@ -178,6 +178,11 @@
+     uint32_t wlan_held;
+     void *wlan_context;
+     int (*wlan_policy)(void *);
++    bool adsp_attempted, adsp_busy;
++    uint32_t adsp_held, adsp_selector[2];
++    rf_cmddb_resource adsp_resource[2];
++    void *adsp_context;
++    int (*adsp_policy)(void *);
+ };
+ static wf_power_context wf_power;
+ 
+@@ -348,6 +353,13 @@
+             if (a->address != b->address || a->type != b->type || a->aux_version != b->aux_version ||
+                 a->aux_bytes != b->aux_bytes || a->priority[0] != b->priority[0] || a->priority[1] != b->priority[1]) return false;
+         }
++    }
++    if(context->adsp_attempted)for(unsigned i=0;i<2;++i) {
++        static const uint8_t names[2][8]={"lcx.lvl","lmx.lvl"};
++        rf_cmddb_resource fresh={};
++        if(rf_cmddb_lookup((const volatile uint8_t *)context->base[WFP_DB],RF_CMDDB_BYTES,
++            names[i],RF_CMDDB_ARC,&fresh)!=RF_CMDDB_OK||
++            memcmp(&fresh,&context->adsp_resource[i],sizeof(fresh)))return false;
+     }
+     return !wf_power_check(context);
+ }
+@@ -406,19 +418,20 @@
+ }
+ 
+ static unsigned wf_power_targets(const wf_power_context *context)
+-{ return context->wlan_busy ? 3u + RF_WIFI_BW_COUNT + context->wlan_plan.votes : context->firmware ? 3u + RF_WIFI_BW_COUNT : 3u; }
++{ return context->adsp_busy ? 66u : context->wlan_busy ? 3u + RF_WIFI_BW_COUNT + context->wlan_plan.votes : context->firmware ? 3u + RF_WIFI_BW_COUNT : 3u; }
+ static uint32_t wf_power_address(wf_power_context *context, unsigned target)
+ {
+-    return target < 3 ? wf_arc_address[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bcm[target - 3u].address :
++    return target >=64 ? context->adsp_resource[target-64].address : target < 3 ? wf_arc_address[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bcm[target - 3u].address :
+         context->wlan_plan.vote[target - 3u - RF_WIFI_BW_COUNT].address;
+ }
+ static uint32_t wf_power_data(wf_power_context *context, unsigned target)
+ {
+-    return target < 3 ? wf_arc_selector[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bandwidth[target - 3u] :
++    return target >=64 ? context->adsp_selector[target-64] : target < 3 ? wf_arc_selector[target] : target < 3u + RF_WIFI_BW_COUNT ? context->bandwidth[target - 3u] :
+         context->wlan_plan.vote[target - 3u - RF_WIFI_BW_COUNT].value;
+ }
+ static bool wf_power_child_live(wf_power_context *context)
+-{ return !context->wlan_busy || (context->wlan_policy && context->wlan_context && !context->wlan_policy(context->wlan_context)); }
++{ return (!context->wlan_busy || (context->wlan_policy && context->wlan_context && !context->wlan_policy(context->wlan_context))) &&
++    (!context->adsp_busy || (context->adsp_policy && context->adsp_context && !context->adsp_policy(context->adsp_context))); }
+ 
+ static bool wf_power_rsc_guard(wf_power_context *context)
+ {
+@@ -445,7 +458,8 @@
+         wf_power_check(context) || !wf_power_rsc_guard(context) || !wf_power_tables(context, false) ||
+         !wf_power_child_live(context)) return EPERM;
+     if (unit == WFP_RSC) {
+-        if (context->phase != WFP_ARC || context->target >= wf_power_targets(context) || context->step >= 13) return EPERM;
++        if (context->phase != WFP_ARC || context->target >= wf_power_targets(context) ||
++            (context->adsp_busy && context->target < 64) || context->step >= 13) return EPERM;
+         static const uint32_t offsets[13] = {
+             0xd30, 0xd34, 0xd38, 0xd10, 0xd1c, 0xd14, 0xd14, 0xd14, 0xd14, 0xd14, 0xd1c, 0xd10, 0xd08};
+         const uint32_t values[13] = {0x10108, wf_power_address(context, context->target), wf_power_data(context, context->target),
+@@ -507,7 +521,7 @@
+ 
+ static int wf_power_vote(wf_power_context *context, unsigned target)
+ {
+-    if (target >= wf_power_targets(context) || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
++    if (target >= wf_power_targets(context) || (context->adsp_busy && target<64) || !wf_power_tables(context, false) || !wf_power_rsc_guard(context) ||
+         !wf_power_child_live(context) ||
+         wf_power_word(context, WFP_RSC, 0xd04u) || !wf_power_word(context, WFP_RSC, 0xd18u)) return EBUSY;
+     context->target = target; context->step = 0;
+@@ -530,12 +544,15 @@
+     if (!complete) return ETIMEDOUT;
+     if (target < 3) context->held |= 1u << target;
+     else if (target < 3u + RF_WIFI_BW_COUNT) context->bandwidth_held |= 1u << (target - 3u);
++    else if(target>=64)context->adsp_held|=1u<<(target-64);
+     else context->wlan_held |= 1u << (target - 3u - RF_WIFI_BW_COUNT);
+     if (target < 3)
+         IOLog("REDFIN WIFI POWER: ARC address=%#x selector=%u held=1 polls=%u IRQ=%#x CMD=%#x\n",
+             wf_arc_address[target], wf_arc_selector[target], context->polls, context->irq, context->command_status);
+     else if (target < 3u + RF_WIFI_BW_COUNT) IOLog("REDFIN WIFI POWER: BCM address=%#x value=%#x held=1 polls=%u IRQ=%#x CMD=%#x\n",
+         wf_power_address(context, target), wf_power_data(context, target), context->polls, context->irq, context->command_status);
++    else if(target>=64)IOLog("REDFIN SENSORS: ARC address=%#x selector=%u accepted=1 IRQ=%#x CMD=%#x\n",
++        wf_power_address(context,target),wf_power_data(context,target),context->irq,context->command_status);
+     else IOLog("REDFIN WIFI WLAN: VRM vote=%u address=%#x value=%u accepted=1 polls=%u IRQ=%#x CMD=%#x\n",
+         target - 3u - RF_WIFI_BW_COUNT, wf_power_address(context, target), wf_power_data(context, target),
+         context->polls, context->irq, context->command_status);
+@@ -663,6 +680,8 @@
+     if (base_held && context->wlan_busy && context->wlan_attempted && context->wlan_resources_valid &&
+         context->wlan_policy && context->wlan_context && context->phase == WFP_ARC &&
+         context->wlan_plan.votes && context->wlan_plan.votes <= RF_WLAN_MAX_VOTES && wf_power_rsc_guard(context)) return 0;
++    if(base_held&&context->adsp_busy&&context->adsp_attempted&&context->adsp_context&&
++        context->adsp_policy&&context->phase==WFP_ARC&&wf_power_rsc_guard(context))return 0;
+     return base_held && context->phase == WFP_AOP_ON &&
+         wf_power_word(context, WFP_RSC, 0xd04u) == 0 &&
+         wf_power_word(context, WFP_RSC, 0xd14u) == 0 &&
+@@ -674,6 +693,45 @@
+ {
+     return !redfin_wifi_power_held() && wf_power_tables(&wf_power, false) &&
+         wf_power_rsc_guard(&wf_power) ? 0 : EPERM;
++}
++
++/* Called only by the established CPU0 WLAN owner, between radio polls. All
++ * AOP/RSC operations remain on that same thread; there is no second writer.
++ * LCX/LMX selectors are decoded from actual CMD-DB and preserve foreign floors.
++ * Votes remain held until the complete platform resets, even on failure. */
++extern "C" int redfin_sensor_power_start(void *child,int (*policy)(void *))
++{
++    wf_power_context *c=&wf_power;
++    if(!child||!policy||c->adsp_attempted||!c->wlan_powered||c->wlan_busy||
++        redfin_wifi_power_audit()||policy(child))return EPERM;
++    static const uint8_t names[2][8]={"lcx.lvl","lmx.lvl"};
++    for(unsigned i=0;i<2;++i) {
++        rf_cmddb_resource *r=&c->adsp_resource[i];
++        if(rf_cmddb_lookup((const volatile uint8_t *)c->base[WFP_DB],RF_CMDDB_BYTES,names[i],RF_CMDDB_ARC,r)!=RF_CMDDB_OK||
++            r->type!=RF_CMDDB_ARC||r->aux_version!=0x1000||r->address%4)return ENXIO;
++        int selector=wf_selector(r,384);if(selector<0)return ENXIO;
++        c->adsp_selector[i]=(uint32_t)selector;
++        for(unsigned slot=1;slot<8;++slot)for(unsigned command=0;command<c->commands;++command) {
++            const wf_slot *s=&c->inherited[slot];if(!(s->enabled&(1u<<command)))continue;
++            if((s->command[command][1]&~3u)!=r->address)continue;
++            uint32_t held=s->command[command][2];
++            if(s->command[command][1]!=r->address||!(s->command[command][0]&(1u<<16))||
++                held>=r->level_count||(!r->levels[held]&&held))return EPERM;
++            if(held>c->adsp_selector[i])c->adsp_selector[i]=held;
++        }
++    }
++    if(c->adsp_resource[0].address==c->adsp_resource[1].address)return EPERM;
++    c->adsp_attempted=true;c->adsp_context=child;c->adsp_policy=policy;
++    if(!wf_power_tables(c,false)||!wf_power_rsc_guard(c))return EPERM;
++    c->adsp_busy=true;c->phase=WFP_ARC;
++    int error=wf_power_vote(c,64);if(!error)error=wf_power_vote(c,65);
++    if(!error){c->phase=WFP_AOP_ON;c->adsp_busy=false;}
++    const rf_wifi_aop_ops operations={c,wf_power_check,wf_power_aop_read,wf_power_aop_write,wf_power_aop_notify,wf_power_pause};
++    if(!error)error=rf_wifi_aop_adsp_state(&c->aop,&operations,1);
++    if(!error&&(c->adsp_held!=3||redfin_wifi_power_audit()||policy(child)))error=EPERM;
++    if(error)c->poisoned=true;
++    IOLog("REDFIN SENSORS: native power result=%d ARC=%#x AOP=%u same-worker=1 retained=1\n",error,c->adsp_held,c->aop.adsp_load_state);
++    return error;
+ }
+ 
+ static bool wf_wlan_platform(bool power)
+diff --git a/iokit/Kernel/arm/redfin_wifi_fw_start.inc b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
+--- a/iokit/Kernel/arm/redfin_wifi_fw_start.inc
++++ b/iokit/Kernel/arm/redfin_wifi_fw_start.inc
+@@ -940,6 +940,8 @@
+         }
+     }
+ }
++#include "redfin_sensor_native.inc"
++
+ static int fw_start_transport_run(fw_start_context *context)
+ {
+     context->phase = FW_START_GLINK;
+@@ -994,6 +996,7 @@
+         if (context->packets_started) {
+             error = fw_start_packets_poll(context, now);
+             if (error) return error;
++            sn_poll();
+         }
+         if (now >= next_report) {
+             IOLog("REDFIN WIFI GLINK: version=%u channel=%u ack=%u open=%u RX=%#x heard=%u sent=%u packets=%u services=%u WLFW=%#x\n",
+diff --git a/iokit/Kernel/arm/redfin_sensor_native.inc b/iokit/Kernel/arm/redfin_sensor_native.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_sensor_native.inc
+@@ -0,0 +1,381 @@
++/* SPDX-License-Identifier: MIT
++ * Native Redfin ADSP/PAS1, included by the one established WLAN owner.
++ * Preferred HackiOS8e611870 redwood_adsp.c startup/SMEM/QRTR was reviewed;
++ * its64MiB/0x86700000 reservation and LPASS MMIO do not apply to Redfin.
++ * All firmware/calibration comes from private source-backed resident assets.
++ */
++#include "redfin_sensor_assets.h"
++#include "../../../bsd/dev/redfin_ssc_client.h"
++#include <sys/vnode.h>
++#include <sys/stat.h>
++#include <sys/uio.h>
++#include <sys/kauth.h>
++extern "C" int redfin_sensor_power_start(void *,int (*)(void *));
++extern "C" void redfin_sensor_hid_sample(unsigned,const rf_ssc_sensor *);
++extern "C" void redfin_sensor_hid_withdraw(unsigned);
++extern "C" uint32_t redfin_sensor_hid_interval(unsigned);
++enum {SN_SOURCE=1,SN_POWER,SN_RESET,SN_METADATA,SN_INIT,SN_SETUP,SN_SMP,SN_COPY,SN_AUTH,SN_READY,SN_LINK,SN_RUNNING};
++struct sn_context {
++    unsigned attempted,active,failed,phase,power,reset,initialized,setup,auth_attempted,authenticated;
++    unsigned copies,stores,peer_seen,hello,announced,ssc_started,queue_head,queue_tail,queue_count;
++    uint64_t source_bytes,nonce,started,report_at,function;
++    uint8_t source_sha[32];
++    uint8_t *source_data;
++    fw_start_map destination;
++    rf_sensor_assets assets;rf_sensor_image image;
++    rf_wifi_smp2p_session smp;rf_wifi_smp2p_ops smp_ops;
++    rf_glink glink;rf_glink_ops glink_ops;
++    rf_host host;rf_host_ops host_ops;
++    rf_ssc_client ssc;rf_ssc_ops ssc_ops;
++    uint32_t peer,ssc_node,ssc_port;
++    uint8_t queue[32][RF_HOST_BLOCK+64];uint32_t queue_bytes[32];
++    uint8_t transport[RF_HOST_BLOCK+128];
++};
++static sn_context sn;
++static uint64_t sn_ns(void *)
++{
++    uint64_t ticks=__builtin_arm_rsr64("CNTPCT_EL0");
++    return (ticks/19200000u)*1000000000u+(ticks%19200000u)*1000000000u/19200000u;
++}
++static bool sn_contract(bool capture)
++{
++    DTEntry node;uint64_t bytes=0,hardware[8]={};
++    static const char expected_path[]="/redfin/firmware/native-sensors.bundle";
++    char path[sizeof(expected_path)]={};
++    uint32_t proof=0,witness[10]={};uint8_t digest[32]={};
++    static const uint64_t expected[8]={RF_SENSOR_BASE,RF_SENSOR_MEMORY,0x80900000,0x200000,0x1f40000,0x20000,0x408000,0x1000};
++    static const uint32_t contract[10]={1,1,2,443,429,3,0,2,384,384};
++    if(SecureDTLookupEntry(NULL,"/redfin-sensors",&node)!=kSuccess||
++        !fw_property(node,"source-path",path,sizeof(path))||memcmp(path,expected_path,sizeof(path))||
++        !fw_property(node,"bundle-bytes",&bytes,sizeof(bytes))||
++        !fw_property(node,"bundle-sha256",digest,sizeof(digest))||
++        !fw_property(node,"live-fdt-verified",&proof,sizeof(proof))||proof!=1||
++        !fw_property(node,"source-contract",witness,sizeof(witness))||memcmp(witness,contract,sizeof(contract))||
++        !fw_property(node,"hardware-reg",hardware,sizeof(hardware))||memcmp(hardware,expected,sizeof(hardware))||
++        bytes<64||bytes>32u*1024u*1024u)return false;
++    if(capture){sn.source_bytes=bytes;memcpy(sn.source_sha,digest,32);}
++    else if(sn.source_bytes!=bytes||memcmp(sn.source_sha,digest,32))return false;
++    return true;
++}
++static int sn_check(void *opaque)
++{
++    if(opaque!=&sn||!sn.active||sn.failed||!redfin_wifi_gui_ready()||
++        current_thread()!=fw_probe.owner||sn.nonce!=fw_probe.nonce||fw_start_glink_check(&fw_start))return EPERM;
++    if(sn.destination.map&&(sn.destination.map->getVirtualAddress()!=sn.destination.base||sn.destination.map->getLength()!=RF_SENSOR_MEMORY))return EPERM;
++    return 0;
++}
++static bool sn_valid(void *p){return !sn_check(p);}
++static int sn_barrier(void *p){if(sn_check(p))return EPERM;__asm__ volatile("dsb osh":::"memory");return sn_check(p);}
++static int sn_map(fw_start_map *m,uint64_t base,uint64_t bytes,bool write)
++{
++    if(sn_check(&sn)||m->map||!sn_contract(false))return EPERM;
++    m->memory=IOMemoryDescriptor::withPhysicalAddress(base,bytes,write?kIODirectionInOut:kIODirectionIn);
++    m->map=m->memory?m->memory->map(kIOMapWriteCombineCache|(write?0:kIOMapReadOnly)):NULL;
++    if(!m->map||!m->map->getVirtualAddress()||m->map->getLength()!=bytes)return ENOMEM;
++    m->base=(uintptr_t)m->map->getVirtualAddress();return sn_check(&sn);
++}
++static int sn_read_source(void)
++{
++    if(sn_check(&sn)||sn.source_data||!sn_contract(false))return EPERM;
++    vfs_context_t context=vfs_context_kernel();vnode_t vnode=NULL;
++    int error=vnode_lookup("/redfin/firmware/native-sensors.bundle",VNODE_LOOKUP_NOFOLLOW,&vnode,context);
++    if(error)return error;
++    struct vnode_attr attr;VATTR_INIT(&attr);VATTR_WANTED(&attr,va_data_size);VATTR_WANTED(&attr,va_uid);VATTR_WANTED(&attr,va_mode);
++    error=vnode_getattr(vnode,&attr,context);
++    if(!error&&(vnode_vtype(vnode)!=VREG||!VATTR_IS_SUPPORTED(&attr,va_data_size)||
++        !VATTR_IS_SUPPORTED(&attr,va_uid)||!VATTR_IS_SUPPORTED(&attr,va_mode)||attr.va_data_size!=sn.source_bytes||
++        attr.va_uid!=0||(attr.va_mode&022)))error=EPERM;
++    if(!error){sn.source_data=(uint8_t *)IOMalloc((vm_size_t)sn.source_bytes);if(!sn.source_data)error=ENOMEM;}
++    for(uint64_t at=0;!error&&at<sn.source_bytes;) {
++        int n=(int)(sn.source_bytes-at);if(n>65536)n=65536;int residual=n;
++        error=vn_rdwr(UIO_READ,vnode,(caddr_t)(sn.source_data+at),n,(off_t)at,UIO_SYSSPACE,0,
++            vfs_context_ucred(context),&residual,vfs_context_proc(context));
++        if(!error&&(residual||sn_check(&sn)))error=EIO;
++        if(!error)at+=(unsigned)n;
++    }
++    vnode_put(vnode);
++    /* Keep the bounded immutable copy for the DSP's later TFTP requests. Its
++     * whole-container and per-record hashes are checked before any PAS call. */
++    return error;
++}
++static void sn_delay(void *p,unsigned us)
++{if(sn_check(p)||us>30000)return;if(us>=1000)IOSleep((us+999)/1000);else IODelay(us);}
++static int sn_invoke(void *p,rf_sq_regs *r)
++{
++    if(!r||sn_check(p)||!sn.power||!sn.function||(r->x[0]!=sn.function&&r->x[0]!=1))return EPERM;
++    register uint64_t x0 __asm__("x0")=r->x[0],x1 __asm__("x1")=r->x[1],x2 __asm__("x2")=r->x[2],
++        x3 __asm__("x3")=r->x[3],x4 __asm__("x4")=r->x[4],x5 __asm__("x5")=r->x[5],x6 __asm__("x6")=r->x[6],x7 __asm__("x7")=0;
++    __asm__ volatile("dsb sy\n\tsmc #0\n\tdsb sy": "+r"(x0),"+r"(x1),"+r"(x2),"+r"(x3),"+r"(x4),"+r"(x5),"+r"(x6),"+r"(x7):
++        :"x8","x9","x10","x11","x12","x13","x14","x15","x16","x17","cc","memory");
++    r->x[0]=x0;r->x[1]=x1;r->x[2]=x2;r->x[3]=x3;r->x[4]=x4;r->x[5]=x5;r->x[6]=x6;r->x[7]=x7;
++    return sn_check(p);
++}
++static int sn_pas(unsigned command)
++{
++    if(sn_check(&sn)||!sn.power||!sn_contract(false)||redfin_wifi_power_audit()||
++       (command==6&&(sn.phase!=SN_RESET||sn.auth_attempted))||
++       (command==1&&(sn.phase!=SN_INIT||!sn.reset||sn.initialized))||
++       (command==2&&(sn.phase!=SN_SETUP||!sn.initialized||sn.setup))||
++       (command==5&&(sn.phase!=SN_AUTH||!sn.setup||!sn.reset||!sn.auth_attempted||sn.authenticated||sn.smp.stage!=RF_WIFI_SMP2P_ARMED)))return EPERM;
++    rf_sq_regs request={{0}},live;request.x[0]=UINT64_C(0x42000200)|command;
++    request.x[1]=command==1?0x82:command==2?3:1;request.x[2]=1;
++    request.x[3]=command==1||command==2?RF_SENSOR_BASE:0;request.x[4]=command==2?RF_SENSOR_MEMORY:0;
++    live=request;sn.function=request.x[0];unsigned calls=0,busy=0,resumes=0;uint64_t first=sn_ns(NULL);
++    int error=0;int64_t status=0;uint64_t value=0;
++    do {
++        if(sn_ns(NULL)-first>UINT64_C(10000000000)){error=ETIMEDOUT;break;}
++        error=sn_invoke(&sn,&live);++calls;if(error)break;
++        status=(int64_t)live.x[0];value=live.x[1];
++        if(status==1){if(++resumes>1024){error=ETIMEDOUT;break;}continue;}
++        if(status==-12&&busy++<3){sn_delay(&sn,30000);live=request;continue;}
++        if(status||value)error=EIO;break;
++    }while(true);
++    sn.function=0;
++    IOLog("REDFIN SENSORS: PAS1 command=%u result=%d status=%lld value=%#llx calls=%u resumes=%u\n",command,error,status,value,calls,resumes);
++    return error;
++}
++static int sn_copy(uint32_t offset,const uint8_t *data,uint32_t bytes)
++{
++    if(sn_check(&sn)||!sn.reset||sn.auth_attempted||!sn.destination.base||!bytes||bytes>65536||
++        offset>RF_SENSOR_MEMORY||bytes>RF_SENSOR_MEMORY-offset||
++        (sn.phase!=SN_METADATA&&sn.phase!=SN_COPY))return EPERM;
++    uint8_t *destination=(uint8_t *)sn.destination.base+offset;
++    if(data)memcpy(destination,data,bytes);else memset(destination,0,bytes);
++    __asm__ volatile("dsb osh":::"memory");
++    const volatile uint8_t *actual=destination;
++    for(uint32_t i=0;i<bytes;++i)if(actual[i]!=(data?data[i]:0))return EIO;
++    ++sn.copies;return sn_check(&sn);
++}
++static int sn_reset(void *p){return !sn_check(p)&&sn.reset&&!sn.auth_attempted?0:EPERM;}
++static int sn_started(void *p){return !sn_check(p)&&sn.authenticated?0:EPERM;}
++static int sn_lock(void *p,uint32_t ms){return sn_check(p)?EPERM:fw_start_lock(&fw_start,ms);}
++static int sn_unlock(void *){return fw_start_unlock(&fw_start);}
++static int sn_write(void *p,uint32_t offset,uint32_t value)
++{
++    if(sn_check(p)||offset%4||offset>REDFIN_SMEM_BYTES-4)return EPERM;
++    /* Both allocators validate their exact host2 item/FIFO target before this
++     * callback; recheck the selected private heap for an independent bound. */
++    redfin_smem_report heap={};
++    if(redfin_smem_inspect_host((const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base,
++        REDFIN_SMEM_BYTES,2,&heap)!=REDFIN_SMEM_OK||offset<heap.partition_offset||
++        offset>heap.partition_offset+heap.partition_bytes-4)return EPERM;
++    ++sn.stores;return fw_start_smem_write(&fw_start,offset,value);
++}
++static int sn_notify(void *p,unsigned signal)
++{
++    if(sn_check(p)||(signal!=0&&signal!=2))return EPERM;
++    __asm__ volatile("dsb oshst":::"memory");
++    *(volatile uint32_t *)(fw_start.mapping[FW_START_IPCC].base+0xc)=0x30000u|signal;
++    __asm__ volatile("dsb osh":::"memory");return sn_check(p);
++}
++static int sn_kick(void *p){return sn_notify(p,2);}
++static int sn_gl_kick(void *p){return sn_notify(p,0);}
++static int sn_ms(void *p,uint64_t *ms){if(!ms||sn_check(p))return EPERM;*ms=sn_ns(p)/1000000u;return 0;}
++static int sn_pause(void *p,uint32_t us){if(sn_check(p)||!us||us>1000)return EPERM;IODelay(us);return sn_check(p);}
++static int sn_gl_check(void *p)
++{
++    if(sn_check(p)||!sn.authenticated||sn.smp.stage!=RF_WIFI_SMP2P_READY||sn.smp.poisoned||!sn.smp.peer)return EPERM;
++    uint32_t offset=sn.smp.peer+36+20*sn.smp.slave_index;
++    if(sn.smp.slave_index>=16||offset>REDFIN_SMEM_BYTES-4)return EPERM;
++    return (redfin_smem_u32((const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base+offset)&3)==2?0:EPERM;
++}
++static int sn_gl_lock(void *p){return sn_gl_check(p)?EPERM:sn_lock(p,1000);}
++static int sn_payload(void *p,uint32_t offset,const uint8_t *data,uint32_t bytes)
++{
++    uint32_t tx=sn.glink.tx;
++    if(sn_gl_check(p)||!tx||!data||!bytes||bytes>16384||(offset|bytes)%4||offset<tx||offset-tx>16384-bytes)return EPERM;
++    memcpy((void *)(fw_start.mapping[FW_START_SMEM].base+offset),data,bytes);
++    return sn_barrier(p);
++}
++static int sn_queue(uint32_t type,uint32_t from,uint32_t node,uint32_t to,const uint8_t *data,uint32_t bytes)
++{
++    if(sn_gl_check(&sn)||!data||!bytes||bytes>RF_HOST_BLOCK+4||sn.queue_count>=32)return ENOBUFS;
++    uint8_t *q=sn.queue[sn.queue_head];uint32_t n=32+((bytes+3)&~3u);memset(q,0,n);
++    const uint32_t fields[8]={1,type,1,from,0,bytes,node,to};
++    for(unsigned i=0;i<8;++i)rf_gl_encode(q+i*4,fields[i]);memcpy(q+32,data,bytes);
++    sn.queue_bytes[sn.queue_head]=n;sn.queue_head=(sn.queue_head+1)%32;++sn.queue_count;return 0;
++}
++static int sn_control(uint32_t type,uint32_t from,uint32_t node,uint32_t to,uint32_t a,uint32_t b,uint32_t c=0,uint32_t d=0)
++{uint8_t data[20];uint32_t v[5]={type,a,b,c,d};for(unsigned i=0;i<5;++i)rf_gl_encode(data+i*4,v[i]);return sn_queue(type,from,node,to,data,sizeof(data));}
++static int sn_host_send(void *,uint32_t from,uint32_t node,uint32_t to,const uint8_t *data,uint32_t bytes)
++{return sn_queue(1,from,node,to,data,bytes);}
++static int sn_lookup(void *,const char *name,const uint8_t **data,uint32_t *bytes)
++{
++    if(strncmp(name,"image/",6)||sn_gl_check(&sn))return ENOENT;
++    char key[80];if(strlen(name+6)>70)return ENOENT;
++    snprintf(key,sizeof(key),"fw/%s",name+6);const rf_sensor_asset *a=rf_sensor_asset_find(&sn.assets,key);
++    if(!a)return ENOENT;*data=a->data;*bytes=a->bytes;return 0;
++}
++static void sn_host_event(void *,unsigned kind,const char *name,uint32_t bytes)
++{IOLog("REDFIN SENSORS: host event=%u file=%.150s bytes=%u\n",kind,name,bytes);}
++static int sn_pd(uint32_t source,uint32_t from,const uint8_t *data,uint32_t bytes)
++{
++    if(bytes<7||bytes>4096||data[0]||rf_host_le16(data+5)!=bytes-7)return EINVAL;
++    uint16_t msg=rf_host_le16(data+3);uint8_t response[512]={2};
++    memcpy(response+1,data+1,4);response[7]=2;response[8]=4;unsigned used=14;
++    char service[80]={};unsigned found=0;
++    for(unsigned at=7;at<bytes;) {
++        if(bytes-at<3)return EINVAL;
++        unsigned type=data[at],n=rf_host_le16(data+at+1);at+=3;if(n>bytes-at)return EINVAL;
++        if(type==1&&msg==0x21) {
++            if(found++||!n||n>=sizeof(service))return EINVAL;
++            for(unsigned i=0;i<n;++i)if(data[at+i]<32||data[at+i]>126)return EINVAL;
++            memcpy(service,data+at,n);
++        }
++        at+=n;
++    }
++    if(msg==0x21&&found) {
++        static const char *const domains[3]={"root_pd","sensor_pd","audio_pd"};unsigned count=0;
++        const rf_sensor_asset *match[3]={};
++        for(unsigned i=0;i<3;++i) {
++            char key[80];if(snprintf(key,sizeof(key),"pd/%s/%s",domains[i],service)>=(int)sizeof(key))return EINVAL;
++            match[i]=rf_sensor_asset_find(&sn.assets,key);if(match[i]){if(match[i]->bytes!=12)return EINVAL;++count;}
++        }
++        response[used++]=0x10;response[used++]=2;response[used++]=0;rf_host_le_put(response+used,count,2);used+=2;
++        response[used++]=0x11;response[used++]=2;response[used++]=0;response[used++]=1;response[used++]=0;
++        if(count) {
++            response[used++]=0x12;unsigned length_at=used;used+=2;response[used++]=(uint8_t)count;
++            for(unsigned i=0;i<3;++i)if(match[i]) {
++                char domain[48];int n=snprintf(domain,sizeof(domain),"msm/adsp/%s",domains[i]);
++                response[used++]=(uint8_t)n;memcpy(response+used,domain,n);used+=(unsigned)n;
++                memcpy(response+used,match[i]->data,4);used+=4;response[used++]=(uint8_t)rf_sa32(match[i]->data+4);
++                memcpy(response+used,match[i]->data+8,4);used+=4;
++            }
++            rf_host_le_put(response+length_at,used-length_at-2,2);
++        }
++        IOLog("REDFIN SENSORS: native pd service=%.79s actual-domains=%u\n",service,count);
++    } else if(msg!=0x20){response[10]=1;response[12]=0x5e;}
++    rf_host_le_put(response+5,used-7,2);return sn_queue(1,0x4001,source,from,response,used);
++}
++static int sn_ssc_send(void *,const uint8_t *data,uint32_t bytes)
++{return sn.ssc_port?sn_queue(1,0x4004,sn.ssc_node,sn.ssc_port,data,bytes):ENXIO;}
++static void sn_sample(void *,unsigned kind,const rf_ssc_sensor *sensor)
++{
++    redfin_sensor_hid_sample(kind,sensor);
++    if(sensor->samples==1||sensor->samples%1024==0)IOLog("REDFIN SENSORS: sample datatype=%s name=%.79s count=%u status=%u values=%u fixed=%d,%d,%d ticks=%llu\n",
++        rf_ssc_datatype(kind),sensor->name,sensor->samples,sensor->status,sensor->values,sensor->fixed[0],sensor->fixed[1],sensor->fixed[2],sensor->ticks);
++}
++static void sn_withdraw(void *,unsigned kind){redfin_sensor_hid_withdraw(kind);}
++static void sn_event(void *,const char *event,unsigned a,unsigned b)
++{IOLog("REDFIN SENSORS: SSC event=%s a=%u b=%u\n",event,a,b);}
++static void sn_packet(void *,const uint8_t *data,uint32_t length)
++{
++    uint32_t type,source,from,confirm,size,destination,to,at;
++    if(length>=32&&rf_gl_u32(data)==1) {
++        type=rf_gl_u32(data+4);source=rf_gl_u32(data+8);from=rf_gl_u32(data+12);confirm=rf_gl_u32(data+16);
++        size=rf_gl_u32(data+20);destination=rf_gl_u32(data+24);to=rf_gl_u32(data+28);at=32;
++    }else if(length>=16&&data[0]==3&&!(data[2]&~1u)) {
++        type=data[1];confirm=data[2]&1;size=rf_gl_u32(data+4);source=rf_host_le16(data+8);from=rf_host_le16(data+10);
++        destination=rf_host_le16(data+12);to=rf_host_le16(data+14);at=16+data[3];
++        if(from==0xfffe)from=0xfffffffeu;if(to==0xfffe)to=0xfffffffeu;
++    }else {sn.failed=1;return;}
++    if(at>length||!size||size>length-at||confirm>1||(destination!=1&&destination!=UINT32_MAX)){sn.failed=1;return;}
++    if(!sn.peer_seen){sn.peer=source;sn.peer_seen=1;}
++    if(source!=sn.peer){sn.failed=1;return;}
++    if(confirm&&sn_control(7,to,source,from,destination,to)){sn.failed=1;return;}
++    const uint8_t *p=data+at;int error=0;
++    if(type==2) {
++        if(!(sn.hello&2)){sn.hello|=3;error=sn_control(2,0xfffffffeu,source,0xfffffffeu,0,0);}
++    }else if(type==4&&to==0xfffffffeu&&size==20) {
++        uint32_t service=rf_gl_u32(p+4),instance=rf_gl_u32(p+8),node=rf_gl_u32(p+12),port=rf_gl_u32(p+16);
++        IOLog("REDFIN SENSORS: QRTR service=%u version=%u instance=%u node=%u port=%#x\n",service,instance&255,instance>>8,node,port);
++        if(service==RF_SNS_SERVICE&&(instance&255)==RF_SNS_VERSION&&node==source&&port) {
++            if(sn.ssc_port&&(sn.ssc_node!=node||sn.ssc_port!=port)){sn.failed=1;return;}
++            sn.ssc_node=node;sn.ssc_port=port;
++        }
++    }else if(type==5&&size==20&&rf_gl_u32(p+4)==RF_SNS_SERVICE){error=ENXIO;}
++    else if(type==1&&to==0x4001)error=sn_pd(source,from,p,size);
++    else if(type==1&&to==0x4002)error=rf_host_tftp_request(&sn.host,&sn.host_ops,source,from,p,size);
++    else if(type==1&&to>=0x4100&&to<0x5100)error=rf_host_tftp_packet(&sn.host,&sn.host_ops,source,from,to,p,size);
++    else if(type==1&&to==0x4004&&source==sn.ssc_node&&from==sn.ssc_port)error=rf_ssc_receive(&sn.ssc,p,size);
++    if(error){IOLog("REDFIN SENSORS: QRTR failed=%d type=%u to=%#x\n",error,type,to);sn.failed=1;}
++}
++static int sn_start(void)
++{
++    sn.active=1;sn.phase=SN_SOURCE;sn.nonce=fw_probe.nonce;sn.started=sn_ns(NULL);
++    if(!sn_contract(true)||sn_check(&sn))return EPERM;
++    int error=sn_read_source();if(error)return error;
++    const uint8_t *data=sn.source_data;
++    if(rf_sensor_assets_open(&sn.assets,data,(size_t)sn.source_bytes,sn.source_sha,redfin_mpss_kernel_sha256,NULL)||
++        rf_sensor_image_open(&sn.image,&sn.assets))return EINVAL;
++    IOLog("REDFIN SENSORS: source verified assets=%u segments=%u native-reservation=%#llx/%#x\n",sn.assets.count,sn.image.count,RF_SENSOR_BASE,RF_SENSOR_MEMORY);
++    sn.phase=SN_POWER;error=redfin_sensor_power_start(&sn,sn_check);if(error)return error;sn.power=1;
++    sn.phase=SN_RESET;error=sn_pas(6);if(error)return error;sn.reset=1;
++    error=sn_map(&sn.destination,RF_SENSOR_BASE,RF_SENSOR_MEMORY,true);if(error)return error;
++    sn.phase=SN_METADATA;error=sn_copy(0,sn.image.metadata,sn.image.metadata_bytes);if(error)return error;
++    sn.phase=SN_INIT;error=sn_pas(1);if(error)return error;sn.initialized=1;
++    sn.phase=SN_SETUP;error=sn_pas(2);if(error)return error;sn.setup=1;
++    sn.smp.remote_pid=2;
++    sn.smp_ops={(const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base,REDFIN_SMEM_BYTES,&sn,sn_check,
++        sn_reset,sn_started,sn_lock,sn_unlock,sn_write,sn_barrier,sn_kick,sn_ms,sn_pause};
++    sn.phase=SN_SMP;error=rf_wifi_smp2p_prepare(&sn.smp,&sn.smp_ops);if(error)return error;
++    sn.phase=SN_COPY;
++    for(unsigned i=0;i<sn.image.count;++i) {
++        const rf_sensor_segment *s=&sn.image.segment[i];
++        for(uint32_t at=0;at<s->memory;) {
++            uint32_t n=at<s->bytes?s->bytes-at:s->memory-at;if(n>65536)n=65536;
++            error=sn_copy(s->physical-(uint32_t)RF_SENSOR_BASE+at,at<s->bytes?s->data+at:NULL,n);if(error)return error;at+=n;
++        }
++        /* This same owner services WLAN/MPSS between native sensor segments. */
++        error=fw_start_packets_poll(&fw_start,fw_start_ns(&fw_start));if(error)return error;
++    }
++    if(!sn_contract(false)||redfin_wifi_power_audit())return EPERM;
++    error=rf_wifi_smp2p_auth_begin(&sn.smp,&sn.smp_ops);if(error)return error;
++    sn.phase=SN_AUTH;sn.auth_attempted=1;error=sn_pas(5);if(error)return error;sn.authenticated=1;sn.reset=0;
++    sn.phase=SN_READY;error=rf_wifi_smp2p_wait_ready(&sn.smp,&sn.smp_ops,10000);
++    IOLog("REDFIN SENSORS: SMP2P ready=%d state=%#x handover=%u copies=%u elapsed-ms=%llu\n",error,sn.smp.last_state,sn.smp.handover,sn.copies,(sn_ns(NULL)-sn.started)/1000000u);
++    if(error)return error;
++    sn.phase=SN_LINK;sn.glink.remote_host=2;
++    sn.glink_ops={&sn,(const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base,sn_gl_check,sn_gl_lock,sn_unlock,
++        sn_write,sn_barrier,sn_gl_kick,sn_packet,sn_payload};
++    sn.host_ops={&sn,sn_gl_check,sn_lookup,sn_host_send,sn_host_event};
++    sn.ssc_ops={&sn,sn_gl_check,sn_ssc_send,sn_ns,sn_sample,sn_withdraw,sn_event};
++    error=rf_gl_init(&sn.glink,&sn.glink_ops);if(error)return error;
++    error=rf_gl_say(&sn.glink,&sn.glink_ops,0,1,1,NULL,0);if(!error)sn.phase=SN_RUNNING;
++    return error;
++}
++static void sn_poll(void)
++{
++    if(sn.failed)return;
++    if(!sn.attempted) {
++        if(!fw_start.interface_timed)return;
++        DTEntry node;if(SecureDTLookupEntry(NULL,"/redfin-sensors",&node)!=kSuccess)return;
++        sn.attempted=1;int error=sn_start();
++        IOLog("REDFIN SENSORS: start result=%d phase=%u reset=%u auth=%u retained=1 same-worker=1\n",error,sn.phase,sn.reset,sn.authenticated);
++        if(error){sn.failed=1;return;}
++    }
++    int error=rf_wifi_smp2p_alive(&sn.smp,&sn.smp_ops);
++    if(error==RF_WIFI_SMP2P_UNSTABLE)return;
++    if(!error)error=rf_gl_pump(&sn.glink,&sn.glink_ops);
++    if(error==RF_GL_AGAIN)error=0;
++    if(!error&&sn.glink.open&&!(sn.hello&1)) {sn.hello|=1;error=sn_control(2,0xfffffffeu,UINT32_MAX,0xfffffffeu,0,0);}
++    if(!error&&sn.glink.open&&!sn.announced) {
++        error=sn_control(4,0xfffffffeu,UINT32_MAX,0xfffffffeu,64,0x101,1,0x4001);
++        if(!error)error=sn_control(4,0xfffffffeu,UINT32_MAX,0xfffffffeu,4096,1,1,0x4002);
++        if(!error)sn.announced=1;
++    }
++    while(!error&&sn.queue_count) {
++        error=rf_gl_send_packet(&sn.glink,&sn.glink_ops,sn.queue[sn.queue_tail],sn.queue_bytes[sn.queue_tail],sn.transport,sizeof(sn.transport));
++        if(error==RF_GL_AGAIN){error=0;break;}if(error)break;
++        sn.queue_tail=(sn.queue_tail+1)%32;--sn.queue_count;
++    }
++    if(!error&&sn.ssc_port&&!sn.ssc_started){sn.ssc_started=1;error=rf_ssc_begin(&sn.ssc,&sn.ssc_ops,&sn.assets);}
++    if(!error&&sn.ssc_started) {
++        for(unsigned i=0;i<RF_SENSOR_COUNT;++i) {
++            uint32_t interval=redfin_sensor_hid_interval(i);
++            if(interval)error=rf_ssc_set_interval(&sn.ssc,i,interval);
++            if(error)break;
++        }
++        if(!error)error=rf_ssc_poll(&sn.ssc);
++    }
++    uint64_t now=sn_ns(NULL);
++    if(now>=sn.report_at) {
++        sn.report_at=now+UINT64_C(5000000000);
++        IOLog("REDFIN SENSORS: GLINK open=%u packets=%u SSC=%#x registry=%u pending=%u error=%d\n",sn.glink.open,sn.glink.packets,sn.ssc_port,sn.ssc.registry_verified,sn.ssc.pending,error);
++        if(!sn_contract(false))error=EPERM;
++    }
++    if(error||sn.failed) {
++        IOLog("REDFIN SENSORS: stopped error=%d phase=%u glink=%u/%u changed=%u offset=%#x retained=1\n",error,sn.phase,sn.glink.last_command,sn.glink.last_p1,sn.glink.changed_reason,sn.glink.changed_offset);
++        rf_ssc_stop(&sn.ssc);sn.failed=1;
++    }
++}
+diff --git a/iokit/Kernel/arm/redfin_sensor_assets.h b/iokit/Kernel/arm/redfin_sensor_assets.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_sensor_assets.h
+@@ -0,0 +1,82 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_SENSOR_ASSETS_H
++#define REDFIN_SENSOR_ASSETS_H
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#define RF_SENSOR_BASE UINT64_C(0x89200000)
++#define RF_SENSOR_MEMORY 0x02800000u
++#define RF_SENSOR_ASSETS_MAX 512u
++struct rf_sensor_asset {char name[80];const uint8_t *data;uint32_t bytes;};
++struct rf_sensor_assets {uint32_t count;struct rf_sensor_asset file[RF_SENSOR_ASSETS_MAX];};
++typedef int (*rf_sensor_sha_fn)(void *,const uint8_t *,size_t,uint8_t[32]);
++static inline uint32_t rf_sa32(const uint8_t *p)
++{return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
++static inline uint64_t rf_sa64(const uint8_t *p){return rf_sa32(p)|(uint64_t)rf_sa32(p+4)<<32;}
++static inline int rf_sensor_assets_open(struct rf_sensor_assets *out,const uint8_t *data,size_t bytes,
++    const uint8_t expected[32],rf_sensor_sha_fn sha,void *context)
++{
++    if(!out||!data||!expected||!sha||bytes<64||bytes>32u*1024u*1024u)return -1;
++    out->count=0;uint8_t digest[32];
++    if(sha(context,data,bytes,digest)||memcmp(digest,expected,32)||memcmp(data,"RFSSC01\0",8)||
++        rf_sa32(data+8)!=1||rf_sa64(data+16)!=bytes)return -1;
++    for(unsigned i=24;i<64;++i)if(data[i])return -1;
++    unsigned count=rf_sa32(data+12);if(!count||count>RF_SENSOR_ASSETS_MAX||64+count*128>bytes)return -1;
++    uint64_t cursor=64+count*128;
++    for(unsigned i=0;i<count;++i) {
++        const uint8_t *r=data+64+i*128;unsigned name=0;
++        while(name<80&&r[name]) {
++            unsigned c=r[name++];
++            if(c=='.'&&name>=2&&r[name-2]=='.')return -1;
++            if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='/'||c=='_'||c=='.'||c=='-'))return -1;
++        }
++        if(!name||name>=80||r[0]=='/')return -1;
++        for(unsigned j=name;j<80;++j)if(r[j])return -1;
++        uint64_t at=rf_sa64(r+80),n=rf_sa64(r+88);
++        if(at!=cursor||!n||n>16u*1024u*1024u||at>bytes||n>bytes-at)return -1;
++        for(unsigned j=0;j<i;++j)if(!memcmp(out->file[j].name,r,80))return -1;
++        if(sha(context,data+at,(size_t)n,digest)||memcmp(digest,r+96,32))return -1;
++        memcpy(out->file[i].name,r,80);out->file[i].data=data+at;out->file[i].bytes=(uint32_t)n;
++        cursor=(at+n+15)&~UINT64_C(15);if(cursor>bytes)return -1;
++        for(uint64_t j=at+n;j<cursor;++j)if(data[j])return -1;
++    }
++    if(cursor!=bytes)return -1;
++    out->count=count;return 0;
++}
++static inline const struct rf_sensor_asset *rf_sensor_asset_find(const struct rf_sensor_assets *s,const char *name)
++{
++    if(!s||!name||s->count>RF_SENSOR_ASSETS_MAX)return NULL;
++    for(unsigned i=0;i<s->count;++i)if(!strcmp(s->file[i].name,name))return &s->file[i];
++    return NULL;
++}
++struct rf_sensor_segment {uint32_t physical,bytes,memory;const uint8_t *data;};
++struct rf_sensor_image {const uint8_t *metadata;uint32_t metadata_bytes,count;struct rf_sensor_segment segment[64];};
++static inline int rf_sensor_image_open(struct rf_sensor_image *image,const struct rf_sensor_assets *assets)
++{
++    if(!image)return -1;
++    const struct rf_sensor_asset *a=rf_sensor_asset_find(assets,"fw/adsp.mdt");
++    if(!a||a->bytes<52||a->bytes>16384||memcmp(a->data,"\x7f" "ELF\1\1\1",7)||
++       rf_sa32(a->data+28)!=52||a->data[40]!=52||a->data[41]||a->data[42]!=32||a->data[43])return -1;
++    unsigned ph=a->data[44]|(unsigned)a->data[45]<<8;
++    if(ph<2||ph>64||52+ph*32>a->bytes)return -1;
++    image->metadata=a->data;image->metadata_bytes=a->bytes;image->count=0;
++    uint32_t lowest=UINT32_MAX,highest=0;
++    for(unsigned i=0;i<ph;++i) {
++        const uint8_t *p=a->data+52+i*32;
++        uint32_t pa=rf_sa32(p+12),n=rf_sa32(p+16),memory=rf_sa32(p+20),flags=rf_sa32(p+24);
++        if(rf_sa32(p)!=1||(flags&0x7000000)==0x2000000||!memory)continue;
++        if(pa<RF_SENSOR_BASE||pa>=RF_SENSOR_BASE+RF_SENSOR_MEMORY||memory>RF_SENSOR_BASE+RF_SENSOR_MEMORY-pa||n>memory)return -1;
++        for(unsigned j=0;j<image->count;++j)if(pa<image->segment[j].physical+image->segment[j].memory&&
++            image->segment[j].physical<pa+memory)return -1;
++        const struct rf_sensor_asset *part=NULL;
++        if(n) {
++            char name[12]="fw/adsp.b00";name[9]=(char)('0'+i/10);name[10]=(char)('0'+i%10);
++            part=rf_sensor_asset_find(assets,name);if(!part||part->bytes!=n)return -1;
++        }
++        struct rf_sensor_segment *s=&image->segment[image->count++];
++        s->physical=pa;s->bytes=n;s->memory=memory;s->data=part?part->data:NULL;
++        if(pa<lowest)lowest=pa;if(pa+memory>highest)highest=pa+memory;
++    }
++    return !image->count||lowest!=RF_SENSOR_BASE||highest!=RF_SENSOR_BASE+RF_SENSOR_MEMORY?-1:0;
++}
++#endif
+diff --git a/bsd/dev/redfin_ssc_protocol.h b/bsd/dev/redfin_ssc_protocol.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_ssc_protocol.h
+@@ -0,0 +1,71 @@
++/* SPDX-License-Identifier: MIT */
++/* Native SEE/SSC client wire format. This codec contains no firmware, sensor
++ * identity, calibration or fabricated samples. All numbers come from the
++ * discovered SSC service and its actual protobuf messages. */
++#ifndef REDFIN_SSC_PROTOCOL_H
++#define REDFIN_SSC_PROTOCOL_H
++#include <stdint.h>
++#include <stddef.h>
++#include <stdbool.h>
++
++#define RF_SNS_SERVICE 400u
++#define RF_SNS_VERSION 1u
++#define RF_SNS_REQUEST_MAX 1000u
++#define RF_SNS_REPORT_MAX 62000u
++#define RF_SNS_EVENT_MAX 512u
++#define RF_SNS_VALUES_MAX 16u
++enum { RF_SNS_QMI_REQUEST=0x20, RF_SNS_QMI_REPORT=0x21, RF_SNS_QMI_JUMBO=0x22 };
++enum { RF_SNS_ATTR_REQUEST=1,RF_SNS_DISABLE_REQUEST=10,RF_SNS_ATTR_EVENT=128,
++    RF_SNS_ERROR_EVENT=130,RF_SNS_LOOKUP_REQUEST=512,RF_SNS_CONFIG_REQUEST=513,
++    RF_SNS_ON_CHANGE_REQUEST=514,RF_SNS_LOOKUP_EVENT=768,
++    RF_SNS_PROXIMITY_EVENT=769,RF_SNS_SAMPLE_EVENT=1025 };
++enum { RF_SNS_OK,RF_SNS_ARGUMENT,RF_SNS_TRUNCATED,RF_SNS_FORMAT,RF_SNS_LIMIT,
++    RF_SNS_RANGE,RF_SNS_CALLBACK };
++struct rf_sns_slice {const uint8_t *data;uint32_t bytes;};
++struct rf_sns_suid {uint64_t low,high;};
++struct rf_sns_pb {struct rf_sns_slice input;uint32_t offset,fields;};
++struct rf_sns_field {uint32_t number,wire;uint64_t scalar;struct rf_sns_slice data;};
++struct rf_sns_event {uint32_t id;uint64_t ticks;struct rf_sns_slice payload;};
++struct rf_sns_sample {uint32_t bits[RF_SNS_VALUES_MAX],count,status;};
++struct rf_sns_proximity {uint32_t near,adc,status;};
++struct rf_sns_attribute {uint32_t id;struct rf_sns_slice value;};
++struct rf_sns_qmi {
++    uint16_t transaction,message,result,error;
++    uint8_t indication,has_client,has_sensor_result;
++    uint64_t client;
++    uint32_t sensor_result;
++    struct rf_sns_slice payload;
++};
++typedef int (*rf_sns_event_fn)(void *,const struct rf_sns_suid *,const struct rf_sns_event *);
++typedef int (*rf_sns_attribute_fn)(void *,const struct rf_sns_attribute *);
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++/* next returns 1 for a field, 0 at the exact end, or a negative RF_SNS error. */
++int rf_sns_next(struct rf_sns_pb *,struct rf_sns_field *);
++int rf_sns_suid_decode(struct rf_sns_slice,struct rf_sns_suid *);
++int rf_sns_lookup_decode(struct rf_sns_slice,struct rf_sns_slice *datatype,
++    struct rf_sns_suid *,uint32_t capacity,uint32_t *count);
++int rf_sns_events(struct rf_sns_slice,rf_sns_event_fn,void *);
++int rf_sns_attributes(struct rf_sns_slice,rf_sns_attribute_fn,void *);
++int rf_sns_sample_decode(struct rf_sns_slice,struct rf_sns_sample *);
++int rf_sns_proximity_decode(struct rf_sns_slice,struct rf_sns_proximity *);
++/* Integer-only IEEE754 conversion, usable in a kernel without FP state. It
++ * refuses nonfinite/overflow input instead of wrapping or inventing a value. */
++int rf_sns_float_fixed(uint32_t bits,uint32_t numerator,uint32_t denominator,int32_t *);
++
++/* Encoders return the positive encoded length, or a negative RF_SNS error. */
++int rf_sns_lookup_body(uint8_t *,uint32_t,const char *,bool updates,bool default_only);
++int rf_sns_rate_body(uint8_t *,uint32_t,uint32_t ieee754_rate);
++int rf_sns_request(uint8_t *,uint32_t,const struct rf_sns_suid *,uint32_t message,
++    const uint8_t *body,uint32_t body_bytes);
++int rf_sns_qmi_request(uint8_t *,uint32_t,uint16_t transaction,const uint8_t *,uint32_t,bool jumbo);
++int rf_sns_qmi_decode(const uint8_t *,uint32_t,struct rf_sns_qmi *);
++/* Validate an actual registry read response contains every named item in a
++ * previously written fragment. Item ordering/extra native items are allowed. */
++int rf_sns_registry_contains(struct rf_sns_slice actual,struct rf_sns_slice expected);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/bsd/dev/redfin_ssc_protocol.c b/bsd/dev/redfin_ssc_protocol.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_ssc_protocol.c
+@@ -0,0 +1,376 @@
++/* SPDX-License-Identifier: MIT */
++#include "redfin_ssc_protocol.h"
++#include <string.h>
++
++static uint32_t le32(const uint8_t *p)
++{return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
++static uint64_t le64(const uint8_t *p)
++{return le32(p)|(uint64_t)le32(p+4)<<32;}
++static uint16_t le16(const uint8_t *p)
++{return (uint16_t)p[0]|(uint16_t)p[1]<<8;}
++static void put16(uint8_t *p,uint16_t n){p[0]=(uint8_t)n;p[1]=(uint8_t)(n>>8);}
++static void put32(uint8_t *p,uint32_t n)
++{for(unsigned i=0;i<4;++i)p[i]=(uint8_t)(n>>(8*i));}
++static void put64(uint8_t *p,uint64_t n)
++{for(unsigned i=0;i<8;++i)p[i]=(uint8_t)(n>>(8*i));}
++static int varint(struct rf_sns_pb *p,uint64_t *out)
++{
++    uint64_t v=0;
++    for(unsigned i=0;i<10;++i) {
++        if(p->offset>=p->input.bytes)return -RF_SNS_TRUNCATED;
++        unsigned b=p->input.data[p->offset++];
++        if(i==9 && (b&0xfe))return -RF_SNS_RANGE;
++        v|=(uint64_t)(b&127)<<(7*i);
++        if(!(b&128)){*out=v;return 0;}
++    }
++    return -RF_SNS_FORMAT;
++}
++int rf_sns_next(struct rf_sns_pb *p,struct rf_sns_field *f)
++{
++    if(!p||!f||!p->input.data||p->input.bytes>RF_SNS_REPORT_MAX||p->offset>p->input.bytes)
++        return -RF_SNS_ARGUMENT;
++    if(p->offset==p->input.bytes)return 0;
++    if(++p->fields>8192)return -RF_SNS_LIMIT;
++    uint64_t key=0;int error=varint(p,&key);if(error)return error;
++    if(!(key>>3)||key>>3>0x1fffffff)return -RF_SNS_FORMAT;
++    memset(f,0,sizeof(*f));f->number=(uint32_t)(key>>3);f->wire=(uint32_t)(key&7);
++    if(!f->wire){error=varint(p,&f->scalar);return error?error:1;}
++    uint64_t bytes=0;
++    if(f->wire==1)bytes=8;
++    else if(f->wire==5)bytes=4;
++    else if(f->wire==2){error=varint(p,&bytes);if(error)return error;}
++    else return -RF_SNS_FORMAT; /* Deprecated groups have no SSC use. */
++    if(bytes>p->input.bytes-p->offset)return -RF_SNS_TRUNCATED;
++    f->data=(struct rf_sns_slice){p->input.data+p->offset,(uint32_t)bytes};
++    if(f->wire==1)f->scalar=le64(f->data.data);
++    if(f->wire==5)f->scalar=le32(f->data.data);
++    p->offset+=(uint32_t)bytes;return 1;
++}
++int rf_sns_suid_decode(struct rf_sns_slice input,struct rf_sns_suid *out)
++{
++    if(!out)return RF_SNS_ARGUMENT;
++    struct rf_sns_suid v={0};struct rf_sns_pb p={input,0,0};struct rf_sns_field f;
++    unsigned seen=0;int next;
++    while((next=rf_sns_next(&p,&f))>0) {
++        if(f.number!=1&&f.number!=2)continue;
++        unsigned bit=1u<<(f.number-1);
++        if(f.wire!=1||(seen&bit))return RF_SNS_FORMAT;
++        seen|=bit;if(f.number==1)v.low=f.scalar;else v.high=f.scalar;
++    }
++    if(next<0)return -next;
++    if(seen!=3||!(v.low|v.high))return RF_SNS_FORMAT;
++    *out=v;return 0;
++}
++int rf_sns_lookup_decode(struct rf_sns_slice input,struct rf_sns_slice *datatype,
++    struct rf_sns_suid *uids,uint32_t capacity,uint32_t *count)
++{
++    if(!datatype||!uids||!count||!capacity||capacity>64)return RF_SNS_ARGUMENT;
++    struct rf_sns_pb p={input,0,0};struct rf_sns_field f;unsigned found=0,n=0;int next;
++    struct rf_sns_slice type={0};
++    /* Validate before exposing any discovered sensor to the caller. */
++    while((next=rf_sns_next(&p,&f))>0) {
++        if(f.number==1) {
++            if(found||f.wire!=2||!f.data.bytes||f.data.bytes>64)return RF_SNS_FORMAT;
++            for(unsigned i=0;i<f.data.bytes;++i)
++                if(f.data.data[i]<32||f.data.data[i]>126)return RF_SNS_FORMAT;
++            found=1;type=f.data;
++        } else if(f.number==2) {
++            struct rf_sns_suid uid;
++            if(f.wire!=2)return RF_SNS_FORMAT;
++            int error=rf_sns_suid_decode(f.data,&uid);if(error)return error;
++            if(++n>capacity)return RF_SNS_LIMIT;
++        }
++    }
++    if(next<0)return -next;
++    if(!found)return RF_SNS_FORMAT;
++    p=(struct rf_sns_pb){input,0,0};n=0;
++    while(rf_sns_next(&p,&f)>0)if(f.number==2) {
++        struct rf_sns_suid uid;int error=rf_sns_suid_decode(f.data,&uid);if(error)return error;
++        for(unsigned i=0;i<n;++i)if(uids[i].low==uid.low&&uids[i].high==uid.high)return RF_SNS_FORMAT;
++        uids[n++]=uid;
++    }
++    *datatype=type;*count=n;return 0;
++}
++static int event_decode(struct rf_sns_slice input,struct rf_sns_event *event)
++{
++    struct rf_sns_pb p={input,0,0};struct rf_sns_field f;
++    struct rf_sns_event v={0};unsigned seen=0;int next;
++    while((next=rf_sns_next(&p,&f))>0) {
++        if(f.number>3)continue;
++        unsigned bit=1u<<(f.number-1);if(seen&bit)return RF_SNS_FORMAT;
++        seen|=bit;
++        if(f.number==1){if(f.wire!=5||!f.scalar||f.scalar>4095)return RF_SNS_FORMAT;v.id=(uint32_t)f.scalar;}
++        else if(f.number==2){if(f.wire!=1)return RF_SNS_FORMAT;v.ticks=f.scalar;}
++        else {if(f.wire!=2)return RF_SNS_FORMAT;v.payload=f.data;}
++    }
++    if(next<0)return -next;
++    if(seen!=7)return RF_SNS_FORMAT;
++    *event=v;return 0;
++}
++int rf_sns_events(struct rf_sns_slice input,rf_sns_event_fn callback,void *context)
++{
++    if(!callback)return RF_SNS_ARGUMENT;
++    struct rf_sns_pb p={input,0,0};struct rf_sns_field f;
++    struct rf_sns_suid uid={0};unsigned seen=0,events=0;int next;
++    while((next=rf_sns_next(&p,&f))>0) {
++        if(f.number==1) {
++            if(seen||f.wire!=2)return RF_SNS_FORMAT;
++            int error=rf_sns_suid_decode(f.data,&uid);if(error)return error;seen=1;
++        } else if(f.number==2) {
++            struct rf_sns_event event;
++            if(f.wire!=2)return RF_SNS_FORMAT;
++            int error=event_decode(f.data,&event);if(error)return error;
++            if(++events>RF_SNS_EVENT_MAX)return RF_SNS_LIMIT;
++        }
++    }
++    if(next<0)return -next;
++    if(!seen)return RF_SNS_FORMAT;
++    p=(struct rf_sns_pb){input,0,0};
++    while(rf_sns_next(&p,&f)>0)if(f.number==2) {
++        struct rf_sns_event event;int error=event_decode(f.data,&event);if(error)return error;
++        if(callback(context,&uid,&event))return RF_SNS_CALLBACK;
++    }
++    return 0;
++}
++static int attribute_decode(struct rf_sns_slice input,struct rf_sns_attribute *out)
++{
++    struct rf_sns_pb p={input,0,0};struct rf_sns_field f;struct rf_sns_attribute v={0};unsigned seen=0;int next;
++    while((next=rf_sns_next(&p,&f))>0) {
++        if(f.number>2)continue;
++        unsigned bit=1u<<(f.number-1);if(seen&bit)return RF_SNS_FORMAT;seen|=bit;
++        if(f.number==1){if(f.wire||f.scalar>INT32_MAX)return RF_SNS_RANGE;v.id=(uint32_t)f.scalar;}
++        else {if(f.wire!=2)return RF_SNS_FORMAT;v.value=f.data;}
++    }
++    if(next<0)return -next;
++    if(seen!=3)return RF_SNS_FORMAT;
++    *out=v;return 0;
++}
++int rf_sns_attributes(struct rf_sns_slice input,rf_sns_attribute_fn callback,void *context)
++{
++    if(!callback)return RF_SNS_ARGUMENT;
++    struct rf_sns_pb p={input,0,0};struct rf_sns_field f;unsigned count=0;int next;
++    while((next=rf_sns_next(&p,&f))>0)if(f.number==1) {
++        struct rf_sns_attribute value;if(f.wire!=2)return RF_SNS_FORMAT;
++        int error=attribute_decode(f.data,&value);if(error)return error;
++        if(++count>256)return RF_SNS_LIMIT;
++    }
++    if(next<0)return -next;
++    p=(struct rf_sns_pb){input,0,0};
++    while(rf_sns_next(&p,&f)>0)if(f.number==1) {
++        struct rf_sns_attribute value;int error=attribute_decode(f.data,&value);if(error)return error;
++        if(callback(context,&value))return RF_SNS_CALLBACK;
++    }
++    return 0;
++}
++static bool finite_float(uint32_t bits){return (bits&0x7f800000u)!=0x7f800000u;}
++int rf_sns_sample_decode(struct rf_sns_slice input,struct rf_sns_sample *out)
++{
++    if(!out)return RF_SNS_ARGUMENT;
++    struct rf_sns_sample v={0};struct rf_sns_pb p={input,0,0};struct rf_sns_field f;unsigned seen=0;int next;
++    while((next=rf_sns_next(&p,&f))>0) {
++        if(f.number==1) {
++            if(f.wire!=5&&f.wire!=2)return RF_SNS_FORMAT;
++            unsigned n=f.wire==5?1:f.data.bytes/4;
++            if((f.wire==2&&f.data.bytes%4)||n>RF_SNS_VALUES_MAX-v.count)return RF_SNS_LIMIT;
++            for(unsigned i=0;i<n;++i) {
++                uint32_t bits=f.wire==5?(uint32_t)f.scalar:le32(f.data.data+i*4);
++                if(!finite_float(bits))return RF_SNS_RANGE;
++                v.bits[v.count++]=bits;
++            }
++        } else if(f.number==2) {
++            if(seen||f.wire||f.scalar>3)return RF_SNS_FORMAT;
++            seen=1;v.status=(uint32_t)f.scalar;
++        }
++    }
++    if(next<0)return -next;
++    if(!seen||!v.count)return RF_SNS_FORMAT;
++    *out=v;return 0;
++}
++int rf_sns_proximity_decode(struct rf_sns_slice input,struct rf_sns_proximity *out)
++{
++    if(!out)return RF_SNS_ARGUMENT;
++    struct rf_sns_proximity v={0};struct rf_sns_pb p={input,0,0};struct rf_sns_field f;unsigned seen=0;int next;
++    while((next=rf_sns_next(&p,&f))>0) {
++        if(f.number>3)continue;
++        unsigned bit=1u<<(f.number-1);
++        if((seen&bit)||f.wire||f.scalar>UINT32_MAX)return RF_SNS_FORMAT;
++        seen|=bit;
++        if(f.number==1){if(f.scalar>1)return RF_SNS_RANGE;v.near=(uint32_t)f.scalar;}
++        else if(f.number==2)v.adc=(uint32_t)f.scalar;
++        else {if(f.scalar>3)return RF_SNS_RANGE;v.status=(uint32_t)f.scalar;}
++    }
++    if(next<0)return -next;
++    if(seen!=7)return RF_SNS_FORMAT;
++    *out=v;return 0;
++}
++int rf_sns_float_fixed(uint32_t bits,uint32_t num,uint32_t den,int32_t *out)
++{
++    if(!out||!num||num>1000000||!den||den>1000000)return RF_SNS_ARGUMENT;
++    if(!finite_float(bits))return RF_SNS_RANGE;
++    uint64_t mantissa=bits&0x7fffffu;unsigned exponent=(bits>>23)&255;
++    int shift=(exponent? (int)exponent:1)-134;
++    if(exponent)mantissa|=0x800000u;
++    uint64_t numerator=mantissa*num,denominator=den;
++    if(shift>=0) {
++        if(shift>40||numerator>(UINT64_MAX>>shift))return RF_SNS_RANGE;
++        numerator<<=shift;
++    } else {
++        unsigned right=(unsigned)-shift;
++        if(right>63||denominator>(UINT64_MAX>>right)){*out=0;return 0;}
++        denominator<<=right;
++    }
++    uint64_t value=numerator/denominator,remainder=numerator%denominator;
++    if(remainder>=denominator-remainder)++value;
++    uint64_t limit=(bits>>31)?UINT64_C(2147483648):INT32_MAX;
++    if(value>limit)return RF_SNS_RANGE;
++    *out=(bits>>31)?(value==UINT64_C(2147483648)?INT32_MIN:-(int32_t)value):(int32_t)value;
++    return 0;
++}
++struct writer {uint8_t *data;uint32_t bytes,at;int error;};
++static void append(struct writer *w,const void *data,uint32_t bytes)
++{
++    if(w->error)return;
++    if(bytes>w->bytes-w->at){w->error=RF_SNS_LIMIT;return;}
++    if(bytes)memcpy(w->data+w->at,data,bytes);w->at+=bytes;
++}
++static void scalar(struct writer *w,uint64_t value)
++{
++    do{uint8_t b=(uint8_t)(value&127);value>>=7;if(value)b|=128;append(w,&b,1);}while(value&&!w->error);
++}
++static void field_bytes(struct writer *w,unsigned field,const void *data,unsigned bytes)
++{scalar(w,field*8u+2u);scalar(w,bytes);append(w,data,bytes);}
++int rf_sns_lookup_body(uint8_t *out,uint32_t capacity,const char *name,bool updates,bool default_only)
++{
++    if(!out||!name||capacity>RF_SNS_REQUEST_MAX)return -RF_SNS_ARGUMENT;
++    unsigned bytes=0;while(bytes<64&&name[bytes]) {
++        unsigned c=(uint8_t)name[bytes];
++        if(!((c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_'))return -RF_SNS_ARGUMENT;
++        ++bytes;
++    }
++    if(!bytes||bytes==64)return -RF_SNS_ARGUMENT;
++    struct writer w={out,capacity,0,0};field_bytes(&w,1,name,bytes);
++    scalar(&w,16);scalar(&w,updates);scalar(&w,24);scalar(&w,default_only);
++    return w.error?-w.error:(int)w.at;
++}
++int rf_sns_rate_body(uint8_t *out,uint32_t capacity,uint32_t rate)
++{
++    if(!out||capacity<5||!finite_float(rate)||(rate>>31)||!(rate&0x7fffffff)||rate>0x43c80000)
++        return -RF_SNS_ARGUMENT;
++    out[0]=13;put32(out+1,rate);return 5;
++}
++int rf_sns_request(uint8_t *out,uint32_t capacity,const struct rf_sns_suid *uid,uint32_t message,
++    const uint8_t *body,uint32_t bytes)
++{
++    if(!out||!uid||!(uid->low|uid->high)||!message||message>4095||capacity>RF_SNS_REQUEST_MAX||
++        bytes>RF_SNS_REQUEST_MAX-64||(bytes&&!body))return -RF_SNS_ARGUMENT;
++    uint8_t encoded_uid[18]={9},standard[RF_SNS_REQUEST_MAX];
++    put64(encoded_uid+1,uid->low);encoded_uid[9]=17;put64(encoded_uid+10,uid->high);
++    struct writer request={standard,sizeof(standard),0,0};
++    field_bytes(&request,2,body,bytes);
++    const uint8_t suspend[4]={8,1,16,0}; /* native APSS / wakeup delivery */
++    struct writer w={out,capacity,0,0};field_bytes(&w,1,encoded_uid,sizeof(encoded_uid));
++    scalar(&w,21);uint8_t id[4];put32(id,message);append(&w,id,4);
++    field_bytes(&w,3,suspend,sizeof(suspend));field_bytes(&w,4,standard,request.at);
++    return w.error?-w.error:request.error?-request.error:(int)w.at;
++}
++int rf_sns_qmi_request(uint8_t *out,uint32_t capacity,uint16_t transaction,const uint8_t *payload,
++    uint32_t bytes,bool jumbo)
++{
++    if(!out||!transaction||!payload||!bytes||bytes>RF_SNS_REQUEST_MAX)return -RF_SNS_ARGUMENT;
++    uint32_t total=12+bytes+(jumbo?4u:0u);if(capacity<total)return -RF_SNS_LIMIT;
++    out[0]=0;put16(out+1,transaction);put16(out+3,RF_SNS_QMI_REQUEST);put16(out+5,(uint16_t)(total-7));
++    out[7]=1;put16(out+8,(uint16_t)(bytes+2));put16(out+10,(uint16_t)bytes);memcpy(out+12,payload,bytes);
++    if(jumbo){out[12+bytes]=16;put16(out+13+bytes,1);out[15+bytes]=1;}
++    return (int)total;
++}
++int rf_sns_qmi_decode(const uint8_t *data,uint32_t bytes,struct rf_sns_qmi *out)
++{
++    if(!data||!out||bytes<7||bytes>RF_SNS_REPORT_MAX+32||le16(data+5)!=bytes-7)
++        return RF_SNS_ARGUMENT;
++    struct rf_sns_qmi v={0};v.transaction=le16(data+1);v.message=le16(data+3);
++    if(data[0]==2&&v.message==RF_SNS_QMI_REQUEST&&v.transaction)v.indication=0;
++    else if(data[0]==4&&(v.message==RF_SNS_QMI_REPORT||v.message==RF_SNS_QMI_JUMBO))v.indication=1;
++    else return RF_SNS_FORMAT;
++    uint32_t seen=0;
++    for(uint32_t at=7;at<bytes;) {
++        if(bytes-at<3)return RF_SNS_TRUNCATED;
++        uint32_t type=data[at],length=le16(data+at+1);at+=3;
++        if(length>bytes-at)return RF_SNS_TRUNCATED;
++        const uint8_t *value=data+at;at+=length;
++        uint32_t bit=type==1?1u:type==2?2u:type==16?4u:type==17?8u:0u;
++        if(seen&bit)return RF_SNS_FORMAT;seen|=bit;
++        if(v.indication) {
++            if(type==1){if(length!=8)return RF_SNS_FORMAT;v.client=le64(value);v.has_client=1;}
++            else if(type==2) {
++                if(length<2||le16(value)!=length-2||length-2>(v.message==RF_SNS_QMI_JUMBO?RF_SNS_REPORT_MAX:1000u))
++                    return RF_SNS_FORMAT;
++                v.payload=(struct rf_sns_slice){value+2,length-2};
++            }
++        } else {
++            if(type==2){if(length!=4)return RF_SNS_FORMAT;v.result=le16(value);v.error=le16(value+2);}
++            else if(type==16){if(length!=8)return RF_SNS_FORMAT;v.client=le64(value);v.has_client=1;}
++            else if(type==17){if(length!=4)return RF_SNS_FORMAT;v.sensor_result=le32(value);v.has_sensor_result=1;}
++        }
++    }
++    if(v.indication) {if((seen&3)!=3||!v.payload.bytes)return RF_SNS_FORMAT;}
++    else if(!(seen&2)||v.result>1||(!v.result&&v.error))return RF_SNS_FORMAT;
++    *out=v;return 0;
++}
++static int registry_parts(struct rf_sns_slice input,struct rf_sns_slice *name,struct rf_sns_slice *items)
++{
++    struct rf_sns_pb p={input,0,0};struct rf_sns_field f;unsigned seen=0;int next;
++    while((next=rf_sns_next(&p,&f))>0)if(f.number==1||f.number==2) {
++        unsigned bit=1u<<(f.number-1);if((seen&bit)||f.wire!=2)return RF_SNS_FORMAT;
++        seen|=bit;if(f.number==1)*name=f.data;else *items=f.data;
++    }
++    return next<0?-next:seen==3?0:RF_SNS_FORMAT;
++}
++struct registry_item {struct rf_sns_slice name,value;uint32_t version,kind,wire;uint64_t scalar;};
++static int registry_item_decode(struct rf_sns_slice input,struct registry_item *out)
++{
++    struct registry_item v={0};struct rf_sns_pb p={input,0,0};struct rf_sns_field f;unsigned seen=0;int next;
++    while((next=rf_sns_next(&p,&f))>0) {
++        unsigned bit=f.number==1?1u:f.number==2?2u:f.number>=10&&f.number<=13?4u:0u;
++        if(seen&bit)return RF_SNS_FORMAT;seen|=bit;
++        if(f.number==1){if(f.wire!=2||!f.data.bytes)return RF_SNS_FORMAT;v.name=f.data;}
++        else if(f.number==2){if(f.wire!=5)return RF_SNS_FORMAT;v.version=(uint32_t)f.scalar;}
++        else if(bit==4) {
++            if(((f.number==10||f.number==11)&&f.wire!=2)||(f.number==12&&f.wire!=5)||(f.number==13&&f.wire!=1))return RF_SNS_FORMAT;
++            v.kind=f.number;v.wire=f.wire;v.value=f.data;v.scalar=f.scalar;
++        }
++    }
++    if(next<0)return -next;
++    if((seen&5)!=5)return RF_SNS_FORMAT;
++    *out=v;return 0;
++}
++static int registry_subset(struct rf_sns_slice actual,struct rf_sns_slice expected,unsigned depth)
++{
++    if(depth>=16)return RF_SNS_LIMIT;
++    struct rf_sns_pb p={expected,0,0};struct rf_sns_field f;unsigned count=0;int next;
++    while((next=rf_sns_next(&p,&f))>0)if(f.number==3) {
++        if(f.wire!=2||++count>1024)return RF_SNS_FORMAT;
++        struct registry_item e;int error=registry_item_decode(f.data,&e);if(error)return error;
++        struct rf_sns_pb a={actual,0,0};struct rf_sns_field g;unsigned found=0;int step;
++        while((step=rf_sns_next(&a,&g))>0)if(g.number==3) {
++            if(g.wire!=2)return RF_SNS_FORMAT;
++            struct registry_item v;error=registry_item_decode(g.data,&v);if(error)return error;
++            if(v.name.bytes!=e.name.bytes||memcmp(v.name.data,e.name.data,e.name.bytes))continue;
++            if(++found>1||v.version<e.version||v.kind!=e.kind)return RF_SNS_FORMAT;
++            if(v.kind==10)error=registry_subset(v.value,e.value,depth+1);
++            else if(v.wire==2)error=v.value.bytes!=e.value.bytes||memcmp(v.value.data,e.value.data,e.value.bytes)?RF_SNS_FORMAT:0;
++            else error=v.scalar!=e.scalar?RF_SNS_FORMAT:0;
++            if(error)return error;
++        }
++        if(step<0)return -step;
++        if(!found)return RF_SNS_FORMAT;
++    }
++    return next<0?-next:!count?RF_SNS_FORMAT:0;
++}
++int rf_sns_registry_contains(struct rf_sns_slice actual,struct rf_sns_slice expected)
++{
++    struct rf_sns_slice an={0},ai={0},en={0},ei={0};
++    int error=registry_parts(actual,&an,&ai);if(!error)error=registry_parts(expected,&en,&ei);
++    if(error)return error;
++    if(an.bytes!=en.bytes||memcmp(an.data,en.data,en.bytes))return RF_SNS_FORMAT;
++    return registry_subset(ai,ei,0);
++}
+diff --git a/bsd/dev/redfin_ssc_client.h b/bsd/dev/redfin_ssc_client.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_ssc_client.h
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_SSC_CLIENT_H
++#define REDFIN_SSC_CLIENT_H
++#include "redfin_ssc_protocol.h"
++#include "../../iokit/Kernel/arm/redfin_sensor_assets.h"
++#define RF_SSC_SENSORS 16u
++enum {RF_SENSOR_ACCEL,RF_SENSOR_GYRO,RF_SENSOR_MAG,RF_SENSOR_LIGHT,RF_SENSOR_PROX,
++    RF_SENSOR_PRESSURE,RF_SENSOR_TEMP,RF_SENSOR_GRAVITY,RF_SENSOR_LINEAR_ACCEL,
++    RF_SENSOR_ROTATION,RF_SENSOR_GAME_ROTATION,RF_SENSOR_GEOMAG_ROTATION,RF_SENSOR_COUNT};
++struct rf_ssc_sensor {
++    struct rf_sns_suid uid;
++    char name[80],vendor[80];
++    uint32_t found,attributes,available,stream_type,rate,configured,attribute_sent,configure_sent;
++    uint32_t samples,errors,status,values;
++    uint32_t rate_count,rates[32],requested_interval;
++    int32_t fixed[RF_SNS_VALUES_MAX];
++    uint64_t ticks,last_received;
++};
++struct rf_ssc_ops {
++    void *context;
++    int (*check)(void *);
++    int (*send)(void *,const uint8_t *,uint32_t);
++    uint64_t (*now_ns)(void *);
++    void (*sample)(void *,unsigned,const struct rf_ssc_sensor *);
++    void (*withdraw)(void *,unsigned);
++    void (*event)(void *,const char *,unsigned,unsigned);
++};
++struct rf_ssc_client {
++    unsigned begun,failed,phase,registry_index,registry_verified,lookup_index,request_kind,request_sensor;
++    uint16_t serial,pending;
++    uint64_t deadline,client;
++    unsigned client_seen,registry_found,read_verified;
++    struct rf_sns_suid registry;
++    const struct rf_sensor_assets *assets;
++    const struct rf_sensor_asset *fragment;
++    struct rf_ssc_sensor sensor[RF_SSC_SENSORS];
++    const struct rf_ssc_ops *ops;
++    uint8_t request[RF_SNS_REQUEST_MAX+32];
++};
++#ifdef __cplusplus
++extern "C" {
++#endif
++int rf_ssc_begin(struct rf_ssc_client *,const struct rf_ssc_ops *,const struct rf_sensor_assets *);
++int rf_ssc_receive(struct rf_ssc_client *,const uint8_t *,uint32_t);
++int rf_ssc_poll(struct rf_ssc_client *);
++void rf_ssc_stop(struct rf_ssc_client *);
++const char *rf_ssc_datatype(unsigned);
++int rf_ssc_set_interval(struct rf_ssc_client *,unsigned,uint32_t microseconds);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/bsd/dev/redfin_ssc_client.c b/bsd/dev/redfin_ssc_client.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_ssc_client.c
+@@ -0,0 +1,237 @@
++/* SPDX-License-Identifier: MIT
++ * Actual SSC service discovery, persisted-registry readback, attributes and
++ * samples. No configured name alone can publish an iOS sensor. */
++#include "redfin_ssc_client.h"
++#include <string.h>
++static const char *const datatype[RF_SENSOR_COUNT]={"accel","gyro","mag","ambient_light","proximity",
++    "pressure","sensor_temperature","gravity","linear_accel","rotation_vector","game_rv","geomag_rv"};
++const char *rf_ssc_datatype(unsigned i){return i<RF_SENSOR_COUNT?datatype[i]:NULL;}
++static bool uid_equal(const struct rf_sns_suid *a,const struct rf_sns_suid *b)
++{return a->low==b->low&&a->high==b->high;}
++static int gate(struct rf_ssc_client *s)
++{return !s||!s->begun||s->failed||!s->ops||s->ops->check(s->ops->context)?-1:0;}
++void rf_ssc_stop(struct rf_ssc_client *s)
++{
++    if(!s||s->failed)return;s->failed=1;
++    if(s->ops)for(unsigned i=0;i<RF_SENSOR_COUNT;++i)if(s->sensor[i].samples)s->ops->withdraw(s->ops->context,i);
++}
++static int fail(struct rf_ssc_client *s,const char *why,unsigned a,unsigned b)
++{s->ops->event(s->ops->context,why,a,b);rf_ssc_stop(s);return -1;}
++static int request(struct rf_ssc_client *s,const struct rf_sns_suid *uid,unsigned msg,
++    const uint8_t *body,unsigned bytes,unsigned kind,unsigned sensor)
++{
++    if(gate(s)||s->pending||s->serial==65535)return -1;
++    uint8_t payload[RF_SNS_REQUEST_MAX];int n=rf_sns_request(payload,sizeof(payload),uid,msg,body,bytes);
++    if(n<0)return fail(s,"encode",msg,(unsigned)-n);
++    s->pending=++s->serial;s->request_kind=kind;s->request_sensor=sensor;
++    n=rf_sns_qmi_request(s->request,sizeof(s->request),s->pending,payload,(unsigned)n,true);
++    if(n<0||s->ops->send(s->ops->context,s->request,(unsigned)n))return fail(s,"send",msg,n<0?(unsigned)-n:0);
++    s->deadline=s->ops->now_ns(s->ops->context)+UINT64_C(5000000000);return 0;
++}
++static int lookup(struct rf_ssc_client *s,const char *name,unsigned kind,unsigned sensor)
++{
++    uint8_t body[128];int n=rf_sns_lookup_body(body,sizeof(body),name,true,true);
++    const struct rf_sns_suid well={UINT64_C(0xabababababababab),UINT64_C(0xabababababababab)};
++    return n<0?-1:request(s,&well,RF_SNS_LOOKUP_REQUEST,body,(unsigned)n,kind,sensor);
++}
++int rf_ssc_begin(struct rf_ssc_client *s,const struct rf_ssc_ops *o,const struct rf_sensor_assets *assets)
++{
++    if(!s||!o||!assets||s->begun||!o->check||!o->send||!o->sample||!o->withdraw||!o->event||!o->now_ns)return -1;
++    s->begun=1;s->ops=o;s->assets=assets;s->phase=1;
++    return lookup(s,"registry",1,0);
++}
++struct attr_context {struct rf_ssc_sensor *sensor;const char *datatype;};
++static int attribute(void *context,const struct rf_sns_attribute *a)
++{
++    struct attr_context *context_info=context;
++    struct rf_ssc_sensor *s=context_info->sensor;
++    struct rf_sns_pb p={a->value,0,0};struct rf_sns_field f;unsigned count=0;int next;
++    while((next=rf_sns_next(&p,&f))>0)if(f.number==1) {
++        if(f.wire!=2||++count>128)return -1;
++        struct rf_sns_pb v={f.data,0,0};struct rf_sns_field x;unsigned seen=0;int n;
++        while((n=rf_sns_next(&v,&x))>0) {
++            if(++seen>1)return -1;
++            if(a->id<=2) {
++                if(x.number!=2||x.wire!=2||!x.data.bytes||x.data.bytes>=80)return -1;
++                char *dest=a->id==0?s->name:a->id==1?s->vendor:NULL;
++                unsigned bytes=x.data.bytes;
++                if(bytes&&x.data.data[bytes-1]==0)--bytes;
++                for(unsigned i=0;i<bytes;++i)if(x.data.data[i]<32||x.data.data[i]>126)return -1;
++                if(a->id==2&&(strlen(context_info->datatype)!=bytes||memcmp(x.data.data,context_info->datatype,bytes)))return -1;
++                if(dest){memcpy(dest,x.data.data,bytes);dest[bytes]=0;}
++                s->attributes|=1u<<a->id;
++            } else if(a->id==3) {
++                if(x.number!=5||x.wire||x.scalar>1)return -1;
++                s->available=(uint32_t)x.scalar;s->attributes|=8;
++            } else if(a->id==16) {
++                if(x.number!=4||x.wire!=1||x.scalar>2)return -1;
++                s->stream_type=(uint32_t)x.scalar;s->attributes|=16;
++            } else if(a->id==6) {
++                if(x.number!=3||x.wire!=5)return -1;
++                uint32_t bits=(uint32_t)x.scalar;
++                if((bits>>31)||!bits||bits>=0x7f800000)return -1;
++                if(s->rate_count<32)s->rates[s->rate_count++]=bits;
++                if(!(bits>>31)&&bits&&bits<=0x43c80000&&((bits<=0x42480000&&bits>s->rate)||!s->rate))s->rate=bits;
++            }
++        }
++        if(n<0)return -1;
++    }
++    return next<0?-1:0;
++}
++static int event(void *context,const struct rf_sns_suid *uid,const struct rf_sns_event *e)
++{
++    struct rf_ssc_client *s=context;
++    if(e->id==RF_SNS_LOOKUP_EVENT&&uid->low==UINT64_C(0xabababababababab)&&uid->high==uid->low) {
++        struct rf_sns_slice type={0};struct rf_sns_suid uids[16];uint32_t count=0;
++        int error=rf_sns_lookup_decode(e->payload,&type,uids,16,&count);if(error)return fail(s,"lookup-decode",error,0);
++        unsigned i;
++        if(type.bytes==8&&!memcmp(type.data,"registry",8)) {
++            if(count!=1)return fail(s,"registry-unavailable",count,0);
++            if(s->registry_found&&!uid_equal(&s->registry,&uids[0]))return fail(s,"registry-changed",0,0);
++            s->registry=uids[0];s->registry_found=1;return 0;
++        }
++        for(i=0;i<RF_SENSOR_COUNT;++i)if(strlen(datatype[i])==type.bytes&&!memcmp(datatype[i],type.data,type.bytes))break;
++        if(i==RF_SENSOR_COUNT)return 0;
++        struct rf_ssc_sensor *sensor=&s->sensor[i];
++        if(!count){if(sensor->samples)s->ops->withdraw(s->ops->context,i);memset(sensor,0,sizeof(*sensor));return 0;}
++        if(count!=1)return fail(s,"ambiguous-default",i,count);
++        if(sensor->found&&!uid_equal(&sensor->uid,&uids[0]))return fail(s,"sensor-replaced",i,0);
++        sensor->uid=uids[0];sensor->found=1;s->ops->event(s->ops->context,"discovered",i,count);return 0;
++    }
++    if(s->registry_found&&uid_equal(uid,&s->registry)) {
++        if(e->id==514&&s->phase==4&&s->fragment) {
++            struct rf_sns_slice expected={s->fragment->data,s->fragment->bytes};
++            if(rf_sns_registry_contains(e->payload,expected))return fail(s,"registry-readback",s->registry_index,0);
++            s->read_verified=1;
++        } else if(e->id==RF_SNS_ERROR_EVENT)return fail(s,"registry-error",e->id,0);
++        return 0;
++    }
++    unsigned index;for(index=0;index<RF_SENSOR_COUNT;++index)if(s->sensor[index].found&&uid_equal(uid,&s->sensor[index].uid))break;
++    if(index==RF_SENSOR_COUNT)return 0;
++    struct rf_ssc_sensor *sensor=&s->sensor[index];
++    if(e->id==RF_SNS_ATTR_EVENT) {
++        struct attr_context a={sensor,datatype[index]};int error=rf_sns_attributes(e->payload,attribute,&a);
++        if(error)return fail(s,"attributes",index,error);
++        if(!sensor->available&&sensor->samples)s->ops->withdraw(s->ops->context,index);
++        return 0;
++    }
++    if(e->id==RF_SNS_ERROR_EVENT){++sensor->errors;sensor->configured=0;s->ops->withdraw(s->ops->context,index);return 0;}
++    if(!sensor->configured||!sensor->available)return 0;
++    if((index==RF_SENSOR_PROX&&e->id!=RF_SNS_PROXIMITY_EVENT)||(index!=RF_SENSOR_PROX&&e->id!=RF_SNS_SAMPLE_EVENT))return 0;
++    uint64_t now=s->ops->now_ns(s->ops->context);
++    /* SSC and APSS use the same native 19.2MHz architectural counter. Reject
++     * repeats, future times and stale data; the backend preserves that epoch. */
++    uint64_t seconds=e->ticks/19200000u,remainder=e->ticks%19200000u;
++    if(seconds>UINT64_MAX/1000000000u)return fail(s,"timestamp-overflow",index,0);
++    uint64_t sample_ns=seconds*1000000000u+remainder*1000000000u/19200000u;
++    if(!e->ticks||e->ticks<=sensor->ticks||sample_ns>now+UINT64_C(100000000)||now>sample_ns+UINT64_C(10000000000))
++        return fail(s,"timestamp",index,0);
++    if(index==RF_SENSOR_PROX) {
++        struct rf_sns_proximity v;int error=rf_sns_proximity_decode(e->payload,&v);if(error)return fail(s,"proximity",error,0);
++        sensor->fixed[0]=(int32_t)v.near;sensor->fixed[1]=(int32_t)v.adc;sensor->values=2;sensor->status=v.status;
++    } else {
++        struct rf_sns_sample v;int error=rf_sns_sample_decode(e->payload,&v);if(error)return fail(s,"sample",index,error);
++        unsigned wanted=index<=RF_SENSOR_MAG||index==RF_SENSOR_GRAVITY||index==RF_SENSOR_LINEAR_ACCEL?3:
++            index>=RF_SENSOR_ROTATION?4:1;
++        if(v.count<wanted||v.count>6)return fail(s,"sample-dimensions",index,v.count);
++        for(unsigned i=0;i<v.count;++i) {
++            uint32_t num=1,den=1;
++            if(index==RF_SENSOR_ACCEL||index==RF_SENSOR_GRAVITY||index==RF_SENSOR_LINEAR_ACCEL){num=100000;den=980665;}
++            /* SEE pressure is hPa, native HID exposes kPa. */
++            if(index==RF_SENSOR_PRESSURE)den=10;
++            if(index==RF_SENSOR_LIGHT)den=65536; /* Native HID ALS is integer lux. */
++            error=rf_sns_float_fixed(v.bits[i],num,den,&sensor->fixed[i]);if(error)return fail(s,"sample-range",index,error);
++        }
++        sensor->values=v.count;sensor->status=v.status;
++    }
++    sensor->ticks=e->ticks;sensor->last_received=now;++sensor->samples;
++    s->ops->sample(s->ops->context,index,sensor);return 0;
++}
++int rf_ssc_receive(struct rf_ssc_client *s,const uint8_t *data,uint32_t bytes)
++{
++    if(gate(s))return -1;
++    struct rf_sns_qmi q;int error=rf_sns_qmi_decode(data,bytes,&q);if(error)return fail(s,"qmi-decode",error,bytes);
++    if(q.has_client) {
++        if(s->client_seen&&q.client!=s->client)return fail(s,"client-changed",0,0);
++        s->client=q.client;s->client_seen=1;
++    }
++    if(q.indication)return rf_sns_events(q.payload,event,s)?fail(s,"events",0,0):0;
++    if(!s->pending||q.transaction!=s->pending)return fail(s,"unexpected-response",q.transaction,s->pending);
++    if(q.result||q.error||(q.has_sensor_result&&q.sensor_result))return fail(s,"native-request-error",q.error,q.sensor_result);
++    unsigned kind=s->request_kind;s->pending=0;
++    if(kind==2)s->phase=3; /* Write ACK; now request actual registry readback. */
++    if(kind==5)++s->lookup_index;
++    if(kind==7)s->sensor[s->request_sensor].configured=1;
++    return 0;
++}
++int rf_ssc_set_interval(struct rf_ssc_client *s,unsigned index,uint32_t us)
++{
++    if(gate(s)||index>=RF_SENSOR_COUNT||us<2500||us>10000000)return -1;
++    struct rf_ssc_sensor *sensor=&s->sensor[index];
++    if(sensor->requested_interval==us)return 0;
++    sensor->requested_interval=us;
++    if(!sensor->rate_count||sensor->stream_type)return 0;
++    /* Select a real advertised rate, without kernel floating-point state. */
++    uint32_t selected=0;int32_t desired=(int32_t)((UINT64_C(1000000)<<16)/us);
++    for(unsigned i=0;i<sensor->rate_count;++i) {
++        int32_t rate=0;if(rf_sns_float_fixed(sensor->rates[i],1,1,&rate)||rate<=0||rate>400*65536)continue;
++        if(!selected)selected=sensor->rates[i];
++        int32_t chosen=0;rf_sns_float_fixed(selected,1,1,&chosen);
++        if((rate>=desired&&chosen<desired)||(rate>=desired&&rate<chosen)||(rate<desired&&chosen<desired&&rate>chosen))
++            selected=sensor->rates[i];
++    }
++    if(selected&&selected!=sensor->rate){sensor->rate=selected;sensor->configure_sent=0;}
++    return 0;
++}
++int rf_ssc_poll(struct rf_ssc_client *s)
++{
++    if(gate(s))return -1;
++    uint64_t now=s->ops->now_ns(s->ops->context);
++    if(s->pending)return now>s->deadline?fail(s,"request-timeout",s->request_kind,s->pending):0;
++    if(s->phase==1) {
++        if(!s->registry_found)return now>s->deadline?fail(s,"registry-timeout",0,0):0;
++        s->phase=2;
++    }
++    if(s->phase==2) {
++        char name[8]="reg/000";unsigned i=s->registry_index;
++        if(i>=400)return fail(s,"registry-bound",i,0);
++        name[4]=(char)('0'+i/100);name[5]=(char)('0'+i/10%10);name[6]=(char)('0'+i%10);
++        s->fragment=rf_sensor_asset_find(s->assets,name);
++        if(!s->fragment) {
++            if(!i)return fail(s,"registry-empty",0,0);
++            s->phase=5;s->ops->event(s->ops->context,"registry-verified",s->registry_verified,0);
++        } else return request(s,&s->registry,513,s->fragment->data,s->fragment->bytes,2,0);
++    }
++    if(s->phase==3) {
++        struct rf_sns_pb p={{s->fragment->data,s->fragment->bytes},0,0};struct rf_sns_field f;
++        if(rf_sns_next(&p,&f)!=1||f.number!=1||f.wire!=2||f.data.bytes>100)return fail(s,"registry-name",0,0);
++        uint8_t body[104];body[0]=10;body[1]=(uint8_t)f.data.bytes;memcpy(body+2,f.data.data,f.data.bytes);
++        s->phase=4;s->read_verified=0;
++        return request(s,&s->registry,512,body,f.data.bytes+2,3,0);
++    }
++    if(s->phase==4) {
++        if(!s->read_verified)return now>s->deadline?fail(s,"registry-read-timeout",s->registry_index,0):0;
++        ++s->registry_index;++s->registry_verified;s->phase=2;return 0;
++    }
++    if(s->phase==5&&s->lookup_index<RF_SENSOR_COUNT)return lookup(s,datatype[s->lookup_index],5,s->lookup_index);
++    for(unsigned i=0;i<RF_SENSOR_COUNT;++i) {
++        struct rf_ssc_sensor *sensor=&s->sensor[i];
++        if(!sensor->found)continue;
++        if(!sensor->attribute_sent){sensor->attribute_sent=1;return request(s,&sensor->uid,1,NULL,0,6,i);}
++        if((sensor->attributes&31)==31&&sensor->available&&!sensor->configure_sent) {
++            if(sensor->stream_type>1)continue;
++            uint8_t body[8];unsigned bytes=0;
++            if(!sensor->stream_type) {
++                if(!sensor->rate)continue;
++                int n=rf_sns_rate_body(body,sizeof(body),sensor->rate);if(n<0)return fail(s,"rate",i,0);
++                bytes=(unsigned)n;
++            }
++            sensor->configure_sent=1;
++            return request(s,&sensor->uid,sensor->stream_type?514:513,body,bytes,7,i);
++        }
++        if(sensor->samples&&sensor->configured&&!sensor->stream_type&&now-sensor->last_received>UINT64_C(10000000000)) {
++            sensor->configured=0;s->ops->withdraw(s->ops->context,i);s->ops->event(s->ops->context,"stream-stale",i,0);
++        }
++    }
++    return 0;
++}
+diff --git a/iokit/Kernel/arm/RedfinSensorHID.cpp b/iokit/Kernel/arm/RedfinSensorHID.cpp
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinSensorHID.cpp
+@@ -0,0 +1,133 @@
++/* SPDX-License-Identifier: MIT
++ * Native HID publication from actual, validated SEE samples. Each sensor owns
++ * its workloop/event cache. Failed/replaced sources terminate their service. */
++#include <IOKit/IOLib.h>
++#include <IOKit/IOWorkLoop.h>
++#include <IOKit/IOService.h>
++#include <IOKit/IOPlatformExpert.h>
++#include <libkern/c++/OSNumber.h>
++#include "hid/IOHIDEventService.h"
++#include "hid/IOHIDEvent.h"
++#include "hid/IOHIDEventFieldDefs.h"
++#include "hid/IOHIDKeys.h"
++#include "../../../bsd/dev/redfin_ssc_client.h"
++#include <kern/clock.h>
++static uint32_t intervals[RF_SENSOR_COUNT];
++class RedfinSensorHID : public IOHIDEventService {
++    OSDeclareDefaultStructors(RedfinSensorHID);
++public:
++    unsigned kind;
++    IOWorkLoop *loop;
++    IOLock *cache_lock;
++    IOHIDEvent *cached;
++    char native_name[80],native_vendor[80];
++    bool initSensor(unsigned index,const rf_ssc_sensor *s) {
++        if(!IOHIDEventService::init()||index>=RF_SENSOR_COUNT)return false;
++        kind=index;strlcpy(native_name,s->name,sizeof(native_name));strlcpy(native_vendor,s->vendor,sizeof(native_vendor));
++        loop=IOWorkLoop::workLoop();cache_lock=IOLockAlloc();
++        return loop&&cache_lock;
++    }
++    IOWorkLoop *getWorkLoop() const override {return loop;}
++    OSString *getProduct() override {return OSString::withCString(native_name);}
++    OSString *getTransport() override {return OSString::withCString("SPU");}
++    UInt32 getVendorID() override {return 0x18d1;}
++    UInt32 getProductID() override {return 0x7250+kind;}
++    UInt32 getReportInterval() override {uint32_t n=__atomic_load_n(&intervals[kind],__ATOMIC_ACQUIRE);return n?n:20000;}
++    UInt32 getPrimaryUsagePage() override {return 0x20;}
++    UInt32 getPrimaryUsage() override {
++        static const UInt32 usages[RF_SENSOR_COUNT]={0x73,0x76,0x83,0x41,0x12,0x31,0x33,0x73,0x73,0x8a,0x8a,0x8a};
++        return usages[kind];
++    }
++    bool start(IOService *provider) override {
++        if(!IOHIDEventService::start(provider))return false;
++        setProperty(kIOHIDManufacturerKey,native_vendor);
++        setProperty("SensorDataType",rf_ssc_datatype(kind));
++        setProperty("SensorSource","native-adsp-ssc");
++        setProperty("SensorCalibrationVerified",kOSBooleanTrue);
++        setProperty("EventType",eventType(),32);
++        return true;
++    }
++    UInt32 eventType() const {
++        static const UInt32 types[RF_SENSOR_COUNT]={kIOHIDEventTypeAccelerometer,kIOHIDEventTypeGyro,kIOHIDEventTypeCompass,
++            kIOHIDEventTypeAmbientLightSensor,kIOHIDEventTypeProximity,kIOHIDEventTypeAtmosphericPressure,
++            kIOHIDEventTypeTemperature,kIOHIDEventTypeAccelerometer,kIOHIDEventTypeAccelerometer,
++            kIOHIDEventTypeOrientation,kIOHIDEventTypeOrientation,kIOHIDEventTypeOrientation};
++        return types[kind];
++    }
++    IOReturn setProperties(OSObject *object) override {
++        OSDictionary *d=OSDynamicCast(OSDictionary,object);if(!d)return kIOReturnBadArgument;
++        OSObject *value=d->getObject(kIOHIDReportIntervalKey);
++        if(value) {
++            OSNumber *n=OSDynamicCast(OSNumber,value);if(!n||n->unsigned64BitValue()<2500||n->unsigned64BitValue()>10000000)return kIOReturnBadArgument;
++            __atomic_store_n(&intervals[kind],n->unsigned32BitValue(),__ATOMIC_RELEASE);
++            setProperty(kIOHIDReportIntervalKey,n);
++        }
++        return kIOReturnSuccess;
++    }
++    IOHIDEvent *copyEvent(IOHIDEventType type,IOHIDEvent * =0,IOOptionBits=0) override {
++        if(type&&type!=eventType())return NULL;
++        IOLockLock(cache_lock);IOHIDEvent *event=cached;if(event)event->retain();IOLockUnlock(cache_lock);return event;
++    }
++    IOHIDEvent *copyMatchingEvent(OSDictionary *matching) override {
++        OSNumber *type=matching?OSDynamicCast(OSNumber,matching->getObject("EventType")):NULL;
++        return copyEvent(type?type->unsigned32BitValue():0);
++    }
++    void sample(const rf_ssc_sensor *s) {
++        uint64_t raw=__builtin_arm_rsr64("CNTPCT_EL0"),now=mach_absolute_time(),elapsed=0;
++        if(s->ticks>raw)return;
++        uint64_t delta=raw-s->ticks;
++        uint64_t ns=(delta/19200000u)*1000000000u+(delta%19200000u)*1000000000u/19200000u;
++        nanoseconds_to_absolutetime(ns,&elapsed);if(elapsed>now)return;
++        uint64_t time=now-elapsed;
++        IOHIDEvent *event=NULL;
++        if(kind==RF_SENSOR_ACCEL||kind==RF_SENSOR_GRAVITY||kind==RF_SENSOR_LINEAR_ACCEL)
++            event=IOHIDEvent::accelerometerEvent(time,s->fixed[0],s->fixed[1],s->fixed[2],0,0,s->samples);
++        else if(kind==RF_SENSOR_GYRO)event=IOHIDEvent::gyroEvent(time,s->fixed[0],s->fixed[1],s->fixed[2],0,0,s->samples);
++        else if(kind==RF_SENSOR_MAG)event=IOHIDEvent::compassEvent(time,s->fixed[0],s->fixed[1],s->fixed[2],0,0,s->samples);
++        else if(kind==RF_SENSOR_LIGHT) {
++            if(s->fixed[0]<0)return;
++            event=IOHIDEvent::ambientLightSensorEvent(time,(UInt32)s->fixed[0]);
++        }else if(kind==RF_SENSOR_PROX)event=IOHIDEvent::proximityEvent(time,s->fixed[0]?kIOHIDProximityDetectionLargeBodyContact:0,(UInt32)s->fixed[0]);
++        else if(kind==RF_SENSOR_PRESSURE)event=IOHIDEvent::atmosphericPressureEvent(time,s->fixed[0],s->samples);
++        else if(kind==RF_SENSOR_TEMP)event=IOHIDEvent::temperatureEvent(time,s->fixed[0]);
++        else if(kind>=RF_SENSOR_ROTATION) {
++            event=IOHIDEvent::orientationEvent(time,kIOHIDOrientationTypeQuaternion);
++            if(event){event->setFixedValue(kIOHIDEventFieldOrientationQuatX,s->fixed[0]);event->setFixedValue(kIOHIDEventFieldOrientationQuatY,s->fixed[1]);
++                event->setFixedValue(kIOHIDEventFieldOrientationQuatZ,s->fixed[2]);event->setFixedValue(kIOHIDEventFieldOrientationQuatW,s->fixed[3]);}
++        }
++        if(!event)return;
++        IOLockLock(cache_lock);IOHIDEvent *previous=cached;cached=event;event->retain();IOLockUnlock(cache_lock);
++        OSSafeReleaseNULL(previous);dispatchEvent(event);event->release();
++    }
++    void free() override {
++        OSSafeReleaseNULL(cached);
++        if(cache_lock){IOLockFree(cache_lock);cache_lock=NULL;}
++        /* The started base holds its own retain until its gate is removed. */
++        OSSafeReleaseNULL(loop);
++        IOHIDEventService::free();
++    }
++};
++OSDefineMetaClassAndStructors(RedfinSensorHID,IOHIDEventService);
++static RedfinSensorHID *services[RF_SENSOR_COUNT];
++extern "C" uint32_t redfin_sensor_hid_interval(unsigned kind)
++{return kind<RF_SENSOR_COUNT?__atomic_load_n(&intervals[kind],__ATOMIC_ACQUIRE):0;}
++extern "C" void redfin_sensor_hid_sample(unsigned kind,const rf_ssc_sensor *sample)
++{
++    if(kind>=RF_SENSOR_COUNT||!sample||!sample->samples||!sample->name[0]||!sample->vendor[0])return;
++    RedfinSensorHID *service=services[kind];
++    if(!service) {
++        service=OSTypeAlloc(RedfinSensorHID);
++        IOService *provider=IOService::getPlatform();
++        if(!service||!provider||!service->initSensor(kind,sample)||!service->attach(provider)||!service->start(provider)) {
++            if(service){if(service->getProvider())service->detach(provider);service->release();}return;
++        }
++        services[kind]=service;service->setName(sample->name);service->registerService();
++        IOLog("REDFIN SENSORS: native HID published datatype=%s name=%.79s service=%llu\n",rf_ssc_datatype(kind),sample->name,service->getRegistryEntryID());
++    }
++    service->sample(sample);
++}
++extern "C" void redfin_sensor_hid_withdraw(unsigned kind)
++{
++    if(kind>=RF_SENSOR_COUNT)return;RedfinSensorHID *service=services[kind];services[kind]=NULL;
++    if(service){service->terminate();service->release();}
++}
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -674,3 +674,6 @@
+ bsd/skywalk/packet/pbufpool.c			optional skywalk
+ bsd/skywalk/packet/pbufpool_kern.c		optional skywalk
+ bsd/dev/cpu_copy_in_cksum_gen.c			optional skywalk
++
++bsd/dev/redfin_ssc_protocol.c		standard
++bsd/dev/redfin_ssc_client.c		standard
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -28,3 +28,5 @@
+ iokit/Kernel/arm/hid/IOHIDEvent.cpp                              optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp                  optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp             optional iokitcpp
++
++iokit/Kernel/arm/RedfinSensorHID.cpp		optional iokitcpp

@@ -20,7 +20,8 @@ DIAGNOSTIC_LIBRARY='/redfin/lib/libredfin-diagnostic.dylib'
 NETWORK_ENTITLEMENTS={'application-identifier':'com.apple.wifid','platform-application':True,
                       'com.apple.private.system-keychain':True}
 PROGRAMS={'thermald':dict(label='com.redfin.thermald',source='thermald.c',uid=0),
-          'network-check':dict(label='com.redfin.network-check',source='network-check.m',uid=0)}
+          'network-check':dict(label='com.redfin.network-check',source='network-check.m',uid=0),
+          'sensor-check':dict(label='com.redfin.sensor-check',source='sensor-check.m',uid=0)}
 NATIVE_LOGS={'com.apple.tccd':('/System/Library/PrivateFrameworks/TCC.framework/Support/tccd',
     '/private/var/mobile/Library/Logs/redfin-native-tcc.log'),
     'com.apple.assetsd':('/System/Library/Frameworks/AssetsLibrary.framework/Support/assetsd',
@@ -102,6 +103,7 @@ def build(out,cache_path=None):
                 '-miphoneos-version-min=16.0','-O2','-Wall','-Wextra','-Werror','-I',str(HERE),
                 str(HERE/record['source']),'-o',str(out/name)]
             if name=='network-check':command+=['-fobjc-arc','-fblocks','-framework','Foundation']
+            if name=='sensor-check':command+=['-fobjc-arc','-fblocks','-framework','Foundation','-framework','CoreMotion','-framework','IOKit']
             subprocess.run(command,check=True,stdout=log,stderr=log)
             entitlements=out/(name+'.entitlements.plist')
             value=NETWORK_ENTITLEMENTS if name=='network-check' else {'application-identifier':record['label'],'platform-application':True}
@@ -114,7 +116,7 @@ def build(out,cache_path=None):
         command=['xcrun','--sdk','iphoneos','clang','-arch','arm64','-isysroot',sdk,
             '-miphoneos-version-min=16.0','-O2','-Wall','-Wextra','-Werror','-fobjc-arc','-fblocks',
             '-I',str(HERE),'-dynamiclib','-install_name',DIAGNOSTIC_LIBRARY,
-            str(HERE/'native-diagnostics.m'),'-framework','Foundation','-o',str(out/'libredfin-diagnostic.dylib')]
+            str(HERE/'native-diagnostics.m'),str(HERE/'native-tcc-probe.m'),'-framework','Foundation','-o',str(out/'libredfin-diagnostic.dylib')]
         subprocess.run(command,check=True,stdout=log,stderr=log)
         subprocess.run(['codesign','--force','--sign','-','--timestamp=none','--identifier','com.redfin.native-diagnostic',
             str(out/'libredfin-diagnostic.dylib')],check=True,stdout=log,stderr=log)
@@ -125,7 +127,7 @@ def build(out,cache_path=None):
     if not abi['compatible']:raise ValueError('native platform service imports unavailable on20H392')
     report=dict(success=True,abi=abi,mobile_wifi_uuid=uuid,synthetic_password_only=True,
                 source_sha256={n:hashlib.sha256((HERE/n).read_bytes()).hexdigest()
-                    for n in ['thermald.c','network-check.m','native-diagnostics.m','native-tcc-observer.inc','graphics-exec-scope.h','gui-profile.h']},
+                    for n in ['thermald.c','network-check.m','sensor-check.m','native-diagnostics.m','native-tcc-observer.inc','native-tcc-probe.m','native-tcc-probe.h','graphics-exec-scope.h','gui-profile.h']},
                 sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.is_file() and p.name!='build.json'})
     (out/'build.json').write_text(json.dumps(report,indent=2)+'\n');return report
 

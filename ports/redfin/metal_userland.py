@@ -24,7 +24,7 @@ def job():
     return dict(Label='com.redfin.metal-check',ProgramArguments=['/redfin/bin/metal-check'],
         RunAtLoad=True,KeepAlive=False,UserName='mobile',ProcessType='Background',
         StandardOutPath=LOG_PATH,StandardErrorPath=LOG_PATH,
-        EnvironmentVariables={'FD_MESA_DEBUG':'sysmem','RWA_SOFTWARE':'0'},
+        EnvironmentVariables={'FD_MESA_DEBUG':'gmem','RWA_SOFTWARE':'0'},
         JetsamProperties={'ActiveHardMemoryLimit':512,'InactiveHardMemoryLimit':512})
 
 
@@ -34,7 +34,8 @@ def patch_launchd_cache(original):
     before=plistlib.loads(original);after=copy.deepcopy(before)
     jobs=after.get('LaunchDaemons');require(isinstance(jobs,dict),'native launchd jobs absent')
     found=[(k,v) for k,v in jobs.items() if isinstance(v,dict) and v.get('Label')==job()['Label']]
-    require(not found or found==[(JOB_PATH,job())],'conflicting Metal checker identity')
+    previous_raster=copy.deepcopy(job());previous_raster['EnvironmentVariables']['FD_MESA_DEBUG']='sysmem'
+    require(not found or found in [[(JOB_PATH,job())],[(JOB_PATH,previous_raster)]],'conflicting Metal checker identity')
     require(JOB_PATH not in jobs or bool(found),'occupied Metal checker path')
     jobs[JOB_PATH]=job()
     if after==before:return original,dict(changed=False)
@@ -246,13 +247,15 @@ def adapt_driver(text):
     text = replace_once(text,'\tint (*finish)(struct rwa_device *, char *, size_t);',
         '\tint (*finish)(struct rwa_device *, char *, size_t);\n'
         '\tint (*commands_begin)(struct rwa_device *, char *, size_t);\n'
-        '\tint (*commands_end)(struct rwa_device *, char *, size_t);')
+        '\tint (*commands_end)(struct rwa_device *, char *, size_t);\n'
+        '\tint (*raster_statistics)(struct rwa_device *,uint64_t *,size_t);')
     text = replace_once(text,'\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");',
         '\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");\n'
         '\t*(void **)&mesa.commands_begin = dlsym(mesa.handle, "rwa_commands_begin");\n'
-        '\t*(void **)&mesa.commands_end = dlsym(mesa.handle, "rwa_commands_end");')
+        '\t*(void **)&mesa.commands_end = dlsym(mesa.handle, "rwa_commands_end");\n'
+        '\t*(void **)&mesa.raster_statistics = dlsym(mesa.handle,"rwa_redfin_raster_stats");')
     text = replace_once(text,'if (mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||',
-        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL ||\n'
+        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL || mesa.raster_statistics == NULL ||\n'
         '\t    mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||')
     text = replace_once(text,'- (void)commit\n{\n\tchar why[512] = { 0 };',
         '- (void)commit\n{\n\tREDFIN_MESA_SCOPE;\n\tchar why[512] = { 0 };\n'
@@ -347,6 +350,16 @@ def adapt_driver(text):
         '\tredfin_native_argument_encoder_reflection=method_getImplementation(class_getInstanceMethod(fn,sel_getUid("newArgumentEncoderWithBufferIndex:reflection:")));\n'
         '\tinstalled = YES;\n\tclass_replaceMethod(fn,')
     text = adapt_execution(text)
+    text += '''
+/* Private readonly evidence for the paired native pixel checker. */
+int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)
+{
+    REDFIN_MESA_SCOPE;
+    if (!counts || words!=2 || ![device isKindOfClass:[RedwoodMetalDevice class]] ||
+        !mesa.raster_statistics) return -1;
+    return mesa.raster_statistics([device mesaDevice],counts,words);
+}
+'''
     return text.replace('/redwood/', '/redfin/').replace('libredwoodair.dylib', 'libredfinair.dylib')
 
 

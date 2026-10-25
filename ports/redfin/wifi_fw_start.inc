@@ -940,6 +940,8 @@ static void fw_start_qrtr_packet(void *opaque, const uint8_t *data, uint32_t len
         }
     }
 }
+#include "sensor-native.inc"
+
 static int fw_start_transport_run(fw_start_context *context)
 {
     context->phase = FW_START_GLINK;
@@ -994,6 +996,7 @@ static int fw_start_transport_run(fw_start_context *context)
         if (context->packets_started) {
             error = fw_start_packets_poll(context, now);
             if (error) return error;
+            sn_poll();
         }
         if (now >= next_report) {
             IOLog("REDFIN WIFI GLINK: version=%u channel=%u ack=%u open=%u RX=%#x heard=%u sent=%u packets=%u services=%u WLFW=%#x\n",

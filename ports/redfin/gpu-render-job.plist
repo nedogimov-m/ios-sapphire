@@ -15,7 +15,7 @@
 <key>StandardErrorPath</key><string>/private/var/mobile/Library/Logs/redfin-gpu-render.log</string>
 <key>EnvironmentVariables</key><dict>
 <key>OSMESA_SOFTWARE</key><string>0</string>
-<key>FD_MESA_DEBUG</key><string>sysmem</string>
+<key>FD_MESA_DEBUG</key><string>gmem</string>
 <key>MESA_DEBUG</key><string>context</string>
 </dict>
 </dict></plist>

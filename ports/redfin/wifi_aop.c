@@ -221,17 +221,22 @@ int rf_wifi_aop_open(struct rf_wifi_aop_session *s, const struct rf_wifi_aop_ops
     return RF_WIFI_AOP_OK;
 }
 
-int rf_wifi_aop_load_state(struct rf_wifi_aop_session *s,
-    const struct rf_wifi_aop_ops *ops, int on)
+static int load_state(struct rf_wifi_aop_session *s,
+    const struct rf_wifi_aop_ops *ops, int on, int adsp)
 {
     static const char on_text[RF_WIFI_AOP_MESSAGE_BYTES] =
         "{class: image, res: load_state, name: modem, val: on}";
     static const char off_text[RF_WIFI_AOP_MESSAGE_BYTES] =
         "{class: image, res: load_state, name: modem, val: off}";
+    static const char adsp_on[RF_WIFI_AOP_MESSAGE_BYTES] =
+        "{class: image, res: load_state, name: adsp, val: on}";
+    static const char adsp_off[RF_WIFI_AOP_MESSAGE_BYTES] =
+        "{class: image, res: load_state, name: adsp, val: off}";
     if (!s || !valid_ops(ops, 1) || (on != 0 && on != 1)) return RF_WIFI_AOP_ARGUMENT;
-    if (!s->open || s->poisoned || s->load_state != (on ? 0u : 1u)) return RF_WIFI_AOP_STATE;
+    uint32_t *state=adsp?&s->adsp_load_state:&s->load_state;
+    if (!s->open || s->poisoned || *state != (on ? 0u : 1u)) return RF_WIFI_AOP_STATE;
     uint32_t box = s->baseline.word[AOP_OUR_BOX / 4u], value;
-    const char *text = on ? on_text : off_text;
+    const char *text = adsp ? (on ? adsp_on : adsp_off) : (on ? on_text : off_text);
     int error = connected(s, ops);
     if (!error) error = rd(ops, box, &value);
     if (!error && value) error = RF_WIFI_AOP_BUSY;
@@ -254,7 +259,11 @@ int rf_wifi_aop_load_state(struct rf_wifi_aop_session *s,
     AOP_STEP(notify(s, ops));
     AOP_STEP(poll_word(s, ops, box, 0, RF_WIFI_AOP_TX_MS));
     AOP_STEP(connected(s, ops));
-    s->load_state = on ? 1u : 2u;
+    *state = on ? 1u : 2u;
 #undef AOP_STEP
     return RF_WIFI_AOP_OK;
 }
+int rf_wifi_aop_load_state(struct rf_wifi_aop_session *s,const struct rf_wifi_aop_ops *ops,int on)
+{return load_state(s,ops,on,0);}
+int rf_wifi_aop_adsp_state(struct rf_wifi_aop_session *s,const struct rf_wifi_aop_ops *ops,int on)
+{return load_state(s,ops,on,1);}

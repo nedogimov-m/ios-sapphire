@@ -35,7 +35,7 @@ static int payload(void *p,uint32_t at,const uint8_t *data,uint32_t bytes){
 static struct rf_glink_ops ops={&session,smem,check,lock,unlock,write32,barrier,kick,packet,NULL};
 uint8_t *memory(void){return smem;}
 void reset(void){memset(&session,0,sizeof(session));memset(smem,0,sizeof(smem));live=1;locked=locks=unlocks=writes=fail_write=kicks=received_bytes=unsafe=bulk_failure=0;ops.payload=NULL;}
-void option(unsigned which,unsigned value){if(which==0)live=value;if(which==1)fail_write=value;if(which==2)ops.payload=payload;if(which==3)bulk_failure=value;}
+void option(unsigned which,unsigned value){if(which==0)live=value;if(which==1)fail_write=value;if(which==2)ops.payload=payload;if(which==3)bulk_failure=value;if(which==4)session.remote_host=value;}
 int initialize(void){return rf_gl_init(&session,&ops);}
 int pump(void){int e=rf_gl_pump(&session,&ops);if(e && e!=RF_GL_AGAIN)session.poisoned=1;return e;}
 int say(void){return rf_gl_say(&session,&ops,0,1,1,NULL,0);}
@@ -216,6 +216,36 @@ class NativeGlinkTests(unittest.TestCase):
         self.library.option(0, 0)
         self.assertNotEqual(self.library.say(), 0)
         self.assertEqual(self.library.metric(10), writes)
+
+    def test_adsp_heap_selection_never_allocates_from_modem_and_cannot_change_after_init(self):
+        self.library.option(4,2)
+        self.assertNotEqual(self.library.initialize(),0)
+        self.assertEqual(self.library.metric(10),0)
+        self.setUp();self.library.option(4,2)
+        from test_wifi_smem import TOC
+        struct.pack_into('<I',self.memory,TOC+44,2<<16)
+        struct.pack_into('<I',self.memory,PART+4,2<<16)
+        self.assertEqual(self.library.initialize(),0)
+        self.assertEqual(self.library.say(),0)
+        writes=self.library.metric(10);self.library.option(4,1)
+        self.assertNotEqual(self.library.say(),0)
+        self.assertEqual(self.library.metric(10),writes)
+
+    def test_adsp_and_modem_heaps_coexist_without_cross_host_writes(self):
+        from test_wifi_smem import TOC,PART_SIZE
+        second=0x30000
+        struct.pack_into('<I',self.memory,TOC+8,2)
+        self.memory[TOC+80:TOC+128]=self.memory[TOC+32:TOC+80]
+        struct.pack_into('<I',self.memory,TOC+80,second)
+        struct.pack_into('<I',self.memory,TOC+92,2<<16)
+        self.memory[second:second+PART_SIZE]=self.memory[PART:PART+PART_SIZE]
+        struct.pack_into('<I',self.memory,second+4,2<<16)
+        before=bytes(self.memory[PART:PART+PART_SIZE])
+        self.library.option(4,2)
+        self.assertEqual(self.library.initialize(),0)
+        self.assertEqual(self.library.say(),0)
+        self.assertEqual(bytes(self.memory[PART:PART+PART_SIZE]),before)
+        self.assertGreaterEqual(self.library.metric(0),second)
 
 
 if __name__ == '__main__':

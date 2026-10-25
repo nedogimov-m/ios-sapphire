@@ -19,7 +19,7 @@ CLOCK = C.CFUNCTYPE(C.c_int, C.c_void_p, C.POINTER(C.c_uint64))
 
 
 class Session(C.Structure):
-    _fields_ = [(name, C.c_uint32) for name in ('attempted', 'stage', 'poisoned', 'allocator_locked')]
+    _fields_ = [(name, C.c_uint32) for name in ('remote_pid','bound_pid','attempted', 'stage', 'poisoned', 'allocator_locked')]
     _fields_ += [('error', C.c_int), ('platform_error', C.c_int)]
     _fields_ += [(name, C.c_uint32) for name in
                 ('partition', 'partition_bytes', 'cacheline', 'entry', 'data', 'hosts', 'version', 'toc_count', 'toc_entry')]
@@ -143,11 +143,11 @@ class Model:
         names = [('slave-kernel', state)] if names is None else names
         item = bytearray(340)
         struct.pack_into('<5I', item, 0, 0x504d5324, version | features << 8,
-                         1, 16 | len(names) << 16, restart)
+                         self.session.remote_pid or 1, 16 | len(names) << 16, restart)
         for index, (name, value) in enumerate(names):
             item[20 + index * 20:36 + index * 20] = name.encode().ljust(16, b'\0')
             struct.pack_into('<I', item, 36 + index * 20, value)
-        self.inbound = self.append(435, item, cached=cached)
+        self.inbound = self.append(443 if self.session.remote_pid==2 else 435, item, cached=cached)
         return self.inbound
 
     def append(self, item_id, payload, cached=False):
@@ -203,6 +203,26 @@ class Smp2pTests(unittest.TestCase):
         model = Model()
         self.assertEqual(self.call(model, 'prepare'), 0)
         return model
+
+    def test_native_adsp_uses_only_host2_and_never_rebinds_the_started_session(self):
+        model=Model();model.session.remote_pid=2
+        model.put(TOC+44,2<<16);model.put(PART+4,2<<16)
+        self.assertEqual(self.call(model,'prepare'),0)
+        self.assertEqual(model.u32(model.session.entry)>>16,429)
+        self.assertEqual(model.u32(model.session.data+8),2<<16)
+        self.assertEqual(model.u32(model.session.data+12),16|(1<<16))
+        self.assertEqual(model.u32(model.session.data+40),0,'ADSP must not acquire an IPA entry')
+        self.assertEqual(self.call(model,'auth_begin'),0)
+        model.started=True;model.reset_proven=False;model.peer()
+        self.assertEqual(self.call(model,'wait_ready',10),0)
+        writes=model.stores;model.session.remote_pid=1
+        self.assertNotEqual(self.call(model,'alive'),0)
+        self.assertEqual(model.stores,writes)
+
+    def test_adsp_cannot_allocate_from_the_modem_private_heap(self):
+        model=Model();model.session.remote_pid=2
+        self.assertNotEqual(self.call(model,'prepare'),0)
+        self.assertEqual(model.stores,0)
 
     def armed(self):
         model = self.prepared()
@@ -471,12 +491,14 @@ class Smp2pTests(unittest.TestCase):
         self.assertEqual(sum(event[0] == 'pause' for event in model.events), 4)
 
     def test_kernel_overlay_contains_exact_native_allocator_and_state_machine(self):
+        from test_overlay_sources import sensor_overlay
         patch = (HERE / 'wifi-smp2p.patch').read_text()
         for source, target in [('wifi_smp2p.h', 'redfin_wifi_smp2p.h'),
                                ('wifi_smp2p.c', 'redfin_wifi_smp2p.c')]:
             section = patch.split('+++ b/bsd/dev/' + target + '\n', 1)[1]
             section = section.split('diff --git ', 1)[0]
             actual = ''.join(line[1:] for line in section.splitlines(keepends=True) if line.startswith('+'))
+            actual=sensor_overlay(actual,'bsd/dev/'+target)
             expected = (HERE / source).read_text()
             expected = expected.replace('"wifi_smem.h"', '"../../iokit/bsddev/redfin_wifi_smem.h"')
             expected = expected.replace('"wifi_smp2p.h"', '"redfin_wifi_smp2p.h"')

@@ -194,9 +194,11 @@ class WifiSmemTests(unittest.TestCase):
                              (0, PART, PART_SIZE))
 
     def test_embedded_header_is_exact_copy(self):
+        from test_overlay_sources import sensor_overlay
         first = (HERE / 'wifi-probe.patch').read_text().split('\ndiff --git ', 1)[0]
         embedded = '\n'.join(line[1:] for line in first.splitlines()
                              if line.startswith('+') and not line.startswith('+++')) + '\n'
+        embedded=sensor_overlay(embedded,'iokit/bsddev/redfin_wifi_smem.h')
         self.assertEqual(embedded, (HERE / 'wifi_smem.h').read_text())
 
     def test_private_item_bounds_and_duplicate_descriptor(self):

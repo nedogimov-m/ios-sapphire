@@ -18,6 +18,11 @@ static const struct target targets[]={
     {"/redfin/bin/gui-check",0,0755},
     {"/redfin/bin/thermald",0,0755},
     {"/redfin/bin/network-check",0,0755},
+    {"/redfin/bin/sensor-check",0,0755},
+    {"/redfin/firmware/native-sensors.bundle",0,0600},
+    {"/redfin/bin/gpu-render",0,0755},
+    {"/redfin/lib/libOSMesa.8.dylib",0,0644},
+    {"/redfin/lib/libglapi.0.dylib",0,0644},
     {"/redfin/lib/libredfin-ui.dylib",0,0644},
     {"/redfin/lib/libredfin-graphics.dylib",0,0644},
     {"/redfin/lib/libredfin-eagl.dylib",0,0644},
@@ -35,11 +40,14 @@ static const struct target targets[]={
     {"/System/Library/LaunchDaemons/com.redfin.gui-check.plist",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.thermald.plist",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.network-check.plist",0,0644},
+    {"/System/Library/LaunchDaemons/com.redfin.sensor-check.plist",0,0644},
+    {"/System/Library/LaunchDaemons/com.redfin.gpu-render.plist",0,0644},
     {"/private/var/mobile/Library/Logs/redfin-ui.log",501,0600},
     {"/private/var/mobile/Library/Logs/redfin-refresh.log",501,0600},
     {"/private/var/mobile/Library/Logs/redfin-gui-check.log",501,0644},
     {"/private/var/log/redfin-thermald.log",0,0600},
     {"/private/var/log/redfin-network-check.log",0,0600},
+    {"/private/var/log/redfin-sensor-check.log",0,0600},
     {"/private/var/mobile/Library/Logs/redfin-native-tcc.log",501,0600},
     {"/private/var/mobile/Library/Logs/redfin-native-assetsd.log",501,0600},
 };
@@ -53,7 +61,7 @@ static const struct target targets[]={
 static int stage_contiguous(Volume *volume,uint32_t needed)
 {
     uint32_t total=volume->volumeHeader->totalBlocks;
-    if (total!=4194304 || !needed || needed>4096) return 0;
+    if (total!=4194304 || !needed || needed>8192) return 0;
     size_t bytes=(total+7u)/8u;unsigned char *bitmap=malloc(bytes);
     if (!bitmap) return 0;
     if (!READ(volume->allocationFile,0,bytes,bitmap)) {free(bitmap);return 0;}
@@ -109,8 +117,27 @@ int main(int argc,char **argv)
             if (!strcmp(targets[j].path,argv[i+1])) target=&targets[j];
         if (!target) return 7;
         struct stat source;
-        uint64_t maximum=!strcmp(target->path,"/redfin/lib/libredfinair.dylib") ? 16u*1024*1024 : 4u*1024*1024;
+        int sensor_firmware=!strcmp(target->path,"/redfin/firmware/native-sensors.bundle");
+        uint64_t maximum=sensor_firmware ? 32u*1024*1024 :
+            (!strcmp(target->path,"/redfin/lib/libredfinair.dylib") || !strcmp(target->path,"/redfin/lib/libOSMesa.8.dylib")) ? 16u*1024*1024 : 4u*1024*1024;
         if (lstat(argv[i],&source) || !S_ISREG(source.st_mode) || source.st_size<=0 || (uint64_t)source.st_size>maximum) return 8;
+        if(sensor_firmware) {
+            HFSPlusCatalogRecord *parent=getRecordFromPath("/redfin",volume,NULL,NULL);
+            if(!parent||parent->recordType!=kHFSPlusFolderRecord){free(parent);return 19;}
+            HFSPlusCatalogFolder *folder=(HFSPlusCatalogFolder *)parent;
+            int valid=folder->permissions.ownerID==0&&folder->permissions.groupID==0;
+            free(parent);if(!valid)return 19;
+            parent=getRecordFromPath("/redfin/firmware",volume,NULL,NULL);
+            if(!parent) {
+                if(!newFolder("/redfin/firmware",volume)||!chmodFile("/redfin/firmware",0700,volume)||
+                    !chownFile("/redfin/firmware",0,0,volume))return 19;
+                parent=getRecordFromPath("/redfin/firmware",volume,NULL,NULL);
+            }
+            if(!parent||parent->recordType!=kHFSPlusFolderRecord){free(parent);return 19;}
+            folder=(HFSPlusCatalogFolder *)parent;
+            valid=folder->permissions.ownerID==0&&folder->permissions.groupID==0&&(folder->permissions.fileMode&07777)==0700;
+            free(parent);if(!valid)return 19;
+        }
         int metal_resource=!strcmp(target->path,"/System/Library/Extensions/RedfinMetal.bundle/_CodeSignature/CodeResources");
         if ((!strcmp(target->path,"/System/Library/Extensions/RedfinMetal.bundle/RedfinMetal") ||
              !strcmp(target->path,"/System/Library/Extensions/RedfinMetal.bundle/Info.plist") || metal_resource) &&

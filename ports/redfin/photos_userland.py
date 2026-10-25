@@ -102,7 +102,7 @@ def build(out, cache_path=None):
     executable = out / 'photos-init'
     command = ['xcrun', '--sdk', 'iphoneos', 'clang', '-arch', 'arm64', '-isysroot', sdk,
                '-miphoneos-version-min=16.0', '-O2', '-fblocks', '-Wall', '-Wextra', '-Werror',
-               '-Wno-deprecated-declarations', '-I', str(HERE), str(HERE / 'photos-init.m'),
+               '-Wno-deprecated-declarations', '-I', str(HERE), str(HERE / 'photos-init.m'),str(HERE/'native-tcc-probe.m'),
                '-framework', 'Foundation', '-framework', 'Photos', '-framework', 'Security', '-o', str(executable)]
     with (out / 'build.log').open('wb') as log:
         subprocess.run(command, check=True, stdout=log, stderr=log)

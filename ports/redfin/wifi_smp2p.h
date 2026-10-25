@@ -61,6 +61,7 @@ struct rf_wifi_smp2p_ops {
 };
 
 struct rf_wifi_smp2p_session {
+    uint32_t remote_pid,bound_pid; /* zero/default1 MPSS; native ADSP/PAS1 host2 */
     uint32_t attempted, stage, poisoned, allocator_locked;
     int error, platform_error;
     uint32_t partition, partition_bytes, cacheline, entry, data;

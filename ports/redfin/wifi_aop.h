@@ -31,6 +31,7 @@ struct rf_wifi_aop_snapshot {
 struct rf_wifi_aop_session {
     struct rf_wifi_aop_snapshot baseline;
     uint32_t attempted, open, poisoned, load_state, stores, notifications;
+    uint32_t adsp_load_state;
     int error;
 };
 
@@ -68,6 +69,8 @@ int rf_wifi_aop_open(struct rf_wifi_aop_session *, const struct rf_wifi_aop_ops 
  * can make an uncertain delivery appear successful. Keep the lease quarantined.
  */
 int rf_wifi_aop_load_state(struct rf_wifi_aop_session *, const struct rf_wifi_aop_ops *, int on);
+/* Same serialized mailbox, separately tracked actual ADSP image lifecycle. */
+int rf_wifi_aop_adsp_state(struct rf_wifi_aop_session *, const struct rf_wifi_aop_ops *, int on);
 #ifdef __cplusplus
 }
 #endif

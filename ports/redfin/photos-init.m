@@ -17,6 +17,7 @@
 #include <limits.h>
 #include <sys/time.h>
 #include "gui-profile.h"
+#include "native-tcc-probe.h"
 
 extern int memorystatus_control(uint32_t, int32_t, uint32_t, void *, size_t);
 struct photo_limits {int32_t active;uint32_t active_attributes;int32_t inactive;uint32_t inactive_attributes;};
@@ -121,6 +122,9 @@ keychain_proof(const char *nonce)
 
 /* Observe Security/TCC's own answers for this signed helper. Preserve all
  * native authorization decisions; no policy override or database edit. */
+static void authorization_reply(const char *line,void *context)
+{printf("REDFIN PHOTO TCC: boot=%s %s\n",(const char *)context,line);}
+
 static void
 authorization_proof(const char *nonce)
 {
@@ -149,6 +153,7 @@ authorization_proof(const char *nonce)
         identity_matches,identity_error ? (long)CFErrorGetCode(identity_error) : 0);
     if (signing) CFRelease(signing);if (identity_error) CFRelease(identity_error);
     if (allow) CFRelease(allow);if (error) CFRelease(error);if (task) CFRelease(task);
+    redfin_native_tcc_probe(authorization_reply,(void *)nonce);
 }
 
 int main(void)

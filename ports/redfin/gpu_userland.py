@@ -65,8 +65,10 @@ def patch_launchd_cache(original,system_eagl=False):
     if job.get('Label')!=LABEL or job.get('ProgramArguments')!=['/redfin/bin/gpu-render']:
         raise ValueError('unexpected GPU diagnostic startup identity')
     found=[(key,value) for key,value in jobs.items() if value.get('Label')==LABEL]
+    previous_raster=copy.deepcopy(job)
+    previous_raster.setdefault('EnvironmentVariables',{})['FD_MESA_DEBUG']='sysmem'
     before=hashlib.sha256(original).hexdigest()
-    if len(found)>1 or (found and (found[0][0] not in (JOB_PATH,OLD_JOB_PATH) or found[0][1] not in (job,LEGACY_JOB))):
+    if len(found)>1 or (found and (found[0][0] not in (JOB_PATH,OLD_JOB_PATH) or found[0][1] not in (job,LEGACY_JOB,previous_raster))):
         raise ValueError('refusing an existing conflicting GPU job')
     if JOB_PATH in jobs and (not found or found[0][0]!=JOB_PATH):
         raise ValueError('GPU job path already belongs to a different daemon')
