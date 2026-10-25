@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V20 native composition probes PASS; diagnostic map crashes window server — 2026-10-25
+
+Sourceabda012, graphics local20261025-153037/noCI, unchanged kernel
+local20261025-134128/noCI7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V20 image75ab3c60c41fd21463548894544871306a9e88565e5fb6282fda51478212dbcc,
+nonce530e1f43c88c174c. V23 applied once; full preimages/readback/signatures/
+native readonly fsck PASS. V23 is now applied/stale; do not reuse it. V22
+remains a failed HOST-ONLY stage and must not be applied. Capture leaves clean
+consistent HFSX/write_count948533 and verified Fastboot; no kernel panic/GPU
+fault is observed.
+
+Native192compute and actual MRT/clear/scissor/viewport/attachment1-fetch,
+two vertex streams/four attributes/indexed strip/base instance/varyings,
+nearest+linear sampling, both480/4512-byte source updates/output resolves and
+same-command peer-wrapper probes all PASS actual pixels and guards;26GMEM/
+9sysmem. These successes do not establish correct system composition.
+
+The explicitly enabled draw observer crashes backboardd while CPU-mapping
+its first raw output alias; window-server restarts repeat and no valid draw
+thumbnail is emitted. FAR equals the mapped allocation end; the transfer
+helper enters a depth conversion despite the public R8_UINT buffer format.
+Source inspection identifies the alias constructor's missing internal_format
+initialization. Its correction is prepared but not built/installed at this
+checkpoint. Actual CoreAnimation blitCommandEncoder calls are also recorded:
+that unimplemented path is the next concrete implementation block. No claim
+yet that it alone explains the checkerboard. No-copy buffer requests appear
+after the diagnostic-driven restarts and remain explicitly unsupported.
+
+Both installed job cache and GUI-check plist disable automatic app launches;
+there is no current-nonce GUI-check execution. The user reconfirms Phone and
+Photos work normally and need no further automatic launch tests. Keep them
+disabled. Next finish genuine GPU blits plus native pixel/guard checks and the
+observer-map fix, build one complete block, then use a fresh V24-or-later
+root stage from generation948533 and one combined capture. Normal rendering
+also needs a later observer-disabled check. Correct GUI, smooth60/90render FPS
+and broader Wi-Fi/power/thermal/sensor/Apple authorization work remain open.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x530e1f43c88c174c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN compositor resources/diagnostics and real Scheduled boundary built; fresh V23 staged — 2026-10-25
 
 Source basea3a58ac plus this completed related block. Fix a concrete native
