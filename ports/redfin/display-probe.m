@@ -38,6 +38,9 @@
 
 static RedfinDisplayProbe *active_probe;
 static NSString *const animation_key=@"com.redfin.presentation.measure";
+static kern_return_t last_sample_status;
+static size_t last_sample_bytes;
+static struct redfin_display_statistics_v2 last_sample_value;
 static unsigned request_mode(uint64_t nonce)
 {
     int fd=open(REDFIN_DISPLAY_PROBE_REQUEST,O_RDONLY|O_NOFOLLOW);
@@ -82,6 +85,7 @@ static BOOL sample_attempts(io_connect_t client,uint64_t nonce,struct redfin_dis
         size_t bytes=sizeof(*out);memset(out,0,bytes);
         kern_return_t status=IOConnectCallMethod(client,REDFIN_DISPLAY_STATISTICS_SELECTOR_V2,&nonce,1,
             NULL,0,NULL,NULL,out,&bytes);
+        last_sample_status=status;last_sample_bytes=bytes;last_sample_value=*out;
         if (status==KERN_SUCCESS) return bytes==sizeof(*out) && redfin_display_statistics_valid_v2(out);
         if (status!=kIOReturnBusy) return NO;
         if(attempt+1<attempts)usleep(1000);
@@ -171,7 +175,9 @@ void redfin_display_probe_schedule(UIWindow *host,uint64_t nonce)
         if (service) IOObjectRelease(service);
         struct redfin_display_statistics_v2 start={0};
         if (opened!=KERN_SUCCESS || !sample(client,nonce,&start)) {
-            probe_log(nonce,"refused native completed-presentation statistics unavailable error=%#x",opened);
+            probe_log(nonce,"refused native completed-presentation statistics unavailable open-error=%#x query-error=%#x returned-bytes=%zu version=%u panel-hz=%u hardware-counter-hz=%llu",
+                opened,last_sample_status,last_sample_bytes,last_sample_value.version,last_sample_value.panel_hz,
+                (unsigned long long)last_sample_value.counter_hz);
             if (client) IOServiceClose(client);
             return;
         }

@@ -20,6 +20,16 @@ source hashes, six combined host cases and V52 readonly native fsck pass.
 Reuse the already-validated A620 queue and ordinary graphics v8 unchanged;
 actual system FPS measurements remain pending.
 
+V46 hardware runs without panic/window-server restart but refuses the ordinary
+statistics query: its capture lock exists only in capture-enabled boots. Do not
+interpret that failed observer as an FPS result. Separate native completed-pair
+publication from optional image capture; use a bounded atomic snapshot after
+real GPU completion or positive CPU copy, excluding empty/failed presents. Keep
+both legacy/physical ABI and the exact boot profile. Final-selector host coverage
+now executes the actual ordered overlays with a NULL capture lock, and concurrent
+readers verify coherent CPU/GPU pairs. UI v4 logs actual refusal details. A new
+CI kernel and actual system FPS result remain pending; preferred pins unchanged.
+
 ## Retained submission and separate native completion — 2026-10-26
 
 Review preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's msm bridge

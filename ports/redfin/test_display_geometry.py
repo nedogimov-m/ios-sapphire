@@ -68,6 +68,8 @@ STUBS = r'''
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include "gui-profile.h"
+#include "display-statistics.h"
 #include "display-geometry.h"
 static void IOLog(const char *,...) {}
 static int PE_parse_boot_argn(const char *,void *,unsigned) {return 0;}
@@ -113,6 +115,7 @@ class AppleCLCD : public IOMobileFramebuffer {public:
  uint32_t fWidth=1080,fHeight=2340,fRowBytes=4320,fLogicalW=1125,fLogicalH=2436;
  int fOffX=20,fOffY=48;uintptr_t fPixels=0;const uint8_t *fLastVA=NULL;
  SweetSurface *fSurface=NULL;uint64_t fRedfinFrames=0,fRedfinGPUFrames=0;
+ struct redfin_display_statistics_state fRedfinStatistics={};
  struct redfin_display_geometry fRedfinFit={};
  WORKSPACE_FIELD
  bool allocateRedfinFitWorkspace(void);
@@ -182,7 +185,9 @@ class SweetHIDTouch {public:
 WRAPPERS = r'''
 static struct redfin_display_workspace workspace;
 static SweetHIDTouch hid;
+static uint64_t last_presents,last_gpu_presents;
 extern "C" {
+uint64_t native_presents(unsigned gpu){return gpu?last_gpu_presents:last_presents;}
 void set_gpu_present_result(int value){gpu_present_result=value;}
 bool geometry(unsigned mode,unsigned w,unsigned h,unsigned cw,unsigned ch,struct redfin_display_geometry *g){
  return redfin_display_geometry_make(mode,w,h,cw,ch,g);
@@ -213,6 +218,7 @@ unsigned present(unsigned mode,uint8_t *pixels,const struct redfin_display_surfa
  uint8_t record[0x46c]={};put32(record,0x104,1);put32(record,0x54,1);
  for(unsigned i=0;i<4;i++){put32(record,0x64+i*4,(uint32_t)a[i]);put32(record,0xc4+i*4,(uint32_t)b[i]);}
  releases=locks=barriers=0;fb->present(record);
+ assert(redfin_display_statistics_read(&fb->fRedfinStatistics,&last_presents,&last_gpu_presents));
  unsigned result=releases|(locks<<8)|(barriers<<16);fb->free();delete fb;current_surface=NULL;return result;
 }
 unsigned workspace_lifecycle(unsigned mode,bool fault){
@@ -340,7 +346,7 @@ class DisplayGeometryTests(unittest.TestCase):
         library = directory / 'display.so'
         result = subprocess.run([compiler, '-std=c++17', '-O2', '-Wall', '-Wextra', '-Werror',
                                  '-Wno-unused-parameter', '-Wno-unused-function', '-Wno-misleading-indentation',
-                                 '-shared', '-fPIC', str(source), '-o', str(library)], capture_output=True, text=True)
+                                 '-shared', '-fPIC', '-I', str(HERE), str(source), '-o', str(library)], capture_output=True, text=True)
         if result.returncode:
             raise RuntimeError(result.stderr)
         cls.lib = C.CDLL(str(library))
@@ -427,6 +433,8 @@ class DisplayGeometryTests(unittest.TestCase):
             for result in (1,-1):
                 self.lib.set_gpu_present_result(result)
                 self.assertEqual(self.lib.present(2,output,C.byref(surface),rect,rect,0),0)
+                self.assertEqual((self.lib.native_presents(0),self.lib.native_presents(1)),
+                                 (1,1) if result==1 else (0,0))
                 self.assertEqual(bytes(output),original_output)
                 self.assertEqual(bytes(source),original_source)
         finally:
@@ -504,6 +512,7 @@ class DisplayGeometryTests(unittest.TestCase):
         # The actual wrapper also rejects metadata that cannot describe BGRA.
         for fault in (1,2,3,4,5,6,7):
             self.lib.present(2,output,C.byref(surface),src,dst,fault)
+            self.assertEqual((self.lib.native_presents(0),self.lib.native_presents(1)),(0,0))
             self.assertEqual(output[g.y*WIDTH+g.x],0x5a5a5a5a)
         self.assertEqual(hashlib.sha256(source).digest(),source_before)
 

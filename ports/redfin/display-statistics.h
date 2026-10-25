@@ -23,6 +23,36 @@ struct redfin_display_statistics_v2 {
     uint32_t panel_hz,reserved;
     uint64_t counter_hz;
 };
+/* One existing serialized presenter publishes only after real completion.
+ * Readers never depend on the optional image-capture lock or wait for DMA.
+ * An even sequence brackets one consistent CPU/GPU pair. All shared accesses
+ * are atomic, including a read that overlaps the writer. */
+struct redfin_display_statistics_state {
+    uint64_t sequence,presents,gpu_presents;
+};
+static inline void redfin_display_statistics_record(struct redfin_display_statistics_state *s,bool gpu)
+{
+    __atomic_fetch_add(&s->sequence,1,__ATOMIC_ACQ_REL);
+    __atomic_fetch_add(&s->presents,1,__ATOMIC_RELAXED);
+    if(gpu)__atomic_fetch_add(&s->gpu_presents,1,__ATOMIC_RELAXED);
+    __atomic_fetch_add(&s->sequence,1,__ATOMIC_RELEASE);
+}
+static inline bool redfin_display_statistics_read(const struct redfin_display_statistics_state *s,
+    uint64_t *presents,uint64_t *gpu)
+{
+    if(!s||!presents||!gpu)return false;
+    for(unsigned attempt=0;attempt<4;++attempt) {
+        uint64_t before=__atomic_load_n(&s->sequence,__ATOMIC_ACQUIRE);
+        if(before&1u)continue;
+        uint64_t completed=__atomic_load_n(&s->presents,__ATOMIC_RELAXED);
+        uint64_t accelerated=__atomic_load_n(&s->gpu_presents,__ATOMIC_RELAXED);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if(before==__atomic_load_n(&s->sequence,__ATOMIC_RELAXED)) {
+            *presents=completed;*gpu=accelerated;return true;
+        }
+    }
+    return false;
+}
 #ifdef __cplusplus
 static_assert(sizeof(struct redfin_display_statistics)==40,"native capture statistics ABI");
 static_assert(sizeof(struct redfin_display_statistics_v2)==48,"physical counter statistics ABI");

@@ -1,7 +1,6 @@
-diff --git a/iokit/Kernel/arm/RedfinDisplayStatistics.h b/iokit/Kernel/arm/RedfinDisplayStatistics.h
 --- a/iokit/Kernel/arm/RedfinDisplayStatistics.h
 +++ b/iokit/Kernel/arm/RedfinDisplayStatistics.h
-@@ -5,36 +5,49 @@
+@@ -5,36 +5,79 @@
  #include <stdint.h>
  #include <stddef.h>
  
@@ -24,6 +23,36 @@ diff --git a/iokit/Kernel/arm/RedfinDisplayStatistics.h b/iokit/Kernel/arm/Redfi
 +    uint32_t panel_hz,reserved;
 +    uint64_t counter_hz;
 +};
++/* One existing serialized presenter publishes only after real completion.
++ * Readers never depend on the optional image-capture lock or wait for DMA.
++ * An even sequence brackets one consistent CPU/GPU pair. All shared accesses
++ * are atomic, including a read that overlaps the writer. */
++struct redfin_display_statistics_state {
++    uint64_t sequence,presents,gpu_presents;
++};
++static inline void redfin_display_statistics_record(struct redfin_display_statistics_state *s,bool gpu)
++{
++    __atomic_fetch_add(&s->sequence,1,__ATOMIC_ACQ_REL);
++    __atomic_fetch_add(&s->presents,1,__ATOMIC_RELAXED);
++    if(gpu)__atomic_fetch_add(&s->gpu_presents,1,__ATOMIC_RELAXED);
++    __atomic_fetch_add(&s->sequence,1,__ATOMIC_RELEASE);
++}
++static inline bool redfin_display_statistics_read(const struct redfin_display_statistics_state *s,
++    uint64_t *presents,uint64_t *gpu)
++{
++    if(!s||!presents||!gpu)return false;
++    for(unsigned attempt=0;attempt<4;++attempt) {
++        uint64_t before=__atomic_load_n(&s->sequence,__ATOMIC_ACQUIRE);
++        if(before&1u)continue;
++        uint64_t completed=__atomic_load_n(&s->presents,__ATOMIC_RELAXED);
++        uint64_t accelerated=__atomic_load_n(&s->gpu_presents,__ATOMIC_RELAXED);
++        __atomic_thread_fence(__ATOMIC_ACQUIRE);
++        if(before==__atomic_load_n(&s->sequence,__ATOMIC_RELAXED)) {
++            *presents=completed;*gpu=accelerated;return true;
++        }
++    }
++    return false;
++}
  #ifdef __cplusplus
  static_assert(sizeof(struct redfin_display_statistics)==40,"native capture statistics ABI");
 +static_assert(sizeof(struct redfin_display_statistics_v2)==48,"physical counter statistics ABI");
@@ -59,30 +88,61 @@ diff --git a/iokit/Kernel/arm/RedfinDisplayStatistics.h b/iokit/Kernel/arm/Redfi
 +    return redfin_display_statistics_valid(&base);
 +}
  #endif
-diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
 --- a/iokit/Kernel/arm/SweetFramebuffer.cpp
 +++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
-@@ -505,6 +505,7 @@
+@@ -255,6 +255,7 @@
+ 	void          free(void) APPLE_KEXT_OVERRIDE;
+ 	uint64_t      fRedfinFrames;
+ 	uint64_t      fRedfinGPUFrames;
++	struct redfin_display_statistics_state fRedfinStatistics;
+ 	uint32_t      fRedfinCaptures;
+ 	IOLock       *fRedfinCaptureLock; /* independent of fLock, boot lifetime */
+ 	uint64_t      fRedfinPositivePresents;
+@@ -505,6 +506,8 @@
  	fRedfinFit = fit_geometry;
  	fRedfinCopyOnly = true;
  	fRedfinFrames = 0; fRedfinGPUFrames = 0;
++	fRedfinStatistics = {};
 +	setProperty("RedfinPresentationStatisticsABI",2,32);
  	fRedfinCaptureLock = NULL;
  	fRedfinPositivePresents = 0;
  	fRedfinFinalDone = false;
-@@ -1528,7 +1529,10 @@
+@@ -1326,6 +1329,7 @@
+ 		if (gpu != 0) {
+ 			if (gpu > 0) {
+ 				++fRedfinFrames; ++fRedfinGPUFrames;
++				redfin_display_statistics_record(&fRedfinStatistics,true);
+ 				uint32_t frame = redfin_capture_early(this);
+ 				if (frame != 0) captureRedfin(frame, fRedfinFrames);
+ 				if (fRedfinFrames <= 3 || !(fRedfinFrames % 60))
+@@ -1436,8 +1440,9 @@
+ 		flipBack();
+ 	} else if (fRedfinCopyOnly) {
+ 		__asm__ volatile("dsb sy" ::: "memory");
+-		++fRedfinFrames;
+ 		if (copied > 0) {
++			++fRedfinFrames;
++			redfin_display_statistics_record(&fRedfinStatistics,false);
+ 			uint32_t frame = redfin_capture_early(this);
+ 			if (frame != 0) captureRedfin(frame, fRedfinFrames);
+ 		}
+@@ -1528,26 +1533,37 @@
  	uint32_t outCount = 0;
  
  	switch (selector) {
 -	case REDFIN_DISPLAY_STATISTICS_SELECTOR: {
+-		/* Read only real completed presents, under their existing dedicated
+-		 * lock. A busy presenter refuses; it never stalls the UI on hardware. */
 +	case REDFIN_DISPLAY_STATISTICS_SELECTOR:
 +	case REDFIN_DISPLAY_STATISTICS_SELECTOR_V2: {
 +		const bool extended=selector==REDFIN_DISPLAY_STATISTICS_SELECTOR_V2;
 +		size_t wanted=extended?sizeof(struct redfin_display_statistics_v2):sizeof(struct redfin_display_statistics);
- 		/* Read only real completed presents, under their existing dedicated
- 		 * lock. A busy presenter refuses; it never stalls the UI on hardware. */
++		/* Observe a consistent completed pair without the optional capture
++		 * lock. No query waits for a presenter, DMA or pixel readback. */
  		const char *arguments=PE_boot_args();unsigned bytes=0;
-@@ -1537,7 +1541,7 @@
+ 		if (arguments) while (bytes<608 && arguments[bytes]) ++bytes;
+-		if (!fFB || !fFB->fRedfinCopyOnly || !fFB->fRedfinCaptureLock ||
++		if (!fFB || !fFB->fRedfinCopyOnly ||
  		    bytes==608 || args->scalarInputCount!=1 || !args->scalarInput ||
  		    args->structureInputSize || args->structureInputDescriptor ||
  		    args->structureOutputDescriptor || !args->structureOutput ||
@@ -90,10 +150,14 @@ diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFrame
 +		    args->structureOutputSize!=wanted ||
  		    !redfin_display_statistics_admit(arguments,bytes+1,args->scalarInput[0]))
  			return kIOReturnBadArgument;
- 		if (!IOLockTryLock(fFB->fRedfinCaptureLock)) return kIOReturnBusy;
-@@ -1546,8 +1550,17 @@
- 		    fFB->fRedfinVsyncUS ? 1000000u/fFB->fRedfinVsyncUS : 0,0};
- 		IOLockUnlock(fFB->fRedfinCaptureLock);
+-		if (!IOLockTryLock(fFB->fRedfinCaptureLock)) return kIOReturnBusy;
++		uint64_t completed=0,gpu=0;
++		if (!redfin_display_statistics_read(&fFB->fRedfinStatistics,&completed,&gpu)) return kIOReturnBusy;
+ 		struct redfin_display_statistics stats={1,(uint32_t)sizeof(stats),mach_absolute_time(),
+-		    fFB->fRedfinFrames,fFB->fRedfinGPUFrames,
+-		    fFB->fRedfinVsyncUS ? 1000000u/fFB->fRedfinVsyncUS : 0,0};
+-		IOLockUnlock(fFB->fRedfinCaptureLock);
++		    completed,gpu,fFB->fRedfinVsyncUS ? 1000000u/fFB->fRedfinVsyncUS : 0,0};
  		if (!redfin_display_statistics_valid(&stats)) return kIOReturnNotReady;
 -		memcpy(args->structureOutput,&stats,sizeof(stats));
 -		args->structureOutputSize=sizeof(stats);args->scalarOutputCount=0;

@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V46 clean runtime; ordinary counter publication repaired as one block — 2026-10-26
+
+Source a4b27a8, CI40241828657/run2/source ece0a6e, kernel
+b09bcdd11ad4580dee52424f7bbef73cc6107dd8eb0d112f9e3f0e806a0c0c15;
+ordinary graphics v8/local20261026-031736 unchanged. V52 applied ONCE with all
+live preimages/backs/readback and clean journal PASS; now APPLIED/STALE, never
+reuse. V46 imagea38fc9db1a49fbd48a3e983b6a51c388f29ebfbcfdbfaf4545447e361e76c97e.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xddab13f83ba4f091 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Fresh authenticated boot ID matched once, userspace-alive/no panic, one
+backboardd61; GPU panel check/pixels/guards and native physical90Hz PASS.
+Correctness jobs/captures/app opens stay OFF. Clean unmounted consistent HFSX,
+write_count1245491, verified Fastboot. FPS measurement FAILED: UI opened AppleCLCD
+but its counter query refused. No rendering-FPS or smoothness claim.
+
+Observed exact source cause: externalMethod required fRedfinCaptureLock,
+allocated only with redfinscreen=1. Ordinary V46 correctly has captures off.
+Repair the complete publication/query path: independently publish one consistent
+atomic completed/GPU pair after an actual GPU fence or positive CPU copy;
+read it with bounded retries and no image-capture lock, hardware wait or pixel
+readback. Empty/failed CPU presents no longer increment completed frames.
+Keep v1/v2 ABI and the exact nonce/profile checks. UI refusal now logs the query
+status, returned size, version, panel rate and physical frequency separately
+from IOServiceOpen's result. Native final selector and concurrent-pair host
+coverage are added; actual present-method tests cover positive/empty/failed
+GPU/CPU completions. Final UI v4 native/20H392 ABI/signatures PASS,
+ce541d326ff5aafa4ef38fe2e63189c230223d55080efb982ddaf1768fe8638e.
+Matching new CI kernel delivery/device measurement pending. Next fresh V53 must
+read generation1245491; next imageV47. All19 combined host cases PASS, including
+actual ordinary selectors, coherent concurrent pairs and actual present methods.
+No Phone/Photos auto-opens. Goal active.
+
 ## REDFIN ordinary native presentation observer ready; reuse completed CI — 2026-10-26
 
 Source base ece0a6e plus this integration: SpringBoard supplies the boot nonce
