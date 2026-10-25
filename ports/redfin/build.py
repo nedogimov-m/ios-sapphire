@@ -54,6 +54,7 @@ def main():
     p.add_argument('--dtb', type=Path, help='validated live Redfin DTB, required with --kernel')
     p.add_argument('--apple-adt', type=Path, help='D22AP product identity and development policy for Apple userspace')
     p.add_argument('--device-identity', type=Path, help='private physical Redfin serial; does not provide Apple activation certificates')
+    p.add_argument('--keychain-material', type=Path, help='private persistent software keywrap material; GUI3 only, consumed before userspace')
     p.add_argument('--memory-base', type=lambda x: int(x, 0))
     p.add_argument('--memory-size', type=lambda x: int(x, 0))
     p.add_argument('--boot-mpidr', type=lambda x: int(x, 0), default=0)
@@ -67,7 +68,7 @@ def main():
     p.add_argument('--smp-gui', action='store_true', help='bounded eight-core iOS, touch and RW-root profile; compiled shim owns return')
     p.add_argument('--smp-cpus', type=int, choices=(2, 8), help='CPU count for the isolated --smp-probe; default 2')
     p.add_argument('--display', action='store_true', help='publish the CPU-copy AppleCLCD display; requires --kernel, --apple-adt and --splash')
-    p.add_argument('--display-hz', type=int, help='software copy cadence: 1..10 Hz, or 30/60 with --smp-gui; requires --display')
+    p.add_argument('--display-hz', type=int, help='copy cadence:1..10 or GUI30/60;90 requests a verified physical full-panel GUI3 mode')
     p.add_argument('--display-fit', choices=('full', 'cutout'), help='fit complete iPhone canvas, optionally below Pixel camera; requires --smp-gui')
     p.add_argument('--capture-screen', action='store_true', help='capture up to three tiny display frames in the RAM log; requires --display')
     p.add_argument('--userspace-stacks', action='store_true', help='capture bounded user thread stacks before timed shutdown')
@@ -250,11 +251,13 @@ def main():
                     'ufs_root', 'ufs_rw', 'return_bootloader', 'shim_early_return')
         if not all(getattr(a, name) for name in required):
             p.error('--smp-gui requires kernel/DTB/Apple ADT, display/splash/touch, RW UFS root and compiled shim return')
-        if a.boot_mpidr or a.display_hz not in (10, 30, 60) or a.shutdown_seconds != 180:
-            p.error('--smp-gui requires CPU0, --display-hz 10/30/60 and --shutdown-seconds 180')
+        if a.boot_mpidr or a.display_hz not in (10, 30, 60,90) or a.shutdown_seconds != 180:
+            p.error('--smp-gui requires CPU0, --display-hz 10/30/60/90 and --shutdown-seconds 180')
+        if a.display_hz==90 and (not a.gpu_gui or a.display_fit!='full'):
+            p.error('--display-hz90 requires --gpu-gui and --display-fit full')
         if (any(value for name, value in vars(a).items() if name.endswith('_probe') and not (a.wifi_gui and name == 'wifi_native_probe')) or
                 a.usb_aarch64_context or a.usb_live_log or a.userspace_stacks or
-                (a.capture_screen and a.display_fit != 'cutout') or a.trace_syscalls):
+                (a.capture_screen and a.display_fit not in ('full','cutout')) or a.trace_syscalls):
             p.error('--smp-gui excludes other probes and diagnostic writers')
     if a.cpu_capability_target is not None:
         if not a.cpu_capability_probe:
@@ -302,8 +305,8 @@ def main():
                     ('cpu_capability_probe', 'spmi_probe'))):
             p.error('--cpu-capability-probe requires a separate RAM-only profile')
     if a.display_hz is not None:
-        if not (1 <= a.display_hz <= 10 or (a.smp_gui and a.display_hz in (30, 60))):
-            p.error('--display-hz must be in [1, 10], or 30/60 for --smp-gui')
+        if not (1 <= a.display_hz <= 10 or (a.smp_gui and a.display_hz in (30,60,90))):
+            p.error('--display-hz must be in [1, 10], or 30/60/90 for --smp-gui')
         if not a.display:
             p.error('--display-hz requires --display')
     if a.usb_live_log and not a.usb_network_probe:
@@ -387,6 +390,15 @@ def main():
             private_identity = device_identity.load(a.device_identity)
         except (OSError, ValueError, TypeError):
             p.error('private Redfin identity is invalid or unreadable')
+    private_keychain = None
+    if a.keychain_material:
+        if not a.gpu_gui or not a.apple_adt:
+            p.error('--keychain-material requires --gpu-gui and --apple-adt')
+        from ports.redfin import keychain_material
+        try:
+            private_keychain = keychain_material.load(a.keychain_material)
+        except (OSError, ValueError, TypeError):
+            p.error('private Redfin keychain material is invalid or unreadable')
     if not 4320 <= a.stride <= 16384 or a.stride % 4:
         p.error('--stride must be a multiple of 4 in [4320, 16384]')
     if not 5 <= a.seconds <= 300:
@@ -435,6 +447,8 @@ def main():
                 if a.smp_probe or a.smp_gui else mkadt.build(a.memory_base, a.memory_size, a.boot_mpidr))
         if a.apple_adt:
             mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes(), private_identity)
+        if private_keychain is not None:
+            keychain_material.apply(tree, private_keychain)
         from memory import _tree
         nodes, _ = _tree(a.dtb.read_bytes())
         from peripherals import add_observers
@@ -593,6 +607,9 @@ def main():
                 ('height', mkadt.u32(2340)), ('stride', mkadt.u32(a.stride))]))
             if a.display:
                 mkadt.add_linear_display(tree, fb_base, fb_size, fb_base, 1080, 2340, a.stride)
+                if a.display_hz==90:
+                    import panel_mode
+                    panel_mode.add_contract(tree,nodes)
         if a.userspace_waits:
             chosen = next(child for child in tree.children if child.name == 'chosen')
             chosen.props.append(('redfin-user-waits', 0, mkadt.u32(1)))
@@ -795,6 +812,8 @@ def main():
                                 'sha256': hashlib.sha256(a.kernel.read_bytes()).hexdigest()})
     if private_identity is not None:
         manifest['device_identity'] = device_identity.report(a.device_identity, private_identity)
+    if private_keychain is not None:
+        manifest['keychain_material'] = keychain_material.report(a.keychain_material, private_keychain)
     if a.display_hz is not None:
         manifest['display_hz'] = a.display_hz
     if a.display_fit:

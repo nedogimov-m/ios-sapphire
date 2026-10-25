@@ -48,6 +48,7 @@ class GraphicsAMFITests(unittest.TestCase):
 #include <stdio.h>
 #include <string.h>
 #include "gui-profile.h"
+#include "graphics-exec-scope.h"
 #define ENOPOLICY 103
 #ifndef __APPLE__
 typedef uint64_t user_addr_t;
@@ -55,19 +56,28 @@ typedef uint64_t user_addr_t;
 struct proc {int pid;};
 static const char *boot_args,*process_name;
 static int input_error,output_error;
-static unsigned copies;
+static unsigned copies,references;
 static const char *PE_boot_args(void){return boot_args;}
 static int proc_pid(struct proc *p){return p->pid;}
-static int proc_name(int p,char *out,unsigned size){(void)p;snprintf(out,size,"%s",process_name);return 0;}
+typedef struct vnode {int value;} *vnode_t;
+static struct vnode executable;
+static vnode_t proc_getexecutablevnode(struct proc *p){(void)p;if(!strcmp(process_name,"missing-vnode"))return NULL;
+ references++;return &executable;}
+static int vnode_put(vnode_t v){if(v!=&executable || references!=1)__builtin_trap();references--;return 0;}
+static int vn_getpath(vnode_t v,char *out,int *bytes){(void)v;if(!strcmp(process_name,"path-error"))return 14;
+ const char *name=!strcmp(process_name,"backboardd")?"/usr/libexec/backboardd":process_name;
+ int n=snprintf(out,(unsigned)*bytes,"%s%s",name[0]=='/'?"":"/tmp/",name);
+ if(n<0 || n>=*bytes)return 63;*bytes=n+1;return 0;}
 static int copyin(user_addr_t from,void *to,unsigned bytes){if(input_error)return input_error;memcpy(to,(void *)from,bytes);return 0;}
 static int copyout(const void *from,user_addr_t to,unsigned bytes){copies++;if(output_error)return output_error;memcpy((void *)to,from,bytes);return 0;}
 '''+function+r'''
 int invoke(const char *args,const char *name,int call,int in_error,int out_error,uint64_t *flags){
-    boot_args=args;process_name=name;input_error=in_error;output_error=out_error;copies=0;
+    boot_args=args;process_name=name;input_error=in_error;output_error=out_error;copies=references=0;
     struct proc p={42};struct {uint64_t input;user_addr_t output;} q={0,(user_addr_t)flags};
     return redfin_graphics_amfi_syscall(&p,call,(user_addr_t)&q);
 }
 unsigned copy_count(void){return copies;}
+unsigned reference_count(void){return references;}
 '''
         directory=Path(cls.temp.name);(directory/'adapter.c').write_text(source)
         compile=subprocess.run(['cc','-shared','-fPIC','-Wall','-Wextra','-Werror','-I',str(root),
@@ -91,6 +101,7 @@ unsigned copy_count(void){return copies;}
     def call(self,args,name=b'backboardd',number=0x5a,input_error=0,output_error=0):
         flags=ctypes.c_uint64(0x1234)
         result=self.lib.invoke(args,name,number,input_error,output_error,ctypes.byref(flags))
+        self.assertEqual(self.lib.reference_count(),0)
         return result,flags.value,self.lib.copy_count()
 
     def test_other_processes_profiles_or_requests_retain_no_policy(self):
@@ -103,6 +114,18 @@ unsigned copy_count(void){return copies;}
         self.assertEqual(self.call(self.args()),(0,0xff,1))
         self.assertEqual(self.call(self.args(),input_error=14),(14,0x1234,0))
         self.assertEqual(self.call(self.args(),output_error=14),(14,0x1234,1))
+
+    def test_fullscreen_system_apps_need_their_actual_vnode_path(self):
+        full=self.args().replace(b'redfinfit=2',b'redfinfit=1')
+        path=b'/System/Library/CoreServices/SpringBoard.app/SpringBoard'
+        self.assertEqual(self.call(full,path),(0,0xff,1))
+        self.assertEqual(self.call(self.args(),path),(103,0x1234,0))
+        for bad in [b'/tmp/SpringBoard',b'/Applications/MobilePhone.app/PlugIns/extension',b'SpringBoard']:
+            self.assertEqual(self.call(full,bad),(103,0x1234,0))
+
+    def test_missing_failed_and_oversize_vnode_paths_release_their_native_iocount(self):
+        for path in [b'missing-vnode',b'path-error',b'/'+b'a'*300]:
+            self.assertEqual(self.call(self.args(),path),(103,0x1234,0))
 
 
 if __name__=='__main__':unittest.main()

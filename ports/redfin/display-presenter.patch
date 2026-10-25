@@ -268,7 +268,7 @@ new file mode 100644
 +        IOFreeData(p, sizeof(*p)); return false;
 +    }
 +    p->owner = this; p->slices = 1;
-+    nanoseconds_to_absolutetime((uint64_t)SWEET_FB_VSYNC_US * 1000, &p->period);
++    nanoseconds_to_absolutetime((uint64_t)fRedfinVsyncUS * 1000, &p->period);
 +    fRedfinPresenter = p;
 +    for (unsigned i = 0; i < REDFIN_ROW_HELPERS; ++i) {
 +        struct redfin_row_worker *worker = &p->workers[i];
@@ -310,10 +310,10 @@ new file mode 100644
 +AppleCLCD::armRedfinVsync(IOTimerEventSource *sender)
 +{
 +    struct redfin_presenter *p = fRedfinPresenter;
-+    if (!p) { sender->setTimeoutUS(SWEET_FB_VSYNC_US); return; }
++    if (!p) { sender->setTimeoutUS(fRedfinVsyncUS); return; }
 +    uint64_t skipped = 0;
 +    uint64_t next = redfin_display_next_tick(p->next_tick, mach_absolute_time(), p->period, &skipped);
-+    if (!next) { sender->setTimeoutUS(SWEET_FB_VSYNC_US); return; }
++    if (!next) { sender->setTimeoutUS(fRedfinVsyncUS); return; }
 +    p->next_tick = next;
 +    __atomic_fetch_add(&p->skipped_ticks, skipped, __ATOMIC_RELAXED);
 +    sender->wakeAtTime(next);

@@ -9,6 +9,8 @@
 #include <pexpert/pexpert.h>
 #include <arm64/redfin_gui_profile.h>
 #include <sys/errno.h>
+#include <sys/vnode.h>
+#include "redfin_graphics_exec_scope.h"
 
 static int
 redfin_graphics_amfi_syscall(struct proc *process,int call,user_addr_t address)
@@ -19,16 +21,23 @@ redfin_graphics_amfi_syscall(struct proc *process,int call,user_addr_t address)
     if(!args)return ENOPOLICY;
     while(length<608 && args[length])length++;
     if(length==608 || !redfin_gpu_gui_profile(args,length+1,&nonce))return ENOPOLICY;
-    char name[32]={0};
-    proc_name(proc_pid(process),name,sizeof(name));
-    if(strcmp(name,"backboardd"))return ENOPOLICY;
+    char path[256]={0}; int path_bytes=sizeof(path);
+    vnode_t executable=proc_getexecutablevnode(process);
+    if (!executable) return ENOPOLICY;
+    int path_error=vn_getpath(executable,path,&path_bytes);
+    vnode_put(executable);
+    if (path_error || path_bytes<=0 || path_bytes>(int)sizeof(path) ||
+        !memchr(path,0,sizeof(path))) return ENOPOLICY;
+    bool graphics=!strcmp(path,"/usr/libexec/backboardd");
+    bool ui=redfin_ui_executable(path) && redfin_ui_fullscreen(args,length+1);
+    if (!graphics && !ui) return ENOPOLICY;
     struct {uint64_t input_flags;user_addr_t output_flags;} query;
     int error=copyin(address,&query,sizeof(query));
     if(error)return error;
     const uint64_t flags=0xff; /* preferred native dyld allow-path/env/insert/interpose ABI */
     error=copyout(&flags,query.output_flags,sizeof(flags));
-    if(!error)printf("REDFIN GPU DYLD: boot=%016llx backboardd pid=%d GUI3 insertion permitted\n",
-                    (unsigned long long)nonce,proc_pid(process));
+    if(!error)printf("REDFIN GPU DYLD: boot=%016llx path=%s pid=%d GUI3 insertion permitted\n",
+                    (unsigned long long)nonce,path,proc_pid(process));
     return error;
 }
 static const struct mac_policy_ops redfin_graphics_amfi_ops={
@@ -36,7 +45,7 @@ static const struct mac_policy_ops redfin_graphics_amfi_ops={
 };
 static struct mac_policy_conf redfin_graphics_amfi_conf={
     .mpc_name="AMFI",
-    .mpc_fullname="Redfin GUI3 backboardd dyld adapter",
+    .mpc_fullname="Redfin GUI3 system graphics and cutout dyld adapter",
     .mpc_ops=&redfin_graphics_amfi_ops,
 };
 static mac_policy_handle_t redfin_graphics_amfi_handle;

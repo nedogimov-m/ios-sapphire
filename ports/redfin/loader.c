@@ -498,6 +498,13 @@ static int gui_property(unsigned kind, const volatile unsigned char *key,
             bit = 1U << 9; if (!smp_string(value, len, "sweet,display")) return 0;
         } else if (kind == RF_GUI_DISPLAY && smp_key(key, "pixel-format")) {
             bit = 1U << 10; if (!smp_string(value, len, "BGRA")) return 0;
+        } else if (kind == RF_GUI_DISPLAY && smp_key(key, "redfin,panel-mode")) {
+            static const uint32_t panel[] = {1,1080,2340,554000000,0x0af00000,
+                0x0ae94000,0x0ae6b800,0x0f50a000,10,0x80152853,0x80153853};
+            bit = 1U << 11;
+            if (len != sizeof(panel)) return 0;
+            for (unsigned j = 0; j < sizeof(panel)/sizeof(panel[0]); ++j)
+                if (word(value + 4*j, 0) != panel[j]) return 0;
         } else return 0;
     } else if (kind == RF_GUI_UFS) {
         if (!smp_key(key, "reg") || len != 16 || quad(value) != 0x01d84000ULL || quad(value + 8) != 0x3000) return 0;
@@ -655,7 +662,7 @@ static int adt_valid_smp_mode(const volatile unsigned char *b, uint64_t size, in
             off += padded;
         }
         if ((kind == CPU && seen != 0xffff) || (kind == CPUS && seen != 7) || (kind == CHOSEN && seen != 3)) return 0;
-        if ((kind == RF_GUI_DISPLAY && seen != 0x7ff) || (kind == RF_GUI_TOUCH && seen != 127) ||
+        if ((kind == RF_GUI_DISPLAY && seen != 0x7ff && !(gui == 3 && seen == 0xfff)) || (kind == RF_GUI_TOUCH && seen != 127) ||
             (kind == RF_GUI_UFS && seen != 1) || (kind == RF_GUI_FBCON && seen != 0x87)) return 0;
         if (kind == CPU) cpus++;
         depth++; pending[depth] = children; kinds[depth] = kind;

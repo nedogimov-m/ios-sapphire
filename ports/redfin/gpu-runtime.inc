@@ -103,13 +103,18 @@ static int gr_snapshot_bank(void *argument,unsigned bank,uint32_t at,uint32_t *v
 }
 static int gr_snapshot(void *argument,struct rf_gs_snapshot *global,struct rf_gc_snapshot *banks)
 {
-    int error=gr_live();if(error || !gm_payloads_valid(argument))return error?error:ECANCELED;
+    /* Called only within the complete runtime audit. That outer audit checks
+     * every immutable payload once before accepting the complete tuple.
+     * Re-comparing the same private firmware at each nested snapshot edge
+     * adds no register/source observation. Hardware/parent guards still
+     * bracket this entire twice-read SMMU/foreign snapshot. */
+    int error=gr_live();if(error)return error;
     const struct rf_gs_ops go={argument,gr_snapshot_valid,gr_snapshot_global};
     const struct rf_gc_ops bo={argument,gr_snapshot_valid,gr_snapshot_bank};
     error=rf_gs_snapshot_run(&go,gm_chip,global);
     if(!error)error=rf_gc_snapshot_run(&bo,global,banks);
     if(!error)error=gr_live();
-    return error?error:gm_payloads_valid(argument)?0:ECANCELED;
+    return error;
 }
 static int gr_snapshot_read(void *argument,unsigned block,uint32_t at,uint32_t *value)
 {

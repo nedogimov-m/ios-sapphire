@@ -22,13 +22,15 @@ def validate(arguments):
     if len(fits) > 1 or any(token not in ('redfinfit=1', 'redfinfit=2') for token in fits):
         raise ValueError('GUI8 fit must be full-canvas mode1 or camera-exclusion mode2')
     screens = [token for token in flags if token.startswith('redfinscreen')]
-    if screens and (screens != ['redfinscreen=1'] or fits != ['redfinfit=2']):
-        raise ValueError('GUI8 screen capture requires the camera-exclusion profile')
+    if screens and (screens != ['redfinscreen=1'] or fits not in (['redfinfit=1'],['redfinfit=2'])):
+        raise ValueError('GUI8 screen capture requires a complete full or cutout viewport')
     flags = [token for token in flags if token not in screens]
     flags = [token for token in flags if token not in fits]
     rates = [token for token in flags if token.startswith('sweetfb_hz=')]
-    if len(rates) != 1 or rates[0] not in ('sweetfb_hz=10', 'sweetfb_hz=30', 'sweetfb_hz=60'):
-        raise ValueError('GUI8 copy cadence must be exactly 10, 30 or 60 Hz')
+    if len(rates) != 1 or rates[0] not in ('sweetfb_hz=10', 'sweetfb_hz=30', 'sweetfb_hz=60','sweetfb_hz=90'):
+        raise ValueError('GUI8 cadence must be exactly 10, 30, 60 or 90 Hz')
+    if rates[0]=='sweetfb_hz=90' and ('redfingui=3' not in tokens or fits!=['redfinfit=1']):
+        raise ValueError('physical90Hz requires the full-screen GUI3 and live panel contract')
     flags = ['sweetfb_hz=10' if token == rates[0] else token for token in flags]
     if (arguments != ' '.join(tokens) or len(flags) != len(REQUIRED) or set(flags) != REQUIRED or
             tokens.count('-enable_kprintf_spam') > 1 or match is None or not int(match[1], 16)):

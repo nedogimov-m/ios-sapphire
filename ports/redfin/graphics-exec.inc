@@ -5,6 +5,7 @@
  * No configurable injection list, other process, image code or argv changes.
  */
 #include <arm64/redfin_gui_profile.h>
+#include "redfin_graphics_exec_scope.h"
 
 /* REDFIN_GRAPHICS_EXEC_TEST_BEGIN */
 static bool redfin_graphics_exec_selected(const char *args,unsigned bytes,
@@ -30,4 +31,23 @@ static bool redfin_graphics_exec_wanted(struct image_params *imgp)
     if(bytes==608)return false;
     return redfin_graphics_exec_selected(args,bytes+1,imgp->ip_strings,
         imgp->ip_ndp->ni_cnd.cn_nameptr,imgp->ip_ndp->ni_cnd.cn_namelen);
+}
+
+static const char *redfin_graphics_exec_environment(struct image_params *imgp)
+{
+    if (redfin_graphics_exec_wanted(imgp))
+        return "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-graphics.dylib";
+    if (!imgp || !imgp->ip_ndp || !(imgp->ip_flags&IMGPF_IS_64BIT_ADDR)) return NULL;
+    const char *args=PE_boot_args(), *saved=imgp->ip_strings;
+    static const char key[]="executable_path=";
+    if (!args || !saved || strncmp(saved,key,sizeof(key)-1)) return NULL;
+    unsigned bytes=0;
+    while (bytes<608 && args[bytes]) ++bytes;
+    const char *path=saved+sizeof(key)-1;
+    const char *leaf=strrchr(path,'/');
+    if (bytes==608 || !leaf || !redfin_ui_executable(path) ||
+        strlen(leaf+1)!=(unsigned)imgp->ip_ndp->ni_cnd.cn_namelen ||
+        memcmp(leaf+1,imgp->ip_ndp->ni_cnd.cn_nameptr,strlen(leaf+1)) ||
+        !redfin_ui_fullscreen(args,bytes+1)) return NULL;
+    return "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-ui.dylib";
 }

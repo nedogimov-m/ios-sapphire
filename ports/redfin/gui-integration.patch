@@ -1,0 +1,445 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -200,6 +200,9 @@
+ 	memcpy(value, data->getBytesNoCopy(), bytes);
+ 	return true;
+ }
++
++#include "RedfinPanelMode.inc"
++#include "RedfinDisplayMode.inc"
+ 
+ class IOMobileFramebuffer : public IOService {
+ 	OSDeclareDefaultStructors(IOMobileFramebuffer);
+@@ -264,6 +267,7 @@
+ 	uint32_t      fBootSrc, fBootStride;
+ 	bool          directPresent(const uint8_t *rec);
+ 	void          scanFrom(uint64_t pa, uint32_t stride);
++	uint32_t      fRedfinVsyncUS = SWEET_FB_VSYNC_US;
+ 	uint32_t      fFlushTicks;    /* vsync ticks between panel copies */
+ 	bool          fPowerOff;      /* RequestPowerChange(0) */
+ 	uint32_t      fFadeStep;      /* fade-out steps done while off */
+@@ -558,8 +562,13 @@
+ 	/* This is a software notification clock, not measured hardware vblank. */
+ 	uint32_t hz = 5;
+ 	(void)PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
+-	if (hz < 1 || (hz > 10 && !(redfin_gui_selected() && (hz == 30 || hz == 60)))) hz = 5;
+-	fFlushTicks = 60 / hz;
++	if (hz < 1 || (hz > 10 && !(redfin_gui_selected() && (hz == 30 || hz == 60 || hz == 90)))) hz = 5;
++	hz = redfin_panel_mode(provider, hz);
++	const uint32_t notification_hz = hz == 90 ? 90 : 60;
++	fRedfinVsyncUS = 1000000 / notification_hz;
++	fFlushTicks = notification_hz / hz;
++	if (!fFlushTicks) fFlushTicks = 1;
++	(void)redfin_publish_modes(this, cw, ch, notification_hz);
+ 	/* Publish only after all resources exist, before timer or clients can run. */
+ 	if (fRedfinCaptures == 0) {
+ 		fRedfinCaptureLock = IOLockAlloc();
+@@ -570,7 +579,7 @@
+ 		}
+ 	}
+ 	(void)startRedfinPresenter();
+-	fVsync->setTimeoutUS(SWEET_FB_VSYNC_US);
++	fVsync->setTimeoutUS(fRedfinVsyncUS);
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
+@@ -761,11 +770,8 @@
+ 	}
+ 	uint64_t now = mach_absolute_time();
+ 	uint64_t count = ++fb->fVsyncCount;
+-	uint64_t values[6] = {
+-		(uint32_t)count, (uint32_t)(count >> 32),
+-		(uint32_t)now, (uint32_t)(now >> 32),
+-		0, 0,
+-	};
++	uint64_t values[6];
++	redfin_display_notification(now, count, values);
+ 
+ 	IOLockLock(fb->fLock);
+ 	for (unsigned int i = 0; i < fb->fClients->getCount(); i++) {
+@@ -1599,6 +1605,26 @@
+ 			IOLog("SWEET FB: display %s\n", off ? "off" : "on");
+ 		}
+ 		break;
++	case 74: /* Native SupportedFrameInfo: no optional tags. */
++		out[0] = 0; outCount = 1;
++		break;
++	case 77: /* Native GetCurrentAbsoluteTime, same clock as notifications. */
++		out[0] = mach_absolute_time(); outCount = 1;
++		break;
++	case 79: /* Native GetBlock: the current color/timing IDs. */
++		if (args->scalarInputCount >= 2 && args->scalarInput[0] == 0x40) {
++			if (args->structureOutputDescriptor || !redfin_display_current_mode(
++			    args->scalarInput[0], args->scalarInput[1], args->structureOutput,
++			    args->structureOutputSize)) return kIOReturnBadArgument;
++			return kIOReturnSuccess;
++		}
++		if (args->scalarInputCount >= 2) {
++			static unsigned blocks_logged;
++			if (__atomic_fetch_add(&blocks_logged, 1, __ATOMIC_RELAXED) < 8)
++				IOLog("REDFIN DISPLAY BLOCK: id=%#llx offset=%llu bytes=%u legacy-zero=1\n",
++				    args->scalarInput[0], args->scalarInput[1], args->structureOutputSize);
++		}
++		break;
+ 	case kSweetFBSwapWait:
+ 	default:
+ 		break;
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -5769,14 +5769,15 @@
+ 	}
+ 
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+-	if (redfin_graphics_exec_wanted(imgp)) {
++	const char *redfin_environment = redfin_graphics_exec_environment(imgp);
++	if (redfin_environment) {
+ 		error = exec_add_user_string(imgp,
+-		    CAST_USER_ADDR_T("DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-graphics.dylib"), UIO_SYSSPACE, TRUE);
++		    CAST_USER_ADDR_T(redfin_environment), UIO_SYSSPACE, TRUE);
+ 		if (error) goto bad;
+ 		if (imgp->ip_argspace < new_ptr_size) { error = E2BIG; goto bad; }
+ 		imgp->ip_argspace -= new_ptr_size;
+ 		imgp->ip_envc++;
+-		printf("REDFIN EAGL EXEC: fixed GUI3 library added for /usr/libexec/backboardd\n");
++		printf("REDFIN EAGL EXEC: fixed GUI3 library added for %s\n", imgp->ip_strings);
+ 	}
+ #endif
+ 
+diff --git a/iokit/Kernel/arm/SweetKeyStore.cpp b/iokit/Kernel/arm/SweetKeyStore.cpp
+--- a/iokit/Kernel/arm/SweetKeyStore.cpp
++++ b/iokit/Kernel/arm/SweetKeyStore.cpp
+@@ -112,7 +112,7 @@
+ 		if (len > args->structureOutputDescriptor->getLength()) {
+ 			return kIOReturnNoSpace;
+ 		}
+-		args->structureOutputDescriptor->writeBytes(0, buf, len);
++		if (args->structureOutputDescriptor->writeBytes(0, buf, len) != len) return kIOReturnUnderrun;
+ 		args->structureOutputDescriptorSize = len;
+ 		return kIOReturnSuccess;
+ 	}
+diff --git a/iokit/Kernel/arm/RedfinPanelMode.inc b/iokit/Kernel/arm/RedfinPanelMode.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinPanelMode.inc
+@@ -0,0 +1,63 @@
++/* SPDX-License-Identifier: MIT */
++#include "RedfinPanelMode.h"
++
++struct redfin_panel_maps { vm_offset_t base[4]; };
++static uint32_t redfin_panel_read(void *context,unsigned bank,uint32_t offset)
++{
++    struct redfin_panel_maps *maps=(struct redfin_panel_maps *)context;
++    uint32_t value=*(volatile uint32_t *)(maps->base[bank]+offset);
++    __asm__ volatile("dmb oshld" ::: "memory"); return value;
++}
++static void redfin_panel_write(void *context,unsigned bank,uint32_t offset,uint32_t value)
++{
++    struct redfin_panel_maps *maps=(struct redfin_panel_maps *)context;
++    *(volatile uint32_t *)(maps->base[bank]+offset)=value;
++    __asm__ volatile("dsb oshst" ::: "memory");
++}
++static uint64_t redfin_panel_time(void *context __unused)
++{uint64_t n;absolutetime_to_nanoseconds(mach_absolute_time(),&n);return n;}
++static void redfin_panel_delay(void *context __unused,unsigned us)
++{if (us>=1000) IOSleep((us+999)/1000);else IODelay(us);}
++static void redfin_panel_log_sample(const char *name,const struct redfin_panel_sample *s)
++{
++    IOLog("REDFIN PANEL TE: %s edges=%u intervals=%u min-us=%u max-us=%u mean-us=%u elapsed-us=%u intf-frames=%u GPIO10-input=1\n",
++        name,s->edges,s->intervals,s->minimum_us,s->maximum_us,s->mean_us,s->elapsed_us,s->frames);
++}
++static uint32_t redfin_panel_mode(IOService *provider,uint32_t requested)
++{
++    if (requested!=90) return requested;
++    /* This property is built only from the captured live FDT and verified
++     * two-mode commands. Pointer fields are never accepted from userspace. */
++    const uint32_t expected[]={1,1080,2340,554000000,0x0af00000,0x0ae94000,
++        0x0ae6b800,0x0f50a000,10,0x80152853,0x80153853};
++    uint32_t actual[sizeof(expected)/sizeof(expected[0])]={};
++    if (!redfin_gui_selected() || !redfin_fb_data(provider,"redfin,panel-mode",actual,sizeof(actual)) ||
++        memcmp(actual,expected,sizeof(actual))) {
++        IOLog("REDFIN PANEL:90Hz refused: live hardware contract missing\n");return 60;
++    }
++    struct redfin_panel_maps maps={};
++    /* Check the independent clock controller before touching gated DSI/DPU. */
++    maps.base[RP_CC]=ml_io_map(expected[4],0x4000);
++    if (!maps.base[RP_CC]) return 60;
++    const uint32_t clock_offsets[]={0x2080,0x2028,0x2038,0x200c};
++    for (unsigned i=0;i<4;++i) {
++        uint32_t clock=redfin_panel_read(&maps,RP_CC,clock_offsets[i]);
++        IOLog("REDFIN PANEL CLOCK: offset=%#x value=%#x\n",clock_offsets[i],clock);
++        if (!redfin_panel_clock_on(clock)) return 60;
++    }
++    maps.base[RP_DSI]=ml_io_map(expected[5]&~0x3fffu,0x4000)+(expected[5]&0x3fff);
++    maps.base[RP_INTF]=ml_io_map(expected[6]&~0x3fffu,0x4000)+(expected[6]&0x3fff);
++    maps.base[RP_GPIO]=ml_io_map(expected[7]&~0x3fffu,0x4000)+(expected[7]&0x3fff);
++    if (maps.base[RP_DSI]<(expected[5]&0x3fff)+1 ||
++        maps.base[RP_INTF]<(expected[6]&0x3fff)+1 ||
++        maps.base[RP_GPIO]<(expected[7]&0x3fff)+1) return 60;
++    struct redfin_panel_io io={&maps,redfin_panel_read,redfin_panel_write,redfin_panel_delay,redfin_panel_time};
++    struct redfin_panel_result result={};bool switched=redfin_panel_switch_90(&io,&result);
++    IOLog("REDFIN PANEL MODE: request=90 actual=%u verified=%u stage=%u version=%#x ctrl=%#x status=%#x tear=%#x auto=%#x gpio=%#x command=%u rollback=%u uncertain=%u FIFO=1 DMA-memory=0\n",
++        result.actual_hz,switched,result.stage,result.version,result.control,result.status,result.tear,
++        result.autorefresh,result.gpio,result.command_done,result.rollback_done,result.uncertain);
++    redfin_panel_log_sample("before",&result.before);redfin_panel_log_sample("after",&result.after);
++    if (result.rollback_done) redfin_panel_log_sample("rollback",&result.rollback);
++    provider->setProperty("redfin-panel-hz-verified",(unsigned long long)result.actual_hz,32);
++    return switched ? 90 : 60;
++}
+diff --git a/iokit/Kernel/arm/RedfinPanelMode.h b/iokit/Kernel/arm/RedfinPanelMode.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinPanelMode.h
+@@ -0,0 +1,174 @@
++/* SPDX-License-Identifier: MIT */
++/* Bounded S6E3HC2 mode transaction. Register and packet facts are from
++ * Google's Redfin500b3a20 DTS/clock/pinctrl and display-drivers ca74909c.
++ * No DMA address, DPU source, DSC, PLL, SMMU or GPIO configuration writes.
++ * The caller validates the live hardware/ADT and serializes this owner. */
++#ifndef REDFIN_PANEL_MODE_H
++#define REDFIN_PANEL_MODE_H
++#include <stdint.h>
++#include <stdbool.h>
++#include <stddef.h>
++
++enum redfin_panel_bank { RP_DSI,RP_INTF,RP_GPIO,RP_CC };
++struct redfin_panel_io {
++    void *context;
++    uint32_t (*read)(void *,unsigned,uint32_t);
++    void (*write)(void *,unsigned,uint32_t,uint32_t);
++    void (*delay)(void *,unsigned);
++    uint64_t (*now_ns)(void *);
++};
++struct redfin_panel_sample {
++    uint32_t edges,intervals,minimum_us,maximum_us,mean_us;
++    uint32_t frames,elapsed_us;
++};
++struct redfin_panel_result {
++    uint32_t stage,actual_hz,version,control,status,tear,autorefresh,gpio;
++    bool command_done,rollback_done,uncertain;
++    struct redfin_panel_sample before,after,rollback;
++};
++static inline uint32_t rp_read(const struct redfin_panel_io *io,unsigned bank,uint32_t reg)
++{return io->read(io->context,bank,reg);}
++static inline void rp_write(const struct redfin_panel_io *io,unsigned bank,uint32_t reg,uint32_t value)
++{io->write(io->context,bank,reg,value);}
++
++static inline bool redfin_panel_clock_on(uint32_t cbcr)
++{return cbcr!=UINT32_MAX && (cbcr&1) && !(cbcr&(1u<<31));}
++
++static inline void redfin_panel_measure(const struct redfin_panel_io *io,
++    struct redfin_panel_sample *out)
++{
++    *out=(struct redfin_panel_sample){0};
++    uint64_t began=io->now_ns(io->context),last=0,total=0;
++    uint32_t old=rp_read(io,RP_GPIO,4)&1,frames=rp_read(io,RP_INTF,0xac);
++    out->minimum_us=UINT32_MAX;
++    /* Also bounded by iterations if a clock stalls. GPIO10 is sampled only;
++     * neither its mux nor interrupt status is modified. */
++    for (unsigned i=0;i<100000;++i) {
++        uint64_t now=io->now_ns(io->context);
++        if (now<began || now-began>=350000000) break;
++        uint32_t level=rp_read(io,RP_GPIO,4)&1;
++        if (level && !old) {
++            ++out->edges;
++            if (last && now>last) {
++                uint64_t us=(now-last)/1000;
++                if (us>UINT32_MAX) break;
++                if (us<out->minimum_us) out->minimum_us=(uint32_t)us;
++                if (us>out->maximum_us) out->maximum_us=(uint32_t)us;
++                total+=us; ++out->intervals;
++            }
++            last=now;
++        }
++        old=level; io->delay(io->context,3);
++    }
++    uint64_t end=io->now_ns(io->context);
++    if (end>=began && (end-began)/1000<=UINT32_MAX) out->elapsed_us=(uint32_t)((end-began)/1000);
++    out->frames=rp_read(io,RP_INTF,0xac)-frames;
++    if (out->intervals) out->mean_us=(uint32_t)(total/out->intervals);
++    else out->minimum_us=0;
++}
++static inline bool redfin_panel_sample_is(const struct redfin_panel_sample *s,unsigned hz)
++{
++    if (!s || s->intervals<15 || s->elapsed_us<250000 || s->elapsed_us>500000) return false;
++    uint32_t target=1000000/hz,slop=target/16;
++    return s->mean_us>=target-slop && s->mean_us<=target+slop &&
++        s->minimum_us>=target-target/5 && s->maximum_us<=target+target/5;
++}
++static inline bool redfin_panel_idle(const struct redfin_panel_io *io)
++{
++    for (unsigned i=0;i<4000;++i) {
++        if (!(rp_read(io,RP_DSI,8)&6u)) return true;
++        io->delay(io->context,5);
++    }
++    return false;
++}
++/* Only the two source-verified timing commands are expressible here. A fresh
++ * DMA-done edge is mandatory; old status is acknowledged before the trigger.
++ * On uncertain completion leave the FIFO/engine alone until the next reset. */
++static inline bool redfin_panel_command(const struct redfin_panel_io *io,unsigned hz,bool *uncertain)
++{
++    if (!uncertain || (hz!=60 && hz!=90) || !redfin_panel_idle(io)) return false;
++    uint32_t control=rp_read(io,RP_DSI,4),trigger=rp_read(io,RP_DSI,0x84);
++    uint32_t dma=rp_read(io,RP_DSI,0x3c),tpg=rp_read(io,RP_DSI,0x15c);
++    uint32_t length=rp_read(io,RP_DSI,0x4c),interrupts=rp_read(io,RP_DSI,0x110);
++    if (!(control&1) || (control&2) || tpg || (trigger&7)!=4 || (interrupts&(1u<<24))) return false;
++    const uint32_t masks=(1u<<1)|(1u<<9)|(1u<<11)|(1u<<13)|(1u<<15)|
++        (1u<<17)|(1u<<21)|(1u<<25)|(1u<<29)|(1u<<31);
++    uint32_t saved_masks=interrupts&masks;
++    rp_write(io,RP_DSI,0x110,saved_masks|1);
++    if (rp_read(io,RP_DSI,0x110)&1) return false;
++    rp_write(io,RP_DSI,4,control|4);
++    rp_write(io,RP_DSI,0x15c,0x30006); /* custom embedded FIFO, no memory fetch */
++    rp_write(io,RP_DSI,0x17c,hz==90 ? 0x80153853 : 0x80152853);
++    rp_write(io,RP_DSI,0x17c,0); /* hardware requires an even count of DWORDs */
++    uint32_t selected=(dma&~((3u<<30)|(1u<<29)|(1u<<24)))|(1u<<28)|(1u<<26);
++    rp_write(io,RP_DSI,0x3c,selected);
++    rp_write(io,RP_DSI,0x4c,4);
++    if (rp_read(io,RP_DSI,0x3c)!=selected || rp_read(io,RP_DSI,0x4c)!=4) {
++        rp_write(io,RP_DSI,0x15c,tpg);rp_write(io,RP_DSI,0x3c,dma);
++        rp_write(io,RP_DSI,0x4c,length);rp_write(io,RP_DSI,4,control);return false;
++    }
++    rp_write(io,RP_DSI,0x90,1);
++    bool done=false;
++    for (unsigned i=0;i<4000;++i) {
++        uint32_t status=rp_read(io,RP_DSI,0x110);
++        if (status&(1u<<24)) break;
++        if (status&1) {done=true;break;}
++        io->delay(io->context,5);
++    }
++    if (!done || !redfin_panel_idle(io)) {*uncertain=true;return false;}
++    rp_write(io,RP_DSI,0x110,saved_masks|1);
++    rp_write(io,RP_DSI,0x15c,tpg);
++    rp_write(io,RP_DSI,0x1ec,1);io->delay(io->context,1);rp_write(io,RP_DSI,0x1ec,0);
++    rp_write(io,RP_DSI,0x3c,dma);rp_write(io,RP_DSI,0x4c,length);rp_write(io,RP_DSI,4,control);
++    bool restored=rp_read(io,RP_DSI,4)==control && rp_read(io,RP_DSI,0x3c)==dma &&
++        rp_read(io,RP_DSI,0x4c)==length && rp_read(io,RP_DSI,0x15c)==tpg;
++    if (!restored) *uncertain=true;
++    return restored;
++}
++
++static inline bool redfin_panel_switch_90(const struct redfin_panel_io *io,
++    struct redfin_panel_result *out)
++{
++    if (!io || !out || !io->read || !io->write || !io->delay || !io->now_ns) return false;
++    *out=(struct redfin_panel_result){0};out->stage=1;
++    if (!redfin_panel_clock_on(rp_read(io,RP_CC,0x2080)) ||
++        !redfin_panel_clock_on(rp_read(io,RP_CC,0x2028)) ||
++        !redfin_panel_clock_on(rp_read(io,RP_CC,0x2038)) ||
++        !redfin_panel_clock_on(rp_read(io,RP_CC,0x200c))) return false;
++    out->stage=2;out->version=rp_read(io,RP_DSI,0);
++    out->control=rp_read(io,RP_DSI,4);out->status=rp_read(io,RP_DSI,8);
++    out->tear=rp_read(io,RP_INTF,0x288);out->autorefresh=rp_read(io,RP_INTF,0x2b4);
++    out->gpio=rp_read(io,RP_GPIO,0);
++    /* Source-identified DSI2.4/TE0 command-mode handoff only. */
++    if ((out->version&0xffff0000u)!=0x20040000u || !(out->control&1) ||
++        (out->control&2) || rp_read(io,RP_DSI,0x2cc) || (out->gpio&0x3c)!=4 ||
++        (out->gpio&(1u<<9))) return false;
++    out->stage=3;redfin_panel_measure(io,&out->before);
++    if (redfin_panel_sample_is(&out->before,90)) {out->actual_hz=90;out->stage=8;return true;}
++    if (!redfin_panel_sample_is(&out->before,60)) return false;
++    out->actual_hz=60;out->stage=4;
++    /* Keep the inherited external-TE autorefresh path and its source. Never
++     * synthesize a faster frame counter as evidence of panel refresh. */
++    if (!(rp_read(io,RP_INTF,0x284)&1) || !(out->tear&(1u<<20)) ||
++        !(out->autorefresh&(1u<<31)) || (out->autorefresh&0xffff)!=1 ||
++        !(out->tear&0xffff)) return false;
++    out->stage=5;
++    out->command_done=redfin_panel_command(io,90,&out->uncertain);
++    if (!out->command_done) {if(out->uncertain) out->actual_hz=0;return false;}
++    uint32_t updated=(out->tear&0xffff0000u)|((out->tear&0xffff)*2/3);
++    rp_write(io,RP_INTF,0x288,updated);
++    io->delay(io->context,40000);
++    out->stage=6;redfin_panel_measure(io,&out->after);
++    if (rp_read(io,RP_INTF,0x288)==updated && redfin_panel_sample_is(&out->after,90)) {
++        out->actual_hz=90;out->stage=8;return true;
++    }
++    out->actual_hz=0;out->stage=7;
++    if (!out->uncertain) out->rollback_done=redfin_panel_command(io,60,&out->uncertain);
++    if (out->rollback_done) {
++        rp_write(io,RP_INTF,0x288,out->tear);io->delay(io->context,40000);
++        redfin_panel_measure(io,&out->rollback);
++        if (redfin_panel_sample_is(&out->rollback,60)) out->actual_hz=60;
++    }
++    return false;
++}
++#endif
+diff --git a/iokit/Kernel/arm/RedfinDisplayMode.inc b/iokit/Kernel/arm/RedfinDisplayMode.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinDisplayMode.inc
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: APSL-2.0 */
++/* Mode publication adapted from preferred8e611870 MiniIOMobileFramebuffer.
++ * Native20H392 IOMobileFramebuffer reads TimingElements/ColorElements and
++ * selector79's current IDs; QuartzCore reads VerticalAttributes/SyncRate. */
++#include "RedfinDisplayMode.h"
++#include <libkern/c++/OSNumber.h>
++#include <libkern/c++/OSDictionary.h>
++#include <libkern/c++/OSArray.h>
++static void redfin_mode_number(OSDictionary *dictionary,const char *key,uint32_t value)
++{
++    OSNumber *number=OSNumber::withNumber(value,32);
++    if (number) {dictionary->setObject(key,number);number->release();}
++}
++static bool redfin_publish_modes(IOService *fb,uint32_t width,uint32_t height,uint32_t hz)
++{
++    OSDictionary *timing=OSDictionary::withCapacity(8),*horizontal=OSDictionary::withCapacity(4);
++    OSDictionary *vertical=OSDictionary::withCapacity(4),*color=OSDictionary::withCapacity(8);
++    OSArray *timings=OSArray::withCapacity(1),*colors=OSArray::withCapacity(1);
++    bool success=timing && horizontal && vertical && color && timings && colors;
++    if (success) {
++        redfin_mode_number(color,"ID",1);redfin_mode_number(color,"PixelEncoding",0);
++        redfin_mode_number(color,"Depth",8);redfin_mode_number(color,"Colorimetry",1);
++        redfin_mode_number(color,"EOTF",1);redfin_mode_number(color,"DynamicRange",0);
++        redfin_mode_number(color,"Score",1);color->setObject("IsVirtual",kOSBooleanFalse);
++        colors->setObject(color);
++        redfin_mode_number(horizontal,"Active",width);redfin_mode_number(horizontal,"Total",width);
++        redfin_mode_number(horizontal,"SyncRate",hz<<16);redfin_mode_number(horizontal,"PreciseSyncRate",hz<<16);
++        redfin_mode_number(vertical,"Active",height);redfin_mode_number(vertical,"Total",height);
++        redfin_mode_number(vertical,"SyncRate",hz<<16);redfin_mode_number(vertical,"PreciseSyncRate",hz<<16);
++        redfin_mode_number(timing,"ID",1);redfin_mode_number(timing,"Score",1);
++        timing->setObject("IsVirtual",kOSBooleanFalse);timing->setObject("IsOverscanned",kOSBooleanFalse);
++        timing->setObject("HorizontalAttributes",horizontal);timing->setObject("VerticalAttributes",vertical);
++        timing->setObject("ColorModes",colors);timings->setObject(timing);
++        success=fb->setProperty("TimingElements",timings) && fb->setProperty("ColorElements",colors);
++    }
++    OSSafeReleaseNULL(timings);OSSafeReleaseNULL(colors);OSSafeReleaseNULL(timing);
++    OSSafeReleaseNULL(horizontal);OSSafeReleaseNULL(vertical);OSSafeReleaseNULL(color);
++    IOLog("REDFIN DISPLAY MODES: logical=%ux%u rate=%u current-color=1 current-timing=1 published=%u native20H392=1\n",
++        width,height,hz,success);
++    return success;
++}
+diff --git a/iokit/Kernel/arm/RedfinDisplayMode.h b/iokit/Kernel/arm/RedfinDisplayMode.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinDisplayMode.h
+@@ -0,0 +1,26 @@
++/* SPDX-License-Identifier: MIT */
++/* Actual20H392 IOMobileFramebuffer afd11f8e008f3276bd72c0e0d96cffa6 ABI. */
++#ifndef REDFIN_DISPLAY_MODE_H
++#define REDFIN_DISPLAY_MODE_H
++#include <stdint.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <string.h>
++
++static inline void redfin_display_notification(uint64_t now,uint64_t count,uint64_t values[6])
++{
++    /* Native VsyncNotifyFunc decodes time, presentation-time, counter in this
++     * order. A frame counter in the first pair is not an absolute timestamp. */
++    values[0]=(uint32_t)now;values[1]=(uint32_t)(now>>32);
++    values[2]=(uint32_t)now;values[3]=(uint32_t)(now>>32);
++    values[4]=(uint32_t)count;values[5]=(uint32_t)(count>>32);
++}
++static inline bool redfin_display_current_mode(uint64_t block,uint64_t offset,
++    void *output,size_t capacity)
++{
++    if (block!=0x40 || !output || !capacity || capacity>4096 || offset>40 || capacity>40-offset) return false;
++    uint32_t native[10]={0,1,1,0,0,0,0,0,0,0}; /* current color/timing IDs */
++    memcpy(output,(const uint8_t *)native+(size_t)offset,capacity);
++    return true;
++}
++#endif

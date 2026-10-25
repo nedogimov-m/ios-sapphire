@@ -23,6 +23,7 @@ PROGRAM = '/redfin/bin/photos-init'
 JOB_PATH = '/System/Library/LaunchDaemons/' + LABEL + '.plist'
 LOG_PATH = '/private/var/mobile/Library/Logs/redfin-photos-init.log'
 ENTITLEMENTS = {'application-identifier': LABEL, 'platform-application': True,
+                'keychain-access-groups': [LABEL],
                 'com.apple.private.memorystatus': True,
                 'com.apple.private.tcc.allow': ['kTCCServicePhotos'],
                 'com.apple.photos.bourgeoisie': True,
@@ -94,7 +95,7 @@ def build(out, cache_path=None):
     command = ['xcrun', '--sdk', 'iphoneos', 'clang', '-arch', 'arm64', '-isysroot', sdk,
                '-miphoneos-version-min=16.0', '-O2', '-fblocks', '-Wall', '-Wextra', '-Werror',
                '-Wno-deprecated-declarations', '-I', str(HERE), str(HERE / 'photos-init.m'),
-               '-framework', 'Foundation', '-framework', 'Photos', '-o', str(executable)]
+               '-framework', 'Foundation', '-framework', 'Photos', '-framework', 'Security', '-o', str(executable)]
     with (out / 'build.log').open('wb') as log:
         subprocess.run(command, check=True, stdout=log, stderr=log)
         entitlements = out / 'photos-init.entitlements.plist'

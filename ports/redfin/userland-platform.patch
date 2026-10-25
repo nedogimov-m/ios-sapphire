@@ -1,0 +1,338 @@
+diff --git a/iokit/Kernel/arm/SweetPlatformExpert.cpp b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -11,6 +11,8 @@
+ #include <IOKit/IOLib.h>
+ #include <libkern/c++/OSData.h>
+ #include "RedfinDeviceIdentity.h"
++extern void RedfinKeychainPrepare(IORegistryEntry *);
++#include "RedfinDeviceModel.inc"
+ 
+ static void redfin_publish_serial(IOService *platform, IOService *provider)
+ {
+@@ -58,7 +60,10 @@
+ 	if (!IODTPlatformExpert::start(provider)) {
+ 		return false;
+ 	}
++	IORegistryEntry *private_chosen = IORegistryEntry::fromPath("/chosen", gIODTPlane);
++	if (private_chosen) { RedfinKeychainPrepare(private_chosen); private_chosen->release(); }
+ 	redfin_publish_serial(this, provider);
++	redfin_publish_model(this, provider);
+ 	registerService();
+ 	IOLog("SWEET: platform expert registered\n");
+ 	return true;
+diff --git a/iokit/Kernel/arm/SweetKeyStore.cpp b/iokit/Kernel/arm/SweetKeyStore.cpp
+--- a/iokit/Kernel/arm/SweetKeyStore.cpp
++++ b/iokit/Kernel/arm/SweetKeyStore.cpp
+@@ -40,6 +40,10 @@
+ 	kAKSUnlockBag        = 12,
+ 	kAKSLockBag          = 13,
+ 	kAKSGetSystem        = 14,
++	kAKSGetBagUUID       = 23,
++	kAKSGetConfiguration = 31,
++	kAKSGeneration       = 40,
++	kAKSPrewarm          = 115,
+ 	kAKSGetDeviceState   = 17,
+ 	kAKSGetExtDeviceState = 35,     /* aks_get_extended_device_state */
+ 	kAKSAssertHold       = 26,
+@@ -58,6 +62,7 @@
+  * (MobileKeyBag MKBDeviceUnlockedSinceBoot); clear lock bits = unlocked.
+  */
+ #define SWEET_AKS_LOCK_STATE    0x4
++#include "RedfinKeychain.inc"
+ 
+ class AppleKeyStore : public IOService {
+ 	OSDeclareDefaultStructors(AppleKeyStore);
+@@ -194,10 +199,11 @@
+ 	case kAKSAssertDrop:
+ 	case kAKSAssertConsume:
+ 	case kAKSUnloadSessionBags:
+-	case kAKSNotifyStateSet:
++	case kAKSPrewarm:
+ 		args->scalarOutputCount = 0;
+ 		break;
+ 	case kAKSGetSystem:
++	case kAKSGeneration:
+ 		if (out_scalars < 1) {
+ 			ret = kIOReturnBadArgument;
+ 			break;
+@@ -213,14 +219,29 @@
+ 		args->scalarOutput[0] = SWEET_AKS_LOCK_STATE;
+ 		args->scalarOutputCount = 1;
+ 		break;
++	case kAKSNotifyStateSet:
++		__atomic_store_n(&redfin_kc_notified,true,__ATOMIC_RELEASE);
++		args->scalarOutputCount = 0;
++		break;
+ 	case kAKSNotifyStateIsSet:
+-		/* Nothing was ever set: answer "not set". */
+ 		if (out_scalars < 1) {
+ 			ret = kIOReturnBadArgument;
+ 			break;
+ 		}
+-		args->scalarOutput[0] = 0;
++		args->scalarOutput[0] = __atomic_load_n(&redfin_kc_notified,__ATOMIC_ACQUIRE);
+ 		args->scalarOutputCount = 1;
++		break;
++	case kAKSWrapKey:
++		ret = redfin_kc_transform(args,false);
++		break;
++	case kAKSUnwrapKey:
++		ret = redfin_kc_transform(args,true);
++		break;
++	case kAKSGetBagUUID:
++		ret = redfin_kc_bag_uuid(args);
++		break;
++	case kAKSGetConfiguration:
++		ret = redfin_kc_configuration(args);
+ 		break;
+ 	case kAKSGetDeviceState:
+ 	case kAKSGetExtDeviceState:
+diff --git a/iokit/Kernel/arm/RedfinKeychain.inc b/iokit/Kernel/arm/RedfinKeychain.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinKeychain.inc
+@@ -0,0 +1,116 @@
++/* SPDX-License-Identifier: MIT */
++/* Preferred MiniAppleKeyStore's wrap/unwrap ABI, adapted for Redfin's
++ * persistent HFSX root, actual20H392 calls and portable AES provider.
++ * AES256/RFC3394 uses persistent private material, not a fixed mixing key.
++ * This software device bag does not emulate a Secure Enclave. */
++#include <libkern/c++/OSData.h>
++#include <libkern/crypto/aes.h>
++#include "RedfinKeywrap.h"
++
++static aes_encrypt_ctx redfin_kc_encrypt;
++static aes_decrypt_ctx redfin_kc_decrypt;
++static uint8_t redfin_kc_uuid[16];
++static bool redfin_kc_attempted, redfin_kc_ready, redfin_kc_notified;
++static IOReturn sweet_aks_struct_out(IOExternalMethodArguments *, const void *, uint32_t);
++static uint32_t sweet_aks_der_pair(uint8_t *, const char *, uint8_t);
++
++/* Platform expert invokes this before any userspace can inspect IORegistry.
++ * Retain before removal: DT-backed OSData need not outlive its dictionary. */
++void RedfinKeychainPrepare(IORegistryEntry *chosen)
++{
++    if (!chosen || __atomic_exchange_n(&redfin_kc_attempted, true, __ATOMIC_ACQ_REL)) return;
++    OSData *data = OSDynamicCast(OSData, chosen->getProperty("redfin-keychain-material"));
++    if (!data) return;
++    data->retain();
++    uint8_t material[56] = {};
++    bool valid = data->getLength() == sizeof(material);
++    if (valid) memcpy(material, data->getBytesNoCopy(), sizeof(material));
++    chosen->removeProperty("redfin-keychain-material");
++    bool removed = chosen->getProperty("redfin-keychain-material") == NULL;
++    data->release();
++    const uint8_t version[8] = {1,0,0,0,1,0,0,0};
++    unsigned key_nonzero = 0, uuid_nonzero = 0;
++    for (unsigned i=8;i<40;++i) key_nonzero |= material[i];
++    for (unsigned i=40;i<56;++i) uuid_nonzero |= material[i];
++    valid = valid && removed && !memcmp(material, version, sizeof(version)) && key_nonzero && uuid_nonzero;
++    if (valid) {
++        valid = !aes_encrypt_key(material+8,32,&redfin_kc_encrypt) &&
++            !aes_decrypt_key(material+8,32,&redfin_kc_decrypt);
++        if (valid) memcpy(redfin_kc_uuid,material+40,sizeof(redfin_kc_uuid));
++    }
++    redfin_kw_clear(material,sizeof(material));
++    if (!valid) {
++        redfin_kw_clear(&redfin_kc_encrypt,sizeof(redfin_kc_encrypt));
++        redfin_kw_clear(&redfin_kc_decrypt,sizeof(redfin_kc_decrypt));
++        redfin_kw_clear(redfin_kc_uuid,sizeof(redfin_kc_uuid));
++    }
++    __atomic_store_n(&redfin_kc_ready,valid,__ATOMIC_RELEASE);
++    IOLog("REDFIN KEYCHAIN: private material accepted=%u removed-from-registry=%u software-AES256-RFC3394=1 SEP=0\n",
++        valid,removed);
++}
++static int redfin_kc_encrypt_block(void *context, const uint8_t in[16], uint8_t out[16])
++{
++    const uint8_t zero[16] = {};
++    return aes_encrypt_cbc(in,zero,1,out,(aes_encrypt_ctx *)context);
++}
++static int redfin_kc_decrypt_block(void *context, const uint8_t in[16], uint8_t out[16])
++{
++    const uint8_t zero[16] = {};
++    return aes_decrypt_cbc(in,zero,1,out,(aes_decrypt_ctx *)context);
++}
++static IOReturn redfin_kc_transform(IOExternalMethodArguments *args, bool unwrap)
++{
++    if (!__atomic_load_n(&redfin_kc_ready,__ATOMIC_ACQUIRE)) return kIOReturnNotReady;
++    size_t length = args->structureInputDescriptor ? args->structureInputDescriptor->getLength() :
++        args->structureInputSize;
++    if (args->scalarInputCount != 2 || !args->scalarInput ||
++        (!unwrap && (!args->scalarOutput || args->scalarOutputCount<1)) ||
++        args->scalarInput[0] != SWEET_AKS_SYSTEM_HANDLE ||
++        args->scalarInput[1] > UINT32_MAX || (!unwrap && !redfin_kw_length(length)) ||
++        (unwrap && (length < 24 || length > 72 || !redfin_kw_length(length-8))))
++        return kIOReturnBadArgument;
++    uint8_t input[72] = {}, output[72] = {}, iv[8] = {};
++    IOReturn result = kIOReturnBadArgument;
++    if (args->structureInputDescriptor) {
++        if (args->structureInputDescriptor->readBytes(0,input,length) != length) goto done;
++    } else {
++        if (!args->structureInput) goto done;
++        memcpy(input,args->structureInput,length);
++    }
++    {
++        uint32_t key_class = (uint32_t)args->scalarInput[1];
++        redfin_kw_class_iv(key_class,iv);
++        int error = unwrap ? redfin_kw_unwrap(redfin_kc_decrypt_block,&redfin_kc_decrypt,iv,
++            input,length,output,sizeof(output)) :
++            redfin_kw_wrap(redfin_kc_encrypt_block,&redfin_kc_encrypt,iv,input,length,output,sizeof(output));
++        if (error) {
++            result = error == EBADMSG ? kIOReturnNotPermitted : kIOReturnBadArgument;
++            goto done;
++        }
++        result = sweet_aks_struct_out(args,output,(uint32_t)(unwrap ? length-8 : length+8));
++        if (result == kIOReturnSuccess) {
++            if (!unwrap && args->scalarOutputCount >= 1) {
++                args->scalarOutput[0] = key_class; args->scalarOutputCount = 1;
++            } else args->scalarOutputCount = 0;
++        }
++    }
++done:
++    redfin_kw_clear(input,sizeof(input)); redfin_kw_clear(output,sizeof(output)); redfin_kw_clear(iv,sizeof(iv));
++    return result;
++}
++static IOReturn redfin_kc_bag_uuid(IOExternalMethodArguments *args)
++{
++    if (!__atomic_load_n(&redfin_kc_ready,__ATOMIC_ACQUIRE)) return kIOReturnNotReady;
++    args->scalarOutputCount = 0;
++    return sweet_aks_struct_out(args,redfin_kc_uuid,sizeof(redfin_kc_uuid));
++}
++static IOReturn redfin_kc_configuration(IOExternalMethodArguments *args)
++{
++    uint8_t der[128] = {}; uint32_t n = 2;
++    n += sweet_aks_der_pair(der+n,"bd",0);
++    n += sweet_aks_der_pair(der+n,"gp",0);
++    n += sweet_aks_der_pair(der+n,"mua",10);
++    der[0]=0x31; der[1]=(uint8_t)(n-2);
++    args->scalarOutputCount=0;
++    return sweet_aks_struct_out(args,der,n);
++}
+diff --git a/iokit/Kernel/arm/RedfinKeywrap.h b/iokit/Kernel/arm/RedfinKeywrap.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinKeywrap.h
+@@ -0,0 +1,85 @@
++/* SPDX-License-Identifier: MIT */
++/* RFC3394 key wrapping, using the caller's existing AES block provider.
++ * No key material, fixed wrapping secret, heap or SIMD implementation here. */
++#ifndef REDFIN_KEYWRAP_H
++#define REDFIN_KEYWRAP_H
++#include <stdint.h>
++#include <stddef.h>
++#include <stdbool.h>
++#include <string.h>
++#include <sys/errno.h>
++
++#define REDFIN_KW_KEY_MAX 64u
++typedef int (*redfin_kw_block_fn)(void *, const uint8_t[16], uint8_t[16]);
++
++static inline void redfin_kw_clear(void *memory, size_t bytes)
++{
++    volatile uint8_t *p = (volatile uint8_t *)memory;
++    while (bytes--) *p++ = 0;
++}
++static inline void redfin_kw_counter(uint8_t a[8], uint64_t counter)
++{
++    for (unsigned i = 0; i < 8; ++i) {
++        a[7-i] ^= (uint8_t)counter;
++        counter >>= 8;
++    }
++}
++static inline bool redfin_kw_length(size_t length)
++{return length >= 16 && length <= REDFIN_KW_KEY_MAX && !(length & 7u);}
++
++static inline int redfin_kw_wrap(redfin_kw_block_fn encrypt, void *context,
++    const uint8_t iv[8], const void *input, size_t length, void *output, size_t capacity)
++{
++    if (!encrypt || !iv || !input || !output || !redfin_kw_length(length) || capacity < length+8)
++        return EINVAL;
++    uint8_t a[8], block[16], result[16];
++    uint8_t *wrapped = (uint8_t *)output;
++    memmove(wrapped+8, input, length);
++    memcpy(a, iv, sizeof(a));
++    unsigned n = (unsigned)(length/8);
++    int error = 0;
++    for (unsigned j = 0; j < 6 && !error; ++j) for (unsigned i = 1; i <= n; ++i) {
++        memcpy(block, a, 8); memcpy(block+8, wrapped+8*i, 8);
++        error = encrypt(context, block, result);
++        if (error) break;
++        memcpy(a, result, 8); redfin_kw_counter(a, (uint64_t)n*j+i);
++        memcpy(wrapped+8*i, result+8, 8);
++    }
++    if (!error) memcpy(wrapped, a, 8);
++    else redfin_kw_clear(wrapped, length+8);
++    redfin_kw_clear(a,sizeof(a)); redfin_kw_clear(block,sizeof(block)); redfin_kw_clear(result,sizeof(result));
++    return error;
++}
++static inline int redfin_kw_unwrap(redfin_kw_block_fn decrypt, void *context,
++    const uint8_t iv[8], const void *input, size_t length, void *output, size_t capacity)
++{
++    if (!decrypt || !iv || !input || !output || length < 24 ||
++        !redfin_kw_length(length-8) || capacity < length-8) return EINVAL;
++    uint8_t a[8], block[16], result[16];
++    const uint8_t *wrapped = (const uint8_t *)input;
++    uint8_t *key = (uint8_t *)output;
++    memcpy(a, wrapped, 8); memmove(key, wrapped+8, length-8);
++    unsigned n = (unsigned)((length-8)/8);
++    int error = 0;
++    for (int j = 5; j >= 0 && !error; --j) for (unsigned i = n; i > 0; --i) {
++        memcpy(block, a, 8); redfin_kw_counter(block, (uint64_t)n*(unsigned)j+i);
++        memcpy(block+8, key+8*(i-1), 8);
++        error = decrypt(context, block, result);
++        if (error) break;
++        memcpy(a, result, 8); memcpy(key+8*(i-1), result+8, 8);
++    }
++    unsigned difference = 0;
++    for (unsigned i = 0; i < 8; ++i) difference |= a[i] ^ iv[i];
++    if (!error && difference) error = EBADMSG;
++    if (error) redfin_kw_clear(key,length-8);
++    redfin_kw_clear(a,sizeof(a)); redfin_kw_clear(block,sizeof(block)); redfin_kw_clear(result,sizeof(result));
++    return error;
++}
++static inline void redfin_kw_class_iv(uint32_t key_class, uint8_t iv[8])
++{
++    /* RFC3394 permits an application-specific initial value. Bind the
++     * opaque wrapped key to its actual native class, with the same +8 ABI. */
++    iv[0]='R'; iv[1]='D'; iv[2]='K'; iv[3]=1;
++    for (unsigned i=0;i<4;++i) iv[4+i]=(uint8_t)(key_class>>(24-8*i));
++}
++#endif
+diff --git a/iokit/Kernel/arm/RedfinDeviceModel.inc b/iokit/Kernel/arm/RedfinDeviceModel.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinDeviceModel.inc
+@@ -0,0 +1,32 @@
++/* SPDX-License-Identifier: MIT */
++/* Physical model/SKU is separate from the installed iPhone10,3 userland ABI. */
++static void redfin_publish_model(IOService *platform, IOService *provider)
++{
++    IORegistryEntry *root = IORegistryEntry::fromPath("/",gIODTPlane);
++    IORegistryEntry *chosen = IORegistryEntry::fromPath("/chosen",gIODTPlane);
++    if (root && chosen) {
++        OSData *model = OSDynamicCast(OSData,root->getProperty("model-number"));
++        OSData *mirror = OSDynamicCast(OSData,chosen->getProperty("model-number"));
++        OSData *marker = OSDynamicCast(OSData,chosen->getProperty("redfin-identity-version"));
++        uint32_t version = 0;
++        if (marker && marker->getLength() == sizeof(version))
++            memcpy(&version,marker->getBytesNoCopy(),sizeof(version));
++        if (version == 1 && (model || mirror)) {
++            bool valid = model && mirror && model->getLength() == mirror->getLength() &&
++                model->getLength() >= 5 && model->getLength() <= 17;
++            const uint8_t *bytes = valid ? (const uint8_t *)model->getBytesNoCopy() : NULL;
++            if (valid) {
++                valid = !bytes[model->getLength()-1] &&
++                    !memcmp(bytes,mirror->getBytesNoCopy(),model->getLength());
++                for (unsigned i=0; valid && i+1<model->getLength(); ++i)
++                    valid = (bytes[i]>='0' && bytes[i]<='9') || (bytes[i]>='A' && bytes[i]<='Z');
++            }
++            bool published = valid && provider &&
++                platform->setProperty("IOPlatformModelNumber",(const char *)bytes) &&
++                provider->setProperty("IOPlatformModelNumber",(const char *)bytes);
++            IOLog("REDFIN MODEL: physical-model-published=%u valid=%u\n",published,valid);
++        }
++    }
++    if (chosen) chosen->release();
++    if (root) root->release();
++}

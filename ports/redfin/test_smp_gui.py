@@ -98,12 +98,22 @@ class GUIProfileTests(unittest.TestCase):
         args = ARGS + ' redfinfit=2 redfinscreen=1'
         self.check(args, 1)
         self.assertEqual(gui_profile.validate(args), '0123456789abcdef')
-        for bad in (ARGS + ' redfinscreen=1', args.replace('redfinfit=2', 'redfinfit=1'),
+        full=args.replace('redfinfit=2','redfinfit=1')
+        self.check(full,1)
+        self.assertEqual(gui_profile.validate(full),'0123456789abcdef')
+        for bad in (ARGS + ' redfinscreen=1',
                     args + ' redfinscreen=1', args.replace('redfinscreen=1', 'redfinscreen=0'),
                     args + ' -enable_kprintf_spam'):
             self.check(bad, 0)
             with self.assertRaises(ValueError):
                 gui_profile.validate(bad)
+
+    def test_physical90_requires_gui3_and_complete_fullscreen_in_both_parsers(self):
+        args=ARGS.replace('sweetfb_hz=10','sweetfb_hz=90').replace('redfingui=1','redfingui=3')+' redfinfit=1'
+        self.check(args,1);self.assertEqual(gui_profile.cadence(args),90)
+        for bad in [args.replace('redfinfit=1','redfinfit=2'),args.replace('redfingui=3','redfingui=2')]:
+            self.check(bad,0)
+            with self.assertRaises(ValueError):gui_profile.validate(bad)
 
     def test_hidden_tail_controls_unterminated_field_and_invalid_nonce_fail(self):
         for args in (ARGS + '\0hidden=1', ARGS.replace(' ', '\t', 1), ARGS + '\n',
@@ -190,6 +200,7 @@ class GUILoaderTests(unittest.TestCase):
         wrapper = ('#include "loader.c"\n'
             'int command(const char *p){return smp_command(p);}\n'
             'int tree(const void *p,unsigned n){return adt_valid_smp_mode(p,n,1);}\n'
+            'int tree3(const void *p,unsigned n){return adt_valid_smp_mode(p,n,3);}\n'
             'int md0tree(const void *p,unsigned n){return adt_valid_smp(p,n);}\n')
         # fdt.c supplies only the real loader's link dependencies.
         for name, shim, gui, probe, count in (('gui', 1, 1, 0, 8), ('md0', 1, 0, 1, 8),
@@ -200,7 +211,7 @@ class GUILoaderTests(unittest.TestCase):
             lib = compile_shared(cls.directory, wrapper, name,
                                  ('-DREDFIN_LOADER_TEST', str(HERE / 'fdt.c')))
             lib.command.argtypes = [C.c_char_p]
-            lib.tree.argtypes = lib.md0tree.argtypes = [C.c_void_p, C.c_uint]
+            lib.tree.argtypes = lib.tree3.argtypes = lib.md0tree.argtypes = [C.c_void_p, C.c_uint]
             cls.libs[name] = lib
         sys.path.insert(0, str(HERE.parents[1] / 'tools'))
         import adt
@@ -254,6 +265,24 @@ class GUILoaderTests(unittest.TestCase):
                     victim.props = [(k, f, bytes([v[0] ^ 1]) + v[1:] if k == key else v) for k, f, v in victim.props]
                     raw = self.adt.serialize(tree)
                     self.assertEqual(lib.tree(raw, len(raw)), 0, (target.name, key))
+
+    def test_optional_panel_contract_admits_only_exact_registers_in_the_gpu_tree(self):
+        from ports.redfin.panel_mode import VALUES,PROPERTY
+        def make(values):
+            tree=self.gui_tree()
+            display=next(c for p in tree.children if p.name=='arm-io' for c in p.children if c.name=='disp0')
+            display.props.append((PROPERTY,0,self.mk.u32(*values)))
+            tree.children += [self.mk.node(name,[]) for name in ('redfin-wifi','redfin-wifi-native','redfin-wifi-power',
+                'redfin-wifi-start','redfin-wifi-glink','redfin-wifi-wlfw','redfin-wifi-wlan','redfin-wifi-snoc',
+                'redfin-rmtfs','redfin-wifi-dma','redfin-wifi-assets','redfin-wifi-fw','redfin-gpu',
+                'redfin-gpu-power','redfin-gmu','redfin-gpu-smmu','redfin-gpu-command')]
+            return self.adt.serialize(tree)
+        lib=self.libs['gui'];raw=make(VALUES)
+        self.assertEqual(lib.tree3(raw,len(raw)),1)
+        self.assertEqual(lib.tree(raw,len(raw)),0)
+        for i in range(len(VALUES)):
+            values=list(VALUES);values[i]^=1;raw=make(values)
+            self.assertEqual(lib.tree3(raw,len(raw)),0,i)
 
 
 class GUIRuntimeTests(unittest.TestCase):

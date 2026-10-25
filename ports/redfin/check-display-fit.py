@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check cutout geometry in an already authenticated REDFIN SCREEN RAM log.
+"""Check full-panel or legacy cutout geometry in an authenticated RAM log.
 
 Reads the existing 120x260 RGB captures without device access or output writes.
 This checks RAM presentation; it does not measure the physical camera or touch.
@@ -19,6 +19,8 @@ SPEC.loader.exec_module(decoder)
 FB_LINE = b'REDFIN FB: fit 2 bilinear viewport 31,136 1017x2204 top-exclusion 136'
 HID_LINE = b'REDFIN HID: fit 2 inverse viewport 31,136 1017x2204'
 VIEWPORT = (31, 136, 1017, 2204)
+FULL_FB_LINE = b'REDFIN FB: fit 1 bilinear viewport 0,0 1080x2340 top-exclusion 0'
+FULL_HID_LINE = b'REDFIN HID: fit 1 inverse viewport 0,0 1080x2340'
 SAMPLE_STEP, SAMPLE_CENTER = 9, 4
 
 
@@ -26,12 +28,14 @@ def inspect(data):
     if not isinstance(data, bytes) or len(data) > decoder.MAX_LOG_BYTES:
         raise ValueError('log exceeds bounded input size')
     lines = [line.removesuffix(b'\r') for line in data.split(b'\n')]
-    for prefix, expected in ((b'REDFIN FB: fit ', FB_LINE), (b'REDFIN HID: fit ', HID_LINE)):
+    full=FULL_FB_LINE in lines
+    for prefix, expected in ((b'REDFIN FB: fit ', FULL_FB_LINE if full else FB_LINE),
+                             (b'REDFIN HID: fit ', FULL_HID_LINE if full else HID_LINE)):
         matches = [line for line in lines if prefix in line]
         if matches != [expected]:
             raise ValueError('expected exactly one matching fit line: ' + expected.decode())
     frames = decoder.decode(data)
-    vx, vy, vw, vh = VIEWPORT
+    vx, vy, vw, vh = (0,0,1080,2340) if full else VIEWPORT
     results = []
     rendered = False
     for frame in frames:
@@ -64,10 +68,12 @@ def inspect(data):
                             if nonblack_content else None})
     if not rendered:
         raise ValueError('captured frames contain no rendered content inside the viewport')
-    return {'evidence': 'RAM presentation', 'mode': 'cutout',
+    return {'evidence': 'RAM presentation', 'mode': 'full' if full else 'cutout',
             'viewport': {'x': vx, 'y': vy, 'width': vw, 'height': vh},
-            'thumbnail_content_bounds': {'left': 3, 'top': 15, 'right': 116, 'bottom': 260},
-            'checks': {'display_and_hid_fit_logs': True, 'black_margins': True,
+            'thumbnail_content_bounds': {'left': 0 if full else 3, 'top': 0 if full else 15,
+                                         'right': 120 if full else 116, 'bottom': 260},
+            'checks': {'display_and_hid_fit_logs': True, 'black_margins': None if full else True,
+                       'full_panel_viewport': full,
                        'captured_rendered_content': True}, 'frames': results}
 
 

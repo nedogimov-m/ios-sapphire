@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native platform/display block built and host-verified — 2026-10-25
+
+Whole source block implemented before combined checks or a new iOS boot:
+persistent private AES256/RFC3394 device bag/native AKS ABI, synthetic SecItem
+persistence probe, physical model publication, canonical native Photos URL,
+full1080x2340viewport/inverse touch, UUID/method-guarded native status-bar
+camera avoidance, physical90Hz FIFO/TE transaction, real display-mode IDs/
+rate metadata and corrected native timestamp packing. Firmware compares are
+deduplicated only inside the outer complete GPU audit. An opt-in native
+Phone/Photos smoke job performs no calls/messages/account operation.
+
+Local kernel build20261025-061234PASS/noCI, SHA256
+522ea9fd7ded64cd6b327ddc16a100721feae172e576bdecc45651ce7521b042.
+All138distinct selected host cases PASS. The first combined run passed134
+cases and exposed an outdated AMFI fixture lacking executable-vnode handling;
+its corrected four cases also pass, including exact app paths and iocount
+release. AES known answers/corruption/classes/reset persistence/native short
+inband/descriptors, panel fresh-done/TE/rollback/uncertain-completion faults,
+full geometry/source guards/sanitizers, complete audit corruption, signature
+scope, native cache and previous Wi-Fi/root contracts pass. The UI dylib's
+first link lacked CoreGraphics; explicit linking fixes it. All three native
+signed artifacts resolve every nonweak import through actual20H392,52libs.
+
+V8 stage on a private sparse clone passes native readonly fsck and strict
+codesign/full-extent readback for all programs. It plans195blocks/798720bytes,
+38new blocks, zero freed. Existing Photos helper stays within its18blocks;
+all source-zero/new blocks are included. No root/device write or new iOS
+boot has occurred. Device is verified idle/unmounted recovery, timer stopped;
+fresh snapshot remains clean/write_count761257. Read-only Linux inventory
+observes real battery100%/Full/35.6C and USB-PD source present, with real
+thermal inputs; this is not iOS battery/charging/thermal/sensor support.
+
+Next: freeze this kernel, build/preflight the full-panel90Hz capture image,
+apply the backed-up complete files and run one combined180s hardware capture.
+Then repeat only the completed boot for native Keychain persistence. Real
+panel90Hz, native About model, Photos readiness/app survival, time/camera
+layout, faster cadence and native credential persistence are unverified yet.
+No stable60/90fps, Metal or Apple account activation/login claim. Power/
+charging/thermals/all sensors remain mandatory subsequent implementation.
+Last actual boot026ce38e14155367/source13e151f/imagegpu-panel-v1 and its exact
+args/results remain in the GPU panel checkpoint below; no new boot args used.
+
 ## REDFIN native model and next userland ABI observations — 2026-10-25
 
 Verified offline recovery reports physical SKU G5NZ6/model Pixel5. Exact

@@ -379,7 +379,7 @@ class DisplayGeometryTests(unittest.TestCase):
         return source, surface, output
 
     def test_exact_fixed_modes_and_camera_rectangle(self):
-        for mode, expected in ((1, (0, 1, 1080, 2338)), (2, (31, 136, 1017, 2204))):
+        for mode, expected in ((1, (0, 0, 1080, 2340)), (2, (31, 136, 1017, 2204))):
             g = self.geometry(mode)
             self.assertEqual((g.x, g.y, g.w, g.h), expected)
             self.assertLessEqual(abs(g.w * 2436 - g.h * 1125), 2436)

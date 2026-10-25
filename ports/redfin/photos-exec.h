@@ -8,7 +8,8 @@
 static inline bool redfin_photos_exec_selected(const char *args, unsigned bytes, const char *saved)
 {
     return args && saved && redfin_gpu_gui_profile(args, bytes, NULL) &&
-        !strcmp(saved, "executable_path=/redfin/bin/photos-init");
+        (!strcmp(saved, "executable_path=/redfin/bin/photos-init") ||
+         !strcmp(saved, "executable_path=/redfin/bin/gui-check"));
 }
 static inline bool redfin_photos_exec_signature(unsigned flags, bool platform)
 {

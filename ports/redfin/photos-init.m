@@ -3,6 +3,7 @@
  * Never replace a database, synthesize its schema or suppress a Photos assert. */
 #import <Foundation/Foundation.h>
 #import <Photos/Photos.h>
+#import <Security/Security.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <CommonCrypto/CommonDigest.h>
@@ -12,6 +13,8 @@
 #include <string.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <limits.h>
 #include "gui-profile.h"
 
 extern int memorystatus_control(uint32_t, int32_t, uint32_t, void *, size_t);
@@ -52,7 +55,60 @@ identity_proof(const char *nonce)
     printf("REDFIN IDENTITY PROOF: boot=%s MobileGestalt-serial=%u sha256=%s\n",nonce,present,hex);
     memset(serial,0,sizeof(serial));
     if (value) CFRelease(value);
+    value=copy ? copy(CFSTR("ModelNumber")) : NULL;
+    present=NO; memset(digest,0,sizeof(digest)); memset(hex,0,sizeof(hex));
+    if (value && CFGetTypeID(value)==CFStringGetTypeID())
+        present=CFStringGetCString((CFStringRef)value,serial,sizeof(serial),kCFStringEncodingASCII) && serial[0];
+    if (present) {
+        CC_SHA256(serial,(CC_LONG)strlen(serial),digest);
+        for (unsigned i=0;i<sizeof(digest);++i) snprintf(hex+2*i,3,"%02x",digest[i]);
+    }
+    printf("REDFIN IDENTITY MODEL PROOF: boot=%s MobileGestalt-model=%u sha256=%s\n",nonce,present,hex);
+    memset(serial,0,sizeof(serial)); memset(digest,0,sizeof(digest)); memset(hex,0,sizeof(hex));
+    if (value) CFRelease(value);
     if (handle) dlclose(handle);
+}
+
+/* Exercise the real SecItem/securityd/AKS path, without a user's password.
+ * An existing exact item on a later boot proves native decrypt persistence. */
+static void
+keychain_proof(const char *nonce)
+{
+    static const unsigned char marker[]="Redfin native Keychain persistence probe v1.";
+    CFMutableDictionaryRef query=CFDictionaryCreateMutable(NULL,0,&kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    if (!query) return;
+    CFDictionarySetValue(query,kSecClass,kSecClassGenericPassword);
+    CFDictionarySetValue(query,kSecAttrService,CFSTR("com.redfin.keychain.persistence-probe"));
+    CFDictionarySetValue(query,kSecAttrAccount,CFSTR("local-device"));
+    CFDictionarySetValue(query,kSecAttrAccessGroup,CFSTR("com.redfin.photos-init"));
+    CFDictionarySetValue(query,kSecReturnData,kCFBooleanTrue);
+    CFDictionarySetValue(query,kSecMatchLimit,kSecMatchLimitOne);
+    CFTypeRef value=NULL;
+    OSStatus status=SecItemCopyMatching(query,&value),add=errSecSuccess;
+    BOOL existing=status==errSecSuccess;
+    if (status==errSecItemNotFound) {
+        CFMutableDictionaryRef item=CFDictionaryCreateMutableCopy(NULL,0,query);
+        if (item) {
+            CFDictionaryRemoveValue(item,kSecReturnData);
+            CFDictionaryRemoveValue(item,kSecMatchLimit);
+            CFDictionarySetValue(item,kSecAttrAccessible,kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly);
+            CFDataRef data=CFDataCreate(NULL,marker,sizeof(marker)-1);
+            if (data) {
+                CFDictionarySetValue(item,kSecValueData,data);
+                add=SecItemAdd(item,NULL); CFRelease(data);
+            } else add=errSecAllocate;
+            CFRelease(item);
+        } else add=errSecAllocate;
+        if (add==errSecSuccess || add==errSecDuplicateItem) status=SecItemCopyMatching(query,&value);
+    }
+    BOOL valid=status==errSecSuccess && value && CFGetTypeID(value)==CFDataGetTypeID() &&
+        CFDataGetLength((CFDataRef)value)==(CFIndex)(sizeof(marker)-1) &&
+        !memcmp(CFDataGetBytePtr((CFDataRef)value),marker,sizeof(marker)-1);
+    printf("REDFIN KEYCHAIN PROBE: boot=%s existing=%u add-status=%d read-status=%d exact=%u\n",
+        nonce,existing,(int)add,(int)status,valid);
+    if (value) CFRelease(value);
+    CFRelease(query);
 }
 
 int main(void)
@@ -72,6 +128,7 @@ int main(void)
         @try {
             identity_proof(nonce);
             if (limit) return 4;
+            keychain_proof(nonce);
             Class photo=NSClassFromString(@"PHPhotoLibrary");
             Class manager=NSClassFromString(@"PLPhotoLibraryPathManager");
             if (!manager) dlopen("/System/Library/PrivateFrameworks/PhotoLibraryServicesCore.framework/PhotoLibraryServicesCore",RTLD_NOW|RTLD_LOCAL);
@@ -84,9 +141,24 @@ int main(void)
                 printf("REDFIN PHOTO INIT REFUSED: actual native method ABI differs\n"); return 5;
             }
             NSURL *url=((id (*)(id,SEL))objc_msgSend)(photo,sel_registerName("systemPhotoLibraryURL"));
-            NSString *path=url.URLByResolvingSymlinksInPath.path;
+            if (!url || !url.isFileURL) {
+                printf("REDFIN PHOTO INIT REFUSED: native system-library URL missing or non-file\n"); return 6;
+            }
+            /* Foundation may canonicalize /private/var back to /var. Compare
+             * actual filesystem canonical paths, with a directory boundary,
+             * rather than requiring one spelling of this native mobile home. */
+            char canonical[PATH_MAX]={0},mobile[PATH_MAX]={0};
+            const char *native=url.isFileURL ? url.fileSystemRepresentation : NULL;
+            int path_error=0;
+            if (!native || !realpath(native,canonical)) path_error=errno ? errno : ENOENT;
+            if (!realpath("/var/mobile",mobile) && !path_error) path_error=errno ? errno : ENOENT;
+            NSString *path=canonical[0] ? [NSString stringWithUTF8String:canonical] : nil;
             BOOL system=((BOOL (*)(id,SEL,id))objc_msgSend)(manager,sel_registerName("isSystemPhotoLibraryURL:"),url);
-            if (!url || !url.isFileURL || !system || ![path hasPrefix:@"/private/var/mobile/"] ||
+            size_t mobile_bytes=strlen(mobile);
+            BOOL within=mobile_bytes && !strncmp(canonical,mobile,mobile_bytes) && canonical[mobile_bytes]=='/';
+            printf("REDFIN PHOTO INIT URL: file=%u system=%u canonical=%u within-mobile=%u error=%d path=%s\n",
+                url.isFileURL,system,canonical[0]!=0,within,path_error,canonical[0] ? canonical : "(none)");
+            if (!url || !url.isFileURL || !system || path_error || !within ||
                 [path containsString:@"Syndication.photoslibrary"]) {
                 printf("REDFIN PHOTO INIT REFUSED: expected the native mobile system-library URL\n"); return 6;
             }

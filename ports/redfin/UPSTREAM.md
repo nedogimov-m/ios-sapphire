@@ -1,5 +1,67 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native device bag, full-panel status bar and display-mode ABI — 2026-10-25
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+MiniAppleKeyStore and MiniIOMobileFramebuffer, with paired userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 unchanged. Actual20H392 securityd
+requests selectors10/11's two-scalar wrap/unwrap ABI. Adapt that ABI using
+AES256/RFC3394 and persistent private software material, binding the native
+key class into its integrity IV; do not import the upstream's fixed mixing
+key or claim SEP. Platform startup consumes/removes the material's chosen
+property before userspace. Native UUID/configuration/generation/prewarm and
+notification-state operations, inband/descriptors and exact copy lengths are
+handled. A synthetic SecItem marker exercises securityd without a Wi-Fi
+password; only a subsequent boot can establish actual persistence.
+
+Installed IOMobileFramebuffer UUIDafd11f8e008f3276bd72c0e0d96cffa6 confirms
+selector72 notifications,79 GetBlock,77 absolute time and the six-halves
+VsyncNotifyFunc ABI. Its callback decodes time/presentation-time/counter;
+the inherited Sweet driver sent counter/time/zero. Correct that order and
+publish the preferred driver's TimingElements/ColorElements/current IDs.
+Actual IOMobileFramebuffer contains those property names, and QuartzCore
+contains HorizontalAttributes/VerticalAttributes/SyncRate/PreciseSyncRate.
+Keep the logical1125x2436canvas while filling all1080x2340physical pixels,
+with the matching inverse touch transform. The tiny aspect correction fills
+the formerly unused two rows; nothing is cropped from the source canvas.
+
+Neither preferred repository contains an identified Redfin cutout adapter.
+Use installed UIKitCore1242978a2c2c37818d6c9777edce2804's verified native
+avoidance/layout/time-item APIs and public UIView coordinate conversion.
+The runtime refuses another UUID/method ABI; the time stays outside the
+source-verified [0,145)x[0,136)camera rectangle without changing global safe
+areas or shrinking the whole UI. Native exec/dyld adaptation remains scoped
+to GUI3, exact system executable paths and full-panel mode. AMFI checks the
+actual executable vnode path and drops its acquired iocount on every exit.
+Only the existing backboardd EAGL bridge and five named system UI executables
+are eligible. No global injection or Metal device publication is added.
+
+Google kernel/msm500b3a2059c1eec0fec08ec56add06320ea901a8's panel DTS,
+dispcc-lito.c and pinctrl-lito.c, and msm-extra/display-drivers
+ca74909cd98764454a2dacf784cda119c45a7f4c's native FIFO/interrupt/TE helpers,
+are reviewed. The captured live FDT selects S6E3HC2 with matching60/90Hz
+commands53:28/53:38,554MHz,14000/9000us transfer times and GPIO10 TE.
+Bind its real DSI2.4/INTF1/clock/GPIO addresses into a strict builder/shim/
+kernel contract. A bounded command-mode transaction uses the native FIFO,
+preserves its configuration, requires fresh DMA-done and physical TE edges,
+and verifies90Hz separately from DPU frame count/render FPS. It keeps the
+inherited external-TE autorefresh owner; a failed measured switch rolls back
+to60Hz. Unknown/video/off-clock handoffs refuse the switch. There is no new
+memory-DMA allocation, display SMMU, scanout address, DSC or PLL change.
+No physical90Hz result is claimed before the combined hardware capture.
+
+Remove only two redundant immutable-payload comparisons inside each nested
+runtime snapshot. The complete outer audit still checks every payload once
+before accepting its tuple, before and after every real GPU submission.
+Twice-read foreign/SMMU snapshots, power/caller guards and faults/fences stay.
+Native Photos initialization now checks canonical filesystem paths because
+its own URL manager accepts the /var spelling. An explicitly opt-in native
+GUI checker opens Phone/Photos and records process/window-server survival;
+it makes no call/message/account operation. Existing helper updates retain
+all allocated blocks; every new zero block, complete signed file, native
+readonly fsck, allocation/preimage and data-before-metadata order is checked
+before applying the separately backed-up update.
+
 ## Complete A620 panel presentation and bootstrap-installation correction — 2026-10-25
 
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's RedwoodGPU

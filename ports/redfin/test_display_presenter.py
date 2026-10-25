@@ -81,6 +81,7 @@ struct redfin_presenter;
 class AppleCLCD {
 public:
  bool fRedfinCopyOnly=true,fPowerOff=false;int references=1;
+ uint32_t fRedfinVsyncUS=16667;
  struct redfin_display_geometry fRedfinFit={};
  struct redfin_display_workspace *fRedfinFitWorkspace=NULL;
  struct redfin_presenter *fRedfinPresenter=NULL;

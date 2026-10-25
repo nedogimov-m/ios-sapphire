@@ -47,7 +47,7 @@ configuration and 20H392 swap/HID ABIs stay the same.
 | Builder option | Boot argument | Physical viewport | Behavior |
 | --- | --- | --- | --- |
 | Omitted | Omitted | 1080×2340, source offset 20,48 | Existing centered crop |
-| `--display-fit full` | `redfinfit=1` | 1080×2338 at 0,1 | Scale the complete 1125×2436 canvas; one black row above and below |
+| `--display-fit full` | `redfinfit=1` | 1080×2340 at 0,0 | Fill the physical panel with the complete 1125×2436 canvas; native status-bar adapter accounts for the camera |
 | `--display-fit cutout` | `redfinfit=2` | 1017×2204 at 31,136 | Scale the complete canvas below the front camera; black top and side margins |
 
 Add `--display-fit cutout` to the established bounded
@@ -142,3 +142,33 @@ iOS lock screen inside the viewport. Both services report1017x2204 at31,136.
 The timed shutdown leaves HFSX clean/unmounted and returns to verified
 fastboot. No physical gestures or panel alignment measurement were made;
 14 presentations during a static-screen test are not an FPS measurement.
+
+Full physical panel and native mode metadata — 2026-10-25
+-------------------------------------------------------
+
+The complete new GUI3 block retains the iPhoneX logical canvas but fills
+all1080x2340pixels. `ui_userland.py` builds a signed native status-bar adapter
+against installed20H392, with UUID/type guards and actual UIView coordinates;
+its native avoidance/time placement uses the physical camera rectangle
+without a top strip. `--display-fit cutout` retains the older exclusion mode.
+The full mode's tiny aspect correction also fills the formerly unused two rows.
+
+`--display-hz90 --display-fit full --gpu-gui` requests a physical S6E3HC2
+switch. Builder, shim and kernel verify the live FDT-derived panel/register/
+GPIO/command contract. The kernel first checks the inherited clock and
+command-mode/TE/autorefresh ownership, sends53:38 through the native FIFO,
+and measures GPIO10 TE edges. It publishes90Hz only after actual90Hz proof;
+an unverified handoff retains60Hz notification/mode metadata, and a failed
+measurement after the switch attempts a verified60Hz rollback. No software
+timer or DPU counter alone counts as physical panel refresh evidence. No
+DSC/PLL, scanout address or display-SMMU reconfiguration is performed.
+
+The native IOMobileFramebuffer timestamp order is now time/time/counter,
+with current-mode IDs and TimingElements/ColorElements read by installed
+CoreAnimation. Both full and cutout modes allow authenticated RAM captures;
+`check-display-fit.py` verifies their exact display/HID viewport and content.
+The signed gui-check job opens Phone/Photos only with `redfinscreen=1` and
+records surviving PIDs/SpringBoard, without calls/messages/account actions.
+Host checks/native builds pass; physical results are pending the combined
+boot. Metal, stable60/90fps and correct physical cutout alignment are not
+established by those host results.

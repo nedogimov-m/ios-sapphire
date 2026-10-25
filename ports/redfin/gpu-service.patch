@@ -80,7 +80,16 @@ diff --git a/bsd/dev/redfin_gpu_power.c b/bsd/dev/redfin_gpu_power.c
 diff --git a/osfmk/arm64/redfin_gui_profile.h b/osfmk/arm64/redfin_gui_profile.h
 --- a/osfmk/arm64/redfin_gui_profile.h
 +++ b/osfmk/arm64/redfin_gui_profile.h
-@@ -70,7 +70,7 @@
+@@ -60,7 +60,7 @@
+  for(unsigned tail=length;tail<bytes;tail++) if(args[tail]) return false;
+  uint64_t seen=0,nonce=0;
+  bool nonce_seen=false,trace_seen=false,cadence_seen=false,screen_seen=false;
+- unsigned fit_mode=0;
++ unsigned fit_mode=0,cadence=0,gui_mode=1;
+  for(unsigned pos=0;pos<length;) {
+   if(args[pos]==' ') { pos++;continue; }
+   unsigned start=pos;
+@@ -70,10 +70,10 @@
    }
    unsigned n=pos-start;
    bool known=false;
@@ -88,8 +97,35 @@ diff --git a/osfmk/arm64/redfin_gui_profile.h b/osfmk/arm64/redfin_gui_profile.h
 +  if(redfin_gui_token(args+start,n,"redfingui=2") || redfin_gui_token(args+start,n,"redfingui=3")) {
     uint64_t bit=1ULL<<(count-1);
     if(seen&bit) return false;
-    seen|=bit;continue;
-@@ -122,7 +122,20 @@
+-   seen|=bit;continue;
++   seen|=bit;gui_mode=(unsigned)(args[start+n-1]-'0');continue;
+   }
+   for(unsigned i=0;i<count;i++) if(redfin_gui_token(args+start,n,required[i])) {
+    if(seen&(1ULL<<i)) return false;
+@@ -90,9 +90,10 @@
+   }
+   if(redfin_gui_token(args+start,n,"sweetfb_hz=10") ||
+      redfin_gui_token(args+start,n,"sweetfb_hz=30") ||
+-     redfin_gui_token(args+start,n,"sweetfb_hz=60")) {
++     redfin_gui_token(args+start,n,"sweetfb_hz=60") ||
++     redfin_gui_token(args+start,n,"sweetfb_hz=90")) {
+    if(cadence_seen) return false;
+-   cadence_seen=true;continue;
++   cadence_seen=true;cadence=(unsigned)(args[start+n-2]-'0')*10+(unsigned)(args[start+n-1]-'0');continue;
+   }
+   if(redfin_gui_token(args+start,n,"-enable_kprintf_spam")) {
+    if(trace_seen) return false;
+@@ -110,7 +111,8 @@
+   }
+   return false;
+  }
+- if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen || (screen_seen && fit_mode!=2)) return false;
++ if(seen!=((1ULL<<count)-1) || !nonce_seen || !cadence_seen ||
++    (screen_seen && fit_mode!=1 && fit_mode!=2) || (cadence==90 && (gui_mode!=3 || fit_mode!=1))) return false;
+  if(boot_id) *boot_id=nonce;
+  return true;
+ }
+@@ -122,7 +124,20 @@
   for(unsigned at=0;at<bytes && args[at];) {
    if(args[at]==' ') {at++;continue;}
    unsigned first=at;while(at<bytes && args[at] && args[at]!=' ')at++;

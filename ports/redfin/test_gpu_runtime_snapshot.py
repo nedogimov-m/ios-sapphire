@@ -16,12 +16,12 @@ class RuntimeSnapshotTests(unittest.TestCase):
         cls.addClassCleanup(cls.temporary.cleanup)
         root = Path(cls.temporary.name)
         raw = (HERE / 'gpu-runtime.inc').read_text()
-        body = raw[raw.index('static bool gr_snapshot_valid('):raw.index('int redfin_gpu_audit(')]
+        body = raw[raw.index('static bool gr_snapshot_valid('):raw.index('static void gr_dirty(')]
         prefix = r'''
 #include <string.h>
 #include "redfin_gpu_context.h"
 #include "redfin_gmu_tcm.h"
-struct gm_context {unsigned smmu_mode;uintptr_t smmu,cb,base[3];};
+struct gm_context {unsigned smmu_mode;uintptr_t smmu,cb,base[3];bool gx_requested;};
 static struct gm_context context;
 static struct {struct gm_context *context;bool poisoned;
  struct {struct {unsigned active,poisoned;struct rf_gs_snapshot expected;}state;}mapping;}gx;
@@ -34,6 +34,16 @@ static bool redfin_gui_cpu0(void){return false;}
 static bool redfin_gpu_runtime_caller(void){return caller;}
 static int gr_live(void){live_checks++;return power_lost?EIO:0;}
 static bool gm_payloads_valid(void *c){payload_checks++;return c==&context && !payload_lost;}
+static const uint32_t gm_smmu_clocks[][4]={{0,0x10,1,1}};
+struct rf_gmm_ops {void *context;
+ int (*sample)(void *,struct rf_gs_snapshot *,struct rf_gc_snapshot *);
+ int (*read)(void *,unsigned,uint32_t,uint32_t *);};
+static const struct rf_gmm_ops gx_mapping_ops={0};
+/* Mapping/page-table validation is exercised by the dedicated mapping suite.
+ * This fixture runs its real nested callback within the actual outer audit. */
+static int rf_a6_map_verify(void *mapping,const struct rf_gmm_ops *ops){
+ (void)mapping;struct rf_gs_snapshot g;struct rf_gc_snapshot b;return ops->sample(ops->context,&g,&b);}
+static void redfin_gpu_poison(const char *reason){(void)reason;gx.poisoned=true;}
 static uint32_t gm_scalar_read(uintptr_t at){
  reads++;
  if(reads==17){
@@ -49,7 +59,7 @@ static uint32_t gm_scalar_read(uintptr_t at){
 int run(unsigned problem){
  memset(global,0,sizeof(global));memset(banks,0,sizeof(banks));memset(&gx,0,sizeof(gx));
  issue=problem;reads=live_checks=payload_checks=power_lost=payload_lost=0;ready=caller=1;
- context=(struct gm_context){.smmu_mode=6,.smmu=(uintptr_t)global,.cb=(uintptr_t)banks};gx.context=&context;
+ context=(struct gm_context){.smmu_mode=6,.smmu=(uintptr_t)global,.cb=(uintptr_t)banks,.gx_requested=true};gx.context=&context;
  gx.mapping.state.active=1;
  gx.mapping.state.expected=(struct rf_gs_snapshot){.page_bytes=0x1000,.global_bytes=0x8000,.streams=16,.contexts=8};
  global[0x20/4]=(1u<<30)|(1u<<27)|(11u<<9)|16;
@@ -59,7 +69,7 @@ int run(unsigned problem){
  struct rf_gs_snapshot g;struct rf_gc_snapshot b;
  return gr_snapshot(&context,&g,&b);
 }
-unsigned metric(unsigned n){unsigned values[]={reads,live_checks,payload_checks};return n<3?values[n]:999;}
+unsigned metric(unsigned n){unsigned values[]={reads,live_checks,payload_checks,gx.poisoned};return n<4?values[n]:999;}
 int direct(unsigned block,uint32_t at){uint32_t value;return gr_snapshot_read(&context,block,at,&value);}
 int source_check(unsigned problem){
  if(run(0))return EIO;reads=live_checks=payload_checks=0;issue=problem;
@@ -74,6 +84,11 @@ int source_check(unsigned problem){
  if(!error)error=gr_live();return error;
 }
 int source_direct(unsigned unit,uint32_t at){uint32_t value;return gr_source_read(&context,unit,at,&value);}
+int audit_run(unsigned problem){
+ if(source_check(0))return EIO;reads=live_checks=payload_checks=0;issue=problem;
+ power_lost=0;payload_lost=problem==9;gcc[0x10/4]=1;
+ return redfin_gpu_audit();
+}
 '''
         source, library = root / 'snapshot.c', root / 'snapshot.so'
         source.write_text(prefix + body + suffix)
@@ -84,15 +99,26 @@ int source_direct(unsigned unit,uint32_t at){uint32_t value;return gr_source_rea
 
     def test_complete_twice_read_global_and_banks_use_two_full_boundary_checks(self):
         self.assertEqual(self.lib.run(0), 0)
-        self.assertEqual([self.lib.metric(i) for i in range(3)], [162, 2, 2])
+        self.assertEqual([self.lib.metric(i) for i in range(3)], [162, 2, 0])
 
-    def test_lost_power_or_firmware_is_rejected_at_boundary(self):
-        for issue, expected in ((1, errno.EIO), (2, errno.ECANCELED)):
+    def test_lost_power_is_rejected_at_both_nested_snapshot_boundaries(self):
+        for issue, expected in ((1, errno.EIO),):
             self.assertEqual(self.lib.run(issue), expected)
             self.assertEqual(self.lib.metric(0), 162)
-        for issue, expected in ((8, errno.EIO), (9, errno.ECANCELED)):
+        for issue, expected in ((8, errno.EIO),):
             self.assertEqual(self.lib.run(issue), expected)
             self.assertEqual(self.lib.metric(0), 0)
+
+    def test_outer_audit_checks_every_payload_once_before_accepting_the_tuple(self):
+        self.assertEqual(self.lib.audit_run(0),0)
+        self.assertEqual(self.lib.metric(2),1)
+        self.assertEqual(self.lib.metric(3),0)
+        # Both preexisting corruption and a change during the native register
+        # sample stop the complete audit before submit may publish its ring.
+        for issue in (2,9):
+            self.assertEqual(self.lib.audit_run(issue),errno.ECANCELED)
+            self.assertEqual(self.lib.metric(2),1)
+            self.assertEqual(self.lib.metric(3),1)
 
     def test_lost_caller_mapping_or_runtime_stops_nested_reads(self):
         for issue in (3, 4, 5, 6):

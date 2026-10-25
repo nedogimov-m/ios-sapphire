@@ -35,7 +35,7 @@ diff --git a/bsd/kern/redfin_graphics_exec.inc b/bsd/kern/redfin_graphics_exec.i
 new file mode 100644
 --- /dev/null
 +++ b/bsd/kern/redfin_graphics_exec.inc
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,53 @@
 +/* SPDX-License-Identifier: APSL-2.0
 + * Preferred8e611870 kern_exec.c exec_inject_env ABI, scoped to the exact
 + * Redfin GUI3 and Apple's absolute backboardd path. Stock launchd filters
@@ -43,6 +43,7 @@ new file mode 100644
 + * No configurable injection list, other process, image code or argv changes.
 + */
 +#include <arm64/redfin_gui_profile.h>
++#include "redfin_graphics_exec_scope.h"
 +
 +/* REDFIN_GRAPHICS_EXEC_TEST_BEGIN */
 +static bool redfin_graphics_exec_selected(const char *args,unsigned bytes,
@@ -69,3 +70,61 @@ new file mode 100644
 +    return redfin_graphics_exec_selected(args,bytes+1,imgp->ip_strings,
 +        imgp->ip_ndp->ni_cnd.cn_nameptr,imgp->ip_ndp->ni_cnd.cn_namelen);
 +}
++
++static const char *redfin_graphics_exec_environment(struct image_params *imgp)
++{
++    if (redfin_graphics_exec_wanted(imgp))
++        return "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-graphics.dylib";
++    if (!imgp || !imgp->ip_ndp || !(imgp->ip_flags&IMGPF_IS_64BIT_ADDR)) return NULL;
++    const char *args=PE_boot_args(), *saved=imgp->ip_strings;
++    static const char key[]="executable_path=";
++    if (!args || !saved || strncmp(saved,key,sizeof(key)-1)) return NULL;
++    unsigned bytes=0;
++    while (bytes<608 && args[bytes]) ++bytes;
++    const char *path=saved+sizeof(key)-1;
++    const char *leaf=strrchr(path,'/');
++    if (bytes==608 || !leaf || !redfin_ui_executable(path) ||
++        strlen(leaf+1)!=(unsigned)imgp->ip_ndp->ni_cnd.cn_namelen ||
++        memcmp(leaf+1,imgp->ip_ndp->ni_cnd.cn_nameptr,strlen(leaf+1)) ||
++        !redfin_ui_fullscreen(args,bytes+1)) return NULL;
++    return "DYLD_INSERT_LIBRARIES=/redfin/lib/libredfin-ui.dylib";
++}
+diff --git a/bsd/kern/redfin_graphics_exec_scope.h b/bsd/kern/redfin_graphics_exec_scope.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/redfin_graphics_exec_scope.h
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_GRAPHICS_EXEC_SCOPE_H
++#define REDFIN_GRAPHICS_EXEC_SCOPE_H
++#include <stdbool.h>
++#include <string.h>
++
++/* Exact installed system executables. An app extension, renamed executable,
++ * writable container or another process with the same comm is not admitted. */
++static inline bool redfin_ui_executable(const char *path)
++{
++    static const char *const paths[] = {
++        "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
++        "/Applications/Preferences.app/Preferences",
++        "/Applications/MobilePhone.app/MobilePhone",
++        "/Applications/MobileSlideShow.app/MobileSlideShow",
++        "/Applications/AppStore.app/AppStore",
++    };
++    if (!path) return false;
++    for (unsigned i=0;i<sizeof(paths)/sizeof(paths[0]);++i)
++        if (!strcmp(path,paths[i])) return true;
++    return false;
++}
++static inline bool redfin_ui_fullscreen(const char *args, unsigned bytes)
++{
++    if (!redfin_gpu_gui_profile(args,bytes,NULL)) return false;
++    for (unsigned at=0;at<bytes && args[at];) {
++        if (args[at]==' ') {++at;continue;}
++        unsigned first=at;
++        while (at<bytes && args[at] && args[at]!=' ') ++at;
++        if (redfin_gui_token(args+first,at-first,"redfinfit=1")) return true;
++    }
++    return false;
++}
++#endif

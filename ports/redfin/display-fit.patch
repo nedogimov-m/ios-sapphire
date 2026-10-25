@@ -211,7 +211,7 @@ diff --git a/iokit/Kernel/arm/RedfinDisplayGeometry.h b/iokit/Kernel/arm/RedfinD
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinDisplayGeometry.h
-@@ -0,0 +1,224 @@
+@@ -0,0 +1,231 @@
 +/*
 + * Redfin CPU presentation and inverse digitizer geometry. No display/HID ABI
 + * change: Apple's iPhone X canvas remains 1125x2436.
@@ -225,7 +225,10 @@ new file mode 100644
 + * 62df7438508565dfc05fab923e84f0704f5a0f07, redfin/overlay/frameworks/base/
 + * core/res/res/values/config.xml:209-225 (Apache-2.0 resource). The conservative
 + * Android cutout rectangle is [0,145)x[0,136), enclosing the radius-40 circle
-+ * centered at (81,77). Mode 2 excludes its complete top 136 rows.
++ * centered at (81,77). Legacy mode2 excludes its complete top136 rows.
++ * Mode1 fills the entire physical panel; its status-bar adapter handles the
++ * camera independently. The 0.06% aspect correction removes the two unused
++ * rows without cropping any part of the native canvas.
 + */
 +#ifndef REDFIN_DISPLAY_GEOMETRY_H
 +#define REDFIN_DISPLAY_GEOMETRY_H
@@ -262,6 +265,10 @@ new file mode 100644
 +{
 +	if (!out || (mode != 1 && mode != 2) || pw != 1080 || ph != 2340 ||
 +	    cw != 1125 || ch != 2436) return false;
++	if (mode == 1) {
++		*out = (struct redfin_display_geometry){mode,pw,ph,cw,ch,0,0,pw,ph};
++		return true;
++	}
 +	uint32_t top = mode == 2 ? REDFIN_DISPLAY_TOP_EXCLUSION : 0;
 +	uint32_t aw = pw, ah = ph - top, w, h;
 +	if ((uint64_t)aw * ch <= (uint64_t)ah * cw) {
