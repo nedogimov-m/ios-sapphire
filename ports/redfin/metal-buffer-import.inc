@@ -10,8 +10,10 @@ rwa_redfin_buffer_from_surface(struct rwa_device *device,unsigned surface,size_t
    }
 #ifdef GALLIUM_FREEDRENO
    struct redwood_drm_surface info={.surface=surface};
-   if(redwood_drm_surface(-1,&info)||info.offset||info.size<extent||info.size>UINT32_MAX) {
-      say(why,bytes,"external Metal buffer needs actual zero-offset native pages");return NULL;
+   int surface_result=redwood_drm_surface(-1,&info);
+   if(surface_result||info.offset||info.size<extent||info.size>UINT32_MAX) {
+      say(why,bytes,"external Metal buffer needs actual zero-offset native pages (lookup=%d offset=%llu span=%llu need=%llu)",
+          surface_result,(unsigned long long)info.offset,(unsigned long long)info.size,(unsigned long long)extent);return NULL;
    }
    struct rwa_buffer *buffer=calloc(1,sizeof(*buffer));
    if(!buffer){say(why,bytes,"external Metal buffer metadata allocation failed");return NULL;}

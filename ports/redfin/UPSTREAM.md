@@ -1,5 +1,29 @@
 # HackiOS upstream review — 2026-10-22
 
+## Executable pipeline resources without changing declaration ABI — 2026-10-25
+
+Preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 runtime validates
+all declared resources at every draw. V28 proves this is too strict after real
+specialization: CoreAnimation leaves its removed configuration buffer0 unbound,
+but the runtime rejects the otherwise compiled draw. Review compute/render
+factories, binding/count/slot checks, argument-buffer reflection and vertex fetch
+construction; kernel remains8e61187098f2c26c5daee8f9f72b6416aa64b9ab.
+
+Restrict requirements only on pipeline-owned metadata after NIR specialization.
+Preserve assigned API/argument-buffer indices and retain full independent layout
+queries. Trace finite descriptor choices conservatively, retain unknown dynamic
+bindings, preserve all live buffer/image/atomic accesses, and rebuild NIR resource
+counts and ordering groups. Match active vertex-input declarations, metadata and
+dense fetch locations; never replace a live missing attribute with a quad value.
+Resolve constant texture offsets in slot validation and all possible shadow sampler
+slots. This follows actual executable use without weakening missing-binding checks.
+
+Fresh native build/actual-cache ABI/signatures,34host cases,4NIR modules and27A620
+compiles pass, including19actual V28 constant sets. An enhanced device contract
+checks inactive high declarations, enabled missing-binding refusal and real enabled
+high-slot pixels/guards. Bounded bind/no-copy diagnostics retain original ownership
+and zero-offset/page checks. Device GUI/pixel results remain pending this block.
+
 ## Typed private resources and actual system specialization — 2026-10-25
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 AIR's pointer,

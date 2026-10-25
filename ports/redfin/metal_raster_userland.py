@@ -10,6 +10,18 @@ def _method(text, signature, body, start=0):
 
 def adapt(text):
     text = '#include "redfin_metal_raster.h"\n'+text
+    point = '\t_fragmentBuffers[index] = buffer;'
+    text = replace_once(text, point, '''\tstatic unsigned redfin_fragment_bind_reports;
+    if(__sync_fetch_and_add(&redfin_fragment_bind_reports,1)<128)
+        rw_print("REDFIN METAL FRAGMENT BIND: index=%lu present=%u bytes=%lu offset=%lu\\n",
+            (unsigned long)index,buffer!=nil,(unsigned long)[buffer length],(unsigned long)offset);
+'''+point)
+    point = '''- (void)setFragmentBytes:(const void *)bytes length:(NSUInteger)length atIndex:(NSUInteger)index
+{
+\tid buffer = [[self device] newBufferWithBytes:bytes length:length options:0];'''
+    text = replace_once(text, point, point+'''
+    if(!buffer&&length)rw_print("REDFIN METAL FRAGMENT BYTES REFUSED: index=%lu bytes=%lu\\n",
+        (unsigned long)index,(unsigned long)length);''')
     text = replace_once(text, '\tunsigned fragment_buffer_table_count;\n};',
         '\tunsigned fragment_buffer_table_count;\n\tconst struct redfin_metal_raster_state *redfin_raster;\n};')
     point = '\tint (*render_draw)(struct rwa_render *, const struct rwa_draw *, char *, size_t);'

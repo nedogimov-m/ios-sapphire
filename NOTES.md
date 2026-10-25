@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN executable pipeline bindings/attributes complete; V32 staged for V29 — 2026-10-25
+
+Source base380306b plus this coherent block. Pipeline-only requirements now
+follow specialized executable NIR, including constant/conditional/phi descriptor
+choices, nulls, buffers, atomics and image operations. Unknown dynamic values
+conservatively retain possible bindings. Keep original indices; declaration/
+argument-encoder layout queries remain full and independent. Rebuild active NIR
+resource counts/bitsets and raster-order groups. Remove genuinely unused vertex
+inputs and rebuild matching dense fetch locations; a live missing attribute is
+refused instead of reading a placeholder quad. Texture-slot validation resolves
+constant descriptor offsets and comparison samplers use actual possible indices.
+
+Extend the native32-round contract: function constant71 disables/enables extra
+buffer7/texture9/sampler5. The disabled pipeline must demand only live slots;
+the enabled one must refuse missing resources before execution, then produce
+real high-binding pixels/guards when bound. Add bounded fragment encoding and
+actual no-copy lookup/offset/span diagnostics, preserving the original page
+checks and ownership; no copied substitute or dummy resource is introduced.
+
+34host cases PASS/no skips;4module NIR checks and8zero/one-pattern A620 compiles
+PASS. All19actual parameter sets captured from V28 (15fragment/four vertex)
+also compile with the same pipeline-only requirements; buffer0 is inactive in
+all of those fragment variants. Full fresh Mesa/AIR/native Metal/checker/shader/
+actual20H392 ABI/signature build PASS: research/redfin-metal-requirements-v1,
+final local20261025-204746/noCI, pairingd88eb59e9e22e3a1d51e1c4404e7e6529e791dec7391d3791293418be45304a0.
+The final driver-only bounded diagnostics rebuild reuses identical Mesa inputs;
+no input fingerprint is bypassed. Kernel unchanged/reused
+local20261025-134128/noCI7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V29 image9cfacbbffb51b570c79a17c58a114b6ddb58457b729958bf28a7113adf2b22c9, nonce93fc731f67a2c21e;
+complete native loader/ADT/liveFDT/firmware/power/DVFS/source-window/return
+preflight PASS. Fresh V32 from clean consistent HFSX/write_count1053920:
+172ranges/23961600bytes/1new/zero freed; complete staged files/native
+signatures/seal/readback/readonly fsck PASS. V32 is PREPARED, NOT APPLIED;
+V31 and older applied stages are stale. Automatic app opens remain disabled.
+Next apply once and collect one combined V29 run. Actual inactive-resource
+behavior and GUI correctness/FPS still need this native run; broader goal open.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x93fc731f67a2c21e redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V28 native resource semantics PASS; inactive pipeline bindings block GUI — 2026-10-25
 
 Source2ee14e8; graphics local20261025-201136/noCI,

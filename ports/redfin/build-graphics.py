@@ -87,6 +87,7 @@ def main():
                 inputs += [ROOT/'ports/redfin/metal-buffer-native-view.patch',ROOT/'ports/redfin/metal-composition-final.patch']
                 inputs += [ROOT/'ports/redfin/metal-function-constants.patch',ROOT/'ports/redfin/metal-function-constants.h',ROOT/'ports/redfin/metal-function-constants.inc']
                 inputs += [ROOT/'ports/redfin/metal-resource-pointers.patch']
+                inputs += [ROOT/'ports/redfin/metal-active-resources.patch',ROOT/'ports/redfin/metal-active-resources.inc']
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -130,6 +131,8 @@ def main():
                     shutil.copy2(ROOT/'ports/redfin/metal-function-constants.inc',source/'src/compiler/air/redfin_metal_function_constants.inc')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-function-constants.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-resource-pointers.patch'],source)
+                    shutil.copy2(ROOT/'ports/redfin/metal-active-resources.inc',source/'src/compiler/air/redfin_metal_active_resources.inc')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-active-resources.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]

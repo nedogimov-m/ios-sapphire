@@ -1,0 +1,93 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -2802,6 +2802,8 @@
+  * the instructions for the same reason everything else here is: a `constexpr sampler`
+  * carrying compare_func::less is still a plain sampler to every sample() that reads it.
+  */
++#include "redfin_metal_active_resources.inc"
++
+ static void
+ slot_shapes(nir_shader *cs, struct rwa_slot slots[RWA_MAX_TEXTURES],
+             bool compare_sampler[RWA_MAX_TEXTURES])
+@@ -2819,12 +2821,20 @@
+             if (is_tex) {
+                nir_tex_instr *t = nir_instr_as_tex(instr);
+                binding = t->texture_index;
++               int offset = nir_tex_instr_src_index(t, nir_tex_src_texture_offset);
++               if (offset >= 0) {
++                  if (nir_src_is_const(t->src[offset].src))
++                     binding += nir_src_as_uint(t->src[offset].src);
++                  else
++                     binding = ~0u; /* never apply one candidate's shape to slot zero */
++               }
+                type = t->dest_type;
+                dim = t->sampler_dim;
+                is_array = t->is_array;
+-               if (compare_sampler && t->is_shadow &&
+-                   t->sampler_index < RWA_MAX_TEXTURES)
+-                  compare_sampler[t->sampler_index] = true;
++               if (compare_sampler && t->is_shadow)
++                  for (unsigned index = 0; index < RWA_MAX_TEXTURES; index++)
++                     if (redfin_texture_binding_may_equal(t, true, index))
++                        compare_sampler[index] = true;
+                if (t->is_shadow && binding < RWA_MAX_TEXTURES)
+                   slots[binding].shadow = true;
+             } else if (instr->type == nir_instr_type_intrinsic) {
+@@ -2958,6 +2968,8 @@
+                 ? _mesa_shader_stage_to_string(compute->info.stage) : "non-compute");
+       goto fail;
+    }
++
++   redfin_pipeline_requirements(compute->nir, &compute->info);
+ 
+    /* What the shader expects to be bound, counted the way Metal counts it: by the
+     * highest index plus one, because the indices are the binding numbers and a kernel
+@@ -5119,27 +5131,10 @@
+       out->attribute[loc] = a->index;
+ 
+       if (d->format == 0) {
+-         /* Not configured. Legal only for an attribute the module gates with a
+-          * function-constant predicate, whose value is the pipeline's and not this
+-          * library's to know (docs/air.md 3.1): the parameter exists either way, so the
+-          * attribute is in vertex_attributes_read either way, and a pipeline whose
+-          * constants make the predicate false may configure nothing here.
+-          */
+-         if (!a->function_constant) {
+-            say(why, why_size, "%s reads vertex attribute %u (%s, %s) and the vertex "
+-                               "descriptor configures no format there, so the fetch "
+-                               "would read a slot nothing was set up for", vname,
+-                a->index, a->name ? a->name : "unnamed",
+-                a->type_name ? a->type_name : "?");
+-            return false;
+-         }
+-         /* The placeholder: this library's own quad buffer, read at stride 0. */
+-         out->element[loc] = (struct pipe_vertex_element){
+-            .src_format = PIPE_FORMAT_R32G32B32A32_FLOAT,
+-            .src_offset = 0, .src_stride = 0,
+-            .vertex_buffer_index = RWA_MAX_VERTEX_BUFFERS,
+-         };
+-         continue;
++         say(why, why_size, "%s reads active vertex attribute %u (%s, %s) and the "
++                            "descriptor configures no format there", vname, a->index,
++             a->name ? a->name : "unnamed", a->type_name ? a->type_name : "?");
++         return false;
+       }
+ 
+       const struct rwa_vertex_format *f = vertex_format(d->format);
+@@ -6246,6 +6241,7 @@
+              ? _mesa_shader_stage_to_string(render->finfo.stage) : "non-fragment");
+       goto fail;
+    }
++   redfin_pipeline_requirements(fs, &render->finfo);
+    slot_shapes(fs, render->frag_slots, render->frag_compare_sampler);
+    count_resources(&render->finfo, render->frag_slots, &out.fragment_buffers,
+                    &out.fragment_textures, &out.fragment_samplers);
+@@ -6312,6 +6308,7 @@
+        * between them would mean an element array that does not describe the fetches --
+        * and it is cheaper to say so here than to find it in a picture.
+        */
++      redfin_pipeline_requirements(vs, &render->vinfo);
+       const char *vn = render->vinfo.entry_point ? render->vinfo.entry_point
+                                                  : "the vertex shader";
+       unsigned fetched = 0;

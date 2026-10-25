@@ -3,6 +3,7 @@
  * Host execution checks translation semantics; only a phone run proves GPU use.
  */
 #include "air_metal.h"
+#include "redfin_metal_function_constants.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,19 +30,38 @@ redfin_metal_resource_check(const char *path, uint64_t nonce)
    fclose(file);
    struct rwa_device *device = loaded ? rwa_device_open(why, sizeof(why)) : NULL;
    struct rwa_compute *compute = NULL;
+   struct rwa_compute *enabled = NULL;
    struct rwa_buffer *buffers[2] = {NULL, NULL};
    struct rwa_texture *texture = NULL;
    struct rwa_sampler *samplers[2] = {NULL, NULL};
    unsigned completed = 0;
+   int requirements = 0, missing_refused = 0, enabled_pixels = 0;
    if (!device)
       goto done;
    printf("REDFIN METAL RESOURCE: boot=%016llx backend=%s\n",
           (unsigned long long)nonce, rwa_device_name(device));
    struct rwa_compute_info info = {0};
-   compute = rwa_compute_create(device, bitcode, length, "redfin_resource_contract",
-                                 &info, why, sizeof(why));
+   struct redfin_metal_constant extra = {.index = 71, .bytes = 1};
+   struct redfin_metal_constants values = {.values = &extra, .count = 1};
+   compute = rwa_redfin_compute_create(device, bitcode, length, "redfin_resource_contract",
+                                        &info, &values, why, sizeof(why));
    if (!compute)
       goto done;
+   requirements = info.buffers == 2 && info.textures == 1 && info.samplers == 2;
+   if (!requirements) {
+      snprintf(why, sizeof(why), "inactive declarations still demand buffers=%u textures=%u samplers=%u",
+               info.buffers, info.textures, info.samplers);
+      goto done;
+   }
+   extra.words[0] = 1;
+   enabled = rwa_redfin_compute_create(device, bitcode, length, "redfin_resource_contract",
+                                        &info, &values, why, sizeof(why));
+   if (!enabled)
+      goto done;
+   if (info.buffers != 8 || info.textures != 10 || info.samplers != 6) {
+      snprintf(why, sizeof(why), "active high binding declarations were lost");
+      goto done;
+   }
    buffers[0] = rwa_buffer_create(device, 256, why, sizeof(why));
    buffers[1] = rwa_buffer_create(device, 32, why, sizeof(why));
    struct rwa_texture_shape shape = {
@@ -73,6 +93,14 @@ redfin_metal_resource_check(const char *path, uint64_t nonce)
       .samplers = samplers, .sampler_count = 2,
    };
    const unsigned groups[3] = {1, 1, 1};
+   memset(output, 0xa5, 256);
+   missing_refused = rwa_dispatch(enabled, &bindings, groups, groups, why, sizeof(why)) < 0;
+   for (unsigned i = 0; i < 256; i++)
+      missing_refused &= ((uint8_t *)output)[i] == 0xa5;
+   if (!missing_refused) {
+      snprintf(why, sizeof(why), "active missing bindings were not refused before execution");
+      goto done;
+   }
    for (unsigned round = 0; round < 32; round++) {
       uint32_t seed = (((uint32_t)nonce + (round / 8) * 0x13715af8u) & ~7u) | (round & 7);
       for (unsigned i = 0; i < 8; i++)
@@ -119,19 +147,36 @@ redfin_metal_resource_check(const char *path, uint64_t nonce)
       }
       completed++;
    }
+   struct rwa_buffer *full_buffers[8] = {[0] = buffers[0], [1] = buffers[1], [7] = buffers[1]};
+   struct rwa_texture *full_textures[10] = {[0] = texture, [9] = texture};
+   struct rwa_sampler *full_samplers[6] = {[0] = samplers[0], [1] = samplers[1], [5] = samplers[0]};
+   struct rwa_bindings full = {
+      .buffers = full_buffers, .buffer_count = 8, .textures = full_textures, .texture_count = 10,
+      .samplers = full_samplers, .sampler_count = 6,
+   };
+   memset(output, 0xa5, 256);
+   if (rwa_dispatch(enabled, &full, groups, groups, why, sizeof(why)))
+      goto done;
+   enabled_pixels = output[9] == (control[0] ^ 0x3f800000u);
+   for (unsigned i = 40; i < 256; i++)
+      enabled_pixels &= ((uint8_t *)output)[i] == 0xa5;
+   if (!enabled_pixels)
+      snprintf(why, sizeof(why), "enabled high bindings returned incorrect output/guards");
 done:
-   printf("REDFIN METAL RESOURCE RESULT: boot=%016llx rounds=%u private-branch-alias-sampler-phi-helper-null-global-bits-dynamic-lanes-guards=%u%s%s\n",
+   printf("REDFIN METAL RESOURCE RESULT: boot=%016llx rounds=%u private-branch-alias-sampler-phi-helper-null-global-bits-dynamic-lanes-guards=%u inactive-requirements=%u active-missing-refused=%u active-high-bindings-pixels-guards=%u%s%s\n",
           (unsigned long long)nonce, completed, completed == 32,
-          completed == 32 ? "" : " reason=", completed == 32 ? "" : why);
+          requirements, missing_refused, enabled_pixels,
+          completed == 32 && enabled_pixels ? "" : " reason=", completed == 32 && enabled_pixels ? "" : why);
    if (samplers[1]) rwa_sampler_destroy(samplers[1]);
    if (samplers[0]) rwa_sampler_destroy(samplers[0]);
    if (texture) rwa_texture_destroy(texture);
    if (buffers[1]) rwa_buffer_destroy(buffers[1]);
    if (buffers[0]) rwa_buffer_destroy(buffers[0]);
    if (compute) rwa_compute_destroy(compute);
+   if (enabled) rwa_compute_destroy(enabled);
    if (device) rwa_device_close(device);
    free(bitcode);
-   return completed == 32;
+   return completed == 32 && requirements && missing_refused && enabled_pixels;
 }
 
 #ifdef REDFIN_METAL_RESOURCE_STANDALONE

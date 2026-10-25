@@ -39,6 +39,15 @@ def replace_once(text, before, after):
 def prepare_ir3_tool(source):
     path = source / 'src/gallium/drivers/freedreno/ir3/ir3_cmdline.c'
     text = path.read_text()
+    active = (source/'src/compiler/air/redfin_metal_active_resources.inc').exists()
+    if active:
+        text = replace_once(text, 'static struct ir3_compiler *compiler;',
+                            '#include "redfin_metal_active_resources.inc"\n\nstatic struct ir3_compiler *compiler;')
+        text = replace_once(text, '   printf("; AIR: %s, %u resources, %u varyings, %u render targets\\n",',
+                            '''   redfin_pipeline_requirements(nir, &info);
+   for (unsigned i = 0; i < info.num_resources; i++)
+      printf("; REQUIRED: kind=%u index=%u\\n", info.resources[i].kind, info.resources[i].index);
+   printf("; AIR: %s, %u resources, %u varyings, %u render targets\\n",''')
     anchor = '   unsigned num_fc = air_module_function_constants(NULL, bitcode, bitcode_size, &fc);'
     text = replace_once(text, anchor, anchor + r'''
    const char *pattern = getenv("REDFIN_HOST_CONSTANT_BYTE");
@@ -117,6 +126,10 @@ def main():
             inputs = ['air_private.h', 'air_to_nir.c', 'air_intrinsics.c', 'air_metal.c']
             report['air_sha256'] = {name: hashlib.sha256((native/'src/compiler/air'/name).read_bytes()).hexdigest()
                                     for name in inputs}
+            stamp = native/'.redfin-graphics'
+            report['mesa_input_sha256'] = stamp.read_text().strip() if stamp.is_file() else None
+            report['air_extensions_sha256'] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in sorted((native/'src/compiler/air').glob('redfin_*.inc'))}
             source = work / 'mesa'
             source.mkdir()
             run(['cp', '-cR', str(native) + '/.', source])
@@ -161,7 +174,7 @@ def main():
                 raise ValueError('constant bytes must be between 0 and 255')
             for number, shader in enumerate(shaders):
                 explicit = snapshot_sets.get(shader.stem)
-                cases = ['snapshot'] if explicit is not None else [0] if shader == contract else patterns
+                cases = ['snapshot'] if explicit is not None else patterns
                 for pattern in cases:
                     check_env = dict(env)
                     if explicit is not None:

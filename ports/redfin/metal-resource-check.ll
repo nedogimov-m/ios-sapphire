@@ -17,6 +17,7 @@ target triple = "air64-apple-ios16.0.0"
 }, align 8
 @redfin_state = internal addrspace(2) global i32 826366246, align 4
 @redfin_zero = internal addrspace(2) global [2 x i8] zeroinitializer, align 1
+@redfin_extra = internal addrspace(2) externally_initialized constant i8 undef, section "air.fc_initializer", align 1
 @__air_sampler_state = internal addrspace(2) constant i64 -9188470239253757879, align 8
 @redfin_fallback = internal constant { %struct._sampler_t addrspace(2)* } {
   %struct._sampler_t addrspace(2)* bitcast (i64 addrspace(2)* @__air_sampler_state to %struct._sampler_t addrspace(2)*)
@@ -40,7 +41,9 @@ entry:
 
 define void @redfin_resource_contract(i32 addrspace(1)* %output,
     i32 addrspace(2)* %control, %struct._texture_2d_t addrspace(1)* %texture,
-    %struct._sampler_t addrspace(2)* %nearest, %struct._sampler_t addrspace(2)* %linear) {
+    %struct._sampler_t addrspace(2)* %nearest, %struct._sampler_t addrspace(2)* %linear,
+    i32 addrspace(2)* %extra_buffer, %struct._texture_2d_t addrspace(1)* %extra_texture,
+    %struct._sampler_t addrspace(2)* %extra_sampler) {
 entry:
   %cells = alloca [2 x %struct._sampler_t addrspace(2)*], align 8
   %a = getelementptr [2 x %struct._sampler_t addrspace(2)*], [2 x %struct._sampler_t addrspace(2)*]* %cells, i32 0, i32 0
@@ -110,6 +113,20 @@ joined:
   %short32 = and i32 %short_word, 65535
   %out_short = getelementptr i32, i32 addrspace(1)* %output, i32 8
   store i32 %short32, i32 addrspace(1)* %out_short, align 4
+  %extra = load i8, i8 addrspace(2)* @redfin_extra, align 1
+  %enabled = icmp ne i8 %extra, 0
+  br i1 %enabled, label %extra_path, label %finished
+extra_path:
+  %extra_value = load i32, i32 addrspace(2)* %extra_buffer, align 4
+  %extra_color = call <4 x float> @redfin_sample(%struct._texture_2d_t addrspace(1)* %extra_texture,
+      %struct._sampler_t addrspace(2)* %extra_sampler, i32 addrspace(2)* %extra_buffer)
+  %extra_red = extractelement <4 x float> %extra_color, i32 0
+  %extra_bits = bitcast float %extra_red to i32
+  %extra_result = xor i32 %extra_bits, %extra_value
+  %out_extra = getelementptr i32, i32 addrspace(1)* %output, i32 9
+  store i32 %extra_result, i32 addrspace(1)* %out_extra, align 4
+  br label %finished
+finished:
   ret void
 }
 
@@ -121,14 +138,20 @@ declare i32 @air.get_width_texture_2d(%struct._texture_2d_t addrspace(1)*, i32)
 !air.version = !{!0}
 !air.language_version = !{!1}
 !air.kernel = !{!2}
+!air.function_constants = !{!13}
 !0 = !{i32 2, i32 5, i32 0}
 !1 = !{!"Metal", i32 2, i32 4, i32 0}
 !2 = !{void (i32 addrspace(1)*, i32 addrspace(2)*, %struct._texture_2d_t addrspace(1)*,
-    %struct._sampler_t addrspace(2)*, %struct._sampler_t addrspace(2)*)* @redfin_resource_contract, !3, !4}
+    %struct._sampler_t addrspace(2)*, %struct._sampler_t addrspace(2)*, i32 addrspace(2)*,
+    %struct._texture_2d_t addrspace(1)*, %struct._sampler_t addrspace(2)*)* @redfin_resource_contract, !3, !4}
 !3 = !{}
-!4 = !{!5, !6, !7, !8, !9}
+!4 = !{!5, !6, !7, !8, !9, !10, !11, !12}
 !5 = !{i32 0, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.buffer_size", i32 256, !"air.arg_type_name", !"uint", !"air.arg_name", !"output"}
 !6 = !{i32 1, !"air.buffer", !"air.location_index", i32 1, i32 1, !"air.read", !"air.address_space", i32 2, !"air.buffer_size", i32 32, !"air.arg_type_name", !"uint", !"air.arg_name", !"control"}
 !7 = !{i32 2, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.sample", !"air.arg_type_name", !"texture2d<float, sample>", !"air.arg_name", !"texture"}
 !8 = !{i32 3, !"air.sampler", !"air.location_index", i32 0, i32 1, !"air.arg_type_name", !"sampler", !"air.arg_name", !"nearest"}
 !9 = !{i32 4, !"air.sampler", !"air.location_index", i32 1, i32 1, !"air.arg_type_name", !"sampler", !"air.arg_name", !"linear"}
+!10 = !{i32 5, !"air.buffer", !"air.location_index", i32 7, i32 1, !"air.read", !"air.address_space", i32 2, !"air.buffer_size", i32 32, !"air.arg_type_name", !"uint", !"air.arg_name", !"extra_buffer"}
+!11 = !{i32 6, !"air.texture", !"air.location_index", i32 9, i32 1, !"air.sample", !"air.arg_type_name", !"texture2d<float, sample>", !"air.arg_name", !"extra_texture"}
+!12 = !{i32 7, !"air.sampler", !"air.location_index", i32 5, i32 1, !"air.arg_type_name", !"sampler", !"air.arg_name", !"extra_sampler"}
+!13 = !{i8 addrspace(2)* @redfin_extra, !"bool", !"redfin_extra", i32 71, i1 true}

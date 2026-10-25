@@ -10,7 +10,7 @@
         [self release];return nil;
     }
     _mesa=RF_MESA(redfin_buffer_from_surface,[device mesaDevice],IOSurfaceGetID(surface),length,bytes,why,sizeof(why));
-    if(!_mesa){rw_print("REDFIN METAL NO COPY REFUSED: %s\n",why);[self release];return nil;}
+    if(!_mesa){static unsigned refused;if(__sync_fetch_and_add(&refused,1)<16)rw_print("REDFIN METAL NO COPY REFUSED: %s\n",why);[self release];return nil;}
     _owner=device;_redfinExternalDevice=[device retain];_length=length;_contents=bytes;
     _redfinBufferSurface=(IOSurfaceRef)CFRetain(surface);_redfinExternalOptions=options;
     _redfinDeallocator=[deallocator copy];return self;
