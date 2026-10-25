@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN queued native bundle and fresh V46 staged; CI kernel running — 2026-10-26
+
+Source9410426 plusddda9d2. Full paired native graphics build
+local20261026-023728/noCI in research/redfin-metal-queued-v4 PASS, including
+actual20H392 ABI/signatures and all four queued native exports. Compiler input
+2f35d186f037efe6427d8d5a2ef965be5838ccbf954bb7391bd4f87edca51852,
+pairing47535d26226aa899de44fdb5fca6854f3911ebb12f0ced026774987c25c1ea92.
+Fix build-only const/prototype/trace declaration integration in the combined
+host/native build phase; no intermediate iOS device boots. All46host contracts
+and changed kernel C++ object checks remain PASS. Actual A620 queue/FPS results
+still PENDING, with no claim of smooth60/90FPS.
+
+Origin denies push to the saved GitHub account (HTTP403). Create/use its CI fork
+nedogimov-m/ios-sapphire, push redfin-bringup without force, and dispatch exact
+ddda9d231ae26681c9cef357128ff0205fc6fa06 with board_profile=redfin. GitHub Actions
+run40236406228/run1 is currently building; CI kernel delivery is not yet ready.
+Host Git credentials stay in Keychain/process memory and are never logged or
+stored. New Redfin ccache will reuse unchanged native compilation in later runs.
+
+Fresh V46 reads exact clean consistent V42 HFSX generation1200036 and its empty
+journal. Stage25710592changed bytes/zero new blocks; complete file audit and
+native readonly-device fsck PASS. This stage is NOT applied. Phone is currently
+idle in temporary Linux recovery after the read, with userdata unchanged. The
+private apply guard requires the completed matching CI run/kernel digest/exact
+queued patch/ABI marker. V43 args/preflight are prepared using the same exact
+planned profile in the preceding entry and a nonce generated only at image build.
+Next: obtain CI kernel, validate image, apply V46 once, then one combined hardware
+cycle. Preserve captures/app opens off; check correctness jobs on for that cycle.
+
 ## REDFIN retained queue and separate Metal completion implemented — 2026-10-26
 
 Source base831584d plus this coherent block. Queue ABI1/parameter0x52465131;

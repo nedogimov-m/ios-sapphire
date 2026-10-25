@@ -23,6 +23,12 @@ and Metal. All46host contracts PASS; exact changed kernel C++ objects compile.
 Full paired native build, CI kernel and A620/device results remain pending.
 Physical90Hz is not a measured rendering rate.
 
+Full paired native local20261026-023728 now passes actual20H392 ABI/signatures
+and all four queued exports. Fresh V46 stage passes native readonly fsck and
+full file audits without filesystem writes. Exact source ddda9d2 is building in
+GitHub Actions run40236406228 on the owned CI fork after origin denied push.
+Kernel delivery and actual A620/system performance evidence remain pending.
+
 ## Command-local descriptor and graphics state reuse — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR stage
