@@ -28,7 +28,9 @@ real GPU completion or positive CPU copy, excluding empty/failed presents. Keep
 both legacy/physical ABI and the exact boot profile. Final-selector host coverage
 now executes the actual ordered overlays with a NULL capture lock, and concurrent
 readers verify coherent CPU/GPU pairs. UI v4 logs actual refusal details. A new
-CI kernel and actual system FPS result remain pending; preferred pins unchanged.
+CI kernel40243857927/run3/source5afedeb now passes the full native build.
+The matching V47 image and V53 stage pass exact source/ABI/read-only fsck;
+actual system FPS remains pending. Preferred pins stay unchanged.
 
 ## Retained submission and separate native completion — 2026-10-26
 

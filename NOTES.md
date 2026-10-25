@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN ordinary counters CI delivered; complete V47 ready for combined measurement — 2026-10-26
+
+Source5afedeb, GitHub Actions40243857927/run3 SUCCESS with ccache. Matching
+native kernel1617aa6f44e5a77788effa04968b64498197e5e315d2d542e12cc1c2d3d19b75,
+18723200bytes; full source hashes/queued+statistics ABI PASS. UI v4 native/ABI/
+signatures/source hashes PASS. Reuse unchanged graphics v8, all correctness jobs,
+heavy capture and automatic app opens OFF. No native graphics rebuild.
+
+Fresh V53 reads actual clean generation1245491; staged86016bytes,
+zero new/freed blocks. Complete files/uid/mode/signatures and native readonly
+fsck PASS. V53 READY, not yet applied; use once, then mark stale. V47 image
+5855aedd2b8e0bc903faa89551f75aff04ba365617d3598cbb2edd77b7775708, exact loader/ADT/live FDT,
+firmware/power/DVFS/return and current CI source preflight PASS. One root-owned
+41-byte request matches this image only; ordinary future boots ignore it.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0b1f45629afae83b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Next: apply V53 once and one combined physical completed-presentation/system
+animation cycle.19host cases passed; real FPS remains pending. Broader goal active.
+
 ## REDFIN V46 clean runtime; ordinary counter publication repaired as one block — 2026-10-26
 
 Source a4b27a8, CI40241828657/run2/source ece0a6e, kernel
