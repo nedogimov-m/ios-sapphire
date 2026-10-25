@@ -23,7 +23,8 @@ OPTIONS = {
     'freedreno-kmds': 'msm', 'vulkan-drivers': '', 'glx': 'disabled', 'egl': 'disabled',
     'gbm': 'disabled', 'osmesa': 'true', 'llvm': 'disabled', 'shared-glapi': 'enabled',
     'gles1': 'disabled', 'gles2': 'enabled', 'opengl': 'true', 'zstd': 'disabled',
-    'xmlconfig': 'disabled', 'expat': 'disabled', 'shader-cache': 'disabled',
+    'xmlconfig': 'disabled', 'expat': 'disabled', 'shader-cache': 'enabled',
+    'shader-cache-max-size': '32M',
     'valgrind': 'disabled', 'libunwind': 'disabled', 'glvnd': 'disabled', 'video-codecs': '',
     'tools': '', 'gallium-vdpau': 'disabled', 'gallium-va': 'disabled',
     'gallium-xa': 'disabled', 'lmsensors': 'disabled', 'build-tests': 'false',
@@ -161,7 +162,8 @@ def main():
     parser.add_argument('--venv', type=Path, help='reuse a prepared graphics build venv')
     parser.add_argument('--shader', type=Path, action='append', default=[])
     parser.add_argument('--constant-byte', type=lambda s: int(s, 0), action='append')
-    parser.add_argument('--snapshots', type=Path, help='private JSON: function name -> {index: hex bytes}')
+    parser.add_argument('--snapshots', type=Path,
+                        help='private JSON: function name -> one {index: hex bytes} snapshot or a list of snapshots')
     parser.add_argument('--lifetime-rounds', type=int, default=0,
                         help='hold/release up to 32 independent translations with native debug allocator accounting')
     parser.add_argument('--cache-check',action='store_true',
@@ -171,6 +173,8 @@ def main():
     work.mkdir(parents=True, exist_ok=False)
     env = dict(os.environ)
     env['PATH'] = '/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:/opt/homebrew/bin:' + env.get('PATH', '')
+    env['MESA_SHADER_CACHE_DIR']=str(work/'shader-cache')
+    env['MESA_SHADER_CACHE_DISABLE']='false'
     report = {'success': False, 'device_execution': False, 'checks': [],
               'date_utc': datetime.datetime.now(datetime.timezone.utc).isoformat()}
     setup_log = work / 'host-build.log'
@@ -191,6 +195,10 @@ def main():
             source = work / 'mesa'
             source.mkdir()
             run(['cp', '-cR', str(native) + '/.', source])
+            cache_id=source/'src/util/redfin_mesa_cache_build.h'
+            if cache_id.exists():
+                cache_id.write_text('#define REDFIN_MESA_CACHE_BUILD_ID "redfin-host-'+
+                                    report['mesa_input_sha256']+'"\n')
             prepare_ir3_tool(source)
             if not 0 <= args.lifetime_rounds <= 32:
                 raise ValueError('lifetime rounds must be between 0 and 32')
@@ -238,8 +246,16 @@ def main():
                 raise ValueError('constant bytes must be between 0 and 255')
             for number, shader in enumerate(shaders):
                 explicit = snapshot_sets.get(shader.stem)
-                cases = ['snapshot'] if explicit is not None else patterns
-                for pattern in cases:
+                if isinstance(explicit,list):
+                    if not explicit or any(not isinstance(case,dict) for case in explicit):
+                        raise ValueError('a snapshot list must contain explicit constant mappings')
+                    cases=[('snapshot-'+str(i),case) for i,case in enumerate(explicit)]
+                elif explicit is not None:
+                    if not isinstance(explicit,dict):raise ValueError('a snapshot must be a constant mapping')
+                    cases=[('snapshot',explicit)]
+                else:
+                    cases=[(pattern,None) for pattern in patterns]
+                for pattern,explicit in cases:
                     check_env = dict(env)
                     check_env['REDFIN_HOST_LIFETIME_ROUNDS'] = str(args.lifetime_rounds)
                     if explicit is not None:

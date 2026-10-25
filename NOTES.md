@@ -1,5 +1,55 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN persistent compilation block built; fresh V40 ready for V37 — 2026-10-26
+
+Source baseb18e64d plus this complete cache/timing block. Preferred ir3 explicitly
+returns without a disk cache on Apple because there is no ELF build ID. Supply
+a deterministic identity from exact Mesa archive/patches, target/Clang/SDK/flags;
+keep host tools separate. Reuse Mesa compressed/CRC/atomic files and async queue,
+with4MiB per-cache outstanding payload/job cap and32MiB shared disk eviction
+target (not a strict cross-process bound). Keep64entry/8MiB in-memory template
+and64entry/8MiB stage-key caps. Persist exact full key, real NIR and explicit
+pointer-free unpruned metadata; validate and restore independent owners. Native
+IR3 record lengths are checked before allocations. No resource/page/half/fence
+or kernel semantics changes. Add bounded other-IOKit/map-unmap/actual-variant-
+compile elapsed counters, retaining the legacy four-word I/O snapshot ABI.
+
+42host tests PASS/no skips.14NIR modules/all19actual parameter variants
+(31compile cases) PASS real memory/CSO/file lifetime, unpruned metadata,
+queue-cap rejection, stale schema, CRC rejection/repair/NEXT fresh-context hit
+and separate compiler namespace. The first schema fixture assumed overwrite of
+an immutable Mesa entry; explicitly remove it before injecting old metadata.
+The expanded matrix then exposes a real bug: a CRC miss did not remove the bad
+file, so later puts were ignored. Fix AIR and ir3 miss cleanup before device
+writes and require another context to hit the repaired file. Failed host/source
+build/staging evidence remains private. The old four-word timing fixture also
+needed ten-word input for the new observer; full tests now pass.
+
+Fresh complete native/actual20H392 ABI/signatures PASS:
+research/redfin-metal-persistence-v2, local20261026-001711/noCI,
+pairingdf1f49f1eb4a2ca0fd01470daffdfb62ef38703a110f851dd9d7969fbba60891.
+Earlier native-v1/local20261026-000922 proof remains private and was NEVER applied. Kernel
+unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V37 imagef96d68ce5298c1cdb8a850576d7740140d4e771875afd2fd054847eed8dd0251,
+nonce21b819b42131c0da; full loader/ADT/liveFDT/firmware/power/DVFS/source-window/
+return preflight PASS. Native checker now also requires two fresh A620 resource
+contexts with changed live inputs and both AIR/ir3 disk hits. GPU correctness
+startup enabled only for this combined check; automatic Phone/Photos opens and
+all draw/kernel image captures stay off. Device results are PENDING.
+
+Fresh V40 read epoch from clean consistent HFSX/write_count1149742. Preserve the
+initial UNAPPLIED staging clone/proofs under stage-before-crc-repair and restage
+new native-v2 against the immutable same read epoch, checking live first-block,
+allocations/target preimages again. No iOS boot or filesystem writes occurred
+between the read and restage. Complete new staged files/readback/signatures/seal/
+native readonly fsck PASS: 58ranges/26660864bytes/19new/zero freed.
+V40 PREPARED, NOT APPLIED; older applied stages remain stale. Next apply once,
+collect V37, then verify ordinary warm boot with probes disabled and the exact
+same compiler identity. Full system smoothness remains unfinished; goal active.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x21b819b42131c0da redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V36 ordinary caches verified; cold pipelines/command preparation still slow — 2026-10-25
 
 Source5cdbc47; ordinary graphics local20261025-234246/noCI,

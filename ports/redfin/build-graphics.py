@@ -83,6 +83,8 @@ def main():
             inputs+=sorted((upstream/'tools/mesa/redwood-drm').iterdir())
             inputs += [ROOT/'ports/redfin/graphics-linear-bounds.patch',
                        ROOT/'ports/redfin/gmem-bounds.h',ROOT/'ports/redfin/drm-profile.h']
+            inputs += [ROOT/'ports/redfin'/name for name in
+                       ('mesa-disk-cache.patch','mesa-disk-cache.h','mesa-disk-cache.inc','graphics-io-profile.patch')]
             if a.metal:
                 inputs+=sorted((upstream/'tools/mesa/air').iterdir())
                 inputs += [ROOT/'ports/redfin/metal-command-scope.patch',ROOT/'ports/redfin/metal-command-scope.h',ROOT/'ports/redfin/metal-gmem.patch',ROOT/'ports/redfin/metal-submission-profile.patch',ROOT/'ports/redfin/metal-attachment-cache.patch',ROOT/'ports/redfin/metal-raster.patch',ROOT/'ports/redfin/metal-raster.h',ROOT/'ports/redfin/metal-raster.inc',ROOT/'ports/redfin/metal-linear-import.patch',ROOT/'ports/redfin/metal-linear-import.h',ROOT/'ports/redfin/metal-linear-copy.patch',ROOT/'ports/redfin/metal-linear-copy.inc',ROOT/'ports/redfin/metal-composition-trace.patch',ROOT/'ports/redfin/metal-composition-trace.inc',ROOT/'ports/redfin/metal-blit.patch',ROOT/'ports/redfin/metal-blit.h',ROOT/'ports/redfin/metal-blit.inc',ROOT/'ports/redfin/metal-buffer-import.patch',ROOT/'ports/redfin/metal-buffer-import.h',ROOT/'ports/redfin/metal-buffer-import.inc']
@@ -97,7 +99,15 @@ def main():
                 inputs += [ROOT/'ports/redfin'/name for name in
                            ('metal-preparation.patch','metal-translation-cache.h',
                             'metal-translation-cache.inc','metal-stage-cache.inc')]
-            fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
+                inputs += [ROOT/'ports/redfin/metal-persistent-cache.inc',ROOT/'ports/redfin/metal-persistent-cache.patch']
+            compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
+                target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
+                shader_cache='enabled/32M/redfin-v1',
+                clang=run([clang,'--version'],capture=True),
+                sdk=run(['xcrun','--sdk','iphoneos','--show-sdk-version'],capture=True),
+                flags={k:env.get(k,'') for k in ('CFLAGS','CPPFLAGS','CXXFLAGS','LDFLAGS')}),
+                sort_keys=True,separators=(',',':')).encode()
+            fingerprint=hashlib.sha256(compiler_identity+b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
             if source.exists() and (not stamp.exists() or stamp.read_text().strip()!=fingerprint):
@@ -109,6 +119,13 @@ def main():
                 shutil.copy2(ROOT/'ports/redfin/gmem-bounds.h',source/'src/gallium/drivers/freedreno/redfin_gmem_bounds.h')
                 shutil.copy2(ROOT/'ports/redfin/drm-profile.h',source/'src/redwood-drm/redfin_drm_profile.h')
                 run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/graphics-linear-bounds.patch'],source)
+                for suffix in ('h','inc'):
+                    shutil.copy2(ROOT/'ports/redfin'/('mesa-disk-cache.'+suffix),
+                                 source/'src/util'/('redfin_mesa_disk_cache.'+suffix))
+                (source/'src/util/redfin_mesa_cache_build.h').write_text(
+                    '#define REDFIN_MESA_CACHE_BUILD_ID "redfin-ios16-arm64-'+fingerprint+'"\n')
+                run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-disk-cache.patch'],source)
+                run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/graphics-io-profile.patch'],source)
                 if a.metal:
                     shutil.copytree(upstream/'tools/mesa/air',source/'src/compiler/air')
                     shutil.copy2(ROOT/'ports/redfin/metal-command-scope.h',source/'src/compiler/air/redfin_metal_command_scope.h')
@@ -149,6 +166,9 @@ def main():
                         shutil.copy2(ROOT/'ports/redfin'/('metal-'+name),
                                      source/'src/compiler/air'/('redfin_metal_'+name.replace('-','_')))
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-preparation.patch'],source)
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-persistent-cache.patch'],source)
+                    shutil.copy2(ROOT/'ports/redfin/metal-persistent-cache.inc',
+                                 source/'src/compiler/air/redfin_metal_persistent_cache.inc')
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -165,7 +185,8 @@ def main():
                     '-Dgallium-drivers=softpipe,freedreno','-Dfreedreno-kmds=msm','-Dvulkan-drivers=',
                     '-Dglx=disabled','-Degl=disabled','-Dgbm=disabled','-Dosmesa=true','-Dllvm=disabled',
                     '-Dshared-glapi=enabled','-Dgles1=disabled','-Dgles2=enabled','-Dopengl=true',
-                    '-Dzstd=disabled','-Dxmlconfig=disabled','-Dexpat=disabled','-Dshader-cache=disabled',
+                    '-Dzstd=disabled','-Dxmlconfig=disabled','-Dexpat=disabled','-Dshader-cache=enabled',
+                    '-Dshader-cache-max-size=32M',
                     '-Dvalgrind=disabled','-Dlibunwind=disabled','-Dglvnd=disabled','-Dvideo-codecs=',
                     '-Dtools=','-Dgallium-vdpau=disabled','-Dgallium-va=disabled','-Dgallium-xa=disabled',
                     '-Dlmsensors=disabled','-Dbuild-tests=false'])

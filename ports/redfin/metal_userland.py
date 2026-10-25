@@ -274,16 +274,19 @@ static void redfin_metal_completed(unsigned draws,unsigned computes,uint64_t que
             (unsigned long long)redfin_phase_us(finishing,finished),
             (unsigned long long)redfin_phase_us(queued,finished));
 }
-static void redfin_metal_io_completed(const uint64_t before[4],const uint64_t after[4])
+static void redfin_metal_io_completed(const uint64_t before[10],const uint64_t after[10])
 {
     if(!before||!after||!redfin_fence_boot[0])return;
-    for(unsigned i=0;i<4;++i)if(after[i]<before[i])return;
+    for(unsigned i=0;i<10;++i)if(after[i]<before[i])return;
     uint64_t count=__atomic_load_n(&redfin_fence_count,__ATOMIC_RELAXED);
     if(count && (count<=4 || !(count&(count-1)) || !(count%120)))
-        rw_print("REDFIN METAL IO: boot=%s sequence=%llu actual-finish=1 io-scope=process submit-calls=%llu submit-io-us=%llu allocation-calls=%llu allocation-io-us=%llu\n",
+        rw_print("REDFIN METAL IO: boot=%s sequence=%llu actual-finish=1 io-scope=process submit-calls=%llu submit-io-us=%llu allocation-calls=%llu allocation-io-us=%llu other-calls=%llu other-io-us=%llu map-operations=%llu map-io-us=%llu variant-compiles=%llu variant-compile-us=%llu\n",
             redfin_fence_boot,(unsigned long long)count,
             (unsigned long long)(after[0]-before[0]),(unsigned long long)((after[1]-before[1])/1000),
-            (unsigned long long)(after[2]-before[2]),(unsigned long long)((after[3]-before[3])/1000));
+            (unsigned long long)(after[2]-before[2]),(unsigned long long)((after[3]-before[3])/1000),
+            (unsigned long long)(after[4]-before[4]),(unsigned long long)((after[5]-before[5])/1000),
+            (unsigned long long)(after[6]-before[6]),(unsigned long long)((after[7]-before[7])/1000),
+            (unsigned long long)(after[8]-before[8]),(unsigned long long)((after[9]-before[9])/1000));
 }
 '''
 
@@ -344,8 +347,8 @@ def adapt_driver(text):
         '\t\t\tfor (RedwoodMetalWork *work in _work) {if(work->render) ++draws;else ++computes;}\n'
         '\t\t\tredfin_metal_completed(draws,computes,_redfinQueuedTicks,redfin_worker_at,redfin_acquired_at,redfin_fence_at,mach_absolute_time());\n'
         '\t\t\tif(redfin_io_start_valid && (draws||computes)) {\n'
-        '\t\t\t\tuint64_t redfin_io_end[4]={0};\n'
-        '\t\t\t\tif(!mesa.submission_statistics([[_queue device] mesaDevice],redfin_io_end,4))\n'
+        '\t\t\t\tuint64_t redfin_io_end[10]={0};\n'
+        '\t\t\t\tif(!mesa.submission_statistics([[_queue device] mesaDevice],redfin_io_end,10))\n'
         '\t\t\t\t\tredfin_metal_io_completed(redfin_io_start,redfin_io_end);\n\t\t\t}\n'
         '\t\t}\n\t}\n'
         '\t/* The queue\'s slot goes back here')
@@ -474,6 +477,12 @@ def adapt_driver(text):
                 (unsigned long long)cache[3],(unsigned long long)cache[4],(unsigned long long)cache[5],
                 (unsigned long long)cache[6],(unsigned long long)cache[7],(unsigned long long)cache[8],
                 (unsigned long long)cache[9],(unsigned long long)cache[10]);
+        rw_print("REDFIN METAL DISK CACHE: boot=%s ordinal=%u enabled=%llu air-hits=%llu air-misses=%llu queued=%llu drops=%llu pending-bytes=%llu invalid=%llu ir3-hits=%llu ir3-misses=%llu ir3-stores=%llu variant-compiles=%llu variant-compile-us=%llu\\n",
+            redfin_fence_boot,redfin_pipeline_number,
+            (unsigned long long)cache[11],(unsigned long long)cache[12],(unsigned long long)cache[13],
+            (unsigned long long)cache[14],(unsigned long long)cache[15],(unsigned long long)cache[16],
+            (unsigned long long)cache[17],(unsigned long long)cache[18],(unsigned long long)cache[19],
+            (unsigned long long)cache[20],(unsigned long long)cache[21],(unsigned long long)(cache[22]/1000));
     }
     if(redfin_memory_sample)redfin_graphics_memory_report("pipeline-after",redfin_pipeline_number);
 '''+point)
@@ -539,8 +548,8 @@ def adapt_execution(text):
         '\t\t\t@autoreleasepool {[self redfinExecute];}\n\t\t});\n\t}\n}\n\n'
         '- (void)redfinExecute\n{\n\tuint64_t redfin_worker_at=mach_absolute_time();\n'
         '\tREDFIN_MESA_SCOPE;\n\tuint64_t redfin_acquired_at=mach_absolute_time();\n'
-        '\tuint64_t redfin_io_start[4]={0};\n'
-        '\tBOOL redfin_io_start_valid=RF_MESA(submission_statistics,[[_queue device] mesaDevice],redfin_io_start,4)==0;')
+        '\tuint64_t redfin_io_start[10]={0};\n'
+        '\tBOOL redfin_io_start_valid=RF_MESA(submission_statistics,[[_queue device] mesaDevice],redfin_io_start,10)==0;')
     text=replace_once(text,'done:;\n\t} @finally {',
         'done:;\n\t} @catch (NSException *exception) {\n'
         '\t\t[self failWith:exception.reason.UTF8String ?: "Metal execution raised an exception"];\n'

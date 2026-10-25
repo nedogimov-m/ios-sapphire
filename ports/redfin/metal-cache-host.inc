@@ -7,12 +7,14 @@
 #include "compiler/air/redfin_metal_translation_cache.h"
 #include "compiler/air/redfin_metal_function_constants.h"
 #include "pipe/p_screen.h"
+#include "util/disk_cache_os.h"
 struct rwa_device {
    const nir_shader_compiler_options *nir_options;
    struct redfin_air_translation_cache translation_cache;
    struct redfin_air_stage_cache stage_cache;
    struct pipe_context *pipe;
    struct pipe_screen *screen;
+   bool software;
 };
 static void say(char *out,size_t bytes,const char *format,...)
 {
@@ -77,6 +79,76 @@ static void redfin_host_stages_run(struct rwa_device *device,nir_shader *first,n
    printf("; AIR STAGE CACHE: real-finalizer=1 equivalent-state-hit=1 forced-LRU=1 surviving-pipelines=1 last-reference-release=1 callback-only-no-shader-execution=1\n");
 }
 
+static void redfin_host_disk_run(const void *bitcode,size_t bytes,const struct redfin_metal_constants *native,
+   const struct air_shader_info *original)
+{
+   const nir_shader_compiler_options *options=ir3_get_compiler_options(compiler);
+   struct rwa_device later={.nir_options=options};void *owner=ralloc_context(NULL);
+   struct air_shader_info info={0};char why[512]={0};uint64_t stats[REDFIN_AIR_CACHE_STAT_WORDS]={0};
+   nir_shader *nir=redfin_air_cached_translate(&later,owner,bitcode,bytes,NULL,native,&info,why,sizeof(why));
+   rwa_redfin_translation_cache_statistics(&later,stats,REDFIN_AIR_CACHE_STAT_WORDS);
+   redfin_host_cache_require(nir&&stats[11]&&stats[12]&&later.translation_cache.hits==0,
+      "fresh context restores the real file without a memory-cache hit");
+   redfin_host_cache_require(info.num_resources==original->num_resources&&info.num_varyings==original->num_varyings&&
+      info.num_vertex_attributes==original->num_vertex_attributes&&info.vertex_attributes_read==original->vertex_attributes_read&&
+      info.num_notes==original->num_notes&&info.threadgroup_bytes==original->threadgroup_bytes&&
+      info.fbfetch_targets==original->fbfetch_targets&&info.raster_order_groups==original->raster_order_groups&&
+      !strcmp(info.entry_point,original->entry_point),"persistent unpruned reflection counts and flags");
+   nir_validate_shader(nir,"actual file-restored NIR");
+   struct disk_cache *disk=later.translation_cache.disk;
+   redfin_host_cache_require(disk&&disk->max_size==REDFIN_MESA_DISK_TARGET,"explicit disk eviction target");
+   struct blob exact;blob_init(&exact);
+   redfin_host_cache_require(redfin_air_cache_key(&exact,bitcode,bytes,NULL,native),"persistent exact key");
+   cache_key key;disk_cache_compute_key(disk,exact.data,exact.size,key);
+   char *filename=disk_cache_get_cache_filename(disk,key);
+   size_t saved_bytes=0;void *saved=disk_cache_get(disk,key,&saved_bytes);
+   redfin_host_cache_require(filename&&saved&&saved_bytes>=24,"real cache file exists");
+   void *too_large=malloc(REDFIN_MESA_DISK_PENDING+1u);
+   redfin_host_cache_require(too_large!=NULL,"queue budget fixture allocation");
+   memset(too_large,0x5a,REDFIN_MESA_DISK_PENDING+1u);
+   uint64_t before[REDFIN_MESA_DISK_WORDS],after[REDFIN_MESA_DISK_WORDS];
+   redfin_mesa_disk_cache_statistics(disk,before);
+   disk_cache_put(disk,key,too_large,REDFIN_MESA_DISK_PENDING+1u,NULL);free(too_large);
+   redfin_mesa_disk_cache_statistics(disk,after);
+   redfin_host_cache_require(after[4]==before[4]+1&&after[5]<=REDFIN_MESA_DISK_PENDING,"background queue rejects oversized work without stalling");
+   /* A valid Mesa CRC with an old AIR record version must be a cold miss. */
+   /* Content-addressed Mesa entries are immutable: replace the fixture file
+    * explicitly, as the production invalid-record path also does. */
+   ((uint32_t *)saved)[1]=99;disk_cache_remove(disk,key);
+   disk_cache_put(disk,key,saved,saved_bytes,NULL);free(saved);
+   redfin_air_cache_finish(&later.translation_cache);
+   struct rwa_device stale={.nir_options=options};struct air_shader_info rebuilt={0};
+   nir_shader *fresh=redfin_air_cached_translate(&stale,owner,bitcode,bytes,NULL,native,&rebuilt,why,sizeof(why));
+   rwa_redfin_translation_cache_statistics(&stale,stats,REDFIN_AIR_CACHE_STAT_WORDS);
+   redfin_host_cache_require(fresh&&stats[17]==1,"old AIR version rejected and compiled again");
+   nir_validate_shader(fresh,"cold fallback from stale disk schema");
+   redfin_air_cache_finish(&stale.translation_cache);
+   /* Damage the actual compressed file: Mesa must reject its CRC and repair. */
+   int fd=open(filename,O_RDWR|O_CLOEXEC|O_NOFOLLOW);struct stat st;unsigned char value;
+   redfin_host_cache_require(fd>=0&&!fstat(fd,&st)&&st.st_size>0&&
+      pread(fd,&value,1,st.st_size-1)==1,"owned cache corruption fixture");
+   value^=0x80;redfin_host_cache_require(pwrite(fd,&value,1,st.st_size-1)==1,"corrupt one compressed byte");close(fd);
+   struct rwa_device corrupt={.nir_options=options};
+   nir_shader *repaired=redfin_air_cached_translate(&corrupt,owner,bitcode,bytes,NULL,native,&rebuilt,why,sizeof(why));
+   rwa_redfin_translation_cache_statistics(&corrupt,stats,REDFIN_AIR_CACHE_STAT_WORDS);
+   redfin_host_cache_require(repaired&&stats[13]&&stats[12]==0,"CRC failure falls back to real translation");
+   nir_validate_shader(repaired,"cold fallback from corrupted compressed file");
+   redfin_air_cache_finish(&corrupt.translation_cache);
+   struct rwa_device recovered={.nir_options=options};
+   nir_shader *restored=redfin_air_cached_translate(&recovered,owner,bitcode,bytes,NULL,native,&rebuilt,why,sizeof(why));
+   rwa_redfin_translation_cache_statistics(&recovered,stats,REDFIN_AIR_CACHE_STAT_WORDS);
+   redfin_host_cache_require(restored&&stats[12]&&stats[17]==0,"next fresh context reads the repaired file");
+   nir_validate_shader(restored,"repaired file survives another context");
+   redfin_air_cache_finish(&recovered.translation_cache);
+   struct disk_cache *other=redfin_mesa_disk_cache_create("redfin-air-fd620-v1","different-compiler-contract",0);
+   redfin_host_cache_require(other!=NULL,"separate compiler namespace fixture");
+   cache_key other_key;disk_cache_compute_key(other,exact.data,exact.size,other_key);
+   size_t wrong_size=0;void *wrong=disk_cache_get(other,other_key,&wrong_size);
+   redfin_host_cache_require(!wrong&&!wrong_size,"different compiler identity never reuses cached NIR");
+   disk_cache_destroy(other);free(filename);blob_finish(&exact);ralloc_free(owner);
+   printf("; AIR DISK CACHE: fresh-context=1 real-NIR-and-reflection=1 bounded-async-queue=1 stale-version-fallback=1 CRC-rejection-repair=1 compiler-namespace=1\n");
+}
+
 static void redfin_host_cache_run(const void *bitcode,size_t bytes,
    const struct air_to_nir_options *options)
 {
@@ -134,6 +206,7 @@ static void redfin_host_cache_run(const void *bitcode,size_t bytes,
    redfin_air_cache_finish(&device.translation_cache);
    nir_validate_shader(second,"live NIR after all templates and other callers released");
    redfin_host_cache_require(!strcmp(second_info.entry_point,saved_name),"surviving metadata");
+   redfin_host_disk_run(bitcode,bytes,&native,&second_info);
    /* Presence, lengths and exact bytes are semantically significant. */
    struct blob legacy,empty;blob_init(&legacy);blob_init(&empty);
    struct redfin_metal_constants undefined={0};

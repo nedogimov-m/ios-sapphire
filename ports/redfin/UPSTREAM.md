@@ -1,5 +1,45 @@
 # HackiOS upstream review — 2026-10-22
 
+## Persistent AIR and ir3 compilation with a native compiler identity — 2026-10-26
+
+Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's
+ir3_disk_cache_init Apple branch: it explicitly disables persistence because
+Mach-O has no ELF build ID. Retain that stale-code protection by binding a
+generated identity to the exact Mesa archive/patches, target ABI, Clang/SDK and
+compiler flags. Host tools use a separate identity and private cache directory.
+Kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab remains unchanged.
+
+Enable Mesa's existing compressed/CRC-checked atomic-file cache for A620 code
+and AIR templates. Keep async writes, one worker per Redfin cache, a4MiB bound
+on outstanding payload/job charges and a32MiB shared filesystem eviction target
+(not a strict cross-process disk bound). In-memory64entry/8MiB template and
+64entry/8MiB stage-key limits stay unchanged. Serialize the exact full module/
+entry/constant key, real NIR and every unpruned reflection field explicitly;
+store no process pointers or live resource bindings. Restore independent owners.
+Different compiler identities, stale schemas, truncated/bad CRC records and
+oversized work fall back to ordinary compilation. Remove corrupt entries so
+Mesa's immutable content-addressed writer can publish their repair. Validate
+ir3 record lengths before allocating from their metadata. No external-page,
+shader precision, GPU ownership or fence check changes.
+
+Extend bounded process timing to other IOKit methods, map/unmap operations and
+actual variant-compilation elapsed time. Legacy four-word I/O counters retain
+their ABI. The new totals include concurrent driver activity and are not pure
+CPU time or display FPS. Native resource checks create two independent A620
+contexts with different live input data; the second must prove AIR file hits,
+ir3 file hits and correct pixels/guards. Phone/Photos auto-launch and draw/
+screen capture remain disabled.
+
+42host integration cases pass.14real modules with all19captured parameter sets
+(31instruction-compile cases) pass in-memory/CSO lifecycle plus real file restore,
+unpruned reflection, queue rejection, stale-version fallback, CRC repair followed
+by another fresh-context hit, and compiler namespace separation. The initial
+corruption test exposed an actual unrepaired-file miss and the completed block
+fixes it before any device writes. Initial fixture schema injection also needed
+explicit replacement because Mesa treats existing entries as immutable. Fresh
+native paired build/actual20H392 ABI/signatures pass. V40 is staged with native
+readonly fsck; actual A620 persistence and warm-system latency remain pending.
+
 ## Preserve stage lookup hash; retain more templates within the same payload cap — 2026-10-25
 
 V34 proves correct native raster/half/resource pixels but the new combined cache

@@ -1,0 +1,24 @@
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -37,6 +37,7 @@
+ #include "nir_builder.h"
+ #include "nir_air.h"
+ #include "redfin_metal_translation_cache.h"
++#include "util/redfin_mesa_disk_cache.h"
+ 
+ #include "pipe/p_context.h"
+ #include "pipe/p_defines.h"
+@@ -665,8 +666,11 @@
+ int
+ rwa_redfin_submission_stats(struct rwa_device *device,uint64_t *counts,size_t words)
+ {
+-   if(!device || device->software || !counts || words!=4 || strcmp(rwa_device_name(device),"FD620")) return -1;
+-   return redfin_drm_profile_read(counts,words);
++   if(!device||device->software||!counts||(words!=4&&words!=10)||strcmp(rwa_device_name(device),"FD620"))return -1;
++   if(words==4)return redfin_drm_profile_read(counts,4);
++   int status=redfin_drm_profile_read(counts,8);if(status)return status;
++   uint64_t compiler[5]={0};status=redfin_ir3_disk_cache_statistics(compiler,5);
++   counts[8]=compiler[3];counts[9]=compiler[4];return status;
+ }
+ 
+ const char *

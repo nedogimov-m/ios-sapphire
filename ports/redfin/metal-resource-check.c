@@ -4,6 +4,7 @@
  */
 #include "air_metal.h"
 #include "redfin_metal_function_constants.h"
+#include "metal-translation-cache.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,8 +13,8 @@
 
 int redfin_metal_resource_check(const char *path, uint64_t nonce);
 
-int
-redfin_metal_resource_check(const char *path, uint64_t nonce)
+static int
+redfin_resource_context(const char *path,uint64_t nonce,unsigned phase,uint64_t statistics[REDFIN_AIR_CACHE_STAT_WORDS])
 {
    char why[1024] = {0};
    FILE *file = fopen(path, "rb");
@@ -102,7 +103,7 @@ redfin_metal_resource_check(const char *path, uint64_t nonce)
       goto done;
    }
    for (unsigned round = 0; round < 32; round++) {
-      uint32_t seed = (((uint32_t)nonce + (round / 8) * 0x13715af8u) & ~7u) | (round & 7);
+      uint32_t seed = ((((uint32_t)nonce ^ (phase*0x9816e3f0u)) + (round / 8) * 0x13715af8u) & ~7u) | (round & 7);
       for (unsigned i = 0; i < 8; i++)
          control[i] = seed ^ (i * 0x1987abcd);
       memset(output, 0xa5, 256);
@@ -179,9 +180,23 @@ done:
    if (buffers[0]) rwa_buffer_destroy(buffers[0]);
    if (compute) rwa_compute_destroy(compute);
    if (enabled) rwa_compute_destroy(enabled);
+   if (device) rwa_redfin_translation_cache_statistics(device,statistics,REDFIN_AIR_CACHE_STAT_WORDS);
    if (device) rwa_device_close(device);
    free(bitcode);
    return completed == 32 && requirements && missing_refused && enabled_pixels;
+}
+
+int redfin_metal_resource_check(const char *path,uint64_t nonce)
+{
+   uint64_t first[REDFIN_AIR_CACHE_STAT_WORDS]={0},second[REDFIN_AIR_CACHE_STAT_WORDS]={0};
+   int cold=redfin_resource_context(path,nonce,0,first);
+   int warm=cold&&redfin_resource_context(path,nonce,1,second);
+   int persistent=warm&&second[11]&&second[12]>=2&&second[18]>first[18];
+   printf("REDFIN METAL PERSISTENCE RESULT: boot=%016llx contexts=2 cold-resource-pixels=%u warm-resource-pixels=%u air-file-hits=%llu ir3-file-hits=%llu pending-bytes=%llu stale-records=%llu passed=%u\n",
+      (unsigned long long)nonce,cold,warm,(unsigned long long)second[12],
+      (unsigned long long)(second[18]-first[18]),(unsigned long long)second[16],
+      (unsigned long long)second[17],persistent);
+   return persistent;
 }
 
 #ifdef REDFIN_METAL_RESOURCE_STANDALONE

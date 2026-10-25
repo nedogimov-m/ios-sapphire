@@ -1,0 +1,45 @@
+--- a/src/redwood-drm/redwood_drm.c
++++ b/src/redwood-drm/redwood_drm.c
+@@ -62,15 +62,15 @@
+ __attribute__((visibility("default"))) int
+ redfin_drm_profile_read(uint64_t *counts,size_t words)
+ {
+-   if(!counts || words!=4) return -1;
+-   redfin_drm_profile_snapshot(counts);return 0;
++   if(!counts || (words!=4&&words!=8)) return -1;
++   if(words==4)redfin_drm_profile_snapshot(counts);else redfin_drm_profile_extended(counts);return 0;
+ }
+ 
+ static int
+ call(unsigned number, void *data, size_t size)
+ {
+ 	size_t returned = size;
+-	bool profile=(number==0x46 || number==0x42);
++	bool profile=true;
+ 	uint64_t started=profile?redfin_drm_now():0;
+ 	kern_return_t result = IOConnectCallStructMethod(connection, number, data, size, data, &returned);
+ 	if(profile) {
+@@ -181,7 +181,11 @@
+ 	 * the program and the memory the GPU sees. So does the kernel's driver here: the memory is
+ 	 * made that way, and this mapping is as the memory is.
+ 	 */
+-	if (IOConnectMapMemory64(connection, handle, mach_task_self(), &address, &mapped, kIOMapAnywhere) != 0) {
++	uint64_t started=redfin_drm_now();
++	kern_return_t result=IOConnectMapMemory64(connection,handle,mach_task_self(),&address,&mapped,kIOMapAnywhere);
++	uint64_t finished=redfin_drm_now();
++	redfin_drm_profile_map_record(started&&finished>=started?finished-started:0);
++	if (result != 0) {
+ 		return (void *)-1;              /* mmap()'s MAP_FAILED */
+ 	}
+ 	return (void *)(uintptr_t)address;
+@@ -191,7 +195,10 @@
+ redwood_drm_unmap(int fd, uint32_t handle, void *address)
+ {
+ 	(void)fd;
++	uint64_t started=redfin_drm_now();
+ 	IOConnectUnmapMemory64(connection, handle, mach_task_self(), (mach_vm_address_t)(uintptr_t)address);
++	uint64_t finished=redfin_drm_now();
++	redfin_drm_profile_map_record(started&&finished>=started?finished-started:0);
+ }
+ 
+ int

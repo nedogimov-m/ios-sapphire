@@ -123,6 +123,8 @@ static bool redfin_air_info_copy(void *owner,struct air_shader_info *out,const s
    return true;
 }
 
+#include "redfin_metal_persistent_cache.inc"
+
 static void redfin_air_cache_drop(struct redfin_air_translation_cache *cache,unsigned index)
 {
    struct redfin_air_cache_entry *entry=cache->slots[index];
@@ -133,38 +135,40 @@ static void redfin_air_cache_drop(struct redfin_air_translation_cache *cache,uns
 static void redfin_air_cache_finish(struct redfin_air_translation_cache *cache)
 {
    for(unsigned i=0;i<REDFIN_AIR_CACHE_ENTRIES;++i)redfin_air_cache_drop(cache,i);
+   disk_cache_destroy(cache->disk);cache->disk=NULL;cache->disk_attempted=false;
 }
 
-static void redfin_air_cache_insert(struct rwa_device *device,const struct blob *key,
+static struct redfin_air_cache_entry *redfin_air_cache_insert(struct rwa_device *device,const struct blob *key,
    uint32_t hash,nir_shader *nir,const struct air_shader_info *info)
 {
    struct redfin_air_translation_cache *cache=&device->translation_cache;
    size_t metadata=redfin_air_info_bytes(info);
-   if(metadata==SIZE_MAX||metadata>REDFIN_AIR_CACHE_BYTES){++cache->bypasses;return;}
+   if(metadata==SIZE_MAX||metadata>REDFIN_AIR_CACHE_BYTES){++cache->bypasses;return NULL;}
    struct blob binary;blob_init(&binary);nir_serialize(&binary,nir,false);
    if(binary.out_of_memory||binary.size>REDFIN_AIR_CACHE_BYTES||
       key->size+metadata+sizeof(struct redfin_air_cache_entry)>REDFIN_AIR_CACHE_BYTES-binary.size) {
-      blob_finish(&binary);++cache->bypasses;return;
+      blob_finish(&binary);++cache->bypasses;return NULL;
    }
    struct redfin_air_cache_entry *entry=rzalloc(NULL,struct redfin_air_cache_entry);
-   if(!entry){blob_finish(&binary);++cache->bypasses;return;}
+   if(!entry){blob_finish(&binary);++cache->bypasses;return NULL;}
    entry->key=ralloc_memdup(entry,key->data,key->size);
    entry->nir=ralloc_memdup(entry,binary.data,binary.size);
    entry->key_bytes=key->size;entry->nir_bytes=binary.size;
    entry->charge=sizeof(*entry)+metadata+key->size+binary.size;entry->hash=hash;
    blob_finish(&binary);
    if(!entry->key||!entry->nir||!redfin_air_info_copy(entry,&entry->info,info)) {
-      ralloc_free(entry);++cache->bypasses;return;
+      ralloc_free(entry);++cache->bypasses;return NULL;
    }
    while(cache->entries>=REDFIN_AIR_CACHE_ENTRIES||cache->bytes+entry->charge>REDFIN_AIR_CACHE_BYTES) {
       unsigned oldest=REDFIN_AIR_CACHE_ENTRIES;
       for(unsigned i=0;i<REDFIN_AIR_CACHE_ENTRIES;++i)
          if(cache->slots[i]&&(oldest==REDFIN_AIR_CACHE_ENTRIES||cache->slots[i]->used<cache->slots[oldest]->used))oldest=i;
-      if(oldest==REDFIN_AIR_CACHE_ENTRIES){ralloc_free(entry);++cache->bypasses;return;}
+      if(oldest==REDFIN_AIR_CACHE_ENTRIES){ralloc_free(entry);++cache->bypasses;return NULL;}
       redfin_air_cache_drop(cache,oldest);++cache->evictions;
    }
    unsigned slot=0;while(slot<REDFIN_AIR_CACHE_ENTRIES&&cache->slots[slot])++slot;
    entry->used=++cache->clock;cache->slots[slot]=entry;++cache->entries;cache->bytes+=entry->charge;
+   return entry;
 }
 
 static nir_shader *redfin_air_cached_translate(struct rwa_device *device,void *owner,
@@ -190,6 +194,13 @@ static nir_shader *redfin_air_cached_translate(struct rwa_device *device,void *o
       ralloc_free(temporary);redfin_air_cache_drop(cache,i);++cache->bypasses;break;
    }
    if(cacheable)++cache->misses;else ++cache->bypasses;
+   if(cacheable) {
+      nir_shader *restored=redfin_air_disk_load(device,owner,&key,info);
+      if(restored) {
+         redfin_air_cache_insert(device,&key,hash,restored,info);
+         blob_finish(&key);return restored;
+      }
+   }
    void *temporary=ralloc_context(NULL);struct air_constant_value *constants=NULL;
    if(!temporary){blob_finish(&key);say(why,why_size,"out of memory translating a shader");return NULL;}
    int count=rwa_redfin_constants_for_module(temporary,bitcode,bytes,values,&constants,why,why_size);
@@ -199,7 +210,10 @@ static nir_shader *redfin_air_cached_translate(struct rwa_device *device,void *o
    nir_shader *nir=air_to_nir(owner,bitcode,bytes,name,&options,device->nir_options,info,&error);
    if(!nir)say(why,why_size,"%s",error?error:"the module could not be translated");
    ralloc_free(temporary);
-   if(nir&&cacheable)redfin_air_cache_insert(device,&key,hash,nir,info);
+   if(nir&&cacheable) {
+      struct redfin_air_cache_entry *entry=redfin_air_cache_insert(device,&key,hash,nir,info);
+      if(entry)redfin_air_disk_store(device,entry);
+   }
    blob_finish(&key);return nir;
 }
 
@@ -211,5 +225,7 @@ int rwa_redfin_translation_cache_statistics(struct rwa_device *device,uint64_t *
    out[3]=cache->bytes;out[4]=cache->evictions;out[5]=cache->bypasses;
    out[6]=device->stage_cache.hits;out[7]=device->stage_cache.misses;
    out[8]=device->stage_cache.entries;out[9]=device->stage_cache.bytes;
-   out[10]=device->stage_cache.evictions;return 0;
+   out[10]=device->stage_cache.evictions;
+   redfin_mesa_disk_cache_statistics(cache->disk,out+11);out[17]=cache->disk_invalid;
+   redfin_ir3_disk_cache_statistics(out+18,5);return 0;
 }

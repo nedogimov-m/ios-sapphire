@@ -38,10 +38,13 @@ int main(void){
  redfin_metal_completed(3,0,0,480,960,1440,1920);assert(logs==1);
  assert(strstr(logged,"boot=0123456789abcdef")&&strstr(logged,"actual-finish=1"));
  assert(strstr(logged,"queue-us=10 gate-us=10 encode-us=10 final-fence-us=10 total-us=40"));
- uint64_t before[4]={0},after[4]={3,9000,2,3000};
+ uint64_t before[10]={0},after[10]={3,9000,2,3000,5,7000,4,8000,2,11000};
  redfin_metal_io_completed(before,after);assert(logs==2);
  assert(strstr(logged,"submit-calls=3 submit-io-us=9 allocation-calls=2 allocation-io-us=3"));
+ assert(strstr(logged,"other-calls=5 other-io-us=7 map-operations=4 map-io-us=8 variant-compiles=2 variant-compile-us=11"));
  redfin_metal_io_completed(after,before);assert(logs==2);
+ uint64_t regressed[10];memcpy(regressed,after,sizeof(regressed));--regressed[9];
+ redfin_metal_io_completed(after,regressed);assert(logs==2);
  assert(!redfin_phase_us(2,1));redfin_fence_timebase.denom=0;assert(!redfin_phase_us(0,480));
  return 0;
 }
