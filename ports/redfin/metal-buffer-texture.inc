@@ -1,13 +1,25 @@
 /* SPDX-License-Identifier: MIT */
 /* Buffer views alias actual prepared parent pages. All layout conversions are
  * native GPU work; order transitions before another view or raw-buffer use. */
+static uint64_t
+rwa_redfin_buffer_address(const struct rwa_buffer *buffer)
+{
+#ifdef GALLIUM_FREEDRENO
+   if(buffer&&!buffer->device->software)return redfin_freedreno_buffer_address(buffer->res);
+#endif
+   return 0;
+}
 static bool
 rwa_redfin_buffers_share(const struct rwa_buffer *a,const struct rwa_buffer *b)
 {
-   if(!a||!b)return false;
+   if(!a||!b||a->device!=b->device)return false;
    if(a==b||a->res==b->res||(a->external_surface&&a->external_surface==b->external_surface))return true;
    uintptr_t x=(uintptr_t)a->map,y=(uintptr_t)b->map;
-   return x&&y&&x<=UINTPTR_MAX-a->size&&y<=UINTPTR_MAX-b->size&&x<y+b->size&&y<x+a->size;
+   if(x&&y&&x<=UINTPTR_MAX-a->size&&y<=UINTPTR_MAX-b->size&&x<y+b->size&&y<x+a->size)return true;
+   /* GEM handles can name a whole heap. Compare the actual suballocation VA
+    * intervals so independent buffers in that heap remain independent. */
+   uint64_t u=rwa_redfin_buffer_address(a),v=rwa_redfin_buffer_address(b);
+   return u&&v&&u<=UINT64_MAX-a->size&&v<=UINT64_MAX-b->size&&u<v+b->size&&v<u+a->size;
 }
 static bool
 rwa_redfin_view_rows_overlap(uint64_t a,uint32_t ap,uint32_t aw,uint32_t ah,
@@ -27,34 +39,30 @@ rwa_redfin_buffer_prepare(struct rwa_buffer *buffer,char *why,size_t bytes)
 {
    if(!buffer)return 0;
    struct rwa_device *device=buffer->device;
-   for(struct rwa_texture *t=device->buffer_textures;t;t=t->buffer_next) {
-      if(!rwa_redfin_buffers_share(t->buffer_parent,buffer))continue;
-      if(t->buffer_pending) {
-         if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,bytes))return -1;
-         t->buffer_pending=false;
-      }
-      if(rwa_redfin_linear_resolve(t,why,bytes))return -1;
-   }
-   return 0;
+   for(struct rwa_texture *t=device->buffer_textures;t;t=t->buffer_next)
+      if(rwa_redfin_buffers_share(t->buffer_parent,buffer)&&rwa_redfin_linear_resolve(t,why,bytes))return -1;
+   if(buffer->gpu_pending&&!buffer->gpu_visible&&rwa_redfin_gpu_alias_transition(device,why,bytes))return -1;
+   return rwa_redfin_gpu_prepare(device,why,bytes);
+}
+static int
+rwa_redfin_buffer_cpu_prepare(struct rwa_buffer *buffer,char *why,size_t bytes)
+{
+   if(!buffer)return 0;
+   if(rwa_redfin_buffer_prepare(buffer,why,bytes))return -1;
+   return buffer->gpu_pending?rwa_redfin_cpu_drain(buffer->device,why,bytes):0;
 }
 static int
 rwa_redfin_buffer_texture_prepare(struct rwa_texture *texture,char *why,size_t bytes)
 {
    if(!texture||!texture->buffer_parent)return 0;
    struct rwa_device *device=texture->device;
-   for(struct rwa_texture *t=device->buffer_textures;t;t=t->buffer_next) {
-      if(!rwa_redfin_buffers_share(t->buffer_parent,texture->buffer_parent))continue;
-      if(t->buffer_pending) {
-         if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,bytes))return -1;
-         t->buffer_pending=false;
-      }
-      if(t!=texture&&rwa_redfin_linear_resolve(t,why,bytes))return -1;
-   }
-   /* Shared parent pages may have fresh CPU writes between commands without
-    * didModifyRange. Invalidate native sampler state once per command; this
-    * records cache work and does not add a raster fence for immutable reads. */
+   for(struct rwa_texture *t=device->buffer_textures;t;t=t->buffer_next)
+      if(t!=texture&&rwa_redfin_buffers_share(t->buffer_parent,texture->buffer_parent)&&
+         rwa_redfin_linear_resolve(t,why,bytes))return -1;
+   /* Native aliases need a cache transition after a different view/raw writer
+    * or a new command's CPU writes. A current shadow stays on the GPU. */
    if(!texture->linear_original&&(!device->command_scope.active||texture->linear_epoch!=device->linear_epoch)) {
-      if(device->pipe->memory_barrier)device->pipe->memory_barrier(device->pipe,PIPE_BARRIER_ALL);
+      if(texture->buffer_parent->gpu_pending&&rwa_redfin_gpu_alias_transition(device,why,bytes))return -1;
       if(redfin_freedreno_alias_written(device->pipe,texture->res)) {
          say(why,bytes,"native parent texture cache transition refused");return -1;
       }
@@ -63,17 +71,24 @@ rwa_redfin_buffer_texture_prepare(struct rwa_texture *texture,char *why,size_t b
    return 0;
 }
 static void
-rwa_redfin_buffer_written(struct rwa_buffer *buffer)
+rwa_redfin_buffer_changed(struct rwa_buffer *buffer,struct rwa_texture *writer,bool gpu)
 {
    if(!buffer)return;
-   struct rwa_device *device=buffer->device;bool aliases=false;
+   struct rwa_device *device=buffer->device;
+   bool pending=gpu&&(device->command_scope.active||device->command_scope.pending);
+   for(struct rwa_buffer *b=device->all_buffers;b;b=b->all_next) {
+      if(!rwa_redfin_buffers_share(b,buffer))continue;
+      b->gpu_pending|=pending;
+      b->gpu_visible=!pending||(!writer&&b->res==buffer->res);
+   }
    for(struct rwa_texture *t=device->buffer_textures;t;t=t->buffer_next) {
       if(!rwa_redfin_buffers_share(t->buffer_parent,buffer))continue;
-      aliases=true;t->linear_epoch=0;
-      if(redfin_freedreno_alias_written(device->pipe,t->res))device->command_scope.failed=true;
+      if(t!=writer)t->linear_epoch=0;
    }
-   if(aliases&&device->pipe->memory_barrier)device->pipe->memory_barrier(device->pipe,PIPE_BARRIER_ALL);
 }
+static void
+rwa_redfin_buffer_written(struct rwa_buffer *buffer)
+{rwa_redfin_buffer_changed(buffer,NULL,true);}
 int
 rwa_redfin_texture_buffer_link(struct rwa_texture *texture,struct rwa_buffer *parent,
     uint64_t offset,uint64_t pitch,char *why,size_t bytes)

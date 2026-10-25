@@ -100,6 +100,8 @@ def main():
                            ('metal-preparation.patch','metal-translation-cache.h',
                             'metal-translation-cache.inc','metal-stage-cache.inc')]
                 inputs += [ROOT/'ports/redfin/metal-persistent-cache.inc',ROOT/'ports/redfin/metal-persistent-cache.patch']
+                inputs += [ROOT/'ports/redfin'/name for name in
+                           ('metal-ordering.patch','metal-ordering.h','metal-ordering.inc')]
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -169,6 +171,10 @@ def main():
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-persistent-cache.patch'],source)
                     shutil.copy2(ROOT/'ports/redfin/metal-persistent-cache.inc',
                                  source/'src/compiler/air/redfin_metal_persistent_cache.inc')
+                    for suffix in ('h','inc'):
+                        shutil.copy2(ROOT/'ports/redfin'/('metal-ordering.'+suffix),
+                                     source/'src/compiler/air'/('redfin_metal_ordering.'+suffix))
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-ordering.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -257,6 +263,8 @@ def main():
                 metal_sources += [ROOT/'ports/redfin/metal-half-check.inc']
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal-translation-cache.h','metal-cache-check.inc')]
+                metal_sources += [ROOT/'ports/redfin'/name for name in
+                                  ('metal-ordering.h','metal-ordering-check.inc')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)

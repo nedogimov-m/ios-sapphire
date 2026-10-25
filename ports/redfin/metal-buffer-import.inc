@@ -23,6 +23,7 @@ rwa_redfin_buffer_from_surface(struct rwa_device *device,unsigned surface,size_t
       say(why,bytes,"native GPU import did not retain the original external pages");return NULL;
    }
    buffer->device=device;buffer->size=length;buffer->map=original;buffer->external_surface=surface;
+   rwa_redfin_buffer_register(buffer);
    fprintf(stderr,"REDFIN METAL EXTERNAL BUFFER: bytes=%zu original-pages=1 actual-kernel-import=1 CPU-pixel-copy=0\n",length);
    return buffer;
 #else

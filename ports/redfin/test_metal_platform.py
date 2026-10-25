@@ -112,8 +112,8 @@ int main(void) {
 
     def test_command_scope_fences_dependencies_and_failures_before_reuse(self):
         # Exercise the actual adapter with writes that become visible only at a
-        # successful fence. Raster commands share a final fence; a following
-        # compute/CPU-validation boundary must first make their writes visible.
+        # successful fence. Queue-ordered GPU operations share a final fence; an explicit
+        # CPU consumer must first make their writes visible.
         source=r'''
 #include <assert.h>
 #include "metal-command-scope.h"
@@ -155,7 +155,16 @@ int main(void) {
  assert(redfin_metal_scope_begin(&s));
  assert(redfin_metal_scope_prepare(&s,true,finish,&g,0,0));
  assert(redfin_metal_scope_complete(&s,true,finish,&g,0,0));
- assert(g.waits==5);return 0;
+ assert(g.waits==5);
+ /* A generic encoding error must not strand already queued work. Drain it
+  * once, keep the error, and permanently reject another scope. */
+ struct redfin_metal_command_scope e={0};struct fake_gpu h={0};
+ assert(!redfin_metal_scope_begin(&e));++h.pending;
+ assert(!redfin_metal_scope_complete(&e,true,finish,&h,0,0));e.failed=true;
+ assert(redfin_metal_scope_end(&e,finish,&h,0,0));
+ assert(h.visible==1&&h.waits==1&&!h.pending&&!e.pending&&!e.completion_failed);
+ assert(redfin_metal_scope_begin(&e));assert(redfin_metal_scope_drain(&e,finish,&h,0,0));
+ assert(h.waits==1);return 0;
 }
 '''
         with tempfile.TemporaryDirectory() as d:

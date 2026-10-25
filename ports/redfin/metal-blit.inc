@@ -9,7 +9,7 @@ rwa_blit_range(uint64_t offset,uint64_t bytes,uint64_t total)
 {return offset<=total&&bytes<=total-offset&&offset<=UINT32_MAX&&bytes<=UINT32_MAX-offset;}
 static int
 rwa_blit_finish(struct rwa_device *device,char *why,size_t bytes)
-{return redfin_metal_scope_complete(&device->command_scope,false,command_scope_finish,device,why,bytes);}
+{return rwa_redfin_gpu_complete(device,true,why,bytes);}
 static int
 rwa_blit_box(struct rwa_device *device,struct rwa_texture *texture,uint64_t level,uint64_t slice,
     const uint64_t origin[3],const uint64_t size[3],struct pipe_box *box,char *why,size_t bytes)
@@ -34,7 +34,7 @@ rwa_blit_native(struct rwa_device *device,struct pipe_resource *source,unsigned 
     struct pipe_resource *destination,unsigned destination_level,const struct pipe_box *destination_box,unsigned filter,
     char *why,size_t bytes)
 {
-   if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,bytes))return -1;
+   if(rwa_redfin_gpu_prepare(device,why,bytes))return -1;
    struct pipe_blit_info info={.src={.resource=source,.level=source_level,.format=source->format,.box=*source_box},
       .dst={.resource=destination,.level=destination_level,.format=destination->format,.box=*destination_box},
       .mask=util_format_get_mask(source->format),.filter=filter};
@@ -59,19 +59,21 @@ rwa_blit_rows(struct rwa_device *device,struct pipe_resource *source,struct pipe
    struct redfin_linear_copy_plan plan={(unsigned)(words?pixel_bytes/4:pixel_bytes),(unsigned)rows,
       (unsigned)source_pitch,(unsigned)destination_pitch,(unsigned)source_offset,(unsigned)destination_offset};
    void *shader=rwa_redfin_row_shader(device,words?32:8,why,bytes);if(!shader)return -1;
-   if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,bytes))return -1;
+   if(rwa_redfin_gpu_prepare(device,why,bytes))return -1;
    struct pipe_context *pipe=device->pipe;
-   if(pipe->memory_barrier)pipe->memory_barrier(pipe,PIPE_BARRIER_ALL);
    struct pipe_shader_buffer buffers[2]={{.buffer=source,.buffer_size=source->width0},
       {.buffer=destination,.buffer_size=destination->width0}};
-   struct pipe_constant_buffer constants={.user_buffer=&plan,.buffer_size=sizeof(plan)};
+   /* The caller's plan lives on its stack. An owned aligned upload must
+    * survive every deferred grid, including another row copy in this scope. */
+   struct pipe_constant_buffer constants={0};
+   if(rwa_redfin_constant_upload(device,&plan,sizeof(plan),&constants,why,bytes))return -1;
    pipe->bind_compute_state(pipe,shader);pipe->set_constant_buffer(pipe,PIPE_SHADER_COMPUTE,0,false,&constants);
+   pipe_resource_reference(&constants.buffer,NULL);
    pipe->set_shader_buffers(pipe,PIPE_SHADER_COMPUTE,0,2,buffers,2);
    const struct pipe_grid_info grid={.work_dim=2,.block={64,1,1},.grid={((uint64_t)plan.words+63)/64,plan.rows,1}};
    pipe->launch_grid(pipe,&grid);int result=rwa_blit_finish(device,why,bytes);
    pipe->set_shader_buffers(pipe,PIPE_SHADER_COMPUTE,0,2,NULL,0);pipe->set_constant_buffer(pipe,PIPE_SHADER_COMPUTE,0,false,NULL);
    pipe->bind_compute_state(pipe,NULL);
-   if(!result&&pipe->memory_barrier)pipe->memory_barrier(pipe,PIPE_BARRIER_ALL);
    return result;
 }
 int
@@ -88,7 +90,7 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
       (destination_buffer&&(!destination_buffer->res||destination_buffer->res->target!=PIPE_BUFFER||destination_buffer->size>destination_buffer->res->width0)))
       return rwa_blit_fail(why,bytes,"blit buffer exceeds its native resource");
    if(rwa_redfin_buffer_prepare(source_buffer,why,bytes)||rwa_redfin_buffer_prepare(destination_buffer,why,bytes))return -1;
-   if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,bytes))return -1;
+   if(rwa_redfin_gpu_prepare(device,why,bytes))return -1;
    static unsigned observations[RF_BLIT_INVALID];
    if(observations[request->operation]++<4)fprintf(stderr,
       "REDFIN METAL BLIT REQUEST: operation=%u size=%llux%llux%llu offsets=%llu/%llu pitches=%llu/%llu levels=%llu/%llu slices=%llu/%llu\n",
@@ -103,6 +105,7 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
       if(!source_buffer&&!source_texture)goto invalid;
       if(source_texture&&(request->source_level>source_texture->res->last_level||request->source_slice>=source_texture->layers))goto invalid;
       result=rwa_redfin_linear_resolve_all(device,why,bytes);
+      if(!result)result=rwa_redfin_cpu_drain(device,why,bytes);
    } else if(request->operation==RF_BLIT_BUFFER||request->operation==RF_BLIT_FILL) {
       uint64_t count=request->size[0],destination=request->destination_offset;
       if(!destination_buffer||!rwa_blit_range(destination,count,destination_buffer->size))goto invalid;
@@ -121,6 +124,8 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
          bool overlap=shared&&source<destination+count&&destination<source+count;
          if(sa&&da&&sa<=UINTPTR_MAX-source_buffer->size&&da<=UINTPTR_MAX-destination_buffer->size)
             overlap|=sa+source<da+destination+count&&da+destination<sa+source+count;
+         uint64_t sg=rwa_redfin_buffer_address(source_buffer),dg=rwa_redfin_buffer_address(destination_buffer);
+         if(sg&&dg)overlap|=sg+source<dg+destination+count&&dg+destination<sg+source+count;
          if(overlap)
             return rwa_blit_fail(why,bytes,"overlapping Metal buffer copy");
          result=rwa_blit_rows(device,source_buffer->res,destination_buffer->res,source,destination,count,count,count,1,why,bytes);
@@ -139,7 +144,8 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
          uint64_t a=source_texture->buffer_offset+(uint64_t)source.y*source_texture->buffer_pitch+(uint64_t)source.x*cpp;
          uint64_t b=destination_texture->buffer_offset+(uint64_t)destination.y*destination_texture->buffer_pitch+(uint64_t)destination.x*cpp;
          if(sp->res!=dp->res&&!(sp->external_surface&&sp->external_surface==dp->external_surface)) {
-            a+=(uintptr_t)sp->map;b+=(uintptr_t)dp->map;
+            uint64_t sa=rwa_redfin_buffer_address(sp),da=rwa_redfin_buffer_address(dp);
+            a+=sa?sa:(uintptr_t)sp->map;b+=da?da:(uintptr_t)dp->map;
          }
          if(rwa_redfin_view_rows_overlap(a,source_texture->buffer_pitch,(uint32_t)(source.width*cpp),source.height,
             b,destination_texture->buffer_pitch,(uint32_t)(destination.width*cpp),destination.height))
@@ -184,10 +190,12 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
          struct pipe_box native=region,linear={.width=region.width,.height=region.height,.depth=1};native.z+=z;native.depth=1;
          if(upload) {
             result=rwa_blit_rows(device,buffer->res,stage_buffer,offset+(uint64_t)z*image,stage_offset,pitch,stage_pitch,pixel_bytes,region.height,why,bytes);
+            if(!result)result=rwa_redfin_gpu_alias_transition(device,why,bytes);
             if(!result)result=redfin_freedreno_alias_written(pipe,stage);
             if(!result)result=rwa_blit_native(device,stage,0,&linear,texture->res,request->destination_level,&native,PIPE_TEX_FILTER_NEAREST,why,bytes);
          } else {
             result=rwa_blit_native(device,texture->res,request->source_level,&native,stage,0,&linear,PIPE_TEX_FILTER_NEAREST,why,bytes);
+            if(!result)result=rwa_redfin_gpu_alias_transition(device,why,bytes);
             if(!result)result=rwa_blit_rows(device,stage_buffer,buffer->res,stage_offset,offset+(uint64_t)z*image,stage_pitch,pitch,pixel_bytes,region.height,why,bytes);
          }
       }
@@ -213,7 +221,7 @@ rwa_redfin_blit(struct rwa_device *device,struct rwa_buffer *source_buffer,struc
    if(!result&&!device->command_scope.active)result=rwa_redfin_linear_resolve_all(device,why,bytes);
    if(!result) {
       static uint64_t calls;uint64_t n=++calls;
-      if(n<=12||!(n&(n-1)))fprintf(stderr,"REDFIN METAL BLIT: operation=%u sequence=%llu actual-native-completion=1 CPU-pixel-copy=0\n",request->operation,(unsigned long long)n);
+      if(n<=12||!(n&(n-1)))fprintf(stderr,"REDFIN METAL BLIT: operation=%u sequence=%llu queue-ordered-native=1 CPU-pixel-copy=0\n",request->operation,(unsigned long long)n);
    }
    return result;
 invalid:

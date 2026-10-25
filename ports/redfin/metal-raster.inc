@@ -54,7 +54,7 @@ rwa_redfin_clear_pass(struct rwa_device *device,struct rwa_texture *const *color
    for(unsigned i=0;i<count;++i)if(mask&(1u<<i))
       for(unsigned c=0;c<4;++c)if(!isfinite(values[i][c]))return -1;
    if(depth_value&&(!isfinite(*depth_value)||*depth_value<0||*depth_value>1))return -1;
-   if(redfin_metal_scope_prepare(&device->command_scope,true,command_scope_finish,device,why,why_size))return -1;
+   if(rwa_redfin_gpu_prepare(device,why,why_size))return -1;
    struct pipe_context *pipe=device->pipe;
    struct pipe_surface *surfaces[PIPE_MAX_COLOR_BUFS]={0},*zs=NULL;
    struct pipe_framebuffer_state fb={.nr_cbufs=count};
@@ -73,6 +73,7 @@ rwa_redfin_clear_pass(struct rwa_device *device,struct rwa_texture *const *color
    if(!fb.width)goto done;
    if(depth_value&&(!depth||!format_has_depth(depth->res->format)))goto done;
    if(stencil_value&&(!depth||!format_has_stencil(depth->res->format)))goto done;
+   if(rwa_redfin_gpu_prepare(device,why,why_size))goto done;
    pipe->set_framebuffer_state(pipe,&fb);
    for(unsigned i=0;i<count;++i)if(mask&(1u<<i)) {
       union pipe_color_union color;
@@ -92,7 +93,7 @@ rwa_redfin_clear_pass(struct rwa_device *device,struct rwa_texture *const *color
       pipe->clear(pipe,clear,NULL,NULL,depth_value?*depth_value:0,stencil_value?*stencil_value:0);
       rwa_redfin_linear_written(depth);
    }
-   result=redfin_metal_scope_complete(&device->command_scope,true,command_scope_finish,device,why,why_size);
+   result=rwa_redfin_gpu_complete(device,false,why,why_size);
    if(!result&&!device->command_scope.active)result=rwa_redfin_linear_resolve_all(device,why,why_size);
 done:
    if(!device->command_scope.active)pipe->set_framebuffer_state(pipe,&(struct pipe_framebuffer_state){0});

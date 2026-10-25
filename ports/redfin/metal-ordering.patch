@@ -1,0 +1,409 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -79,6 +79,7 @@
+ #define RWA_MAX_TEXTURES 16
+ 
+ #include "redfin_metal_command_scope.h"
++#include "redfin_metal_ordering.h"
+ #include "redfin_metal_raster.h"
+ #include "redfin_metal_linear_import.h"
+ #include "redfin_metal_blit.h"
+@@ -116,6 +117,9 @@
+     */
+    bool software;
+    struct redfin_metal_command_scope command_scope;
++   struct rwa_buffer *all_buffers;
++   uint64_t ordering[REDFIN_METAL_ORDERING_WORDS];
++   bool gpu_memory_pending;
+    struct rwa_texture *linear_textures,*buffer_textures;
+    uint64_t linear_epoch,linear_copies[2];
+    void *linear_copy_cso,*linear_byte_copy_cso;
+@@ -195,6 +199,8 @@
+    struct rwa_buffer *next_encoded;
+    bool listed;
+    unsigned external_surface;
++   struct rwa_buffer *all_next;
++   bool gpu_pending,gpu_visible;
+ };
+ 
+ /* A texture, with the shape Metal asked for kept as it was given rather than as it was
+@@ -244,6 +250,18 @@
+ static int rwa_redfin_buffer_texture_prepare(struct rwa_texture *,char *,size_t);
+ static void rwa_redfin_buffer_written(struct rwa_buffer *);
+ static void rwa_redfin_buffer_texture_release(struct rwa_texture *);
++static bool rwa_redfin_buffers_share(const struct rwa_buffer *,const struct rwa_buffer *);
++static void rwa_redfin_buffer_register(struct rwa_buffer *);
++static void rwa_redfin_buffer_unregister(struct rwa_buffer *);
++static void rwa_redfin_ordering_completed(struct rwa_device *);
++static int rwa_redfin_gpu_prepare(struct rwa_device *,char *,size_t);
++static int rwa_redfin_gpu_complete(struct rwa_device *,bool,char *,size_t);
++static int rwa_redfin_gpu_alias_transition(struct rwa_device *,char *,size_t);
++static int rwa_redfin_cpu_drain(struct rwa_device *,char *,size_t);
++static int rwa_redfin_buffer_cpu_prepare(struct rwa_buffer *,char *,size_t);
++static void rwa_redfin_buffer_changed(struct rwa_buffer *,struct rwa_texture *,bool);
++static void rwa_redfin_linear_cpu_written(struct rwa_texture *);
++
+ 
+ /* A sampler is a Gallium state object and nothing more. The state it was built from is
+  * not kept: a refusal about a sampler happens while it is being created, where the
+@@ -749,12 +767,19 @@
+       free(buffer);
+       return NULL;
+    }
++   rwa_redfin_buffer_register(buffer);
+    return buffer;
+ }
+ 
+ void *
+ rwa_buffer_map(struct rwa_buffer *buffer)
+ {
++   if(!buffer)return NULL;
++   char why[256]={0};
++   if(rwa_redfin_buffer_cpu_prepare(buffer,why,sizeof(why))) {
++      fprintf(stderr,"REDFIN METAL CPU BUFFER: read refused after failed completion: %s\n",why);
++      return NULL;
++   }
+    return buffer->map;
+ }
+ 
+@@ -776,6 +801,7 @@
+     */
+    argbuf_scrub(buffer->device, buffer, NULL, NULL);
+    argbuf_forget_all(buffer);
++   rwa_redfin_buffer_unregister(buffer);
+    if(buffer->xfer)pipe_buffer_unmap(buffer->device->pipe, buffer->xfer);
+    pipe_resource_reference(&buffer->res, NULL);
+    free(buffer);
+@@ -1757,7 +1783,8 @@
+        !caller_stride(texture, &box, stride, &row, why, why_size))
+       return -1;
+ 
+-   if(rwa_redfin_linear_prepare(texture,why,why_size))return -1;
++   if(rwa_redfin_linear_prepare(texture,why,why_size)||
++      rwa_redfin_cpu_drain(texture->device,why,why_size))return -1;
+ 
+    /* The slice stride is the region's own rows, because the contract has one stride: a
+     * caller handing over a 3D region hands over a packed stack of its rows, which is
+@@ -1767,7 +1794,7 @@
+    texture->device->pipe->texture_subdata(texture->device->pipe, texture->res, level,
+                                           PIPE_MAP_WRITE, &box, bytes, row,
+                                           row * box.height);
+-   rwa_redfin_linear_written(texture);
++   rwa_redfin_linear_cpu_written(texture);
+    return texture->device->command_scope.active?0:rwa_redfin_linear_resolve(texture,why,why_size);
+ }
+ 
+@@ -1817,7 +1844,8 @@
+        !caller_stride(texture, &box, stride, &row, why, why_size))
+       return -1;
+ 
+-   if(rwa_redfin_linear_prepare(texture,why,why_size))return -1;
++   if(rwa_redfin_linear_prepare(texture,why,why_size)||
++      rwa_redfin_cpu_drain(texture->device,why,why_size))return -1;
+    struct pipe_transfer *xfer = NULL;
+    const uint8_t *map = pipe->texture_map(pipe, texture->res, level, PIPE_MAP_READ, &box,
+                                           &xfer);
+@@ -1911,6 +1939,7 @@
+       return -1;
+    }
+ 
++   if(rwa_redfin_cpu_drain(texture->device,why,why_size))return -1;
+    struct pipe_transfer *xfer = NULL;
+    const uint8_t *map = pipe->texture_map(pipe, texture->res, level, PIPE_MAP_READ, &box,
+                                           &xfer);
+@@ -3220,6 +3249,7 @@
+                          "dispatch in it is vacuous too", what);
+       return -1;
+    }
++   rwa_redfin_ordering_completed(device);
+    return 0;
+ }
+ 
+@@ -3231,6 +3261,7 @@
+    return finish_or_say_why(opaque, true, "Metal commands", why, why_size);
+ }
+ 
++#include "redfin_metal_ordering.inc"
+ #include "redfin_metal_linear_copy.inc"
+ #include "redfin_metal_buffer_texture.inc"
+ #include "redfin_metal_blit.inc"
+@@ -3251,13 +3282,17 @@
+ int
+ rwa_commands_end(struct rwa_device *device, char *why, size_t why_size)
+ {
++   if(!device->command_scope.active)return -1;
++   /* Queue the parent resolves before the one final CPU wait. Even a generic
++    * encoding failure must drain what it already emitted; a failed completion
++    * is never retried on this retired context. */
++   if(!device->command_scope.failed) {
++      device->pipe->set_framebuffer_state(device->pipe,&(struct pipe_framebuffer_state){0});
++      if(rwa_redfin_linear_resolve_all(device,why,why_size))device->command_scope.failed=true;
++   }
+    int error=redfin_metal_scope_end(&device->command_scope,command_scope_finish,device,why,why_size);
+-   if(!error) {
+-      device->pipe->set_framebuffer_state(device->pipe,&(struct pipe_framebuffer_state){0});
+-      error=rwa_redfin_linear_resolve_all(device,why,why_size);
+-      if(!error)rwa_redfin_trace_end(device);
+-   }
+-   else if (why && why_size && !why[0]) say(why,why_size,"Metal command scope retired after a failed completion");
++   if(!error)rwa_redfin_trace_end(device);
++   else if(why&&why_size&&!why[0])say(why,why_size,"Metal command scope retired after encoding/completion failure");
+    return error;
+ }
+ 
+@@ -3678,6 +3713,8 @@
+  */
+ struct rwa_bound {
+    unsigned num_ssbo, num_views, num_images, num_samplers;
++   struct rwa_buffer *written_buffers[PIPE_MAX_SHADER_BUFFERS];
++   struct rwa_texture *written_textures[RWA_MAX_TEXTURES];
+ };
+ 
+ /*
+@@ -3810,7 +3847,7 @@
+          num_ssbo = MAX2(num_ssbo, r->index + 1);
+          if (r->write) {
+             writable |= 1u << r->index;
+-            rwa_redfin_buffer_written(b);
++            bound->written_buffers[r->index]=b;
+          }
+          break;
+ 
+@@ -3822,23 +3859,10 @@
+             return -1;
+          }
+          size_t left = b->size - MIN2(b->size, boffset);
+-         /*
+-          * AN OFFSET THIS GPU CANNOT FETCH FROM, served rather than refused.
+-          *
+-          * Metal allows any multiple of 4 and this screen wants more -- 64 on a6xx, 16
+-          * on softpipe -- and a Gallium driver programs the register with the offset it
+-          * is given, so passing an unaligned one would read the wrong block of the
+-          * right buffer. The answer is Gallium's own: a `user_buffer` is a pointer the
+-          * DRIVER uploads itself, and both back ends do (freedreno's upload_user_buffer
+-          * through u_upload_data at an alignment of 64, softpipe by wrapping the
+-          * pointer). The buffer is mapped for its whole life here, so the pointer is
+-          * simply the mapping plus the offset.
+-          *
+-          * What is uploaded is `air.buffer_size` where Apple's metadata carries one,
+-          * which is all the shader is able to read; the rest of the buffer otherwise.
+-          * A 48-byte uniform block 1164 bytes into a megabyte of uniforms costs 48
+-          * bytes a draw, which is what the window server of this port asks for.
+-          */
++         /* A misaligned Metal constant is a real CPU byte consumer. Drain
++          * dependent writes and upload an immutable aligned copy before binding;
++          * a stack/user pointer cannot outlive this deferred command. */
++         bool uploaded=false;
+          struct pipe_constant_buffer cb = {
+             .buffer_offset = (unsigned)boffset,
+             .buffer_size = (unsigned)left,
+@@ -3848,11 +3872,12 @@
+          } else {
+             size_t want = r->size && r->size <= left ? r->size : left;
+ 
+-            cb.user_buffer = (const char *)b->map + boffset;
+-            cb.buffer_offset = 0;
+-            cb.buffer_size = (unsigned)want;
++            if(rwa_redfin_buffer_cpu_prepare(b,why,why_size)||
++               rwa_redfin_constant_upload(device,(const char *)b->map+boffset,want,&cb,why,why_size))return -1;
++            uploaded=true;
+          }
+          pipe->set_constant_buffer(pipe, stage, r->index, false, &cb);
++         if(uploaded)pipe_resource_reference(&cb.buffer,NULL);
+          break;
+       }
+ 
+@@ -3876,7 +3901,7 @@
+          break;
+ 
+       case AIR_RESOURCE_IMAGE:
+-         if(r->write)rwa_redfin_linear_written(t);
++         if(r->write)bound->written_textures[r->index]=t;
+          images[r->index] = (struct pipe_image_view){
+             .resource = t->res,
+             .format = t->res->format,
+@@ -3987,6 +4012,21 @@
+    return 0;
+ }
+ 
++/* Record actual shader writes after launch/draw, never while merely binding
++ * or validating an operation that may still be refused. */
++static bool
++rwa_redfin_bound_written(const struct rwa_bound *bound)
++{
++   bool writes=false;
++   for(unsigned i=0;i<PIPE_MAX_SHADER_BUFFERS;++i)if(bound->written_buffers[i]) {
++      rwa_redfin_buffer_written(bound->written_buffers[i]);writes=true;
++   }
++   for(unsigned i=0;i<RWA_MAX_TEXTURES;++i)if(bound->written_textures[i]) {
++      rwa_redfin_linear_written(bound->written_textures[i]);writes=true;
++   }
++   return writes;
++}
++
+ /* Take back the views, images and samplers once the fence is in, which is why it can be
+  * done at all: the caller's next call may be rwa_texture_destroy or rwa_sampler_destroy,
+  * and a Gallium context that still holds a sampler state is holding a pointer the next
+@@ -4028,7 +4068,7 @@
+                      char *why, size_t why_size)
+ {
+    struct rwa_device *device = compute->device;
+-   if (redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,why_size))
++   if (rwa_redfin_gpu_prepare(device,why,why_size))
+       return -1;
+    struct pipe_context *pipe = device->pipe;
+    const char *name = compute->info.entry_point ? compute->info.entry_point : "the shader";
+@@ -4094,6 +4134,7 @@
+                   bindings, table, table_count, name, &bound, why, why_size) != 0)
+       return -1;
+ 
++   if(rwa_redfin_gpu_prepare(device,why,why_size))return -1;
+    pipe->bind_compute_state(pipe,cso); /* row conversion may have used its own compute state */
+    struct pipe_grid_info grid = {
+       .work_dim = 3,
+@@ -4102,14 +4143,10 @@
+    };
+    pipe->launch_grid(pipe, &grid);
+ 
+-   /* Waited for here, and not left to rwa_finish, because this is the call that can
+-    * say which dispatch did not come back -- and because the buffers are mapped the
+-    * whole time, so a caller that read them before the fence would read what it wrote
+-    * and call it a result. rwa_finish is for a caller that wants to wait again, or to
+-    * wait for work dispatched through another pipeline of the same device.
+-    */
+-   int rc = redfin_metal_scope_complete(&device->command_scope,false,
+-                                       command_scope_finish,device,why,why_size);
++   bool writes=rwa_redfin_bound_written(&bound);
++   /* A Metal scope queues GPU consumers. Legacy direct calls still complete
++    * synchronously, and every scope retains its real final fence. */
++   int rc=rwa_redfin_gpu_complete(device,writes,why,why_size);
+    unbind_stage(device, PIPE_SHADER_COMPUTE, &bound);
+    return rc;
+ }
+@@ -4117,6 +4154,9 @@
+ int
+ rwa_finish(struct rwa_device *device, char *why, size_t why_size)
+ {
++   if(device->command_scope.failed)return -1;
++   if(rwa_redfin_linear_resolve_all(device,why,why_size))return -1;
++   if(device->command_scope.pending)return rwa_redfin_cpu_drain(device,why,why_size);
+    return finish_or_say_why(device, false, "work", why, why_size);
+ }
+ 
+@@ -6616,13 +6656,12 @@
+ {
+    struct rwa_device *device = render->device;
+    struct pipe_context *pipe = device->pipe;
+-   if (redfin_metal_scope_prepare(&device->command_scope,render->raster_only,
+-                                 command_scope_finish,device,why,why_size)) return -1;
++   if(rwa_redfin_gpu_prepare(device,why,why_size))return -1;
+    /* Ordinary render-target writes/sampler reads use Gallium's resource
+     * dependency graph, including FD6's tile restore/resolve/cache packets.
+     * Unconditionally issuing a shader-memory barrier after every raster-only
+-    * draw forces batch flushes and defeats GMEM. Memory-writing stages and
+-    * CPU validation still drain through command_scope_prepare above. */
++    * draw forces batch flushes and defeats GMEM. Shader writes use native GPU
++    * barriers; only actual CPU byte consumers drain their dependencies. */
+    const char *fname = render->finfo.entry_point ? render->finfo.entry_point
+                                                  : "the fragment shader";
+ 
+@@ -6724,7 +6763,7 @@
+       }
+       size_t need = draw->index_buffer_offset + (size_t)draw->vertex_count * index_size;
+       size_t have = rwa_buffer_size(draw->index_buffer);
+-      if (need > have) {
++      if (draw->index_buffer_offset>have || need > have) {
+          /* Not a formality: past the end, softpipe reads index 0 instead ("if the index
+           * buffer would overflow we return index 0", draw_private.h's DRAW_GET_IDX) and
+           * a6xx clamps the draw against max_indices computed from the resource's width.
+@@ -6735,10 +6774,15 @@
+              draw->index_buffer_offset, need, have);
+          return -1;
+       }
++      if(draw->index_buffer->device!=device) {
++         say(why,why_size,"index buffer belongs to another device");return -1;
++      }
++      /* Index range validation is CPU work: resolve aliases and wait BEFORE
++       * reading bytes copied/filled by an earlier GPU operation. */
++      const uint8_t *indices=rwa_buffer_map(draw->index_buffer);
++      if(!indices){say(why,why_size,"index bytes unavailable after GPU completion failure");return -1;}
+       index_start = (unsigned)(draw->index_buffer_offset / index_size);
+-      index_range((const uint8_t *)rwa_buffer_map(draw->index_buffer) +
+-                  draw->index_buffer_offset, draw->vertex_count, index_size, &min_index,
+-                  &max_index);
++      index_range(indices+draw->index_buffer_offset,draw->vertex_count,index_size,&min_index,&max_index);
+       /* The generated vertex stage's own quad has four corners and this library owns the
+        * buffer they are in, so an index past it is not the application's mistake to make
+        * -- it is a fetch outside a resource of ours, and both back ends answer one with
+@@ -6913,7 +6957,6 @@
+       if(rwa_redfin_linear_prepare(draw->color[i],why,why_size))return -1;
+    if(rwa_redfin_linear_prepare(draw->depth,why,why_size))return -1;
+ 
+-   if(rwa_redfin_buffer_prepare(draw->index_buffer,why,why_size))return -1;
+    for(unsigned i=0;i<draw->vertex_stream_count;++i)
+       if(rwa_redfin_buffer_prepare(draw->vertex_streams[i].buffer,why,why_size))return -1;
+ 
+@@ -7062,6 +7105,8 @@
+                   &vbound, why, why_size) != 0)
+       goto unbind;
+ 
++   if(rwa_redfin_gpu_prepare(device,why,why_size))goto unbind;
++
+    /* clear_color NULL is MTLLoadActionLoad: keep what the attachment holds. A pointer
+     * to four floats is MTLLoadActionClear, and the union is filled from them -- for an
+     * integer attachment the bits of the float land in the right place when the colour
+@@ -7130,13 +7175,9 @@
+       rwa_redfin_linear_written(draw->depth);
+    }
+ 
+-   /* Waited for here, on the same grounds as a dispatch: a picture that was never drawn
+-    * must not read as a result, and this is the call that can say which draw did not
+-    * come back (docs/air.md section 5). A link error between the stages, which ir3 only
+-    * finds now, surfaces as this not finishing.
+-    */
+-   rc = redfin_metal_scope_complete(&device->command_scope,render->raster_only,
+-                                   command_scope_finish,device,why,why_size);
++   bool memory_write=rwa_redfin_bound_written(&fbound);
++   memory_write|=rwa_redfin_bound_written(&vbound);
++   rc=rwa_redfin_gpu_complete(device,memory_write,why,why_size);
+    if(!rc&&!device->command_scope.active)rc=rwa_redfin_linear_resolve_all(device,why,why_size);
+    if(!rc)rc=rwa_redfin_trace_draw(render,draw,why,why_size);
+ 
+diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/drivers/freedreno/freedreno_resource.c
+--- a/src/gallium/drivers/freedreno/freedreno_resource.c
++++ b/src/gallium/drivers/freedreno/freedreno_resource.c
+@@ -1578,7 +1578,7 @@
+ }
+ 
+ /* Owns the supplied reference. These raw buffer aliases are never sampled
+- * or bound as framebuffers. The paired AIR pays real fences across aliases. */
++ * or bound as framebuffers. Paired AIR orders alias handoffs on the queue. */
+ static struct pipe_resource *
+ redfin_buffer_from_bo(struct pipe_screen *screen,struct fd_bo *bo)
+ {
+@@ -1677,12 +1677,23 @@
+    fd_context_access_end(fd_context(pipe));
+    return 0;
+ }
++uint64_t
++redfin_freedreno_buffer_address(struct pipe_resource *resource)
++{
++   if(!resource||resource->target!=PIPE_BUFFER||!is_a6xx(fd_screen(resource->screen)))return 0;
++   struct fd_resource *rsc=fd_resource(resource);
++   if(!rsc->bo||resource->width0>fd_bo_size(rsc->bo))return 0;
++   uint64_t address=fd_bo_get_iova(rsc->bo);
++   return address&&address<=UINT64_MAX-resource->width0?address:0;
++}
+ int
+ redfin_freedreno_alias_written(struct pipe_context *pipe,struct pipe_resource *resource)
+ {
+    if(!pipe||!resource||resource->screen!=pipe->screen||!is_a6xx(fd_context(pipe)->screen))return -1;
+    /* Private AIR uses context_create(flags=0), holds its recursive frontend
+-    * gate, and has paid the real fence. There is no threaded-context worker. */
++    * gate, and submits producers before an alias handoff. This only dirties
++    * native cache/state tracking; it never pretends a CPU fence completed.
++    * There is no threaded-context worker. */
+    fd_context_access_begin(fd_context(pipe));
+    fd_resource(resource)->valid=true;
+    fd_context_all_dirty(fd_context(pipe));

@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 /* The original IOSurface is a bounded raw GPU buffer, never an unaligned
  * sampler/render target. Native NIR copies its rows to/from a real aligned
- * linear texture. Alias transitions pay the actual GPU fence and barriers. */
+ * linear texture. Alias handoffs submit in queue order; CPU consumers and
+ * scope completion pay the real final fence. */
 extern struct pipe_resource *redfin_freedreno_import_buffer(struct pipe_screen *,unsigned);
 extern struct pipe_resource *redfin_freedreno_buffer_alias(struct pipe_screen *,
     struct pipe_resource *,unsigned *,unsigned *);
@@ -44,18 +45,24 @@ rwa_redfin_copy_rows(struct rwa_texture *texture,bool output,char *why,size_t wh
    struct pipe_resource *source=output?texture->linear_shadow_buffer:texture->linear_original;
    struct pipe_resource *destination=output?texture->linear_original:texture->linear_shadow_buffer;
    unsigned cpp=util_format_get_blocksize(texture->res->format);
+   /* Shadow texture and its raw buffer are distinct Gallium resources. The
+    * submit resolves GMEM and orders their shared BO without a CPU wait. */
+   if(output||(!texture->buffer_parent&&texture->linear_surface)) {
+      if(rwa_redfin_gpu_alias_transition(device,why,why_size))return -1;
+   } else if(rwa_redfin_buffer_prepare(texture->buffer_parent,why,why_size))return -1;
    int result=rwa_blit_rows(device,source,destination,
       output?texture->linear_shadow_offset:texture->linear_offset,
       output?texture->linear_offset:texture->linear_shadow_offset,
       output?texture->linear_shadow_pitch:texture->linear_pitch,
       output?texture->linear_pitch:texture->linear_shadow_pitch,
       (uint64_t)texture->res->width0*cpp,texture->res->height0,why,why_size);
+   if(!result)result=rwa_redfin_gpu_alias_transition(device,why,why_size);
    if(!result&&redfin_freedreno_alias_written(pipe,output?texture->linear_original:texture->res)) {
       device->command_scope.failed=true;say(why,why_size,"native GPU alias transition refused");result=-1;
    }
    if(!result) {
       unsigned direction=output?1:0;uint64_t count=++device->linear_copies[direction];
-      if(count<=4)fprintf(stderr,"REDFIN METAL LINEAR COPY: direction=%s width=%u height=%u pitch=%u aligned-pitch=%u actual-GPU-finish=1 CPU-pixel-copy=0\n",
+      if(count<=4)fprintf(stderr,"REDFIN METAL LINEAR COPY: direction=%s width=%u height=%u pitch=%u aligned-pitch=%u queue-ordered-GPU=1 CPU-pixel-copy=0\n",
          output?"resolve":"import",texture->res->width0,texture->res->height0,
          texture->linear_pitch,texture->linear_shadow_pitch);
    }
@@ -109,8 +116,8 @@ rwa_redfin_linear_prepare(struct rwa_texture *texture,char *why,size_t why_size)
    if(rwa_redfin_buffer_texture_prepare(texture,why,why_size))return -1;
    if(!texture->linear_original)return 0;
    struct rwa_device *device=texture->device;
-   /* A draw later in the same command reads the actual earlier shadow writes.
-    * Resolve to the original only after the command's real rendering fence. */
+   /* Keep the newest shadow for repeated GPU consumers in this command.
+    * A different alias resolves it to the parent in queue order. */
    if(texture->linear_dirty)return 0;
    for(struct rwa_texture *other=device->linear_textures;other;other=other->linear_next)
       if(texture->linear_surface&&other!=texture&&other->linear_surface==texture->linear_surface&&other->linear_dirty)
@@ -121,25 +128,37 @@ rwa_redfin_linear_prepare(struct rwa_texture *texture,char *why,size_t why_size)
    return result;
 }
 static void
-rwa_redfin_linear_written(struct rwa_texture *texture)
+rwa_redfin_linear_changed(struct rwa_texture *texture,bool gpu)
 {
    if(!texture)return;
-   if(texture->linear_original) {
-      texture->linear_dirty=true;
-      for(struct rwa_texture *other=texture->device->linear_textures;other;other=other->linear_next)
-         if(texture->linear_surface&&other!=texture&&other->linear_surface==texture->linear_surface)other->linear_epoch=0;
-   }
+   struct rwa_device *device=texture->device;
+   if(texture->linear_original)texture->linear_dirty=true;
+   unsigned surface=texture->linear_surface?texture->linear_surface:texture->redfin_surface;
+   for(struct rwa_texture *other=device->linear_textures;other;other=other->linear_next)
+      if(surface&&other!=texture&&other->linear_surface==surface)other->linear_epoch=0;
    if(texture->buffer_parent) {
-      texture->buffer_pending=true;
-      rwa_redfin_buffer_written(texture->buffer_parent);
+      texture->buffer_pending=gpu&&(device->command_scope.active||device->command_scope.pending);
+      rwa_redfin_buffer_changed(texture->buffer_parent,texture,gpu);
    }
+   texture->linear_epoch=device->linear_epoch;
 }
+static void
+rwa_redfin_linear_written(struct rwa_texture *texture)
+{rwa_redfin_linear_changed(texture,true);}
+static void
+rwa_redfin_linear_cpu_written(struct rwa_texture *texture)
+{rwa_redfin_linear_changed(texture,false);}
 static int
 rwa_redfin_linear_resolve(struct rwa_texture *texture,char *why,size_t why_size)
 {
    if(!texture||!texture->linear_dirty)return 0;
    int result=rwa_redfin_copy_rows(texture,true,why,why_size);
-   if(!result)texture->linear_dirty=false;
+   if(!result) {
+      texture->linear_dirty=false;
+      ++texture->device->ordering[4];
+      rwa_redfin_buffer_written(texture->buffer_parent);
+      texture->linear_epoch=texture->device->linear_epoch;
+   }
    return result;
 }
 static int

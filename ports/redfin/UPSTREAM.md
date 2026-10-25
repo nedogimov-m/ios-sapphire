@@ -1,5 +1,31 @@
 # HackiOS upstream review — 2026-10-22
 
+## GPU-only ordering and actual CPU consumers — 2026-10-26
+
+Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR resource
+binding/index validation and Mesa25.0.7 fd6 barriers, resource tracking and BO
+suballocations. Kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab unchanged.
+The context is created with flags0 and has no threaded worker. Distinct native
+resources over shared pages require an ordered producer submit at their alias
+handoff; a shader-memory barrier alone cannot invent a resource-graph edge.
+Submit that producer without waiting on the CPU, retaining the final real fence.
+Keep ordinary raster batching and omit unconditional FRAMEBUFFER/ALL barriers.
+
+Queue compute/blits and converted-view transitions within the command scope.
+Resolve parent layouts before ending the scope, then wait once. Track actual
+logical buffer overlaps using CPU ranges/surface identity/exact native GPU VA
+intervals, never a heap's common GEM handle. CPU index validation, public buffer
+mapping and misaligned UBO uploads resolve/wait before reading GPU-written bytes;
+argument-encoder records remain CPU metadata and incur no byte-read fence.
+Use owned immutable aligned uploads for stack copy plans and unaligned uniforms.
+Mark writes only after a real launch/draw. Generic encoding failure still drains
+emitted work once; a failed GPU completion is never retried or reported successful.
+
+42host integration cases and complete paired native/20H392 ABI/signatures PASS.
+The native combined checker requires changing GPU-only alias-chain pixels/guards
+with one actual final wait and no CPU drain, and dependent index/UBO CPU consumers
+with actual waits. Device evidence remains pending; this is not a system FPS claim.
+
 ## Persistent AIR and ir3 compilation with a native compiler identity — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's

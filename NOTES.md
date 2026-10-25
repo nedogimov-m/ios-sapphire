@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GPU queue ordering block built; combined A620 check next — 2026-10-26
+
+Source base11a1b03 plus this block. Graphics local20261026-010258/noCI,
+pairinged0dccbcf9deffa0c641a505e73cb889bed017ba600e892c129f69d1c4d3e7dc. Kernel unchanged/reused
+local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+Fresh V39 imagedefb9201c30e290bb341e2d12eb3d83b336b01256300a0a15474922c09acd15f, nonce0b5323cf1be27961;
+full payload/ADT/liveFDT/firmware/power/DVFS/source-window/return preflight PASS.
+
+Complete the related GPU-only blit/compute/converted-view ordering block before
+any device test. Submit alias layout handoffs without a CPU wait, retain native
+shader-memory barriers and ordinary raster dependency tracking, and queue parent
+resolves while the command is still active before its real final fence. Track
+live buffers and exact suballocated GPU VA intervals; a shared GEM heap alone
+never makes two independent allocations aliases. Actual CPU index validation
+and misaligned UBO reads resolve their dependencies and pay the real fence first.
+Upload row plans and unaligned constants into owned immutable Gallium resources.
+Record shader writes after actual launch/draw, distinguish CPU subdata writes,
+and drain partial encoding errors once without retrying a failed GPU completion.
+Readonly counters distinguish queued work, successful real finishes and CPU drains.
+
+42host integration cases PASS, including actual asynchronous resource/status/
+waiter lifetime and generic-error/fence retirement. The first host run found a
+stale observer fixture table; update it and rerun the complete suite successfully.
+Full native paired build/actual20H392 ABI/signatures PASS. Native checker adds
+three changing compute/shadow/render/raw-alias/unaligned-download chains in one
+command, GPU-written valid/invalid index validation, and two GPU-written unaligned
+UBO values with pixel/guard and actual-fence counters. Device results PENDING;
+no FPS/smoothness claim. Startup correctness probes on for this combined run;
+Phone/Photos opens and heavy image/parameter capture remain off. New fresh
+V42 read epoch starts from observed clean V38/write_count1166187. All previous
+applied stages remain stale. Broader goal stays active.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0b5323cf1be27961 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V38 warm system compilation persists across reboot; frame waits remain — 2026-10-26
 
 Source3327d6d; ordinary graphics local20261026-002605/noCI,

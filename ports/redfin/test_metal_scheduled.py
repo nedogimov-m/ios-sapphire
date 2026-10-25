@@ -46,6 +46,7 @@ class MetalScheduledTests(unittest.TestCase):
 #include <stdlib.h>
 #include <stdint.h>
 #include <mach/mach_time.h>
+#include "metal-ordering.h"
 enum {RW_CB_COMMITTED=2,RW_CB_SCHEDULED=3,RW_CB_COMPLETED=4,RW_CB_ERROR=5};
 static dispatch_semaphore_t entered,release_fence;
 static unsigned fail_fence,fail_begin,visible;
@@ -58,7 +59,10 @@ static int end(void *d,char *why,size_t n){
 }
 static int statistics(void *d,uint64_t *counts,size_t n){(void)d;memset(counts,0,n*8);return 0;}
 static struct {int (*commands_begin)(void *,char *,size_t);int (*commands_end)(void *,char *,size_t);
- int (*submission_statistics)(void *,uint64_t *,size_t);} mesa={begin,end,statistics};
+ int (*submission_statistics)(void *,uint64_t *,size_t);
+ int (*ordering_statistics)(void *,uint64_t *,size_t);} mesa={begin,end,statistics,statistics};
+static const char redfin_fence_boot[]="host-fence-fixture";
+static void rw_print(const char *format,...){(void)format;}
 static void redfin_metal_completed(unsigned a,unsigned b,uint64_t c,uint64_t d,uint64_t e,uint64_t f,uint64_t g)
  {(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;}
 static void redfin_metal_io_completed(const uint64_t *a,const uint64_t *b){(void)a;(void)b;}
@@ -133,6 +137,7 @@ int main(void) {
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'status.m').write_text(source)
             built=subprocess.run(['cc','-std=gnu11','-O2','-fblocks','-pthread','-Wall','-Wextra','-Werror',
+                '-I'+str(ROOT/'ports/redfin'),
                 str(root/'status.m'),'-framework','Foundation','-o',str(root/'status')],capture_output=True)
             self.assertEqual(built.returncode,0,built.stderr.decode(errors='replace'))
             result=subprocess.run([str(root/'status')],capture_output=True,timeout=15)
