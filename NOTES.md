@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V10 applied; native-power loader contract and fresh preflight — 2026-10-25
+
+Source base8ea43b8; V10 has now been applied, not merely staged. All31ranges/
+234blocks/958464bytes had matched backed-up preimages, complete signed-file
+readback and native readonly fsckPASS;55new blocks/zero freed, clean root
+and verified Fastboot. Do not apply V10 again, or reuse it after a new boot.
+
+The first gui-platform-v4 preflight rejected its new redfin-power leaf before
+any iOS boot. Loader now admits that optional leaf only in GUI3, with exact
+18word PM7250B/TSENS26xx/OSM contract, optional bounded two-u64 RTC epoch,
+mandatory name/contract, no unknown or repeated properties/nodes/children.
+All30existing GUI3 leaves remain mandatory; older trees still pass. Current
+native loader/GUI8/return/platform suites35testsPASS, including each altered
+contract word, RTC length/range/epoch, missing/duplicate/extra nodes/properties
+and older modes. The separate historical SMPTopologyTests patch-reversal
+fixture is stale against the evolved loader and fails setup, before tests;
+no loader result is inferred from that fixture. Current compiled checks pass.
+
+Fresh gui-platform-v5 native payload/ADT/FDT/Image/private material/firmware/
+shim return preflightPASS. ImageSHA25667a3226bc02a045b44d8a465111c24402e89cfd712b2382bb1a5d055ab96c62b; nonce54d29807ff094ae7.
+Kernel remains frozen local20261025-072951/noCI e3ae1202...; no rebuild needed
+for this shim-only correction. No new physical result yet. Next: one complete
+power/thermal/clock/native-Wi-Fi/Photos/90Hz metadata capture. Existing last
+physical result remains V3; Metal and all actual sensors still unfinished.
+Exact pending args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x54d29807ff094ae7 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete native power/thermal/clock/app-refresh block built — 2026-10-25
 
 Source base9e1bcf2; final local kernel build20261025-072951/noCI PASS,

@@ -200,6 +200,7 @@ class GUILoaderTests(unittest.TestCase):
         wrapper = ('#include "loader.c"\n'
             'int command(const char *p){return smp_command(p);}\n'
             'int tree(const void *p,unsigned n){return adt_valid_smp_mode(p,n,1);}\n'
+            'int tree2(const void *p,unsigned n){return adt_valid_smp_mode(p,n,2);}\n'
             'int tree3(const void *p,unsigned n){return adt_valid_smp_mode(p,n,3);}\n'
             'int md0tree(const void *p,unsigned n){return adt_valid_smp(p,n);}\n')
         # fdt.c supplies only the real loader's link dependencies.
@@ -211,7 +212,7 @@ class GUILoaderTests(unittest.TestCase):
             lib = compile_shared(cls.directory, wrapper, name,
                                  ('-DREDFIN_LOADER_TEST', str(HERE / 'fdt.c')))
             lib.command.argtypes = [C.c_char_p]
-            lib.tree.argtypes = lib.tree3.argtypes = lib.md0tree.argtypes = [C.c_void_p, C.c_uint]
+            lib.tree.argtypes = lib.tree2.argtypes = lib.tree3.argtypes = lib.md0tree.argtypes = [C.c_void_p, C.c_uint]
             cls.libs[name] = lib
         sys.path.insert(0, str(HERE.parents[1] / 'tools'))
         import adt
@@ -283,6 +284,65 @@ class GUILoaderTests(unittest.TestCase):
         for i in range(len(VALUES)):
             values=list(VALUES);values[i]^=1;raw=make(values)
             self.assertEqual(lib.tree3(raw,len(raw)),0,i)
+
+    def test_optional_native_power_contract_is_exact_and_gui3_only(self):
+        from ports.redfin.platform_power import VALUES
+        import struct
+        def make(props=None, children=(), duplicate=False):
+            tree = self.gui_tree()
+            tree.children += [self.mk.node(name, []) for name in (
+                'redfin-wifi', 'redfin-wifi-native', 'redfin-wifi-power',
+                'redfin-wifi-start', 'redfin-wifi-glink', 'redfin-wifi-wlfw',
+                'redfin-wifi-wlan', 'redfin-wifi-snoc', 'redfin-rmtfs',
+                'redfin-wifi-dma', 'redfin-wifi-assets', 'redfin-wifi-fw',
+                'redfin-gpu', 'redfin-gpu-power', 'redfin-gmu',
+                'redfin-gpu-smmu', 'redfin-gpu-command')]
+            if props is not None:
+                leaf = self.mk.node('redfin-power', props, list(children))
+                tree.children += [leaf] * (2 if duplicate else 1)
+            return self.adt.serialize(tree)
+        lib = self.libs['gui']
+        contract = ('native-contract', self.mk.u32(*VALUES))
+        anchor = ('rtc-anchor', self.mk.u64(123456789, 1700000000))
+        for props in (None, [contract], [contract, anchor], [anchor, contract]):
+            raw = make(props)
+            self.assertEqual(lib.tree3(raw, len(raw)), 1, props)
+        # Reject power even in otherwise valid older GUI modes.
+        for mode, extra in ((lib.tree, 0), (lib.tree2, 12)):
+            tree = self.gui_tree()
+            tree.children += [self.mk.node(name, []) for name in (
+                'redfin-wifi', 'redfin-wifi-native', 'redfin-wifi-power',
+                'redfin-wifi-start', 'redfin-wifi-glink', 'redfin-wifi-wlfw',
+                'redfin-wifi-wlan', 'redfin-wifi-snoc', 'redfin-rmtfs',
+                'redfin-wifi-dma', 'redfin-wifi-assets', 'redfin-wifi-fw')[:extra]]
+            raw = self.adt.serialize(tree)
+            self.assertEqual(mode(raw, len(raw)), 1)
+            tree.children.append(self.mk.node('redfin-power', [contract]))
+            raw = self.adt.serialize(tree)
+            self.assertEqual(mode(raw, len(raw)), 0)
+        for i in range(len(VALUES)):
+            words = list(VALUES); words[i] ^= 1
+            raw = make([('native-contract', self.mk.u32(*words))])
+            self.assertEqual(lib.tree3(raw, len(raw)), 0, i)
+        for props in ([], [anchor], [contract, contract], [contract, anchor, anchor],
+                      [('native-contract', contract[1][:-4])],
+                      [('native-contract', contract[1] + bytes(4))],
+                      [contract, ('unknown', b'')],
+                      [contract, ('rtc-anchor', anchor[1][:-1])],
+                      [contract, ('rtc-anchor', anchor[1] + bytes(1))]):
+            raw = make(props)
+            self.assertEqual(lib.tree3(raw, len(raw)), 0, props)
+        for counter, offset in ((0, 1700000000), (2**32, 0), (1, 2**32),
+                                (1, 1577836798), (1, 4102444799),
+                                (2**64-1, 2**64-1)):
+            raw = make([contract, ('rtc-anchor', struct.pack('<QQ', counter, offset))])
+            self.assertEqual(lib.tree3(raw, len(raw)), 0, (counter, offset))
+        for counter, offset in ((1, 1577836799), (4102444799, 0)):
+            raw = make([contract, ('rtc-anchor', struct.pack('<QQ', counter, offset))])
+            self.assertEqual(lib.tree3(raw, len(raw)), 1, (counter, offset))
+        for raw in (make([contract], duplicate=True),
+                    make([contract], children=[self.mk.node('child', [])])):
+            self.assertEqual(lib.tree3(raw, len(raw)), 0)
 
 
 class GUIRuntimeTests(unittest.TestCase):

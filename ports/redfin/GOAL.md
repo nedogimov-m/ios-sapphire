@@ -96,9 +96,10 @@ is confirmed; native SecTask/TCC and daemon logging are added without a
 permission override. Do not claim Photos repaired until a real run proves it.
 All47distinct selected host casesPASS; local kernel20261025-072951/noCI,
 e3ae1202... is frozen. Complete signed/actual-import bundles and V10 private
-stage pass native readonly fsck. V10 has not been applied or booted yet;
-31ranges/234blocks/958464bytes,55new/zero freed. Only this complete V10 set
-may be applied. Next physical results, full Metal, every actual sensor and
+stage pass native readonly fsck. V10 is now fully backed-up/readback-verified and applied; no new iOS boot yet;
+31ranges/234blocks/958464bytes,55new/zero freed. Never reuse applied V10. The new optional power leaf now passes the strict
+native loader; fresh gui-platform-v5 preflight and35current host casesPASS.
+Next: one complete hardware capture. Next physical results, full Metal, every actual sensor and
 real account authorization remain unfinished; see newest NOTES.
 
 ## Operating constraints
