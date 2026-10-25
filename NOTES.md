@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V28 native resource semantics PASS; inactive pipeline bindings block GUI — 2026-10-25
+
+Source2ee14e8; graphics local20261025-201136/noCI,
+pairinge8c2fae4825c1230769067f84139c920fcfa83a0634f70611d57e04a9189c807.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V28 image3543be281fda9a6bdbdc6f4bc07fbe9f32f58f90dfb5753f981fae531fbe653f, nonce47ede8ef6eb9380c.
+V31 applied once:165ranges/24027136bytes/6new/zero freed; complete live
+preimages/full-file readback/signatures/staged native readonly fsck PASS.
+V31 is applied/stale; never reuse. Collector returns clean consistent HFSX/
+write_count1053920 and verified Fastboot. App checks have no current nonce;
+Phone/Photos were not automatically launched.
+
+Current nonce-bound native Metal log reports FD620 and all32authored resource
+rounds PASS: actual conditional private writes/alias selection, sampler and null
+texture references/phis/helper offsets, inline sampler global, exact numeric/
+NaN/padded-vector bits, dynamic lanes and guards. Prior192compute/two queues,
+raster/MRT/vertex/pitch/resolve/transfers/external/A8four-seed/specialization
+probes all PASS. This is actual native GPU evidence for the compiler block.
+
+Actual CoreAnimation pipelines now compile instead of refusing the private
+pointer store. Draws are rejected because unpruned declaration metadata still
+demands inactive buffer0 even after specialization removed every load from it:
+`fixed_frag_lph_cph reads buffer 0 and 2 buffers were bound`. Multiple backboardd
+restarts follow; no completed compositor draw/image is established, GUI remains
+unavailable. Some restarted clients also report no-copy buffer refusals. Fifteen
+fragment/four vertex constant variants are captured privately for exact offline
+reproduction. Next compute actual pipeline binding requirements from optimized
+NIR, retaining original binding indices and full declaration/argument-encoder
+layout queries; never invent dummy bindings or drop a live conditional resource.
+
+Capture status is logs-collected, NOT userspace-alive: encrypted RAM authenticates
+but its1MiB ring lost the startup/boot-ID markers. Current file logs carry the
+expected nonce; do not silently promote this to authenticated full-startup/image
+proof. No panic is reported in the retained tail, not proof about missing bytes.
+The broader goal stays open; correct system pixels/FPS remain unproved.
+Exact observed/planned image args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x47ede8ef6eb9380c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN typed resource/global-initializer block built; V31 staged for V28 — 2026-10-25
 
 Source base63bd0d6 plus this coherent block. Extend preferred AIR with typed
