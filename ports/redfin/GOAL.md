@@ -9,28 +9,22 @@ human-dependent actions, and continue independent work.
 
 ## Latest checkpoint
 
-Source889e7d0; local kernel20261025-095649/noCI6ce92eff...;
-V10/b199fc38b7166150 passes authenticated image/launchd/userspace proof,
-clean root836288 and verified Fastboot. V14 is applied/stale; never reuse.
-Real Metal192compute commands, BGRA/RG8 and three alpha-blended draws/pixels/
-guards PASS. System Metal is active. Warmed automatic six-layer animation
-measures13.899completed physical GPU fps and60.000callback Hz. Stable60/90fps
-is unfinished. Phone survives; window server stable; no GPU fault/panic.
+Source1c510c9; local kernel20261025-102326/noCI00fa3c57...;
+V11/7dca6c09263e4ae3 passes authenticated image/launchd/userspace proof,
+clean root845261 and verified Fastboot. V15 applied/stale, never reuse.
+Native async Metal192compute/BGRA/RG8/three-blend pixels+guards PASS, Phone
+survives, window server stable, no GPU fault/panic. Warmed six-layer workload
+12.500physical GPU fps versus60.000callback Hz: stable60/90fps unfinished.
+Native64KiB firmware copy improves15.034s->6.247s with all readback/contracts;
+FW_READY32.346s/station35.947s after worker, real credential/autojoin unproved.
 
-Photos/assetsd still fail. Native self/audit Security and TCCD's own actual
-DER/signing-ID/token checks succeed; native Photos preflight0/access assertion
-remains. Resolve actual policy/attribution without replacing native answers.
-WLAN starts late and guarded64KiB firmware copy takes15.03s; next implement
-its complete timing/copy improvement with the linked native sensor transport.
-SSC protocol codecs are in progress. ADSP/SSC/HID, remaining render/display
-throughput, real credential/autojoin and account authorization remain.
-The next complete async Metal/native TCCD/firmware-copy block is built with
-74selected host casesPASS (2optional checks skipped), all native imports/
-signatures and actual loader preflightPASS. Kernel local20261025-102326/noCI
-00fa3c57...; V11/7dca6c09263e4ae3 image43b7af06...; fresh V15 is staged against
-clean836288, not applied yet. Apply once and run one complete capture.
-Actual readonly persist provides115private sensor registry/calibration files;
-SSC codecs are in progress, not an integrated/proven sensor backend.
+Native TCCD actually permits the Photos entitlement and its audit check;
+SecTask and native pidpath also succeed. Assetsd/preflight still fail, so
+trace the native authorization record/error reply, not another permission
+bypass. Sensor SSC codecs and host2 SMEM/SMP2P/GLINK selection are in progress,
+not integrated/built/proven. Actual115persist registry/calibration files are
+privately captured read-only. Complete ADSP/power/SSC/HID, remaining GPU
+throughput and Photos reply cause before the next integrated test.
 Exact source/builds/boot args and results are in newest NOTES.md.
 
 ## Required results

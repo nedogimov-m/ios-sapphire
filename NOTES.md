@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V11 asynchronous native Metal and firmware-copy result; TCCD permits Photos — 2026-10-25
+
+Source1c510c9; kernel local20261025-102326/noCI00fa3c57...; image43b7af06...
+V15 applied once with complete preimages/range readback/native signatures/
+readonly fsck. Never reuse V15. Boot7dca6c09263e4ae3 passes authenticated exact
+image/launchd/userspace proof, clean HFSX/not inconsistent/write_count845261
+and verified Fastboot. No GPU retirement/fault, panic or window-server restart.
+Native two-queue192compute commands, BGRA/RG8 pixels and three blended draws/
+guards PASS with the asynchronous executor. Phone248survives5/17s; Photos249
+still aborts. Warmed six-layer workload:125completed GPU presents/10.000334s
+(12.500fps),601callbacks/60.000Hz. This does not establish a throughput or
+latency improvement over V10; smoothness and stable60/90fps remain unfinished.
+
+Native segment copy now6247ms (previous15034ms), all4478native64KiB chunks
+and final outer contract pass. Cached DT hits at segment completion fall
+from5711498to692209. Native FW_READY32.346s/station35.947s after worker,
+versus38.593s/42.206s in V10. Reported absolute uptime is not an isolated
+startup-latency comparison. Real saved credentials/IPv4 remain unavailable;
+the native synthetic marker continues to persist. No user's password read.
+
+Critical diagnosis: native TCCD's actual hasEntitlement:containsService:
+answers1 for Photos/PhotosAdd allow and native check-by-audit-token. Its
+cached native Photos entitlement is present. The newer independent/evaluate
+ObjC path is not used by these requests. Own audit-token pidpath succeeds
+(assetsd66bytes/Photos49bytes,error0). Native preflight still returns0 and
+assetsd's assertion still fires, so do not bypass/grant/rewrite permissions:
+trace the actual authorization-record/error reply in the native framework.
+Entitlement/signature/PID path denial is no longer a supported explanation.
+
+Native sensor work in progress: bounded SSC request/event/attribute/QMI/
+integer-only IEEE754 codecs, and APPS/ADSP host2 SMEM/SMP2P/GLINK selection.
+These are working-tree source, not a built/integrated/physically proven sensor
+backend. Actual persist has115files/112JSON registry/calibration records and
+real LSM6DSR/LIS2MDL/BMP380/TCS3701 tokens. They stay private; no persist writes.
+Next complete block must finish native ADSP/power/SSC/HID, remaining real GPU
+throughput and the actual Photos reply cause before combined checks/one boot.
+Exact V11 observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7dca6c09263e4ae3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN full asynchronous Metal/native TCCD/firmware-copy block built and staged — 2026-10-25
 
 Source base9e798ac plus this implementation. Native Metal commit now enqueues
