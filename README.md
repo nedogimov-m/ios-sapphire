@@ -129,6 +129,11 @@ one final CPU wait, with correct pixels/guards. GPU-written indices and unaligne
 uniforms retain their required CPU synchronization and bounds checks. All prior
 native graphics contracts still pass; ordinary UI FPS remains unmeasured.
 
+Command-local resource and graphics binding reuse also passes real A620 pixels,
+changed CPU data, sparse high-to-low slots and error cleanup after encoded work.
+An eight-draw command skips14descriptor/70graphics/7vertex updates and releases
+all cached references at scope exit. System UI rendering FPS remains unfinished.
+
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
 have complete, independently verified local backups. Android userdata has

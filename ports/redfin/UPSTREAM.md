@@ -28,6 +28,16 @@ high-to-low resources inside the second real persistence context. Actual A620
 pixels/guards and system performance remain pending. No Phone/Photos auto-open
 or heavy capture is enabled.
 
+V41 now proves actual A620 reuse and lifetimes: two changed-input8draw commands
+make4descriptor calls including cleanup, skip14descriptors/70..71graphics states/
+7vertex bindings, and preserve every pixel/guard. A missing-texture refusal after
+an encoded draw still drains and cleans up correctly. A scoped resource context
+passes32rounds plus high-to-low sparse bindings,95skips/13stale slots cleared and
+zero live refs. Legacy standalone context and all earlier native contracts pass;
+checker67 exits0. One backboardd, no panic and a clean root are observed. Ordinary
+warm system latency/FPS remain pending; the same compiler identity is preserved
+for that next boot.
+
 ## GPU-only ordering and actual CPU consumers — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's AIR resource

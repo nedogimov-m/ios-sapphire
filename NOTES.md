@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V41 actual A620 binding reuse/exit/error ownership PASS — 2026-10-26
+
+Sourced010573; native graphics local20261026-014045/noCI,
+pairinge6df8198875235c747e2373699e315273ee88e5d9693c2a0fff145deff8b6992.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V41 image802a38873c113d38e7e71128da6d9150ae5289137f83f1e36563b638308c483e, nonce84956c28c04b3aa8.
+Fresh V44 applied once:170ranges/24338432bytes/4new/zero freed; all live preimages,
+full readback/signatures/native readonly fsck PASS. V44 applied/stale, never reuse.
+Authenticated current boot userspace-alive, no panic, one backboardd62, clean
+consistent HFSX/write_count1191640, verified Fastboot. Next fresh rootV45/imageV42.
+
+NEW actual A620 binding checks PASS:2different CPU input patterns,8draws in each
+command, only4native descriptor calls INCLUDING cleanup,14descriptor skips,
+71/70graphics-state skips,7vertex-binding skips, zero live stage/vertex refs
+at return; all pixels/guards match. A second draw missing its texture is refused
+after a real valid draw was already encoded; prior pixels, actual fence and full
+error cleanup all pass. Second resource context runs32rounds in one scope with
+real CPU-consumer waits, then sparse high bindings back to low:95descriptor skips,
+13stale slots cleared, zero live slots, correct outputs/guards. First context
+preserves legacy standalone completion. Persistence still has2AIR/6ir3 hits.
+Every prior192compute/two queues/70cache variants/evictions/half/MRT/varying/
+sampler/blit/pitch/alias/A8/bool/constants/ordering/guards PASS. Launchd records
+checker67 exit(0). Full checks-on evidence retained privately.
+
+Backboardd uses the new path: command8 has14draws,22descriptor calls/2skips,
+42constant refreshes/40stale slots cleared,87graphics calls/54skips,15vertex
+calls/zero skips and zero live refs at return. It still costs65475us total,
+60186encoding/5217finalization,2submits/8237us,4allocations/12279us,14other calls/
+362us, zero new variants. This cold-cache correctness boot does not prove FPS
+or a paired speedup. During it prepare ordinary native local20261026-014749/noCI
+with EXACT same compiler identity/pairing and full native/20H392 ABI/signatures
+PASS. V42 image0d2e57380fe750be9c4d0b339ccd09c2bcabc485c85b5ae360710cc7f2c21f85,
+noncefcd710fe0be2866a, complete preflight PASS. Fresh V45 reads1191640 to disable
+only the completed correctness jobs/cached policies. Phone/Photos auto-open and
+all heavy image/parameter capture stay off. Ordinary warm latency and broader
+goal remain open. Exact observed V41 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x84956c28c04b3aa8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN complete command-local binding block built; A620 validation next — 2026-10-26
 
 Source base74d47d3 plus this block. Native graphics local20261026-014045/noCI,
