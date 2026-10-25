@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V14 native bin132/625MHz ACK proved; runtime GPU fault and ADSP fatal — 2026-10-25
+
+Source6babaeb, local20261025-123240/noCI9d750911..., image5ba6440557e4daf5...,
+nonce8b7559237da7931f passes exact authenticated image/launchd/user proof.
+Actual readonly speed fuse selects bin132: native5levels/max625MHz. Real HFI
+ACKs prove busy625MHz/DDR10 and idle275MHz/DDR5 requests; this is not an
+independent physical frequency-counter measurement. Metal192compute/BGRA/
+RG8/blend/dependency/guards and5GMEM/0sysmem pass. First warmed native clip
+125GPU presents/10.001186s=12.499fps; no speed improvement is established.
+Later a real owned SMMU/ownership check returnsEFAULT14 during submission1236,
+fence1235 remains the actual completed one, rptr==wptr/status0xc20915. Runtime
+correctly retires without claiming completion or releasing live DMA memory;
+backboardd62 then faults and SpringBoard26 restarts as270. Its next clip has
+zeroGPU presentations and19.191CPU-copy fps. Do not callV14 stable GPU or
+claim its restarted GUI has acceleration. Precise fault register/FAR logging
+must precede poisoning, since that currently revokes the diagnostic lease.
+
+Native ADSP still passes INIT/SETUP/684copies/AUTH/fresh-ready in8095ms and
+advertises actual SSC400/v1. The empty registry update is correctly retained
+without fabricated identity. Later SMP2P reports its actual FATAL9; no sensor
+is published. Need source-bound SMEM423 crash-reason capture and the real
+HLOS FastRPC/file dependency, not an invented registry result. Downloaded
+native SSC explicitly blocks file initialization on sdsprpc; exact native
+listener/file APIs and ADSP SID0x1403..1405 are now being reviewed privately.
+
+Phone284 and Photos288 survive their5/17s automatic opens after the window-
+server restart; actual Photos TCC right2/error0 is preserved. No kernel panic
+recorded. Clean HFSX/not inconsistent/write_count884236; bounded user-file
+logs captured readonly and productredfin verified Fastboot. No root update;
+V16 remains applied/stale. New offline staging must start from884236.
+Next complete block: preserve exact failure causes, profile real Metal command
+stages, resolve native transport/lifetime and SSC host dependencies. Stable
+60/90fps, actual sensor/CoreMotion/VD6281, real Wi-Fi autojoin/cable/motion and
+Apple authorization remain unfinished. Last observed no-restart GPU capture
+isV13. Exact V14 observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x8b7559237da7931f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN full native GPU DVFS/thermal/idle and SSC startup block built — 2026-10-25
 
 Source base29535d2 plus this implementation. GPU had only one active275MHz
