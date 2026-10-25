@@ -1,0 +1,195 @@
+diff --git a/bsd/dev/redfin_gpu_runtime.inc b/bsd/dev/redfin_gpu_runtime.inc
+--- a/bsd/dev/redfin_gpu_runtime.inc
++++ b/bsd/dev/redfin_gpu_runtime.inc
+@@ -16,6 +16,9 @@
+     uint64_t *dirty_first,*dirty_end;
+     uint64_t audit_ns,wait_ns,publish_ns,gpu_ticks,polls;
+     uint32_t state,fence,completed;
++    uint32_t fault_fsr,fault_syndrome;
++    uint64_t fault_address;
++    bool fault_captured;
+     bool dirty;
+ } gr;
+ 
+@@ -73,8 +76,32 @@
+     if(!redfin_gpu_ready() || !gx.context || gx.context->smmu_mode!=6 ||
+         !(redfin_gui_cpu0() || redfin_gpu_runtime_caller()))return ENXIO;
+     int error=gx_check(gx.context);
+-    if(error)redfin_gpu_poison("power/context ownership changed");
++    if(error) {
++        /* Poisoning revokes the runtime thread lease. Capture the real owned
++         * fault while the original parent/CPU/clock lease is still valid,
++         * without clearing a fault, retrying DMA or inventing completion. */
++        if(!gr.fault_captured&&error==EFAULT&&gm_valid(gx.context)) {
++            struct gm_context *c=gx.context;
++            gr.fault_fsr=gm_scalar_read(c->cb+0x58);
++            gr.fault_address=(uint64_t)gm_scalar_read(c->cb+0x64)<<32|gm_scalar_read(c->cb+0x60);
++            gr.fault_syndrome=gm_scalar_read(c->cb+0x68);gr.fault_captured=true;
++            uint64_t address=gr.fault_address,pte=0,l2=0;
++            if(address>=RF_GR_BASE&&address-RF_GR_BASE<RF_GR_BYTES&&gr.leaves&&gr.l2) {
++                pte=gr.leaves[(address-RF_GR_BASE)>>12];l2=gr.l2[address>>21];
++            }
++            printf("REDFIN GPU OWNED FAULT: error=%d FSR=%#x FAR=%#llx FSYNR=%#x completed=%u issued=%u L2=%#llx PTE=%#llx requested-khz=%u no-clear=1 no-retry=1\n",
++                error,gr.fault_fsr,address,gr.fault_syndrome,gr.completed,gr.fence,l2,pte,
++                gx.performance.gpu[gx.dvfs_profile?gx.dvfs_index:1].khz);
++            gx_diagnostic(c);
++        }
++        redfin_gpu_poison("power/context ownership changed");
++    }
+     return error;
++}
++bool redfin_gpu_fault_info(uint64_t *address,uint32_t *fsr)
++{
++    if(!address||!fsr||!gr.fault_captured)return false;
++    *address=gr.fault_address;*fsr=gr.fault_fsr;return true;
+ }
+ /* Runtime snapshots remain complete, twice-read and compared to the exact
+  * original foreign-state lease. Bracket the read-only snapshot with the
+diff --git a/bsd/dev/redfin_gpu_service.h b/bsd/dev/redfin_gpu_service.h
+--- a/bsd/dev/redfin_gpu_service.h
++++ b/bsd/dev/redfin_gpu_service.h
+@@ -16,6 +16,7 @@
+ int redfin_gpu_thermal(uint64_t *,int32_t *,int32_t *,unsigned *);
+ int redfin_gpu_dvfs_idle(void);
+ uint64_t redfin_gpu_max_frequency(void);
++bool redfin_gpu_fault_info(uint64_t *,uint32_t *);
+ uint64_t redfin_gpu_address(uint64_t size);
+ int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
+ int redfin_gpu_map_display(uint64_t address,uint64_t physical);
+diff --git a/iokit/Kernel/arm/RedfinGPUService.h b/iokit/Kernel/arm/RedfinGPUService.h
+--- a/iokit/Kernel/arm/RedfinGPUService.h
++++ b/iokit/Kernel/arm/RedfinGPUService.h
+@@ -16,6 +16,7 @@
+ int redfin_gpu_thermal(uint64_t *,int32_t *,int32_t *,unsigned *);
+ int redfin_gpu_dvfs_idle(void);
+ uint64_t redfin_gpu_max_frequency(void);
++bool redfin_gpu_fault_info(uint64_t *,uint32_t *);
+ uint64_t redfin_gpu_address(uint64_t size);
+ int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
+ int redfin_gpu_map_display(uint64_t address,uint64_t physical);
+diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -399,6 +399,21 @@
+     redfin_gpu_sync(NULL,0,false);
+     gTiming.cleaning+=gpuNow()-began;began=gpuNow();
+     result=gpuError(redfin_gpu_submit(addresses,words,count,&r->fence));
++    if(result!=kIOReturnSuccess) {
++        uint64_t address=0;uint32_t fsr=0;
++        if(redfin_gpu_fault_info(&address,&fsr)) {
++            bool found=false;
++            for(unsigned i=0;i<r->nr_bos;++i) {
++                gpu_buffer *b=buffer(bos[i].handle);
++                if(address<b->address||address-b->address>=b->size)continue;
++                found=true;
++                IOLog("REDFIN GPU FAULT BO: submitted-index=%u handle=%u VA=%#llx bytes=%llu offset=%#llx surface=%u client-mapped=%u flags=%#x FSR=%#x\n",
++                    i,bos[i].handle,b->address,b->size,address-b->address,b->surface!=NULL,b->clientMapped,b->flags,fsr);
++                break;
++            }
++            if(!found)IOLog("REDFIN GPU FAULT BO: address=%#llx outside-submitted-BOs=1 count=%u FSR=%#x\n",address,r->nr_bos,fsr);
++        }
++    }
+     gTiming.submitting+=gpuNow()-began;began=gpuNow();gTiming.submissions++;
+     if(result==kIOReturnSuccess && (r->fence<=8 || !(r->fence%256))) {
+         char name[20]={0};proc_selfname(name,sizeof(name));
+diff --git a/iokit/Kernel/arm/redfin_sensor_native.inc b/iokit/Kernel/arm/redfin_sensor_native.inc
+--- a/iokit/Kernel/arm/redfin_sensor_native.inc
++++ b/iokit/Kernel/arm/redfin_sensor_native.inc
+@@ -6,6 +6,7 @@
+  */
+ #include "redfin_sensor_assets.h"
+ #include "../../../bsd/dev/redfin_ssc_client.h"
++#include "redfin_sensor_reason.h"
+ #include <IOKit/IOBufferMemoryDescriptor.h>
+ #include <kern/task.h>
+ #include <sys/vnode.h>
+@@ -21,6 +22,8 @@
+     unsigned attempted,active,failed,phase,power,reset,initialized,setup,auth_attempted,authenticated;
+     unsigned copies,stores,peer_seen,hello,announced,ssc_started,queue_head,queue_tail,queue_count;
+     unsigned cold_witness;
++    unsigned reason_before_valid;
++    char reason_before[RF_SENSOR_REASON_BYTES];
+     uint64_t source_bytes,nonce,started,report_at,function;
+     uint8_t source_sha[32];
+     uint8_t *source_data;
+@@ -330,6 +333,8 @@
+     error=rf_wifi_smp2p_cold(&sn.smp,&sn.smp_ops);
+     IOLog("REDFIN SENSORS: native readonly cold-witness=%d; no inactive-DSP shutdown, no destination access\n",error);
+     if(error)return error;sn.cold_witness=1;
++    sn.reason_before_valid=rf_sensor_reason((const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base,
++        REDFIN_SMEM_BYTES,sn.reason_before)==0;
+     sn.phase=SN_POWER;error=redfin_sensor_power_start(&sn,sn_check);if(error)return error;sn.power=1;
+     sn.phase=SN_METADATA;error=sn_metadata();if(error)return error;
+     if(rf_wifi_smp2p_cold(&sn.smp,&sn.smp_ops))return EPERM;
+@@ -405,6 +410,13 @@
+         if(!sn_contract(false))error=EPERM;
+     }
+     if(error||sn.failed) {
++        if(error==RF_WIFI_SMP2P_FATAL&&!sn_check(&sn)) {
++            char reason[RF_SENSOR_REASON_BYTES]={};
++            int detail=rf_sensor_reason((const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base,REDFIN_SMEM_BYTES,reason);
++            IOLog("REDFIN SENSORS: actual native SMEM423 SFR result=%d reason=%.255s prior-present=%u changed=%u readonly=1 no-restart=1\n",
++                detail,detail?"(unavailable)":reason,sn.reason_before_valid,
++                !detail&&(!sn.reason_before_valid||strcmp(reason,sn.reason_before)));
++        }
+         IOLog("REDFIN SENSORS: stopped error=%d phase=%u glink=%u/%u changed=%u offset=%#x retained=1\n",error,sn.phase,sn.glink.last_command,sn.glink.last_p1,sn.glink.changed_reason,sn.glink.changed_offset);
+         rf_ssc_stop(&sn.ssc);sn.failed=1;
+     }
+diff --git a/iokit/Kernel/arm/redfin_sensor_reason.h b/iokit/Kernel/arm/redfin_sensor_reason.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/redfin_sensor_reason.h
+@@ -0,0 +1,53 @@
++/* SPDX-License-Identifier: MIT */
++/* Readonly native global SMEM423/ADSP subsystem failure reason. Google msm
++ * 500b3a2059c1ee subsys-pil-tz.c and Redfin's qcom,smem-id binding. Include
++ * after wifi_smem.h. No scan of arbitrary RAM, fault clear or restart. */
++#ifndef REDFIN_SENSOR_REASON_H
++#define REDFIN_SENSOR_REASON_H
++#include <sys/errno.h>
++#include <string.h>
++#define RF_SENSOR_REASON_BYTES 256u
++static inline int rf_sensor_reason(const volatile uint8_t *data,size_t bytes,
++    char out[RF_SENSOR_REASON_BYTES])
++{
++    if(!data||bytes!=REDFIN_SMEM_BYTES||!out)return EINVAL;
++    struct redfin_smem_report validated;
++    if(redfin_smem_inspect_host(data,bytes,2,&validated)!=REDFIN_SMEM_OK)return EAGAIN;
++    uint32_t toc=REDFIN_SMEM_BYTES-0x1000,offset=0,length=0,count=0;
++    for(unsigned i=0;i<validated.partitions;++i) {
++        const volatile uint8_t *entry=data+toc+32+48*i;
++        if(redfin_smem_u32(entry+12)!=0xfffefffeu)continue;
++        if(++count!=1)return EINVAL;
++        offset=redfin_smem_u32(entry);length=redfin_smem_u32(entry+4);
++    }
++    if(!count)return ENOENT;
++    if(offset<0x1000||length<32||offset>toc||length>toc-offset)return EINVAL;
++    const volatile uint8_t *part=data+offset;
++    uint32_t free_u=redfin_smem_u32(part+12),free_c=redfin_smem_u32(part+16);
++    if(redfin_smem_u32(part)!=0x54525024u||redfin_smem_u32(part+4)!=0xfffefffeu||
++        redfin_smem_u32(part+8)!=length||free_u<32||free_u>free_c||free_c>length)return EINVAL;
++    uint32_t found=0,payload=0,available=0,items=0;
++    for(uint32_t cursor=32;cursor<free_u;) {
++        if(++items>REDFIN_SMEM_MAX_ITEMS||free_u-cursor<16)return EINVAL;
++        const volatile uint8_t *entry=part+cursor;
++        uint32_t size=redfin_smem_u32(entry+4),padding=redfin_smem_u16(entry+8),header=redfin_smem_u16(entry+10);
++        if(redfin_smem_u16(entry)!=0xa5a5||!size||padding>=size||header>free_u-cursor-16||size>free_u-cursor-16-header)return EINVAL;
++        if(redfin_smem_u16(entry+2)==423) {
++            if(++found!=1)return EINVAL;
++            payload=offset+cursor+16+header;available=size-padding;
++        }
++        cursor+=16+header+size;
++    }
++    if(!found)return ENOENT;
++    uint8_t first[RF_SENSOR_REASON_BYTES],second[RF_SENSOR_REASON_BYTES];
++    unsigned take=available<RF_SENSOR_REASON_BYTES-1?available:RF_SENSOR_REASON_BYTES-1;
++    for(unsigned i=0;i<take;++i)first[i]=data[payload+i];
++    for(unsigned i=0;i<take;++i)second[i]=data[payload+i];
++    if(memcmp(first,second,take)||redfin_smem_u32(part+12)!=free_u||redfin_smem_u32(part+16)!=free_c||
++        redfin_smem_u32(data+toc+8)!=validated.partitions)return EAGAIN;
++    if(!take||!first[0])return ENOENT;
++    unsigned n=0;
++    while(n<take&&first[n]) {uint8_t c=first[n];out[n]=(c>=32&&c<=126)?(char)c:' ';++n;}
++    out[n]=0;return 0;
++}
++#endif

@@ -16,6 +16,9 @@ static struct {
     uint64_t *dirty_first,*dirty_end;
     uint64_t audit_ns,wait_ns,publish_ns,gpu_ticks,polls;
     uint32_t state,fence,completed;
+    uint32_t fault_fsr,fault_syndrome;
+    uint64_t fault_address;
+    bool fault_captured;
     bool dirty;
 } gr;
 
@@ -73,8 +76,32 @@ static int gr_live(void)
     if(!redfin_gpu_ready() || !gx.context || gx.context->smmu_mode!=6 ||
         !(redfin_gui_cpu0() || redfin_gpu_runtime_caller()))return ENXIO;
     int error=gx_check(gx.context);
-    if(error)redfin_gpu_poison("power/context ownership changed");
+    if(error) {
+        /* Poisoning revokes the runtime thread lease. Capture the real owned
+         * fault while the original parent/CPU/clock lease is still valid,
+         * without clearing a fault, retrying DMA or inventing completion. */
+        if(!gr.fault_captured&&error==EFAULT&&gm_valid(gx.context)) {
+            struct gm_context *c=gx.context;
+            gr.fault_fsr=gm_scalar_read(c->cb+0x58);
+            gr.fault_address=(uint64_t)gm_scalar_read(c->cb+0x64)<<32|gm_scalar_read(c->cb+0x60);
+            gr.fault_syndrome=gm_scalar_read(c->cb+0x68);gr.fault_captured=true;
+            uint64_t address=gr.fault_address,pte=0,l2=0;
+            if(address>=RF_GR_BASE&&address-RF_GR_BASE<RF_GR_BYTES&&gr.leaves&&gr.l2) {
+                pte=gr.leaves[(address-RF_GR_BASE)>>12];l2=gr.l2[address>>21];
+            }
+            printf("REDFIN GPU OWNED FAULT: error=%d FSR=%#x FAR=%#llx FSYNR=%#x completed=%u issued=%u L2=%#llx PTE=%#llx requested-khz=%u no-clear=1 no-retry=1\n",
+                error,gr.fault_fsr,address,gr.fault_syndrome,gr.completed,gr.fence,l2,pte,
+                gx.performance.gpu[gx.dvfs_profile?gx.dvfs_index:1].khz);
+            gx_diagnostic(c);
+        }
+        redfin_gpu_poison("power/context ownership changed");
+    }
     return error;
+}
+bool redfin_gpu_fault_info(uint64_t *address,uint32_t *fsr)
+{
+    if(!address||!fsr||!gr.fault_captured)return false;
+    *address=gr.fault_address;*fsr=gr.fault_fsr;return true;
 }
 /* Runtime snapshots remain complete, twice-read and compared to the exact
  * original foreign-state lease. Bracket the read-only snapshot with the

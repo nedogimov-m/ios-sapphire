@@ -12,6 +12,43 @@ from ports.redfin.wifi_userland import _encode_same_size
 
 
 class MetalPlatformTests(unittest.TestCase):
+    def test_completion_profile_uses_native_timebase_and_separates_queue_gate_encoding_and_finish(self):
+        source=r'''
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+#include <stdarg.h>
+#include <mach/mach_time.h>
+static char logged[1024];static unsigned logs;
+static int profile_timebase(mach_timebase_info_t info){info->numer=125;info->denom=6;return 0;}
+static int profile_sysctl(const char *name,void *out,size_t *bytes,void *newp,size_t newlen){
+ (void)name;(void)newp;(void)newlen;const char args[]="redfinbootid=0x0123456789abcdef";
+ assert(*bytes>=sizeof(args));memcpy(out,args,sizeof(args));*bytes=sizeof(args);return 0;
+}
+static void rw_print(const char *format,...){
+ ++logs;va_list args;va_start(args,format);vsnprintf(logged,sizeof(logged),format,args);va_end(args);
+}
+#define mach_timebase_info profile_timebase
+#define sysctlbyname profile_sysctl
+'''+metal_userland.FENCE_OBSERVATIONS+r'''
+int main(void){
+ redfin_metal_completed(0,0,0,480,960,1440,1920);assert(!logs);
+ redfin_metal_completed(3,0,0,480,960,1440,1920);assert(logs==1);
+ assert(strstr(logged,"boot=0123456789abcdef")&&strstr(logged,"actual-finish=1"));
+ assert(strstr(logged,"queue-us=10 gate-us=10 encode-us=10 final-fence-us=10 total-us=40"));
+ assert(!redfin_phase_us(2,1));redfin_fence_timebase.denom=0;assert(!redfin_phase_us(0,480));
+ return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d);(p/'profile.c').write_text(source)
+            compiled=subprocess.run(['cc','-std=c11','-O2','-pthread','-Wall','-Wextra','-Werror',
+                                    str(p/'profile.c'),'-o',str(p/'profile')],capture_output=True)
+            self.assertEqual(compiled.returncode,0,compiled.stderr.decode(errors='replace'))
+            subprocess.run([str(p/'profile')],check=True,timeout=10,capture_output=True)
+
     def test_real_dispatch_worker_returns_before_gpu_wait_and_preserves_queue_order(self):
         # Use the same GCD executor compiled into the driver. A stalled first
         # fence must not stall submission, and another queue must not overtake

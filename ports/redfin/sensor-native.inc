@@ -6,6 +6,7 @@
  */
 #include "sensor-assets.h"
 #include "ssc-client.h"
+#include "sensor-reason.h"
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <kern/task.h>
 #include <sys/vnode.h>
@@ -21,6 +22,8 @@ struct sn_context {
     unsigned attempted,active,failed,phase,power,reset,initialized,setup,auth_attempted,authenticated;
     unsigned copies,stores,peer_seen,hello,announced,ssc_started,queue_head,queue_tail,queue_count;
     unsigned cold_witness;
+    unsigned reason_before_valid;
+    char reason_before[RF_SENSOR_REASON_BYTES];
     uint64_t source_bytes,nonce,started,report_at,function;
     uint8_t source_sha[32];
     uint8_t *source_data;
@@ -330,6 +333,8 @@ static int sn_start(void)
     error=rf_wifi_smp2p_cold(&sn.smp,&sn.smp_ops);
     IOLog("REDFIN SENSORS: native readonly cold-witness=%d; no inactive-DSP shutdown, no destination access\n",error);
     if(error)return error;sn.cold_witness=1;
+    sn.reason_before_valid=rf_sensor_reason((const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base,
+        REDFIN_SMEM_BYTES,sn.reason_before)==0;
     sn.phase=SN_POWER;error=redfin_sensor_power_start(&sn,sn_check);if(error)return error;sn.power=1;
     sn.phase=SN_METADATA;error=sn_metadata();if(error)return error;
     if(rf_wifi_smp2p_cold(&sn.smp,&sn.smp_ops))return EPERM;
@@ -405,6 +410,13 @@ static void sn_poll(void)
         if(!sn_contract(false))error=EPERM;
     }
     if(error||sn.failed) {
+        if(error==RF_WIFI_SMP2P_FATAL&&!sn_check(&sn)) {
+            char reason[RF_SENSOR_REASON_BYTES]={};
+            int detail=rf_sensor_reason((const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base,REDFIN_SMEM_BYTES,reason);
+            IOLog("REDFIN SENSORS: actual native SMEM423 SFR result=%d reason=%.255s prior-present=%u changed=%u readonly=1 no-restart=1\n",
+                detail,detail?"(unavailable)":reason,sn.reason_before_valid,
+                !detail&&(!sn.reason_before_valid||strcmp(reason,sn.reason_before)));
+        }
         IOLog("REDFIN SENSORS: stopped error=%d phase=%u glink=%u/%u changed=%u offset=%#x retained=1\n",error,sn.phase,sn.glink.last_command,sn.glink.last_p1,sn.glink.changed_reason,sn.glink.changed_offset);
         rf_ssc_stop(&sn.ssc);sn.failed=1;
     }

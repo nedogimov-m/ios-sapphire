@@ -1,5 +1,32 @@
 # HackiOS upstream review — 2026-10-22
 
+## Preserve native failure causes and measure actual Metal stages — 2026-10-25
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and paired
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain pinned. V14's native
+EFAULT is not a false fence: keep the existing fail-closed DMA lifetime, but
+capture owned FSR/FAR/FSYNR and bounded arena PTEs before retiring the current
+thread lease. The current submitted BO list supplies the actual matching
+object/offset or an explicit outside-list observation. No fault is cleared,
+no unsafe retry occurs, and no incomplete fence becomes completed.
+
+The preferred native Metal/AIR completion now records actual mach timebase
+intervals for serial-queue delay, shared-context gate, command encoding and
+final real finish. Only a successful native completion emits that evidence;
+callbacks/timers are still separate from physical GPU presentations. This is
+instrumentation, not a performance fix or a speed claim. Native byte/guard/
+dependency probes remain unchanged and actual ABI/import/signature checks pass.
+
+Google msm500b3a2059c1eec0fec08ec56add06320ea901a8 subsys-pil-tz.c reads the
+ADSP subsystem failure reason using global SMEM and native DT qcom,smem-id423.
+Redfin adds a bounded readonly v12/global-heap reader with allocation/source
+bounds, duplicate rejection, stable payload/header reads and256byte maximum.
+A pre-start observation distinguishes changed/new data from an already present
+reason; nothing is cleared. Only an actual current SMP2P FATAL authorizes the
+capture. No ADSP restart or additional MMIO is introduced.122selected combined
+host cases and full native kernel/Mesa/AIR/plugin builds PASS; new hardware
+evidence is pending. FastRPC/file service and direct VD6281 remain unfinished.
+
 ## Native GPU bins, thermal/idle DCVS and SSC startup subscription — 2026-10-25
 
 Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's

@@ -202,27 +202,41 @@ FENCE_OBSERVATIONS = r'''
 static pthread_once_t redfin_fence_once=PTHREAD_ONCE_INIT;
 static char redfin_fence_boot[17];
 static uint64_t redfin_fence_count;
+static mach_timebase_info_data_t redfin_fence_timebase;
 static void redfin_fence_identity(void)
 {
+    if (mach_timebase_info(&redfin_fence_timebase)) return;
     char args[1024]={0};size_t bytes=sizeof(args);
     if (sysctlbyname("kern.bootargs",args,&bytes,NULL,0) || !bytes || bytes>sizeof(args)) return;
     const char *nonce=strstr(args,"redfinbootid=0x");
     if (nonce && strlen(nonce+15)>=16) memcpy(redfin_fence_boot,nonce+15,16);
 }
-static void redfin_metal_completed(unsigned draws,unsigned computes)
+static uint64_t redfin_phase_us(uint64_t start,uint64_t end)
+{
+    uint64_t n=redfin_fence_timebase.numer,d=redfin_fence_timebase.denom;
+    if (!n || !d || end<start || end-start>UINT64_MAX/n) return 0;
+    return (end-start)*n/d/1000;
+}
+static void redfin_metal_completed(unsigned draws,unsigned computes,uint64_t queued,
+    uint64_t worker,uint64_t acquired,uint64_t finishing,uint64_t finished)
 {
     if ((!draws && !computes) || pthread_once(&redfin_fence_once,redfin_fence_identity) || !redfin_fence_boot[0]) return;
     uint64_t count=__atomic_add_fetch(&redfin_fence_count,1,__ATOMIC_RELAXED);
     if (count<=4 || !(count&(count-1)) || !(count%120))
-        rw_print("REDFIN METAL FENCE: boot=%s sequence=%llu draws=%u computes=%u actual-finish=1\n",
-            redfin_fence_boot,(unsigned long long)count,draws,computes);
+        rw_print("REDFIN METAL FENCE: boot=%s sequence=%llu draws=%u computes=%u actual-finish=1 queue-us=%llu gate-us=%llu encode-us=%llu final-fence-us=%llu total-us=%llu\n",
+            redfin_fence_boot,(unsigned long long)count,draws,computes,
+            (unsigned long long)redfin_phase_us(queued,worker),
+            (unsigned long long)redfin_phase_us(worker,acquired),
+            (unsigned long long)redfin_phase_us(acquired,finishing),
+            (unsigned long long)redfin_phase_us(finishing,finished),
+            (unsigned long long)redfin_phase_us(queued,finished));
 }
 '''
 
 
 def adapt_driver(text):
     text = replace_once(text, '#include "redwood_drawable.h"',
-        '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include <pthread.h>\n'
+        '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include <pthread.h>\n#include <mach/mach_time.h>\n'
         'extern int redfin_metal_abi_ready(void);\nextern int redfin_metal_hardware_ready(void);')
     text = replace_once(text, 'static bool\nmesa_available(void)', LOCKING + EXECUTION + FENCE_OBSERVATIONS + '\nstatic bool\nmesa_available(void)')
     text = replace_once(text, 'mesa_available(void)\n{', 'mesa_available(void)\n{\n\tREDFIN_MESA_SCOPE;')
@@ -264,12 +278,13 @@ def adapt_driver(text):
         '\t\t[self failWith:why];[self redwoodReturnSlot];[self redwoodDeliverHandlers];return;\n\t}\n\t@try {')
     text = replace_once(text,'done:\n\t/* The queue\'s slot goes back here',
         'done:;\n\t} @finally {\n'
+        '\t\tuint64_t redfin_fence_at=mach_absolute_time();\n'
         '\t\tif (mesa.commands_end([[_queue device] mesaDevice],why,sizeof(why))) [self failWith:why];\n'
         '\t\telse if (_status!=RW_CB_ERROR) {\n'
         '\t\t\t_status=RW_CB_COMPLETED;\n'
         '\t\t\tunsigned draws=0,computes=0;\n'
         '\t\t\tfor (RedwoodMetalWork *work in _work) {if(work->render) ++draws;else ++computes;}\n'
-        '\t\t\tredfin_metal_completed(draws,computes);\n'
+        '\t\t\tredfin_metal_completed(draws,computes,_redfinQueuedTicks,redfin_worker_at,redfin_acquired_at,redfin_fence_at,mach_absolute_time());\n'
         '\t\t}\n\t}\n'
         '\t/* The queue\'s slot goes back here')
     # retainedReferences:YES applies during encoding as well as execution.
@@ -389,7 +404,7 @@ def adapt_execution(text):
     text=replace_once(text,'\tNSUInteger _outstanding;', '\t_Atomic(NSUInteger) _outstanding;')
     text=replace_once(text,'\tNSUInteger _made, _returned;', '\t_Atomic(NSUInteger) _made, _returned;')
     text=replace_once(text,'\tNSUInteger _status;',
-        '\t_Atomic(NSUInteger) _status;\n\t_Atomic(BOOL) _redfinFinalized;\n\tdispatch_group_t _redfinExecution;')
+        '\t_Atomic(NSUInteger) _status;\n\t_Atomic(BOOL) _redfinFinalized;\n\tdispatch_group_t _redfinExecution;\n\tuint64_t _redfinQueuedTicks;')
     text=replace_once(text,'\t[queue redwoodTookSlot];',
         '\t[queue redwoodTookSlot];\n\t_redfinExecution=dispatch_group_create();\n'
         '\tif (!_redfinExecution) {[self release];return nil;}')
@@ -399,9 +414,11 @@ def adapt_execution(text):
     text=replace_once(text,'- (void)commit\n{\n\tREDFIN_MESA_SCOPE;',
         '- (void)commit\n{\n\t@synchronized(self) {\n'
         '\t\tif (_status>=RW_CB_COMMITTED) return;\n\t\t_status=RW_CB_COMMITTED;\n'
+        '\t\t_redfinQueuedTicks=mach_absolute_time();\n'
         '\t\tredfin_metal_schedule(_redfinExecution,^{\n'
         '\t\t\t@autoreleasepool {[self redfinExecute];}\n\t\t});\n\t}\n}\n\n'
-        '- (void)redfinExecute\n{\n\tREDFIN_MESA_SCOPE;')
+        '- (void)redfinExecute\n{\n\tuint64_t redfin_worker_at=mach_absolute_time();\n'
+        '\tREDFIN_MESA_SCOPE;\n\tuint64_t redfin_acquired_at=mach_absolute_time();')
     text=replace_once(text,'done:;\n\t} @finally {',
         'done:;\n\t} @catch (NSException *exception) {\n'
         '\t\t[self failWith:exception.reason.UTF8String ?: "Metal execution raised an exception"];\n'

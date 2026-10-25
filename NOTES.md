@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native GPU fault/Metal phase/ADSP SFR block built; fresh V17 staged — 2026-10-25
+
+Source base661bb6c plus this complete observation block. Preserve actual owned
+GPU fault FSR/FAR/FSYNR and bounded owned L2/PTE before poison revokes the
+runtime CPU lease; correlate the actual submitted BO/offset if present. No
+fault clear, DMA retry, released live allocation or manufactured completed
+fence. The paired native Metal driver now separates actual queue/gate/encoding/
+final-fence intervals, with boot-bound real-completion evidence. Read actual
+native ADSP global SMEM423 reason only on FATAL; compare with the pre-start
+observation, retain readonly allocator/payload checks and never clear/reset it.
+These observations are implemented; V14 remains the last physical result.
+
+122selected host cases PASS/no skips; full ordered-overlay kernel and fresh
+Mesa/AIR/native Metal/actual20H392 import/signature builds PASS. Kernel local
+20261025-125153/noCI,
+06f3b08b6b96a13a3fdfe389b1ef15921692139ae83e77fe8032edd3b11ca21e.
+Fresh graphics bundle research/redfin-metal-profile-v1/bundle. V15 image
+55be5d4cafa917a63f643b52041bc6e70e7dd3a28e206bd42e7d6af9fa1cedca,
+nonce4938418972d89045; full real loader/nativeDVFS/source-window/pre-retirement
+fault/SFR preflight PASS, Image130660976bytes. No new sensor/DVFS success or
+FPS improvement is claimed. Native FastRPC/registry file dependency is under
+source review and remains unimplemented; real sensor/CoreMotion/VD6281,
+sustained60/90fps, credential/autojoin/cable/motion and Apple authorization
+remain pending.
+
+Fresh V17 snapshot is from clean HFSX/not inconsistent/write_count884236;
+only paired graphics/Metal files and the native job cache are staged. Complete
+native signed-file readback, seals and readonly fsck PASS: 225ranges/
+22724608bytes/4new/zero freed blocks. Device is idle in verified
+recovery; V17 is prepared, NOT APPLIED at this checkpoint. V16 is applied/stale
+and must never be reused. Next apply V17 once, verify all device readback and
+collect one complete autonomous V15 run.
+Exact V15 planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x4938418972d89045 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V14 native bin132/625MHz ACK proved; runtime GPU fault and ADSP fatal — 2026-10-25
 
 Source6babaeb, local20261025-123240/noCI9d750911..., image5ba6440557e4daf5...,

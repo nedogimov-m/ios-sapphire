@@ -16,6 +16,7 @@ int redfin_gpu_audit(void);
 int redfin_gpu_thermal(uint64_t *,int32_t *,int32_t *,unsigned *);
 int redfin_gpu_dvfs_idle(void);
 uint64_t redfin_gpu_max_frequency(void);
+bool redfin_gpu_fault_info(uint64_t *,uint32_t *);
 uint64_t redfin_gpu_address(uint64_t size);
 int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
 int redfin_gpu_map_display(uint64_t address,uint64_t physical);

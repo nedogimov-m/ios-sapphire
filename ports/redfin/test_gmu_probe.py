@@ -112,6 +112,8 @@ class RedfinGMUContractTests(unittest.TestCase):
                            check=True, capture_output=True)
             subprocess.run(['git','apply','--include=bsd/dev/*',str(HERE/'native-gpu-dvfs.patch')],
                            cwd=root,check=True,capture_output=True)
+            subprocess.run(['git','apply','--include=bsd/dev/*',str(HERE/'native-failure-capture.patch')],
+                           cwd=root,check=True,capture_output=True)
             wanted = {
                 'bsd/dev/redfin_gmu_probe.c': HERE/'gmu-probe.c',
                 'bsd/dev/redfin_gmu_probe.h': HERE/'gmu-probe.h',

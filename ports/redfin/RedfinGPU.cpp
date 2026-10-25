@@ -399,6 +399,21 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r)
     redfin_gpu_sync(NULL,0,false);
     gTiming.cleaning+=gpuNow()-began;began=gpuNow();
     result=gpuError(redfin_gpu_submit(addresses,words,count,&r->fence));
+    if(result!=kIOReturnSuccess) {
+        uint64_t address=0;uint32_t fsr=0;
+        if(redfin_gpu_fault_info(&address,&fsr)) {
+            bool found=false;
+            for(unsigned i=0;i<r->nr_bos;++i) {
+                gpu_buffer *b=buffer(bos[i].handle);
+                if(address<b->address||address-b->address>=b->size)continue;
+                found=true;
+                IOLog("REDFIN GPU FAULT BO: submitted-index=%u handle=%u VA=%#llx bytes=%llu offset=%#llx surface=%u client-mapped=%u flags=%#x FSR=%#x\n",
+                    i,bos[i].handle,b->address,b->size,address-b->address,b->surface!=NULL,b->clientMapped,b->flags,fsr);
+                break;
+            }
+            if(!found)IOLog("REDFIN GPU FAULT BO: address=%#llx outside-submitted-BOs=1 count=%u FSR=%#x\n",address,r->nr_bos,fsr);
+        }
+    }
     gTiming.submitting+=gpuNow()-began;began=gpuNow();gTiming.submissions++;
     if(result==kIOReturnSuccess && (r->fence<=8 || !(r->fence%256))) {
         char name[20]={0};proc_selfname(name,sizeof(name));
