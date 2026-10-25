@@ -9,24 +9,22 @@ human-dependent actions, and continue independent work.
 
 ## Latest checkpoint
 
-Source base32d85db. V9/40cdadce6712794f has authenticated image/launchd
-proof, genuine Metal compute/BGRA/RG8 output/guards, surviving Phone and
-stable SpringBoard/backboardd. Clean root827459; V13 applied/stale.
-Automatic six-layer workload measured5.911completed physical fps versus
-59.973callback Hz. That is not the user's earlier30-40fps estimate.
-Photos/assetsd still fail; actual assetsd reason is TCCPhotosService denial.
+Source889e7d0; local kernel20261025-095649/noCI6ce92eff...;
+V10/b199fc38b7166150 passes authenticated image/launchd/userspace proof,
+clean root836288 and verified Fastboot. V14 is applied/stale; never reuse.
+Real Metal192compute commands, BGRA/RG8 and three alpha-blended draws/pixels/
+guards PASS. System Metal is active. Warmed automatic six-layer animation
+measures13.899completed physical GPU fps and60.000callback Hz. Stable60/90fps
+is unfinished. Phone survives; window server stable; no GPU fault/panic.
 
-The complete next block is implemented/built: Metal command-buffer batching,
-actual final-fence completion, resource/surface lifetime and once-per-pass
-clears, native measured90Hz heartbeat, warmed animation statistics and
-native TCCD audit/Security evidence. All36selected host cases, native builds,
-actual20H392 imports/signatures and real loader preflight PASS. Kernel
-local20261025-095649/noCI6ce92eff...; V10/b199fc38b7166150 image950623ce...
-V14 fresh reversible host stage against827459 is not applied yet. Apply once
-and collect one complete autonomous run; assess actual render throughput,
-three-draw blended pixels and native TCCD results. Exact builds/args are in
-newest NOTES.md. Next implement the complete native sensor transport/event
-block. No new physical performance or Photos fix is claimed from host builds.
+Photos/assetsd still fail. Native self/audit Security and TCCD's own actual
+DER/signing-ID/token checks succeed; native Photos preflight0/access assertion
+remains. Resolve actual policy/attribution without replacing native answers.
+WLAN starts late and guarded4KiB firmware copy takes15.03s; next implement
+its complete timing/copy improvement with the linked native sensor transport.
+SSC protocol codecs are in progress. ADSP/SSC/HID, remaining render/display
+throughput, real credential/autojoin and account authorization remain.
+Exact source/builds/boot args and results are in newest NOTES.md.
 
 ## Required results
 

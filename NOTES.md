@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V10 Metal batches/pixels PASS; real animated13.899fps; native TCC evidence — 2026-10-25
+
+Source889e7d0; kernel local20261025-095649/noCI,
+6ce92eff092b24e7cdb1d12766e944c7343d01f0e4890e0fe20ecd451ba302ce.
+V14 applied exactly once:53ranges/10235904bytes/2new/zero freed, all preimages
+backed up, complete files/native signatures/readonly fsck and every written
+range read back. Never reuse V14. V10 image950623ce.../nonceb199fc38b7166150
+passes authenticated exact-image/launchd/userspace proof, clean HFSX/not
+inconsistent/write_count836288 and verified Fastboot.
+
+Native Metal checker passes192compute commands,4096BGRA pixels,4096RG8
+pixels/guard bytes and the new three alpha-blended draws across autorelease
+pools with exact4096pixels/16384guard bytes. System backboardd uses the same
+Metal/AIR and real fences. Warmed six-layer animation over10.000366s has
+139completed physical GPU presentations (13.899fps),601callbacks/60.000Hz.
+Earlier V9 measured5.911fps, but warmup/start scheduling also changed: this
+is not an isolated same-timing A/B test. True90Hz remains independently
+verified, while the native display-link callback is still60Hz. Stable60/90
+render FPS remains unfinished.193total physical presentations; no GPU fault,
+retirement, kernel panic or window-server restart. Phone246survives5/17s;
+Photos247still aborts with zero asset-source sections.
+
+Actual assetsd Security self AND audit-token constructors/batched entitlement
+reads pass: validated1,real Photos entitlement1,error0. Native TCCD's own
+CSOPS audit PID/version matches, DER and signing-ID size negotiations return
+ordinary ERANGE followed by success. Its native Photos preflight stays0 and
+assetsd still throws its original TCCPhotosService access assertion. Do not
+infer a code-signature/token fix or grant permission from those observations;
+resolve the actual policy/attribution/service result next. No TCC answer,
+DB,grant,entitlement or native exception is overridden.
+
+Native MobileWiFi synthetic existing1/exact1 persists again; no real saved
+credential or IPv4 is available in this autonomous run. WLAN worker starts
+at78.8s uptime; source verification2.18s, segment copy15.03s, FW_READY38.59s,
+station42.21s after worker. These measurements identify both late worker
+scheduling and excessive guarded4KiB copy overhead for the next complete
+block. Sensor SSC wire codecs are now being implemented; actual ADSP/native
+sensor integration and real account authorization remain unfinished.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb199fc38b7166150 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V9 measured presentation bottleneck; complete Metal batching block built — 2026-10-25
 
 V9 source32d85db, kernel local20261025-091259/noCI ae5aae0d...,
