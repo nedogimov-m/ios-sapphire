@@ -1,5 +1,19 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native AKS descriptor lifetime correction after physical90Hz capture — 2026-10-25
+
+Authenticated boot3635d632d4fbfca8 proves S6E3HC2 TE60->90Hz and independent
+INTF21->31frames/350ms using the source-verified FIFO path; mean TE changes
+16682->11123us. Its later CPU6/profiled panic symbolicates to the inherited
+AKS output helper's writeBytes/getPhysicalSegment with an unwired IOGMD.
+Re-reviewed preferred8e611870 MiniAppleKeyStore::answer: prepare precedes
+writeBytes and complete follows it. Adapt that lifetime for both descriptor
+input and output, preserving native direction/copy-on-write, bounds and all
+native failures. Regression descriptors assert wiring for every read/write,
+including the actual4096byte device-state case, short copies, prepare errors
+and completion errors. Keep all real crypto/integrity and publication guards.
+The paired userland pin remains906425b75e02b4f99eb5d7bb1ef7c9583472d772.
+
 ## Native device bag, full-panel status bar and display-mode ABI — 2026-10-25
 
 Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab

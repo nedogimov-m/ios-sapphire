@@ -92,7 +92,7 @@ diff --git a/iokit/Kernel/arm/RedfinKeychain.inc b/iokit/Kernel/arm/RedfinKeycha
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinKeychain.inc
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,138 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Preferred MiniAppleKeyStore's wrap/unwrap ABI, adapted for Redfin's
 + * persistent HFSX root, actual20H392 calls and portable AES provider.
@@ -108,6 +108,27 @@ new file mode 100644
 +static bool redfin_kc_attempted, redfin_kc_ready, redfin_kc_notified;
 +static IOReturn sweet_aks_struct_out(IOExternalMethodArguments *, const void *, uint32_t);
 +static uint32_t sweet_aks_der_pair(uint8_t *, const char *, uint8_t);
++
++/* Native IOConnect descriptors are initially unwired. Even CPU readBytes/
++ * writeBytes resolve physical segments and therefore require prepare/complete.
++ * Use the descriptor's native direction, including output copy-on-write.
++ * Bound the wired user range; no allocation or key data is logged here. */
++static IOReturn redfin_kc_descriptor_copy(IOMemoryDescriptor *memory,void *buffer,
++    uint32_t bytes,bool output)
++{
++    if (!memory || !buffer || !bytes || memory->getLength()<bytes || memory->getLength()>1024*1024)
++        return kIOReturnBadArgument;
++    IOReturn ready=memory->prepare();
++    if (ready!=kIOReturnSuccess) return ready;
++    uint64_t copied=output ? memory->writeBytes(0,buffer,bytes) : memory->readBytes(0,buffer,bytes);
++    IOReturn completed=memory->complete();
++    static unsigned observed;
++    if (__atomic_fetch_add(&observed,1,__ATOMIC_RELAXED)<12)
++        IOLog("REDFIN KEYCHAIN DESCRIPTOR: output=%u bytes=%u prepared=1 copied=%llu complete=%#x\n",
++            output,bytes,(unsigned long long)copied,completed);
++    if (completed!=kIOReturnSuccess) return completed;
++    return copied==bytes ? kIOReturnSuccess : kIOReturnUnderrun;
++}
 +
 +/* Platform expert invokes this before any userspace can inspect IORegistry.
 + * Retain before removal: DT-backed OSData need not outlive its dictionary. */
@@ -167,7 +188,8 @@ new file mode 100644
 +    uint8_t input[72] = {}, output[72] = {}, iv[8] = {};
 +    IOReturn result = kIOReturnBadArgument;
 +    if (args->structureInputDescriptor) {
-+        if (args->structureInputDescriptor->readBytes(0,input,length) != length) goto done;
++        result=redfin_kc_descriptor_copy(args->structureInputDescriptor,input,(uint32_t)length,false);
++        if (result!=kIOReturnSuccess) goto done;
 +    } else {
 +        if (!args->structureInput) goto done;
 +        memcpy(input,args->structureInput,length);

@@ -29,24 +29,31 @@ static int decrypt_block(void *c,const uint8_t in[16],uint8_t out[16]){return te
 NATIVE=r'''
 #include <vector>
 #include <algorithm>
+#include <assert.h>
 #define OSDynamicCast(type,object) ((type *)(object))
 static void IOLog(const char *,...){}
 typedef unsigned IOReturn;
 enum {kIOReturnSuccess=0,kIOReturnBadArgument=1,kIOReturnNotReady=2,
  kIOReturnNotPermitted=3,kIOReturnNoSpace=4,kIOReturnUnderrun=5};
 #define SWEET_AKS_SYSTEM_HANDLE 0
+#define SWEET_AKS_LOCK_STATE 4
 class OSData {public:std::vector<uint8_t> bytes;unsigned refs=1;
  OSData(const uint8_t *p,size_t n):bytes(p,p+n){} unsigned getLength(){return (unsigned)bytes.size();}
  void *getBytesNoCopy(){return bytes.data();}void retain(){++refs;}void release(){--refs;}};
 class IORegistryEntry {public:OSData *data;bool block_remove=false;
  IORegistryEntry(OSData *d):data(d){}OSData *getProperty(const char *){return data;}
  void removeProperty(const char *){if(!block_remove)data=NULL;}};
+static unsigned wire_prepares,wire_completes,wire_reads,wire_writes;
 class Descriptor {public:uint8_t *data;size_t bytes;bool short_read=false,short_write=false;
+ bool fail_prepare=false,fail_complete=false;unsigned wired=0;
  Descriptor(uint8_t *p,size_t n):data(p),bytes(n){}size_t getLength(){return bytes;}
- size_t readBytes(size_t offset,void *out,size_t n){if(offset>bytes || n>bytes-offset)return 0;
+ IOReturn prepare(){wire_prepares++;if(fail_prepare)return 7;assert(!wired);wired++;return 0;}
+ IOReturn complete(){assert(wired==1);wire_completes++;wired--;return fail_complete?8:0;}
+ size_t readBytes(size_t offset,void *out,size_t n){assert(wired);wire_reads++;if(offset>bytes || n>bytes-offset)return 0;
   if(short_read && n)--n;memcpy(out,data+offset,n);return n;}
- size_t writeBytes(size_t offset,const void *in,size_t n){if(offset>bytes || n>bytes-offset)return 0;
+ size_t writeBytes(size_t offset,const void *in,size_t n){assert(wired);wire_writes++;if(offset>bytes || n>bytes-offset)return 0;
   if(short_write && n)--n;memcpy(data+offset,in,n);return n;}};
+typedef Descriptor IOMemoryDescriptor;
 struct IOExternalMethodArguments {
  unsigned scalarInputCount=0,scalarOutputCount=0;uint64_t *scalarInput=NULL,*scalarOutput=NULL;
  Descriptor *structureInputDescriptor=NULL,*structureOutputDescriptor=NULL;
@@ -83,10 +90,22 @@ extern "C" unsigned transform(unsigned unwrap,uint8_t *in,unsigned n,unsigned ke
  a.scalarOutput=actual_class;a.scalarOutputCount=flags&32?0:1;
  a.structureInput=in;a.structureInputSize=n;a.structureOutput=out;a.structureOutputSize=cap;
  Descriptor input(in,n),output(out,cap);input.short_read=flags&4;output.short_write=flags&8;
+ input.fail_prepare=flags&64;output.fail_prepare=flags&128;
+ input.fail_complete=flags&256;output.fail_complete=flags&512;
+ wire_prepares=wire_completes=wire_reads=wire_writes=0;
  if(flags&1)a.structureInputDescriptor=&input;if(flags&2)a.structureOutputDescriptor=&output;
  unsigned result=redfin_kc_transform(&a,unwrap);
+ assert(!input.wired && !output.wired);
  *actual_bytes=(unsigned)((flags&2)?a.structureOutputDescriptorSize:a.structureOutputSize);return result;
 }
+extern "C" unsigned descriptor_state(uint8_t *out,unsigned capacity,unsigned flags,unsigned *actual){
+ Descriptor output(out,capacity);IOExternalMethodArguments a;
+ a.structureOutputDescriptor=&output;output.fail_prepare=flags&1;output.short_write=flags&2;output.fail_complete=flags&4;
+ wire_prepares=wire_completes=wire_reads=wire_writes=0;
+ unsigned error=sweet_aks_device_state(&a);assert(!output.wired);
+ *actual=(unsigned)a.structureOutputDescriptorSize;return error;
+}
+extern "C" unsigned wire_metric(unsigned i){unsigned values[]={wire_prepares,wire_completes,wire_reads,wire_writes};return i<4?values[i]:999;}
 extern "C" unsigned config(uint8_t *out,unsigned cap,unsigned which){
  IOExternalMethodArguments a;a.structureOutput=out;a.structureOutputSize=cap;
  unsigned r=which?redfin_kc_bag_uuid(&a):redfin_kc_configuration(&a);
@@ -108,8 +127,9 @@ class KeychainTests(unittest.TestCase):
         text=native.read_text()
         helper='static IOReturn\nsweet_aks_struct_out'+text.split('static IOReturn\nsweet_aks_struct_out',1)[1].split('\n}\n',1)[0]+'\n}\n'
         der='static uint32_t\nsweet_aks_der_pair'+text.split('static uint32_t\nsweet_aks_der_pair',1)[1].split('\n}\n',1)[0]+'\n}\n'
+        state='static IOReturn\nsweet_aks_device_state'+text.split('static IOReturn\nsweet_aks_device_state',1)[1].split('\n}\n',1)[0]+'\n}\n'
         source=root/'keychain.cpp';library=root/'keychain.dylib'
-        source.write_text(AES+NATIVE+(HERE/'keychain-runtime.inc').read_text()+helper+der+WRAPPERS)
+        source.write_text(AES+NATIVE+(HERE/'keychain-runtime.inc').read_text()+helper+der+state+WRAPPERS)
         result=subprocess.run(['c++','-std=c++17','-O2','-shared','-fPIC','-Wall','-Wextra','-Werror',
             '-Wno-misleading-indentation','-I',str(root),str(source),'-o',str(library)],capture_output=True,text=True)
         if result.returncode:raise RuntimeError(result.stderr)
@@ -118,6 +138,7 @@ class KeychainTests(unittest.TestCase):
         cls.lib.transform.argtypes=[C.c_uint,C.c_void_p,C.c_uint,C.c_uint,C.c_uint,C.c_void_p,C.c_uint,C.c_uint,
             C.POINTER(C.c_uint64),C.POINTER(C.c_uint)]
         cls.lib.config.argtypes=[C.c_void_p,C.c_uint,C.c_uint]
+        cls.lib.descriptor_state.argtypes=[C.c_void_p,C.c_uint,C.c_uint,C.POINTER(C.c_uint)]
 
     def kw(self,unwrap,key,iv,data,capacity=None,fail=0):
         size=capacity if capacity is not None else len(data)+(8 if not unwrap else -8)
@@ -168,7 +189,7 @@ class KeychainTests(unittest.TestCase):
 
     def test_native_short_buffers_descriptors_and_wrong_bag_never_succeed(self):
         self.seed();plain=bytes(range(32))
-        for flags,cap,wanted in [(0,39,4),(3,39,4),(1|4,40,1),(2|8,40,5),(16,40,1),(32,40,1)]:
+        for flags,cap,wanted in [(0,39,4),(3,39,4),(1|4,40,5),(2|8,40,5),(16,40,1),(32,40,1)]:
             self.assertEqual(self.transform(0,plain,flags=flags,capacity=cap)[0],wanted)
         self.assertEqual(self.transform(0,plain,handle=1)[0],1)
         for length in (0,1,8,15,17,65,72,80):
@@ -177,6 +198,19 @@ class KeychainTests(unittest.TestCase):
         self.assertEqual(self.transform(0,plain)[0],2)
         for broken in [raw[:55],bytes(56),raw[:8]+bytes(32)+raw[40:]]:
             self.assertEqual(self.lib.prepare(broken,len(broken),0)&1,0)
+
+    def test_unwired_native_device_state_output_and_all_prepare_failures_are_balanced(self):
+        self.seed();out=C.create_string_buffer(4096);actual=C.c_uint()
+        self.assertEqual(self.lib.descriptor_state(out,4096,0,C.byref(actual)),0)
+        self.assertGreater(actual.value,64)
+        self.assertEqual([self.lib.wire_metric(i) for i in range(4)],[1,1,0,1])
+        for flags,wanted,counts in [(1,7,[1,0,0,0]),(2,5,[1,1,0,1]),(4,8,[1,1,0,1])]:
+            self.assertEqual(self.lib.descriptor_state(out,4096,flags,C.byref(actual)),wanted)
+            self.assertEqual([self.lib.wire_metric(i) for i in range(4)],counts)
+        for flags,wanted,counts in [(1|2,0,[2,2,1,1]),(1|2|64,7,[1,0,0,0]),
+                (1|2|128,7,[2,1,1,0]),(1|2|256,8,[1,1,1,0]),(1|2|512,8,[2,2,1,1])]:
+            self.assertEqual(self.transform(0,bytes(range(32)),flags=flags)[0],wanted)
+            self.assertEqual([self.lib.wire_metric(i) for i in range(4)],counts)
 
     def test_private_material_permissions_identity_and_exclusive_creation(self):
         with tempfile.TemporaryDirectory() as d:

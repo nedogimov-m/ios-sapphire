@@ -80,12 +80,21 @@ unchanged, verified Fastboot. Do not reuse V8 for another update. The next
 fresh V9 read phase must include the newly installed UI/GUI checker files.
 Private backups/preimages stay under research/redfin-graphics/root-update-v8.
 
-Next: one integrated180s authenticated boot, native GUI/app/Photos/model/
-Keychain/panel/cadence evidence, then an automated persistence reboot for the
-completed block. Leave only physical human judgment/account authorization
-for later. Continue power/charging, thermal/all-sensor and Metal source blocks.
-Read-only Linux inventory already observes real battery100%/Full/35.6C,
-USB-PD source and native thermal inputs; this does not establish iOS support.
+The first authenticated combined boot3635d632d4fbfca8 proves actual panel
+90Hz: TE mean16682->11123us and INTF21->31frames/350ms, successful native
+FIFO completion and native90Hz mode publication. Full display/HID viewport,
+private key-material removal and actual model publication are observed;
+securityd's32->40wrap succeeds. Smooth90fps and app outcomes remain unproved.
+
+That run then panics in profiled's AKS writeBytes on an unwired large user
+memory descriptor. The complete input/output prepare/complete lifetime fix
+follows the preferred upstream;12targeted host cases and local native build
+20261025-062535PASS/noCI, kernel4c26d9c20147ea4d15e5d18a0692e83346ac57ce64eaf48fa70a36c33a30dc4e.
+Device is verified Fastboot; root dirty/not-inconsistent/write_count762490.
+Do not reuse V8 or apply files to this dirty root. Next kernel-only integrated
+boot replays its native journal and uses the existing180s clean shutdown;
+then perform the completed block's persistence reboot. Continue independent
+power/charging, thermal/all-sensor and Metal implementation afterwards.
 
 ## Operating constraints
 

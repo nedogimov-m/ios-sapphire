@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN physical90Hz proved; AKS descriptor panic located and fixed — 2026-10-25
+
+Source df42261/52d87df, kernel build20261025-061234/noCI. Authenticated image
+dfcf8cdcfa402d32bac0888ed0df5b166fa913172f5f3c6856d53a1b930d45ae/boot3635d632d4fbfca8
+proves the native S6E3HC2 transition: before20TE intervals average16682us
+(range16671..16698), after30average11123us(range11112..11133). Independent
+INTF frame count increases21then31in350ms. Native FIFO completes once,
+DSI2.4/command mode/externalTE/autorefresh owner validates, no uncertain
+completion/rollback; actual90Hz and native90Hz mode publication confirmed.
+Display/HID both report full0,0/1080x2340. This is physical refresh evidence,
+not a measured smooth90fps GUI result. Key material accepted/removed from
+IORegistry, model published/valid1, securityd native32->40wrap succeeds twice.
+
+The integrated run then panics on CPU6/profiled: IOGMD not wired for the
+IODMACommand at IOMemoryDescriptor.cpp:3248. Actual kernel symbolication
+locates getPhysicalSegment/writeBytes inside AppleKeyStoreUserClient's
+externalMethod+0x580. The inherited structure-output helper never prepared
+large user descriptors. Preferred MiniAppleKeyStore::answer explicitly does
+prepare/complete; apply that native lifetime to both input and output, with
+bounded wiring, exact copies and propagated prepare/complete/short errors.
+No fence or memory validation bypass. The real4096byte device-state reply
+and wrap/unwrap descriptors now have balanced prepare/complete regression
+coverage, including failure paths. All12selected AKS/admission casesPASS.
+Local native build20261025-062535PASS/noCI; new kernelSHA2564c26d9c20147ea4d15e5d18a0692e83346ac57ce64eaf48fa70a36c33a30dc4e.
+
+Collector returned verified Fastboot. HFSX write_count762490 is journaled/
+not-inconsistent but dirty after panic; correct file-log capture skipped.
+No GUI/app/Photos/Keychain persistence result is inferred. Never reuse V8
+or modify the dirty root offline. The next complete kernel-only run mounts
+it normally for native journal replay, then uses its bounded clean shutdown.
+The signed V8 programs/libraries need no replacement for this kernel fix.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3635d632d4fbfca8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN full platform image preflight and complete V8 installation — 2026-10-25
 
 Source df42261 plus the standalone builder import correction; local build
