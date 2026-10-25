@@ -1,5 +1,56 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V38 warm system compilation persists across reboot; frame waits remain — 2026-10-26
+
+Source3327d6d; ordinary graphics local20261026-002605/noCI,
+pairingdf1f49f1eb4a2ca0fd01470daffdfb62ef38703a110f851dd9d7969fbba60891,
+compiler identity identical to the V37 checks-on capture. Kernel unchanged/
+reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V38 image0deda5cedff4528981575f8e6ca2158db183a78f1966a35bc5193c590a7860ec,
+nonce698e2195ba273574. V41 applied once:6ranges/258048bytes/zero new/zero freed;
+all live preimages/full readback/signatures/native readonly fsck PASS. V41
+applied/stale, never reuse. Authenticated exact current boot userspace-alive,
+no panic, clean consistent HFSX/write_count1166187, verified Fastboot. Next
+fresh rootV42/imageV39. No active exec sessions; broader goal remains active.
+
+TRUE warm ordinary system persistence observed: at pipeline32,36AIR/39ir3 file
+hits, zero disk misses/puts/drops/invalid/pending bytes and zero variant compiles.
+Memory templates/stages still hit28/29times and preserve their bounded caches.
+Sampled cached fixed_frag API calls are4935us and5882us; earlier cold samples
+cost hundreds of milliseconds. New parameter variants39/40miss once and cost
+798346/870161us, then store successfully: at40,41AIR/45ir3 file hits,2new AIR
+misses/puts and2actual variant compiles/14889us total. This proves reuse across
+a real clean shutdown/reboot, not just two contexts in one process. It does
+not prove global startup/FPS or smoothness. Exactly one backboardd61; zero current
+nonce in checker/render-probe logs; zero heavy draw/image captures. Native GPU
+pixel/guard/cache contracts remain V37's successful prior evidence.
+
+Command/queue cost remains: command8 has5draws/58100us total (28334queue,
+17259encoding,12454finalization),1submit/12318us,2other calls/6885us, no new
+allocations/maps/variant compiles. Command16 has5draws/66582us total,39215us
+queue wait. First command has8allocations/3539us but27other methods/423224us,
+6map operations/323us and zero variant compiles. These are inclusive process
+I/O and command samples, not pure CPU cost, fixed allocation cost or display FPS.
+Do not shrink heap/mapping bounds based on the variable first-call wait.
+
+Next coherent rendering block: inspect/fix redundant waits inside GPU row copies,
+blits and buffer-texture transitions, and separate actual CPU consumers from GPU
+ordering. Current metal-command-scope.h intentionally drains compute/storage
+operations immediately; metal-blit.inc uses that policy for internal row copies.
+metal-buffer-texture.inc also drains a pending view before GPU sampling, even
+when the converted view could remain on the GPU. This is a candidate, not a
+measured causal proof. Merely changing false to true would be WRONG: CPU argbuf/
+index/validation reads and resolve-to-parent accesses must still see real writes.
+Implement coherent ordering, alias/overlap/epoch and CPU-consumer handling
+BEFORE the next combined native check; include mixed raster/compute/copy/CPU-read
+pixel/guard and actual-fence coverage. Preserve strict original-page checks,
+reference lifetimes, half precision/transport, full-panel90Hz and existing real
+fences. Cold unseen variants and the broader power/sensor/Apple-ID goal remain
+open. Phone/Photos auto-launch and all image/parameter capture stay off.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x698e2195ba273574 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN ordinary warm-cache V38 prepared; fresh V41 ready — 2026-10-26
 
 Source45d4ee9; full ordinary native/actual20H392 ABI/signatures PASS:

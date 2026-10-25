@@ -117,6 +117,12 @@ Repeated pipeline preparation is323us; cold complex pipelines still cost
 378..955ms and the sampled38-draw command costs205ms. Remaining CPU preparation
 and waits are the next performance blocker.
 
+Persistent AIR/Adreno code now also passes actual fresh-context pixels and a
+complete ordinary reboot. At pipeline32, V38 reads36AIR templates and39GPU
+programs from disk with no compilation; sampled cached complex pipelines take
+about5..6ms. New variants still take hundreds of milliseconds and command/queue
+waits remain, so smooth system60/90FPS is still unfinished.
+
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
 have complete, independently verified local backups. Android userdata has

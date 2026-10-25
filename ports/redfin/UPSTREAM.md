@@ -49,6 +49,17 @@ with no dropped job or invalid record. One backboardd and no panic are observed.
 Retire startup probes and test the same compiler identity across the next
 ordinary reboot before claiming a system-startup speed improvement.
 
+V38 ordinary reboot now confirms persistence across a real shutdown/reboot with
+the same compiler identity: at pipeline32,36AIR/39ir3 file hits, zero misses,
+stores, pending data or variant compiles. Cached complex API samples are4935us
+and5882us; new variants39/40still take798346/870161us and get stored. One live
+backboardd and no panic are observed; both correctness jobs and all heavy capture
+are inactive. First8allocations cost3539us while27other IOKit methods total
+423224us; do not ascribe that variable wait to memory size or pure compiler CPU.
+Small5-draw groups still take58..67ms including28..39ms queue waits. No FPS or
+visual-smoothness claim. Continue with in-command GPU copies/alias transitions
+and precise CPU-consumer synchronization, retaining all actual final fences.
+
 ## Preserve stage lookup hash; retain more templates within the same payload cap — 2026-10-25
 
 V34 proves correct native raster/half/resource pixels but the new combined cache
