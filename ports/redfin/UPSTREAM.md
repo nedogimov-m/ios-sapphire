@@ -13,7 +13,12 @@ existing fullscreen system window with finite reversible subpixel animation,
 and reports native presentation/GPU counts separately from callback cadence.
 No Phone/Photos launch, test window or image capture is required.5host contracts,
 changed native kernel object and full actual20H392 UI ABI/signatures pass;
-CI delivery and actual system FPS measurements remain pending.
+CI40241828657/run2/source ece0a6e now delivers the matching native kernel.
+The final ordinary-boot caller does not require a capture flag; its exact
+root-owned one-boot request is the sole opt-in. UI v3 ABI/signatures/current
+source hashes, six combined host cases and V52 readonly native fsck pass.
+Reuse the already-validated A620 queue and ordinary graphics v8 unchanged;
+actual system FPS measurements remain pending.
 
 ## Retained submission and separate native completion — 2026-10-26
 

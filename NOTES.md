@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN ordinary native presentation observer ready; reuse completed CI — 2026-10-26
+
+Source base ece0a6e plus this integration: SpringBoard supplies the boot nonce
+without requiring heavy capture; the observer still requires its exact root-owned
+one-boot request. Add only that request path to the offline staging allowlist.
+Final UI v3 actual20H392 ABI/signatures/source hashes PASS, UI SHA256
+8642020f1afd943e5ede7f6e16b001bfc14045c72503a1ac9cd6af485264930a.
+Six combined observer/statistics/staging host cases PASS. The allocator fixture
+still expected the old4096-block cap despite b6a9bec's reviewed8192-block sensor
+bundle support; update both boundary cases, no allocator implementation change.
+
+Reuse completed GitHub Actions40241828657/run2/source ece0a6e, kernel
+b09bcdd11ad4580dee52424f7bbef73cc6107dd8eb0d112f9e3f0e806a0c0c15;
+queued and presentation ABI/source pairing PASS. Reuse unchanged ordinary
+local20261026-031736/noCI graphics v8, both correctness jobs/captures/app opens
+OFF. No kernel/graphics rebuild. V51 was NEVER applied; its failed host clone is
+superseded/forbidden. Fresh V52 reads actual clean unmounted generation1237163,
+stages118784bytes/one new block/zero freed. Full file owners/modes/bytes/signatures
+and native readonly fsck PASS. V52 is READY, not yet applied; use ONCE, then mark
+stale. Phone remains idle in temporary Linux recovery; no iOS boot or live root
+write since V45. Image V46 SHA256
+a38fc9db1a49fbd48a3e983b6a51c388f29ebfbcfdbfaf4545447e361e76c97e.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xddab13f83ba4f091 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Next: apply V52 once, one combined native system animation/presentation cycle;
+measure actual completed GPU frames separately from callbacks. Stable60/90FPS
+and remaining platform items are unfinished; full goal stays active.
+
 ## REDFIN V45 ordinary queued runtime stable; native FPS observer implemented — 2026-10-26
 
 Source38fc90f (render codec246eea), ordinary graphics local20261026-031736/noCI,

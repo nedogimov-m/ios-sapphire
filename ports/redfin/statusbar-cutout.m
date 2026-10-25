@@ -123,8 +123,7 @@ __attribute__((constructor)) static void install_cutout(void)
     const char *nonce=strstr(args,"redfinbootid=0x");
     if (!nonce || strlen(nonce+15)<16) return;
     memcpy(boot_nonce,nonce+15,16);
-    if (redfin_diagnostic_requested(args,(unsigned)bytes) &&
-        !strcmp(NSProcessInfo.processInfo.processName.UTF8String,"SpringBoard"))
+    if (!strcmp(NSProcessInfo.processInfo.processName.UTF8String,"SpringBoard"))
         display_probe_nonce=strtoull(boot_nonce,NULL,16);
     (void)dlopen("/redfin/lib/libredfin-refresh.dylib",RTLD_NOW|RTLD_LOCAL);
     Class bar=objc_getClass("_UIStatusBar"); time_class=objc_getClass("_UIStatusBarTimeItem");

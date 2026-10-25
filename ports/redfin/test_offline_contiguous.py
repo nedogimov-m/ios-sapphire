@@ -43,7 +43,8 @@ unsigned run(unsigned scenario,unsigned needed){
         self.assertEqual(self.lib.run(0,18),300)
         self.assertEqual(self.lib.run(4,2500),300)
         self.assertEqual(self.lib.run(4,4096),300)
-        for scenario,needed in [(1,18),(2,18),(3,18),(0,0),(0,1025),(0,300),(4,4097)]:
+        self.assertEqual(self.lib.run(4,8192),300)
+        for scenario,needed in [(1,18),(2,18),(3,18),(0,0),(0,1025),(0,300),(4,8193)]:
             self.assertEqual(self.lib.run(scenario,needed),0)
 
 

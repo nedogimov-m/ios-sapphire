@@ -14,6 +14,7 @@
 char endianness;
 struct target {const char *path;unsigned uid,mode;};
 static const struct target targets[]={
+    {"/redfin/display-probe-request",0,0644},
     {"/redfin/bin/photos-init",0,0755},
     {"/redfin/bin/gui-check",0,0755},
     {"/redfin/bin/thermald",0,0755},
