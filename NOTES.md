@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete preparation/cache block built; fresh V37 prepared for V34 — 2026-10-25
+
+Source basee10a951 plus this coherent block. Actual host phase profiling finds
+scratch promotion/state folding dominant; fold AIR's defined flags/dead CFG
+inside promotion, retaining the stock schedule for other callers. Representative
+warm host specializations improve about474ms to166ms, not phone FPS. Exact
+module/entry/constant-presence/indices/lengths/bytes keys serve independent real
+NIR/metadata templates, including reflection before pipeline-only pruning.
+Per-device translation payload32entries/8MiB; finalized Gallium CSO keys have
+separate32entry/8MiB bounds and cache/pipeline references. Eviction cannot destroy
+live states. Share one immutable quad VBO per device; avoid allocating it for
+real attribute pipelines with no placeholder. Original-page checks, real
+completion, logical half arithmetic/transport and thermal protection unchanged.
+
+42host integration tests PASS/no skips.14authored/system/resource modules
+validate and compile real A620 instructions, and all19actual captured variants
+PASS with real serialization/deep metadata independence/two-entry forced LRU/
+surviving release/legacy-versus-undefined/invalid-snapshot refusal checks.
+Fresh complete native Mesa/AIR/Metal/checker/shader and actual20H392 ABI/signatures
+PASS: research/redfin-metal-preparation-v1, local20261025-231820/noCI,
+pairinge16fc06f94f0f9226a71c7dbb4afa557c6c0c46a512382a2924889969aec244f.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+
+Fresh V34 image59eeb64422bbc58f91cd6527ef5d20b82024722f18e4c06ca7ad4eb07fddf8b3,
+noncefa842e7ef79c4d5a; complete loader/ADT/liveFDT/firmware/power/DVFS/source-
+window/return preflight PASS. No kernel or draw image captures. GPU correctness
+startup jobs are explicitly enabled for the whole block; Phone/Photos remain
+disabled. Native70color variants/pixels/guards and two pipelines retained across
+both cache evictions are implemented but PENDING actual device execution.
+Fresh V37 from clean consistent HFSX/write_count1122410:183ranges/24174592bytes/
+zero new/zero freed, full staged files/readback/signatures/seal/native readonly
+fsck PASS. V37 PREPARED, NOT APPLIED; every older applied stage remains stale.
+Next apply once and collect one combined V34. User-confirmed correct V32 colours
+must be preserved; severe lag/sustained FPS and the broader goal remain open.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xfa842e7ef79c4d5a redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V33 ordinary path verified; user still reports near-stalled UI — 2026-10-25
 
 Source2770106; graphics local20261025-223758/noCI,

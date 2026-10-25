@@ -1,0 +1,369 @@
+--- a/src/compiler/nir/nir_lower_scratch_to_var.c
++++ b/src/compiler/nir/nir_lower_scratch_to_var.c
+@@ -72,8 +72,8 @@
+    return true;
+ }
+ 
+-bool
+-nir_lower_scratch_to_var(nir_shader *nir)
++static bool
++lower_scratch_to_var_impl(nir_shader *nir, bool fold_defined_state)
+ {
+    unsigned words = DIV_ROUND_UP(nir->scratch_size, 4);
+ 
+@@ -104,12 +104,34 @@
+    do {
+       progress = false;
+       NIR_PASS(progress, nir, nir_lower_vars_to_ssa);
++      /* AIR constructors assign packed flags. Fold their defined bytes and
++       * unreachable CFG here rather than iterating over every dead branch.
++       * Stock callers retain the exact original schedule below.
++       */
++      if (fold_defined_state)
++         NIR_PASS(progress, nir, nir_lower_undef_to_zero);
+       NIR_PASS(progress, nir, nir_opt_constant_folding);
+       NIR_PASS(progress, nir, nir_opt_algebraic);
+       NIR_PASS(progress, nir, nir_copy_prop);
++      if (fold_defined_state) {
++         NIR_PASS(progress, nir, nir_opt_if, 0);
++         NIR_PASS(progress, nir, nir_opt_dead_cf);
++      }
+       NIR_PASS(progress, nir, nir_opt_cse);
+       NIR_PASS(progress, nir, nir_opt_dce);
+    } while (progress);
+ 
+    return true;
+ }
++
++bool
++nir_lower_scratch_to_var(nir_shader *nir)
++{
++   return lower_scratch_to_var_impl(nir, false);
++}
++
++bool
++nir_lower_scratch_to_var_and_fold_state(nir_shader *nir)
++{
++   return lower_scratch_to_var_impl(nir, true);
++}
+--- a/src/compiler/nir/nir.h
++++ b/src/compiler/nir/nir.h
+@@ -5639,6 +5639,7 @@
+                                glsl_type_size_align_func scratch_layout_size_align);
+ 
+ bool nir_lower_scratch_to_var(nir_shader *nir);
++bool nir_lower_scratch_to_var_and_fold_state(nir_shader *nir);
+ 
+ void nir_lower_clip_halfz(nir_shader *shader);
+ 
+--- a/src/compiler/air/air_to_nir.c
++++ b/src/compiler/air/air_to_nir.c
+@@ -4474,7 +4474,7 @@
+     * other before promotion. This is the stock Mesa scratch-to-variable pass,
+     * including correct byte/word packing, rather than a frontend slot cache.
+     */
+-   NIR_PASS(_, c.nir, nir_lower_scratch_to_var);
++   NIR_PASS(_, c.nir, nir_lower_scratch_to_var_and_fold_state);
+    optimize_specialized_state(c.nir);
+    nir_shader_instructions_pass(c.nir, lower_null_resource_access, nir_metadata_none, NULL);
+    optimize_specialized_state(c.nir);
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -36,6 +36,7 @@
+ #include "nir.h"
+ #include "nir_builder.h"
+ #include "nir_air.h"
++#include "redfin_metal_translation_cache.h"
+ 
+ #include "pipe/p_context.h"
+ #include "pipe/p_defines.h"
+@@ -85,6 +86,9 @@
+ extern int redfin_drm_profile_read(uint64_t *,size_t);
+ 
+ struct rwa_device {
++   struct redfin_air_translation_cache translation_cache;
++   struct redfin_air_stage_cache stage_cache;
++   struct pipe_resource *quad_vertices;
+    struct pipe_screen *screen;
+    struct pipe_context *pipe;
+ 
+@@ -465,6 +469,9 @@
+             type_size_vec4, nir_lower_io_use_interpolated_input_intrinsics);
+ }
+ 
++static void redfin_air_cache_finish(struct redfin_air_translation_cache *cache);
++#include "redfin_metal_stage_cache.inc"
++
+ struct rwa_device *
+ rwa_device_open(char *why, size_t why_size)
+ {
+@@ -631,6 +638,9 @@
+       device->pipe->bind_compute_state(device->pipe,NULL);
+       device->pipe->delete_compute_state(device->pipe,device->linear_byte_copy_cso);
+    }
++   redfin_air_stage_cache_finish(&device->stage_cache);
++   redfin_air_cache_finish(&device->translation_cache);
++   pipe_resource_reference(&device->quad_vertices, NULL);
+    device->pipe->destroy(device->pipe);
+    device->screen->destroy(device->screen);
+    free(device);
+@@ -2893,6 +2903,7 @@
+ }
+ 
+ #include "redfin_metal_function_constants.inc"
++#include "redfin_metal_translation_cache.inc"
+ 
+ static struct rwa_compute *
+ rwa_compute_create_impl(struct rwa_device *device, const void *bitcode, size_t size,
+@@ -2912,46 +2923,14 @@
+    compute->device = device;
+    compute->mem_ctx = ralloc_context(NULL);
+ 
+-   /* Function constants are taken as zero. There is nothing to take them from: Metal's
+-    * specialization goes through -[MTLFunction newFunctionWithConstantValues:], which
+-    * is one of the methods that run inside Metal's own classes through a nil compiler
+-    * and return nil before a driver sees them (docs/metal.md 10.7). A module that needs
+-    * real values will say so -- the translator refuses what it cannot fold.
+-    */
+-   struct air_constant_value *constants;
+-   int num_constants=rwa_redfin_constants_for_module(compute->mem_ctx,bitcode,size,constant_values,&constants,why,why_size);
+-   if(num_constants<0)goto fail;
+-
+-   /* library_wrapper is false, unlike air_run --library: a wrapped air.visible function
+-    * is a shader made up to be measurable, not a pipeline anyone can dispatch. Metal
+-    * stitches those into a caller at pipeline time (air.stitching_info), which this
+-    * frontend does not implement, and a driver asked to make a compute pipeline out of
+-    * one should be told that rather than handed a wrapper.
+-    */
+-   const struct air_to_nir_options options = {
+-      .constants = constants,
+-      .num_constants = num_constants,
+-   };
+-   const char *error;
+-   compute->nir = air_to_nir(compute->mem_ctx, bitcode, size, entry, &options,
+-                             device->nir_options, &compute->info, &error);
+-   if (!compute->nir) {
+-      /* The sentence the translator wrote, which is the one that matters: it begins
+-       * with its own category (reader, stage, interface, instruction, intrinsic) and
+-       * names what it met. 135 of the corpus's 456 modules are refused with one of
+-       * these, and a driver should repeat it to the application rather than swallow it.
+-       */
+-      say(why, why_size, "%s", error ? error : "the module could not be translated");
++   /* Cached templates have independent metadata/NIR owners and preserve
++    * explicit undefined constants separately from legacy harness defaults. */
++   compute->nir = redfin_air_cached_translate(device, compute->mem_ctx,
++      bitcode, size, entry, constant_values, &compute->info, why, why_size);
++   if (!compute->nir)
+       goto fail;
+-   }
+ 
+    if (compute->info.stage != MESA_SHADER_COMPUTE) {
+-      /* Nothing reaches the first branch as of now: the translator refuses an
+-       * air.visible function itself, with "stage: air.visible, a library function (not
+-       * yet)", and never returns info for one. It is here because that refusal is the
+-       * frontend's own wording about its own limit, and the day the frontend translates
+-       * these without a wrapper this is the sentence a driver should get instead.
+-       */
+       if (compute->info.stage == MESA_SHADER_NONE)
+          say(why, why_size, "%s is an air.visible library function and not an entry "
+                             "point, so it is not a compute pipeline: Metal stitches "
+@@ -4397,22 +4376,10 @@
+       return -1;
+    }
+ 
+-   /* Function constants taken as zero, which is rwa_compute_create's reason verbatim:
+-    * there is nothing to take them from, and the translator refuses what it cannot fold.
+-    */
+-   struct air_constant_value *constants;
+-   unsigned num_constants =
+-      air_module_function_constants(mem_ctx, bitcode, size, &constants);
+-   const struct air_to_nir_options options = {
+-      .constants = constants,
+-      .num_constants = num_constants,
+-   };
+    struct air_shader_info info = { 0 };
+-   const char *error;
+-   nir_shader *nir = air_to_nir(mem_ctx, bitcode, size, entry, &options,
+-                                device->nir_options, &info, &error);
++   nir_shader *nir = redfin_air_cached_translate(device,mem_ctx,bitcode,size,
++      entry,NULL,&info,why,why_size);
+    if (!nir) {
+-      say(why, why_size, "%s", error ? error : "the module could not be translated");
+       ralloc_free(mem_ctx);
+       return -1;
+    }
+@@ -4544,22 +4511,10 @@
+       return -1;
+    }
+ 
+-   /* Function constants taken as zero, which is rwa_module_textures' reason verbatim:
+-    * there is nothing to take them from, and the translator refuses what it cannot fold.
+-    */
+-   struct air_constant_value *constants;
+-   int num_constants=rwa_redfin_constants_for_module(mem_ctx,bitcode,size,constant_values,&constants,why,why_size);
+-   if(num_constants<0){ralloc_free(mem_ctx);return -1;}
+-   const struct air_to_nir_options options = {
+-      .constants = constants,
+-      .num_constants = num_constants,
+-   };
+    struct air_shader_info info = { 0 };
+-   const char *error;
+-   nir_shader *nir = air_to_nir(mem_ctx, bitcode, size, entry, &options,
+-                                device->nir_options, &info, &error);
++   nir_shader *nir = redfin_air_cached_translate(device,mem_ctx,bitcode,size,
++      entry,constant_values,&info,why,why_size);
+    if (!nir) {
+-      say(why, why_size, "%s", error ? error : "the module could not be translated");
+       ralloc_free(mem_ctx);
+       return -1;
+    }
+@@ -5321,6 +5276,7 @@
+     * compute state there is no threadgroup size to recompile for
+     */
+    void *vs_cso, *fs_cso;
++   struct redfin_air_stage *vs_stage, *fs_stage;
+    void *blend, *dsa, *rast, *velem;
+    struct pipe_rasterizer_state redfin_raster_state;
+    struct pipe_resource *vbuf;        /* the full-screen quad, for the generated stage */
+@@ -5332,34 +5288,6 @@
+     */
+    struct rwa_vertex_state vstate;
+ };
+-
+-/* Clone, finalise and compile one stage, handing the driver a copy it may steal. The
+- * clone is not freed on failure, for compute_state_for's reason: a driver that refused
+- * it may or may not have taken it, and neither driver in this build reaches this (both
+- * return a state object and report a bad shader later, at the draw).
+- */
+-static void *
+-make_stage_cso(struct rwa_device *device, nir_shader *nir, char *why, size_t why_size)
+-{
+-   nir_shader *clone = nir_shader_clone(NULL, nir);
+-   if (!clone) {
+-      say(why, why_size, "out of memory compiling a shader stage");
+-      return NULL;
+-   }
+-   finalize_for_gallium(clone, device->screen);
+-   nir_sweep(clone);
+-
+-   struct pipe_shader_state templ = { .type = PIPE_SHADER_IR_NIR, .ir.nir = clone };
+-   struct pipe_context *pipe = device->pipe;
+-   void *cso = nir->info.stage == MESA_SHADER_VERTEX
+-                  ? pipe->create_vs_state(pipe, &templ)
+-                  : pipe->create_fs_state(pipe, &templ);
+-   if (!cso)
+-      say(why, why_size, "%s would not compile the %s stage",
+-          device->screen->get_name(device->screen),
+-          nir->info.stage == MESA_SHADER_VERTEX ? "vertex" : "fragment");
+-   return cso;
+-}
+ 
+ /* Whether a vertex shader reads vertex attributes, which used to be the one thing the
+  * contract could not feed it -- rwa_render_shape carried no formats, strides or offsets,
+@@ -6222,18 +6150,11 @@
+     * error between the stages cannot surface until the draw, because ir3 compiles and
+     * links at draw time (ir3_cache_lookup), so the two belong to two different calls.
+     */
+-   struct air_constant_value *ffc;
+-   int num_ffc=rwa_redfin_constants_for_module(render->mem_ctx,fragment_bitcode,fragment_size,fragment_values,&ffc,why,why_size);
+-   if(num_ffc<0)goto fail;
+-   const struct air_to_nir_options fopts = { .constants = ffc, .num_constants = num_ffc };
+-   const char *error;
+-   fs = air_to_nir(render->mem_ctx, fragment_bitcode, fragment_size,
+-                               fragment_entry, &fopts, device->nir_options, &render->finfo,
+-                               &error);
+-   if (!fs) {
+-      say(why, why_size, "%s", error ? error : "the fragment module could not be translated");
++   fs = redfin_air_cached_translate(device, render->mem_ctx,
++      fragment_bitcode, fragment_size, fragment_entry, fragment_values,
++      &render->finfo, why, why_size);
++   if (!fs)
+       goto fail;
+-   }
+    if (render->finfo.stage != MESA_SHADER_FRAGMENT) {
+       say(why, why_size, "%s is a %s shader, and this makes render pipelines with a "
+                          "fragment stage",
+@@ -6277,16 +6198,11 @@
+          say(why, why_size, "%zu bytes is not a vertex shader module", vertex_size);
+          goto fail;
+       }
+-      struct air_constant_value *vfc;
+-      int num_vfc=rwa_redfin_constants_for_module(render->mem_ctx,vertex_bitcode,vertex_size,vertex_values,&vfc,why,why_size);
+-      if(num_vfc<0)goto fail;
+-      const struct air_to_nir_options vopts = { .constants = vfc, .num_constants = num_vfc };
+-      vs = air_to_nir(render->mem_ctx, vertex_bitcode, vertex_size, vertex_entry, &vopts,
+-                      device->nir_options, &render->vinfo, &error);
+-      if (!vs) {
+-         say(why, why_size, "%s", error ? error : "the vertex module could not be translated");
++      vs = redfin_air_cached_translate(device, render->mem_ctx,
++         vertex_bitcode, vertex_size, vertex_entry, vertex_values,
++         &render->vinfo, why, why_size);
++      if (!vs)
+          goto fail;
+-      }
+       if (render->vinfo.stage != MESA_SHADER_VERTEX) {
+          say(why, why_size, "%s is a %s shader, and the vertex stage of a render pipeline "
+                             "takes a vertex function",
+@@ -6374,12 +6290,14 @@
+    nir_shader_gather_info(fs,nir_shader_get_entrypoint(fs));
+    nir_shader_gather_info(vs,nir_shader_get_entrypoint(vs));
+    render->raster_only=!fs->info.writes_memory && !vs->info.writes_memory;
+-   render->fs_cso = make_stage_cso(device, fs, why, why_size);
+-   if (!render->fs_cso)
++   render->fs_stage = redfin_air_stage_create(device, fs, why, why_size);
++   if (!render->fs_stage)
+       goto fail;
+-   render->vs_cso = make_stage_cso(device, vs, why, why_size);
+-   if (!render->vs_cso)
++   render->fs_cso = render->fs_stage->cso;
++   render->vs_stage = redfin_air_stage_create(device, vs, why, why_size);
++   if (!render->vs_stage)
+       goto fail;
++   render->vs_cso = render->vs_stage->cso;
+    /* The state objects own distinct clones. Interface strings/arrays were
+     * copied out by air_to_nir and the resource/slot tables contain no NIR
+     * references. Free both fixed-stage originals, including supplied stages.
+@@ -6501,15 +6419,19 @@
+            &(struct pipe_vertex_element){
+               .src_offset = 0, .src_stride = 16, .vertex_buffer_index = 0,
+               .src_format = PIPE_FORMAT_R32G32B32A32_FLOAT });
+-   render->vbuf = pipe_buffer_create(device->screen, PIPE_BIND_VERTEX_BUFFER,
+-                                     PIPE_USAGE_DEFAULT, sizeof(rwa_quad_verts));
+-   if (!render->velem || !render->vbuf) {
+-      say(why, why_size, "%s would not make the quad a draw covers the attachment with",
+-          rwa_device_name(device));
++   bool needs_quad = !render->vstate.count || render->vstate.stream_count > RWA_MAX_VERTEX_BUFFERS;
++   if (needs_quad && !device->quad_vertices) {
++      device->quad_vertices = pipe_buffer_create(device->screen, PIPE_BIND_VERTEX_BUFFER,
++                                                PIPE_USAGE_DEFAULT, sizeof(rwa_quad_verts));
++      if (device->quad_vertices)
++         pipe_buffer_write(device->pipe, device->quad_vertices, 0, sizeof(rwa_quad_verts), rwa_quad_verts);
++   }
++   if (needs_quad)
++      pipe_resource_reference(&render->vbuf, device->quad_vertices);
++   if (!render->velem || (needs_quad && !render->vbuf)) {
++      say(why, why_size, "%s would not make the vertex state", rwa_device_name(device));
+       goto fail;
+    }
+-   pipe_buffer_write(device->pipe, render->vbuf, 0, sizeof(rwa_quad_verts),
+-                     rwa_quad_verts);
+ 
+    /* What the layout became, for a driver that has to fill the stream slots and for a
+     * caller that wants to compare the mapping with the shader's own interface rather
+@@ -6597,14 +6519,8 @@
+     * it, and softpipe's delete is a plain FREE, so a state deleted while bound leaves
+     * the context holding freed memory until something is bound over it.
+     */
+-   if (render->vs_cso) {
+-      pipe->bind_vs_state(pipe, NULL);
+-      pipe->delete_vs_state(pipe, render->vs_cso);
+-   }
+-   if (render->fs_cso) {
+-      pipe->bind_fs_state(pipe, NULL);
+-      pipe->delete_fs_state(pipe, render->fs_cso);
+-   }
++   redfin_air_stage_release(render->vs_stage);
++   redfin_air_stage_release(render->fs_stage);
+    if (render->blend) {
+       pipe->bind_blend_state(pipe, NULL);
+       pipe->delete_blend_state(pipe, render->blend);

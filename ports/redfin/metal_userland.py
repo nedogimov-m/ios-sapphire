@@ -290,7 +290,7 @@ static void redfin_metal_io_completed(const uint64_t before[4],const uint64_t af
 
 def adapt_driver(text):
     text = replace_once(text, '#include "redwood_drawable.h"',
-        '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include "graphics-memory-report.h"\n#include <pthread.h>\n#include <mach/mach_time.h>\n'
+        '#include "redwood_drawable.h"\n#include "metal-abi.h"\n#include "graphics-memory-report.h"\n#include "metal-translation-cache.h"\n#include <pthread.h>\n#include <mach/mach_time.h>\n'
         'extern int redfin_metal_abi_ready(void);\nextern int redfin_metal_hardware_ready(void);')
     text = replace_once(text, 'static bool\nmesa_available(void)', LOCKING + EXECUTION + FENCE_OBSERVATIONS + '\nstatic bool\nmesa_available(void)')
     text = replace_once(text, 'mesa_available(void)\n{', 'mesa_available(void)\n{\n\tREDFIN_MESA_SCOPE;')
@@ -317,15 +317,17 @@ def adapt_driver(text):
         '\tint (*commands_begin)(struct rwa_device *, char *, size_t);\n'
         '\tint (*commands_end)(struct rwa_device *, char *, size_t);\n'
         '\tint (*raster_statistics)(struct rwa_device *,uint64_t *,size_t);\n'
+        '\tint (*translation_statistics)(struct rwa_device *,uint64_t *,size_t);\n'
         '\tint (*submission_statistics)(struct rwa_device *,uint64_t *,size_t);')
     text = replace_once(text,'\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");',
         '\t*(void **)&mesa.finish = dlsym(mesa.handle, "rwa_finish");\n'
         '\t*(void **)&mesa.commands_begin = dlsym(mesa.handle, "rwa_commands_begin");\n'
         '\t*(void **)&mesa.commands_end = dlsym(mesa.handle, "rwa_commands_end");\n'
         '\t*(void **)&mesa.raster_statistics = dlsym(mesa.handle,"rwa_redfin_raster_stats");\n'
+        '\t*(void **)&mesa.translation_statistics = dlsym(mesa.handle,"rwa_redfin_translation_cache_statistics");\n'
         '\t*(void **)&mesa.submission_statistics = dlsym(mesa.handle,"rwa_redfin_submission_stats");')
     text = replace_once(text,'if (mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||',
-        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL || mesa.raster_statistics == NULL || mesa.submission_statistics == NULL ||\n'
+        'if (mesa.commands_begin == NULL || mesa.commands_end == NULL || mesa.raster_statistics == NULL || mesa.translation_statistics == NULL || mesa.submission_statistics == NULL ||\n'
         '\t    mesa.device_open == NULL || mesa.compute_create == NULL || mesa.dispatch == NULL ||')
     text = replace_once(text,'- (void)commit\n{\n\tchar why[512] = { 0 };',
         '- (void)commit\n{\n\tREDFIN_MESA_SCOPE;\n\tchar why[512] = { 0 };\n'
@@ -462,6 +464,17 @@ def adapt_driver(text):
         rw_print("REDFIN METAL PIPELINE TIME: boot=%s ordinal=%u call-us=%llu success=%u vertex=%.80s fragment=%.80s\\n",
             redfin_fence_boot,redfin_pipeline_number,(unsigned long long)redfin_pipeline_call_us,
             render!=NULL,vertex?[[vertex name] UTF8String]:"generated",[[fragment name] UTF8String]);
+    if(redfin_pipeline_report && redfin_fence_boot[0]) {
+        uint64_t cache[REDFIN_AIR_CACHE_STAT_WORDS]={0};
+        REDFIN_MESA_SCOPE;
+        if(!mesa.translation_statistics([self mesaDevice],cache,REDFIN_AIR_CACHE_STAT_WORDS))
+            rw_print("REDFIN METAL PREPARATION: boot=%s ordinal=%u template-hits=%llu misses=%llu entries=%llu bytes=%llu evictions=%llu bypasses=%llu stage-hits=%llu misses=%llu entries=%llu key-bytes=%llu evictions=%llu\\n",
+                redfin_fence_boot,redfin_pipeline_number,
+                (unsigned long long)cache[0],(unsigned long long)cache[1],(unsigned long long)cache[2],
+                (unsigned long long)cache[3],(unsigned long long)cache[4],(unsigned long long)cache[5],
+                (unsigned long long)cache[6],(unsigned long long)cache[7],(unsigned long long)cache[8],
+                (unsigned long long)cache[9],(unsigned long long)cache[10]);
+    }
     if(redfin_memory_sample)redfin_graphics_memory_report("pipeline-after",redfin_pipeline_number);
 '''+point)
     text += '''
@@ -472,6 +485,13 @@ int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)
     if (!counts || words!=2 || ![device isKindOfClass:[RedwoodMetalDevice class]] ||
         !mesa.raster_statistics) return -1;
     return mesa.raster_statistics([device mesaDevice],counts,words);
+}
+int redfin_metal_translation_cache_statistics(id device,uint64_t *counts,size_t words)
+{
+    REDFIN_MESA_SCOPE;
+    if (!counts || words!=REDFIN_AIR_CACHE_STAT_WORDS ||
+        ![device isKindOfClass:[RedwoodMetalDevice class]] || !mesa.translation_statistics) return -1;
+    return mesa.translation_statistics([device mesaDevice],counts,words);
 }
 '''
     return text.replace('/redwood/', '/redfin/').replace('libredwoodair.dylib', 'libredfinair.dylib')

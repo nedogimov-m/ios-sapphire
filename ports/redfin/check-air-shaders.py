@@ -136,6 +136,18 @@ def prepare_memory_probe(source):
     path.write_text(text)
 
 
+def prepare_cache_probe(source):
+    path=source/'src/gallium/drivers/freedreno/ir3/ir3_cmdline.c'
+    shutil.copy2(ROOT/'ports/redfin/metal-cache-host.inc',path.parent/'redfin_metal_cache_host.inc')
+    text=path.read_text()
+    point='static struct ir3_compiler *compiler;'
+    text=replace_once(text,point,point+'\n#include "redfin_metal_cache_host.inc"')
+    # Insert only in the AIR loader, after its bounded memory probe.
+    point='   printf("; AIR LIFETIME: rounds=%u held-bytes=%zu independent-release=1\\n",\n          repeats, held_bytes);\n'
+    text=replace_once(text,point,point+'   redfin_host_cache_run(bitcode,bitcode_size,&options);\n')
+    path.write_text(text)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mesa-source', type=Path, required=True)
@@ -146,6 +158,8 @@ def main():
     parser.add_argument('--snapshots', type=Path, help='private JSON: function name -> {index: hex bytes}')
     parser.add_argument('--lifetime-rounds', type=int, default=0,
                         help='hold/release up to 32 independent translations with native debug allocator accounting')
+    parser.add_argument('--cache-check',action='store_true',
+                        help='exercise real NIR template serialization, metadata ownership and forced LRU eviction')
     args = parser.parse_args()
     work = args.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=False)
@@ -175,6 +189,9 @@ def main():
             if not 0 <= args.lifetime_rounds <= 32:
                 raise ValueError('lifetime rounds must be between 0 and 32')
             prepare_memory_probe(source)
+            if args.cache_check:
+                prepare_cache_probe(source)
+                report['cache_probe_sha256']=hashlib.sha256((ROOT/'ports/redfin/metal-cache-host.inc').read_bytes()).hexdigest()
             venv = args.venv.resolve() if args.venv else work/'venv'
             if not (venv/'bin/meson').is_file():
                 run([sys.executable, '-m', 'venv', venv])

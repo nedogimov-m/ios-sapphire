@@ -1,5 +1,36 @@
 # HackiOS upstream review — 2026-10-22
 
+## Bounded shader preparation and immutable state reuse — 2026-10-25
+
+Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's
+AIR translation, reflection and Gallium stage creation with Mesa25.0.7's real
+NIR serializer and freedreno shader ownership. Kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+is unchanged. A private host phase profile over actual fixed_frag_lph_cph
+specializations identifies scratch promotion and subsequent state folding as
+the dominant frontend cost. Fold defined flags and unreachable control flow
+inside AIR's promotion loop; preserve the stock pass schedule for all other
+Mesa callers. Representative warm host variants fall from about474ms to166ms;
+these are host compiler samples, not phone rendering FPS.
+
+Add exact module/entry/native-constant keys, including undefined/legacy presence,
+sorted indices, lengths and full supplied bytes. Hash matches require full byte
+comparison. Each hit deserializes independent real NIR and deep-copies the full,
+unpruned interface, so reflection and pipeline resource pruning cannot mutate
+another caller. Templates are bounded to32entries/8MiB charged payload per
+device. Canonically finalized stages share their real Gallium CSO with separate
+cache/pipeline references; eviction preserves live pipelines and ordinary driver
+variant keys. Stage keys are independently bounded to32entries/8MiB; this is
+not a bound on all driver/GPU allocations. Retain one immutable quad VBO per
+device and allocate none for attribute streams that do not need the placeholder.
+All external-page, resource, half-precision and fence rules stay intact.
+
+42host integration cases,14real AIR/NIR/A620 modules plus all19captured
+parameter variants and forced two-entry real-template lifetime/eviction checks
+PASS. Full native paired driver/checker/actual20H392 ABI/signatures PASS.
+The explicitly enabled native checker adds70distinct color variants, pixel/guard
+checks and two pipelines retained across both LRUs; its device results are
+pending. Draw/kernel screen capture and automatic Phone/Photos opens remain off.
+
 ## Ordinary composition startup and lightweight latency observations — 2026-10-25
 
 Preferred906425b7/8e611870 graphics sources remain unchanged. V32's complete

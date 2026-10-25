@@ -102,6 +102,12 @@ also removed. Heavy diagnostic readbacks materially perturb this run; ordinary
 composition performance is the next priority. Stable60/90render FPS remains
 unproved.
 
+A complete shader-preparation block now adds bounded per-device translation
+templates, reference-counted Gallium stage reuse and one shared immutable quad
+buffer. AIR folds defined state during scratch promotion rather than repeatedly
+walking dead branches. Host real-NIR ownership/eviction checks and all19captured
+parameter variants pass; the combined native performance run is pending.
+
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
 have complete, independently verified local backups. Android userdata has

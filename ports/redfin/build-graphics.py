@@ -94,6 +94,9 @@ def main():
                 inputs += [ROOT/'ports/redfin/metal-defined-state.patch']
                 inputs += [ROOT/'ports/redfin/metal-memory-lifetime.patch']
                 inputs += [ROOT/'ports/redfin/metal-raster-io.patch']
+                inputs += [ROOT/'ports/redfin'/name for name in
+                           ('metal-preparation.patch','metal-translation-cache.h',
+                            'metal-translation-cache.inc','metal-stage-cache.inc')]
             fingerprint=hashlib.sha256(b''.join(x.read_bytes() for x in inputs)).hexdigest()
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
@@ -142,6 +145,10 @@ def main():
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-defined-state.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-memory-lifetime.patch'],source)
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-raster-io.patch'],source)
+                    for name in ('translation-cache.h','translation-cache.inc','stage-cache.inc'):
+                        shutil.copy2(ROOT/'ports/redfin'/('metal-'+name),
+                                     source/'src/compiler/air'/('redfin_metal_'+name.replace('-','_')))
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-preparation.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -227,6 +234,8 @@ def main():
                 metal_sources += [ROOT/'ports/redfin'/name for name in ('metal-resource-check.c','metal-resource-check.ll')]
                 metal_sources += [ROOT/'ports/redfin/graphics-memory-report.h']
                 metal_sources += [ROOT/'ports/redfin/metal-half-check.inc']
+                metal_sources += [ROOT/'ports/redfin'/name for name in
+                                  ('metal-translation-cache.h','metal-cache-check.inc')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)
