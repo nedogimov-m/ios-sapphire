@@ -93,12 +93,12 @@ three CPU domains now reach their native normal frequencies with observed
 thermal throttling/restoration; Photos still fails in its native assetsd/TCC
 path. Physical90Hz and credential persistence are independently observed.
 
-The latest V18 capture keeps the GPU and window server alive and passes native
-MRT-clear, scissor/viewport and framebuffer-fetch pixel probes. Actual system
-Metal composition still shows checkerboard/incorrect fills. Exact-pitch probes
-identify a32-byte row shift on unaligned sources; real GPU row conversion is
-implemented and awaits the combined hardware check. Correct rendering remains
-the priority; stable60/90render FPS is not established.
+The user confirms Phone and Photos now work normally; their automatic launch
+checks are retired. V19 proves native GPU row conversion and same-command
+texture aliasing for480-byte sources/outputs, but actual system composition
+still shows checkerboard/incorrect fills. Correct rendering is the current
+priority. Bounded per-draw compositor capture and broader native vertex/sampler
+probes are prepared; stable60/90render FPS is not established.
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata

@@ -14,10 +14,21 @@ class GMEMBoundsTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temp=tempfile.TemporaryDirectory();cls.addClassCleanup(cls.temp.cleanup)
         p=Path(cls.temp.name);(p/'bounds.c').write_text('#include "gmem-bounds.h"\n'
-            'int fits(uint64_t n,uint64_t o,uint64_t p,uint32_t r){return redfin_linear_gmem_fits(n,o,p,r);}\n')
+            'int fits(uint64_t n,uint64_t o,uint64_t p,uint32_t r){return redfin_linear_gmem_fits(n,o,p,r);}\n'
+            'uint64_t extent(uint64_t n,uint64_t o,uint64_t d,int imported){return redfin_linear_render_bytes(n,o,d,imported);}\n')
         subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I',str(HERE),
                         str(p/'bounds.c'),'-o',str(p/'bounds.so')],check=True,capture_output=True)
         cls.lib=C.CDLL(str(p/'bounds.so'));cls.lib.fits.argtypes=[C.c_uint64,C.c_uint64,C.c_uint64,C.c_uint32]
+        cls.lib.extent.argtypes=[C.c_uint64,C.c_uint64,C.c_uint64,C.c_int];cls.lib.extent.restype=C.c_uint64
+
+    def test_extra_allocation_tail_does_not_enlarge_a_borrowed_render_slice(self):
+        available=self.lib.extent(65536,0,4544*9,1)
+        self.assertEqual(available,40896);self.assertFalse(self.lib.fits(available,0,4544,9))
+        owned=self.lib.extent(65536,0,4608*12,0)
+        self.assertTrue(self.lib.fits(owned,0,4608,9))
+        self.assertEqual(self.lib.extent(65536,64,4096,1),4160)
+        for offset,declared in [(0,0),(0,65537),(65537,1),(65535,2)]:
+            self.assertEqual(self.lib.extent(65536,offset,declared,1),0)
 
     def test_actual_short_iosurface_cannot_authorize_a_four_row_gmem_store(self):
         self.assertFalse(self.lib.fits(1212416,0,4288,282))

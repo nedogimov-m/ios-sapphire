@@ -1,5 +1,52 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN compositor resources/diagnostics and real Scheduled boundary built; fresh V23 staged — 2026-10-25
+
+Source basea3a58ac plus this completed related block. Fix a concrete native
+command-state contract error: the async executor published Scheduled after
+recording Gallium draws but BEFORE commands_end actually submitted/fenced
+those draws and resolved IOSurfaces. It now publishes Scheduled only after
+that genuine native success, immediately before Completed. A host ObjC/GCD
+regression executes the actual adapted commit/executor/wait/error methods
+with an explicitly delayed real-end call: status/waitUntilScheduled must not
+outrun that boundary, including a failure. This does not yet prove the user's
+checkerboard was caused by that race.
+
+Imported Metal textures now retain/return the genuine IOSurface/plane. Add
+actual first-use evidence for unserved blit/view/fence/event/external-buffer
+calls, preserving their native failure values. Add real two-stream/four-attribute,
+nonzero buffer/index offset/base-instance/indexed-strip/varying/nearest+linear
+sampler pixel checks. Imported GMEM backing is bounded by the declared shared
+slice, not surplus BO tail. Exact padding/guard failures now report offsets.
+
+An explicitly enabled backboardd job captures at most32actual draws/48private
+linear-resource thumbnails after real GPU drains, plus source IDs, pipeline/
+stream/uniform data and alpha/premultiplication statistics. Nonlinear images
+are skipped. Diagnostic fences/CPU readonly maps alter timing; this run cannot
+establish ordinary FPS or exclude timing-sensitive behavior. A nonce/CRC/bounds-
+validated decoder writes only private logs; the default job policy removes the
+capture flag. Kernel/physical display path remains unchanged.
+
+54combined host cases PASS/no skips. Full Mesa/AIR/native Metal/checker/shaders/
+actual20H392 API/signature build PASS, research/redfin-metal-composition-v2,
+final local20261025-153037/noCI. Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V20 image 75ab3c60c41fd21463548894544871306a9e88565e5fb6282fda51478212dbcc, native loader/ADT/liveFDT/
+firmware/power/DVFS/source-window/return preflight PASS.
+
+V22 failed HOST-ONLY staging because the narrow file allowlist lacked the
+known backboardd plist; it performed no device writes and MUST NOT be applied.
+Add only that exact root-owned0644path to the helper. Fresh V23 read epoch from
+clean consistent HFSX/write_count936296; complete file/metadata preimages,
+signed-file/seal/readback/native readonly fsck PASS: 173ranges/24412160bytes/
+2new/zero freed blocks. Both native job cache AND GUI job plist disable auto
+Phone/Photos launches; both cache/backboardd plist explicitly enable this one
+composition observer. UI/identities/credentials/existing logs are preserved.
+V23 is PREPARED, NOT APPLIED; V21 and older are applied/stale. Next apply V23
+once and collect one combined V20 run. User-confirmed Phone/Photos are no
+longer automatically opened. Stable/correct system rendering and broader goal
+remain unfinished. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x530e1f43c88c174c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V19 real row copies partly pass; system checkerboard persists; app checks retired — 2026-10-25
 
 Sourced17ecc1, unchanged local20261025-134128/noCI7fadbcd8..., V19 image

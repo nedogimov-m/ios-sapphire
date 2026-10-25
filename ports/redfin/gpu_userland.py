@@ -25,7 +25,7 @@ LEGACY_JOB={'Label':LABEL,'ProgramArguments':['/redfin/bin/gpu-render'],'RunAtLo
     'EnvironmentVariables':{'OSMESA_SOFTWARE':'0','FD_MESA_DEBUG':'sysmem','MESA_DEBUG':'context'}}
 
 
-def backboardd_job(original):
+def backboardd_job(original,draw_capture=False):
     """Preserve the event server; exec supplies the gated loader after launchd."""
     services=original.get('MachServices')
     if (original.get('Label')!='com.apple.backboardd' or
@@ -42,6 +42,8 @@ def backboardd_job(original):
     # 20H392 launchd explicitly filters DYLD_* here. Remove only our known
     # older configuration; the scoped native exec hook now supplies it.
     env.pop('DYLD_INSERT_LIBRARIES',None)
+    env.pop('REDFIN_METAL_DRAW_CAPTURE',None)
+    if draw_capture:env['REDFIN_METAL_DRAW_CAPTURE']='1'
     if env:job['EnvironmentVariables']=env
     else:job.pop('EnvironmentVariables',None)
     for key in ('StandardOutPath','StandardErrorPath'):
@@ -54,7 +56,8 @@ def backboardd_job(original):
     return job
 
 
-def patch_launchd_cache(original,system_eagl=False):
+def patch_launchd_cache(original,system_eagl=False,draw_capture=False):
+    if draw_capture and not system_eagl:raise ValueError('draw capture requires the native window-server job')
     if not isinstance(original,bytes) or not original.startswith(b'bplist00') or not 40<=len(original)<=0x1000000:
         raise ValueError('GPU diagnostic requires the current bounded binary launchd cache')
     cache=plistlib.loads(original)
@@ -80,7 +83,7 @@ def patch_launchd_cache(original,system_eagl=False):
     if system_eagl:
         backboards=[key for key,value in jobs.items() if value.get('Label')=='com.apple.backboardd']
         if backboards!=[BACKBOARD_PATH]:raise ValueError('expected exactly one stock System backboardd job')
-        expected['LaunchDaemons'][BACKBOARD_PATH]=backboardd_job(jobs[BACKBOARD_PATH])
+        expected['LaunchDaemons'][BACKBOARD_PATH]=backboardd_job(jobs[BACKBOARD_PATH],draw_capture=draw_capture)
         allowed.add(BACKBOARD_PATH)
     common=dict(label=LABEL,job_key=JOB_PATH,system_eagl=system_eagl,migrated_from=OLD_JOB_PATH if migrated else None,
         bytes=len(original),before_sha256=before,root_writes=False)

@@ -35,6 +35,7 @@ static const struct target targets[]={
     {"/System/Library/Extensions/RedfinMetal.bundle/Info.plist",0,0644},
     {"/System/Library/Extensions/RedfinMetal.bundle/_CodeSignature/CodeResources",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.metal-check.plist",0,0644},
+    {"/System/Library/LaunchDaemons/com.apple.backboardd.plist",0,0644},
     {"/private/var/mobile/Library/Logs/redfin-metal-check.log",501,0600},
     {"/System/Library/LaunchDaemons/com.redfin.photos-init.plist",0,0644},
     {"/System/Library/LaunchDaemons/com.redfin.gui-check.plist",0,0644},

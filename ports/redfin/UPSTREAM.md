@@ -1,5 +1,51 @@
 # HackiOS upstream review — 2026-10-22
 
+## Publish native Scheduled only after genuine submission — 2026-10-25
+
+Preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and unchanged kernel
+8e61187098f2c26c5daee8f9f72b6416aa64b9ab remain reviewed pins. Re-read the native
+command-buffer status, scheduling waiters and Metal/AIR deferred raster scope.
+The adapted async loop inherited Scheduled immediately after encoding, while
+commands_end had not yet submitted its deferred draws. A consumer observing
+Scheduled could therefore reach the independent kernel display queue first.
+Publish that status only after actual native submit/fence/IOSurface resolve
+success, before Completed; failure retains the real Error. This is conservative
+scheduling publication on the synchronous native submit backend, not a fake GPU
+completion. Actual adapted ObjC executor/commit/wait/error code is exercised
+against a blocked end fence and real GCD waiters. Native graphical effect remains
+to be checked independently, including after disabling diagnostic drains.
+
+## Native surface metadata and bounded compositor evidence — 2026-10-25
+
+Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab. Re-reviewed native Metal
+IOSurface import/object lifetime and the remaining explicitly unserved entry
+points. Imported texture wrappers now retain and return their actual IOSurface
+and plane; ordinary owned textures still report no IOSurface. Unserved blit,
+view, event/fence and external-buffer entry points retain native failure values
+and emit bounded first-use evidence. No unsupported operation is called complete.
+
+The actual4512-byte probe's pixels showed no mismatch, but its later padding/
+tail check failed. Mesa25.0.7 imports declare slice.size0 as actual stride*rows;
+extra BO allocation bytes are not an enlarged borrowed render slice. Bound
+shared linear GMEM footprint by that declared slice as well as the actual BO.
+Owned native padded textures retain their real backing. Guard checks now log
+the exact failed source/destination/offset. This remains real GPU sysmem routing.
+
+An explicit window-server job option enables at most32real-draw observations
+and48private linear-BO thumbnails, matched to the actual boot nonce and CRC.
+Only genuinely completed work is mapped. Inputs, outputs, stages, source surface
+IDs, stream strides and bounded uniform/vertex words are recorded. Nonlinear
+images are skipped; no fabricated pixels are substituted. Extra real fences and
+CPU diagnostic readback change timing: this capture cannot establish normal FPS
+or exclude a timing-sensitive bug. The default policy removes the observer flag.
+A real two-stream/four-attribute/indexed/base-instance/varying/sampler pixel probe
+covers the path closer to native CoreAnimation. Native behavior awaits hardware.
+
+Phone/Photos are user-confirmed functional; automatic app launch checks are
+retired. The upcoming fresh package disables both job cache and job plist and
+enables only compositor readbacks; it preserves the user's foreground choices.
+
 ## Actual A620 row-layout conversion and native alias ownership — 2026-10-25
 
 Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and

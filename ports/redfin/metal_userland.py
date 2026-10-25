@@ -398,6 +398,8 @@ def adapt_driver(text):
     text = adapt_execution(text)
     from ports.redfin.metal_raster_userland import adapt as adapt_raster
     text = adapt_raster(text)
+    from ports.redfin.metal_resource_userland import adapt as adapt_resources
+    text = adapt_resources(text)
     text += '''
 /* Private readonly evidence for the paired native pixel checker. */
 int redfin_metal_raster_statistics(id device,uint64_t *counts,size_t words)
@@ -476,6 +478,15 @@ def adapt_execution(text):
 '''+text[end:]
     text=replace_once(text,'- (void)waitUntilScheduled { }',
         '- (void)waitUntilScheduled {if (_status<RW_CB_SCHEDULED && _status>=RW_CB_COMMITTED) [self waitUntilCompleted];}')
+    # Raster work can still be only Gallium commands at the end of the
+    # encoding loop. Publishing Scheduled there lets a display consumer
+    # acquire the kernel GPU queue before that work has even been submitted.
+    # The native submit is synchronous; publish only after its real finish
+    # and every IOSurface resolve, immediately before Completed.
+    text=replace_once(text,'\t_status = RW_CB_SCHEDULED;   /* submitted; the fence below is what makes it completed */\n','')
+    text=replace_once(text,'\t\t\t_status=RW_CB_COMPLETED;',
+        '\t\t\t_status=RW_CB_SCHEDULED; /* actual submit/fence/IOSurface resolve have succeeded */\n'
+        '\t\t\t_status=RW_CB_COMPLETED;')
     # A late completed handler must still wait while work is only scheduled.
     start=text.index('- (void)addCompletedHandler:');end=text.index('\n}\n',start)+3
     method=text[start:end]

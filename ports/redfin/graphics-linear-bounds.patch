@@ -9,7 +9,7 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_gmem.c b/src/gallium/driver
  
  /*
   * GMEM is the small (ie. 256KiB for a200, 512KiB for a220, etc) tile buffer
-@@ -693,6 +694,28 @@
+@@ -693,6 +694,30 @@
     }
  }
  
@@ -25,7 +25,9 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_gmem.c b/src/gallium/driver
 +   if (fd_resource_tile_mode(surface->texture,level)!=0) return true;
 +   uint64_t offset=fd_resource_offset(rsc,level,surface->u.tex.first_layer);
 +   unsigned rows=util_format_get_nblocksy(rsc->b.b.format,u_minify(rsc->b.b.height0,level));
-+   bool fits=redfin_linear_gmem_fits(fd_bo_size(rsc->bo),offset,fd_resource_pitch(rsc,level),rows);
++   uint64_t available=redfin_linear_render_bytes(fd_bo_size(rsc->bo),offset,
++      rsc->layout.slices[level].size0,rsc->b.is_shared);
++   bool fits=redfin_linear_gmem_fits(available,offset,fd_resource_pitch(rsc,level),rows);
 +   if (!fits) {
 +      static unsigned notices;
 +      unsigned n=__atomic_fetch_add(&notices,1,__ATOMIC_RELAXED);
@@ -38,7 +40,7 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_gmem.c b/src/gallium/driver
  void
  fd_gmem_render_tiles(struct fd_batch *batch)
  {
-@@ -752,6 +775,14 @@
+@@ -752,6 +777,14 @@
     if (batch->tessellation) {
        assert(ctx->emit_sysmem_prep);
        sysmem = true;

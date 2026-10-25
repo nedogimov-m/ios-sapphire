@@ -7,6 +7,14 @@
 #define REDFIN_GMEM_BOUNDS_H
 #include <stdint.h>
 #include <stdbool.h>
+static inline uint64_t redfin_linear_render_bytes(uint64_t allocation,uint64_t offset,
+    uint64_t declared,bool imported)
+{
+    if(offset>allocation)return 0;
+    if(!imported)return allocation;
+    if(!declared||declared>allocation-offset)return 0;
+    return offset+declared;
+}
 static inline bool redfin_linear_gmem_fits(uint64_t allocation,uint64_t offset,
     uint64_t pitch,uint32_t rows)
 {

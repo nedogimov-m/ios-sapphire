@@ -29,3 +29,24 @@ fragment float4 redfin_fetch_other_fragment(float4 other [[color(1)]])
 fragment float4 redfin_position_sample_fragment(float4 position [[position]],
     texture2d<float,access::read> source [[texture(0)]])
 { return source.read(uint2(position.xy)); }
+
+struct RedfinStreamInput {
+    float2 position [[attribute(0)]];
+    float2 uv [[attribute(1)]];
+    float4 tint [[attribute(2)]];
+    float mask [[attribute(3)]];
+};
+struct RedfinStreamOutput {
+    float4 position [[position]];
+    float2 uv [[user(locn0)]];
+    float4 tint [[user(locn1)]];
+    float mask [[user(locn2)]];
+};
+vertex RedfinStreamOutput redfin_stream_vertex(RedfinStreamInput input [[stage_in]])
+{
+    RedfinStreamOutput value;value.position=float4(input.position,0,1);
+    value.uv=input.uv;value.tint=input.tint;value.mask=input.mask;return value;
+}
+fragment float4 redfin_stream_fragment(RedfinStreamOutput input [[stage_in]],
+    texture2d<float> source [[texture(0)]],sampler state [[sampler(0)]])
+{ return source.sample(state,input.uv)*input.tint*input.mask; }

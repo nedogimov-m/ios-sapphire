@@ -22,7 +22,13 @@ static id<MTLTexture> raster_texture(id device,IOSurfaceRef surface)
     MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
         width:IOSurfaceGetWidth(surface) height:IOSurfaceGetHeight(surface) mipmapped:NO];
     desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;desc.storageMode=MTLStorageModeShared;
-    return [device newTextureWithDescriptor:desc iosurface:surface plane:0];
+    id texture=[device newTextureWithDescriptor:desc iosurface:surface plane:0];
+    void *actual=texture?((void *(*)(id,SEL))objc_msgSend)(texture,sel_registerName("iosurface")):NULL;
+    NSUInteger plane=texture?((NSUInteger (*)(id,SEL))objc_msgSend)(texture,sel_registerName("iosurfacePlane")):0;
+    if(texture&&(actual!=surface||plane)) {
+        printf("REDFIN METAL SURFACE: native object/plane getter mismatch\n");[texture release];return nil;
+    }
+    return texture;
 }
 static id<MTLRenderPipelineState> raster_pipeline(id<MTLDevice> device,id<MTLLibrary> library,
     NSString *fragment,unsigned count,BOOL fetch)
@@ -180,8 +186,14 @@ static BOOL render_byte_pitch(id<MTLDevice> device,id<MTLLibrary> library,uint32
                 /* Source padding must also stay unchanged. Destination row padding
                  * is an implementation detail, but its allocation tail is guarded. */
                 if(!i)for(unsigned y=0;valid&&y<height;++y)for(unsigned at=width*4;valid&&at<pitches[i];++at)
-                    valid=pixels[y*pitches[i]+at]==0xa5;
-                for(unsigned at=pitches[i]*height;valid&&at<allocations[i];++at)valid=pixels[at]==0xa5;
+                    if(pixels[y*pitches[i]+at]!=0xa5) {
+                        printf("REDFIN METAL PITCH PADDING: source-pitch=%u surface=%u round=%u offset=%u actual=%02x\n",
+                            source_pitch,i,round,y*pitches[i]+at,pixels[y*pitches[i]+at]);valid=NO;
+                    }
+                for(unsigned at=pitches[i]*height;valid&&at<allocations[i];++at)if(pixels[at]!=0xa5) {
+                    printf("REDFIN METAL PITCH GUARD: source-pitch=%u destination-pitch=%u surface=%u round=%u offset=%u actual=%02x\n",
+                        source_pitch,destination_pitch,i,round,at,pixels[at]);valid=NO;
+                }
                 if(IOSurfaceUnlock(surfaces[i],kIOSurfaceLockReadOnly,&seed)!=KERN_SUCCESS)valid=NO;
             }
         }

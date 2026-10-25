@@ -1,0 +1,35 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -213,6 +213,7 @@
+    unsigned linear_pitch,linear_offset,linear_shadow_pitch,linear_shadow_offset,linear_surface;
+    uint64_t linear_epoch;
+    bool linear_dirty;
++   unsigned redfin_surface;
+ };
+ 
+ static int rwa_redfin_linear_import(struct rwa_texture *,const struct pipe_resource *,unsigned,unsigned,unsigned,char *,size_t);
+@@ -1390,6 +1391,7 @@
+       return NULL;
+    }
+    texture->device = device;
++   texture->redfin_surface=import?(unsigned)import->id:0;
+    texture->shape = *shape;
+    texture->format_name = fmt->name;
+    texture->layers = array_size;
+@@ -6565,6 +6567,7 @@
+ }
+ 
+ #include "redfin_metal_raster.inc"
++#include "redfin_metal_composition_trace.inc"
+ 
+ int
+ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
+@@ -7090,6 +7093,7 @@
+    rc = redfin_metal_scope_complete(&device->command_scope,render->raster_only,
+                                    command_scope_finish,device,why,why_size);
+    if(!rc&&!device->command_scope.active)rc=rwa_redfin_linear_resolve_all(device,why,why_size);
++   if(!rc)rc=rwa_redfin_trace_draw(render,draw,why,why_size);
+ 
+ unbind:
+    unbind_stage(device, PIPE_SHADER_FRAGMENT, &fbound);
