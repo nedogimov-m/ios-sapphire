@@ -37,18 +37,19 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
  };
  
  static int rwa_redfin_linear_import(struct rwa_texture *,const struct pipe_resource *,unsigned,unsigned,unsigned,char *,size_t);
-@@ -259,6 +267,10 @@
+@@ -259,6 +267,11 @@
  static void rwa_redfin_buffer_register(struct rwa_buffer *);
  static void rwa_redfin_buffer_unregister(struct rwa_buffer *);
  static void rwa_redfin_ordering_completed(struct rwa_device *);
 +static void rwa_redfin_ordering_completed_epoch(struct rwa_device *,uint64_t);
 +static int rwa_redfin_queued_drain(struct rwa_device *,char *,size_t);
 +static void rwa_redfin_device_destroy(struct rwa_device *);
++static bool rwa_redfin_trace_selected(void);
 +
  static int rwa_redfin_gpu_prepare(struct rwa_device *,char *,size_t);
  static int rwa_redfin_gpu_complete(struct rwa_device *,bool,char *,size_t);
  static int rwa_redfin_gpu_alias_transition(struct rwa_device *,char *,size_t);
-@@ -649,8 +661,8 @@
+@@ -649,8 +662,8 @@
     return NULL;
  }
  
@@ -59,7 +60,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
  {
     if (!device)
        return;
-@@ -3230,6 +3242,18 @@
+@@ -3230,6 +3243,18 @@
   * whether the GPU finished, and that is a failure. rwa_finish may be called with
   * nothing outstanding at all, and then no fence means there was nothing to wait for.
   */
@@ -78,7 +79,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
  static int
  finish_or_say_why(struct rwa_device *device, bool required, const char *what,
                    char *why, size_t why_size)
-@@ -3245,7 +3269,11 @@
+@@ -3245,7 +3270,11 @@
        return -1;
     }
  
@@ -91,7 +92,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
                                              RWA_FENCE_TIMEOUT_NS);
     device->screen->fence_reference(device->screen, &fence, NULL);
     if (!done) {
-@@ -3280,11 +3308,13 @@
+@@ -3280,11 +3309,13 @@
  int
  rwa_commands_begin(struct rwa_device *device, char *why, size_t why_size)
  {
@@ -106,7 +107,7 @@ diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
     }
     if (error) say(why,why_size,"Metal command scope is already active or retired");
     return error;
-@@ -3302,12 +3332,17 @@
+@@ -3302,12 +3333,17 @@
        device->pipe->set_framebuffer_state(device->pipe,&(struct pipe_framebuffer_state){0});
        if(rwa_redfin_linear_resolve_all(device,why,why_size))device->command_scope.failed=true;
     }
