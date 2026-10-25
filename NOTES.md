@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V25 original-page freshness PASS; real post-logo damage localized — 2026-10-25
+
+Source1a9bcc0; graphics local20261025-182124/noCI, pairing60fbb633a9fdb781ac599d1c8b41b62df54b5f6674069d9060c34d10592e4d77.
+Kernel unchanged local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V25 image39b59acb73fbe913e30bf11840f980a756630e45bb0911fb7b04ec7face07319, nonce5933bd0ea20fe4bf.
+V28 applied once:192ranges/23183360bytes/zero new/zero freed. Complete live
+preimages/full-file readback/signatures/native readonly fsck PASS. V28 is now
+applied/stale; never reuse. Authenticated capture leaves clean consistent HFSX/
+write_count1017523 and verified Fastboot. No kernel panic/runtime GPU fault;
+backboardd62 remains alive; app-check log has no current nonce (no automatic
+Phone/Photos opens).
+
+All previous compute/raster/MRT/fetch/vertex/sampling/pitch/resolve/blit/mip/tail/
+external/parent-view probes PASS. Both A8 layouts now pass four immediate CPU
+seeds, exact row/prefix/tail guards and lifetime: the retained native CPU map
+fixes V24's repeat-read failure. The549-case's printed boot label incorrectly
+uses its derived pixel seed instead of the unchanged boot nonce; its successful
+result is inside the current authenticated native checker process, but correct
+that diagnostic label before the next run. Do not confuse the seed with another
+boot. The actual cached-page contents remain original/no CPU pixel copy.
+
+39CRC-verified observations include post-logo masks, source textures and7FINAL
+command targets through draw204. The actual A8 clock masks now appear correct.
+Draw43 (fixed_vert_lph_spc/fixed_frag_lph_cph) reads a256x1 RGBA16Float palette
+and32x32 noise image and produces an almost fully cyan full-screen target; its
+next downsample/blur passes consume that same target. This is observed data,
+not yet proof of which shader operation is wrong. Final composite/physical
+present12 remain incorrect (largely black/bad clock and colored fills), so no
+GUI correctness or normal FPS is claimed. Investigate actual system shader
+parameters/translation and preserve completed-frame evidence; do not retune the
+panel path. Fresh upstream tip review recorded in UPSTREAM.md: no GPU/AIR diff
+beyond the frozen graphics pins. Broader goal remains open.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x5933bd0ea20fe4bf redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN original-page CPU-map/cache block built; fresh V28 staged — 2026-10-25
 
 Source base3ffa7d2 plus this complete related block. Retain the native fd_bo CPU

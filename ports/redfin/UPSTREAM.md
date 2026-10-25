@@ -1,5 +1,17 @@
 # HackiOS upstream review — 2026-10-22
 
+## Fresh upstream tips reviewed without changing graphics pins — 2026-10-25
+
+Fetched/read userland tipa79ff0772a3454fd1ef127e181e5b3bce6c9ce18 and kernel
+tipd82c64a3a31cd27a0a0afbf6e213e467e44b1b4c. Relative to the frozen reviewed
+pins, the entire preferred GPU/Metal/AIR code is unchanged. Userland adds
+thermald/thermal_probe and boot-guard bootok work (fcc3214/a79ff07); its real
+kernel pressure -> Darwin notification/state model matches the existing Redfin
+adaptation and remains relevant to later thermal validation. The kernel diff
+only checks7-Zip>=23 and fixes QEMU RAMFB's2048-row mode; neither replaces the
+real Redfin panel geometry or temporary phone boot path. Keep reproducible
+graphics pins906425b7/8e611870 for the current already built combined run.
+
 ## Shared original-page cache contract and post-logo evidence — 2026-10-25
 
 Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and
