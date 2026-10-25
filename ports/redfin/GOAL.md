@@ -9,6 +9,16 @@ human-dependent actions, and continue independent work.
 
 ## Latest checkpoint
 
+V12 observed: V16 applied once/stale. Actual ADSP source, LCX/LMX votes and
+AOP on pass, then the WLAN owner stalls before any PAS reply (cold PAS shutdown
+is the first candidate). Other CPUs/GPU/thermal keep running, no recorded panic.
+Root852658 is NOT clean, no user-file extraction/Photos/FPS conclusion. An
+ordinary temporary boot without optional ADSP is collecting logs and replaying
+the native HFS journal before any further offline update. Adapt preferred
+upstream's owned-metadata-page -> INIT -> MEM_SETUP -> firmware copy -> AUTH
+cold order; never issue inactive-DSP shutdown or touch its RAM before setup.
+V12 sensor/CoreMotion and new GPU throughput remain unproved.
+
 V12 implementation/build milestone: native GMEM routing/dependency probe,
 actual TCC reply observation and complete PAS1/host2/SSC/registry/HID path
 are built. Kernel local20261025-113137/bffe7c0d...; V12/d15ba0e2...;

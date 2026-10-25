@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V12 ADSP power accepted, worker stalls before PAS reply; recovery boot required — 2026-10-25
+
+Source b6a9bec, kernel bffe7c0d.../local20261025-113137/noCI, V12/d15ba0e2...
+nonce ecd67b63b06f7279 passes exact-image authenticated launchd proof. V16 was
+applied exactly once with complete preimages, all47251456written bytes read
+back, native signatures/readonly fsck and verified Fastboot. Never reuse V16.
+Observed actual ADSP assets164/segments32; native LCX0x30030/selector7 and
+LMX0x30040/selector6 both ACK; actual AOP adsp-on consumed, same-owner power
+result0. No PAS1 reply/start-result appears afterward. Other CPUs keep native
+GPU/backboardd/thermal work alive;120GPU presents and no recorded GPU fault
+or kernel panic. The WLAN owner no longer services scans. The first possible
+blocking call after the power message is PAS_SHUTDOWN; that is a supported
+hypothesis, not a captured entry/return pair. Native upstream cold start does
+not shut down an inactive DSP; its metadata uses an owned page before INIT/
+MEM_SETUP, and only then touches DSP memory. Adapt that exact order next.
+
+V12 root is journaled/not inconsistent but NOT clean, write_count852658.
+Collector correctly refused user-file extraction; no FPS/Metal/Photos/native
+TCC error or sensor-success conclusion can be drawn from missing file logs.
+Device returned to verified Fastboot. No raw repair or new offline root write
+is authorized by that dirty state. A temporary ordinary iOS boot without the
+optional ADSP node is now used for native HFS journal replay and clean shutdown,
+retaining the installed block and collecting its actual user logs afterward.
+Recovery-run image c96d4fcc81b1acf8327c9ea4747f5abbe54089f523f578a6e2b3bc52b751ca92,
+nonce b2113da1ed6dead5,same kernel,real loader preflight PASS; not yet observed here.
+Exact recovery-run args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb2113da1ed6dead5 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete GMEM/native SSC/Photos-reply block built; fresh V16 staged — 2026-10-25
 
 Source base e736166 plus this implementation. Physical V11 remains the last
