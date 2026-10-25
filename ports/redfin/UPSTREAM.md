@@ -2,6 +2,17 @@
 
 ## Native Metal function constants and AIR specialization — 2026-10-25
 
+V26 exposed a concrete native-object error before GPU specialization ran:
+_MTLFunction is an abstract base and has no bitCodeOffset. Review the actual
+_MTLFunctionInternal constructor/clone/dealloc: its opaque function-data record
+also contains owning plugin/archive/input references, so direct raw-struct copy
+or base-class allocation is insufficient. Use its native
+newFunctionWithPluginData:bitcodeType: factory with the original type/data,
+then the reviewed native hash setter. The result is a fresh concrete object;
+our same-size/no-ivar subclass marks required-value validation complete. Serialize
+library metadata access for asynchronous callers. ABI checks now bind these
+actual concrete-class selectors as well. No C++ ownership layout is reimplemented.
+
 Preferred graphics pins remain userland906425b7/kernel8e611870. Reviewing the
 actual20H392 Metal cache confirms _MTLDevice.compiler returns nil. Preferred
 AIR consequently invents zero-valued function constants for its harness; that
@@ -12,8 +23,8 @@ This code evidence does not yet establish which parameter causes the GUI damage.
 
 Adapt the actual _MTLLibrary synchronous/asynchronous/cache/descriptor factories
 for Redfin's device only, forwarding original IMPs for other devices. Use the
-native constant-value lookup/metadata and a fresh, ABI-verified _MTLFunction
-constructor; retain immutable per-function values and distinguish specializations
+native constant-value lookup/metadata and the concrete native clone factory;
+retain immutable per-function values and distinguish specializations
 in its actual32-byte native hash. Preserve original AIR entry names; a requested
 specialized alias is a label. Compiler-only descriptor options remain explicit
 refusals. No private C++ constant-storage layout is copied or guessed.

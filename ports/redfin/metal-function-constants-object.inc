@@ -4,6 +4,7 @@
  * its immutable values; no private C++ storage layout or shader rewrite is used. */
 #include <CommonCrypto/CommonDigest.h>
 static char redfin_function_values_key;
+static Class redfin_specialized_function_class;
 static struct redfin_metal_constants
 redfin_function_constants(id function)
 {
@@ -34,7 +35,7 @@ redfin_constant_bytes(MTLDataType type)
     return 0;
 }
 static id
-redfin_specialized_function(id library,NSString *name,id values,NSString *specializedName,NSError **error)
+redfin_specialized_function_locked(id library,NSString *name,id values,NSString *specializedName,NSError **error)
 {
     if(error)*error=nil;
     if(!name.length)return redfin_function_error(error,@"a function name is required");
@@ -65,29 +66,39 @@ redfin_specialized_function(id library,NSString *name,id values,NSString *specia
     } @catch(NSException *exception) {valid=NO;failure=exception.reason;}
     [snapshot release];
     if(!valid) {[prototype release];return redfin_function_error(error,failure?:@"invalid native function constant metadata");}
-    id device=[library device];void *libraryData=((void *(*)(id,SEL))objc_msgSend)(library,sel_getUid("libraryData"));
-    id function=((id (*)(id,SEL,id,NSUInteger,void *,id))objc_msgSend)([objc_lookUpClass("_MTLFunction") alloc],
-        sel_getUid("initWithName:type:libraryData:device:"),name,(NSUInteger)[prototype functionType],libraryData,device);
+    id plugin=((id (*)(id,SEL))objc_msgSend)(prototype,sel_getUid("pluginData"));
+    unsigned char bitcodeType=((unsigned char (*)(id,SEL))objc_msgSend)(prototype,sel_getUid("bitcodeType"));
+    /* This native factory returns a fresh concrete function and performs its
+     * own retains for plugin/archive/function-input data. Its constructor is
+     * NOT a copying API: directly copying its opaque struct would mis-own refs. */
+    id function=((id (*)(id,SEL,id,unsigned char))objc_msgSend)(prototype,
+        sel_getUid("newFunctionWithPluginData:bitcodeType:"),plugin,bitcodeType);
     [prototype release];if(!function)return redfin_function_error(error,@"native function allocation failed");
+    Class concrete=objc_lookUpClass("_MTLFunctionInternal");
+    if(object_getClass(function)!=concrete||class_getInstanceSize(concrete)!=class_getInstanceSize(redfin_specialized_function_class)) {
+        [function release];return redfin_function_error(error,@"unexpected concrete native function class");
+    }
+    object_setClass(function,redfin_specialized_function_class);
     NSData *immutable=[payload copy];
     objc_setAssociatedObject(function,&redfin_function_values_key,immutable,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    /* Metal/CoreAnimation cache keys must distinguish two values of one entry.
-     * The ivar offset/type and constructor come from the actual paired cache. */
-    Ivar ivar=class_getInstanceVariable(objc_lookUpClass("_MTLFunction"),"_functionConstantSpecializationHash");
-    if(!ivar||ivar_getOffset(ivar)!=REDFIN_METAL_FUNCTION_HASH_OFFSET||
-       class_getInstanceSize(object_getClass(function))<(size_t)ivar_getOffset(ivar)+CC_SHA256_DIGEST_LENGTH) {
-        [immutable release];[function release];return redfin_function_error(error,@"native function specialization hash ABI changed");
-    }
+    /* The native clone preserves actual bitcode offset/type and ownership. */
     NSData *air=((id (*)(id,SEL))objc_msgSend)(function,sel_getUid("bitcodeData"));
     CC_SHA256_CTX hash;unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256_Init(&hash);
     CC_SHA256_Update(&hash,name.UTF8String,(CC_LONG)strlen(name.UTF8String));
     if(air.length<=UINT32_MAX)CC_SHA256_Update(&hash,air.bytes,(CC_LONG)air.length);
     CC_SHA256_Update(&hash,immutable.bytes,(CC_LONG)immutable.length);CC_SHA256_Final(digest,&hash);
-    memcpy((uint8_t *)(void *)function+ivar_getOffset(ivar),digest,sizeof(digest));
+    ((void (*)(id,SEL,const void *))objc_msgSend)(function,sel_getUid("setFunctionConstantSpecializationHash:"),digest);
     if(specializedName.length)[function setLabel:specializedName];
     rw_print("REDFIN METAL SPECIALIZATION: function=%s values=%lu native-function=1 immutable=1\n",name.UTF8String,
         (unsigned long)(immutable.length/sizeof(struct redfin_metal_constant)));
     [immutable release];return function;
+}
+static id
+redfin_specialized_function(id library,NSString *name,id values,NSString *specializedName,NSError **error)
+{
+    /* The public library APIs are concurrent; keep native metadata/cache
+     * access serialized even when a caller uses our asynchronous factories. */
+    @synchronized(library) {return redfin_specialized_function_locked(library,name,values,specializedName,error);}
 }
 
 struct redfin_function_hook {const char *selector;IMP replacement,original;};
@@ -185,8 +196,22 @@ static IMP redfin_function_original(SEL selector)
         if(sel_isEqual(selector,sel_getUid(redfin_function_hooks[i].selector)))return redfin_function_hooks[i].original;
     abort();
 }
+static BOOL redfin_function_needs_constants(id self,SEL selector)
+{
+    (void)self;(void)selector;
+    /* Only our factory creates this subclass, after required-value validation.
+     * Specialization is complete in the paired AIR compiler, independently of
+     * the original generic bitcode's native function-constant declarations. */
+    return NO;
+}
 static void redfin_install_function_constants_once(void)
 {
+    Class native=objc_lookUpClass("_MTLFunctionInternal");
+    redfin_specialized_function_class=objc_allocateClassPair(native,"RedfinMetalSpecializedFunction",0);
+    if(!redfin_specialized_function_class)abort();
+    SEL needs=sel_getUid("needsFunctionConstantValues");Method method=class_getInstanceMethod(native,needs);
+    if(!method||!class_addMethod(redfin_specialized_function_class,needs,(IMP)redfin_function_needs_constants,method_getTypeEncoding(method)))abort();
+    objc_registerClassPair(redfin_specialized_function_class);
     Class library=objc_lookUpClass("_MTLLibrary");
     for(unsigned i=0;i<sizeof(redfin_function_hooks)/sizeof(*redfin_function_hooks);++i) {
         struct redfin_function_hook *hook=&redfin_function_hooks[i];SEL selector=sel_getUid(hook->selector);

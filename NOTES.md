@@ -1,5 +1,42 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V26 abstract-function failure diagnosed; concrete native clone built/V30 staged — 2026-10-25
+
+V26 used sourcedc606c5, imagecb8fff0e00849033a0c6eaf21ae0f7c9304830031fd596c808dcb7e28e991417,
+nonce4a3883580f8e40a5; V29 applied once:183ranges/23904256bytes/4new/zero freed,
+full preimages/readback/signatures/readonly fsck PASS. V29 is now applied/stale.
+Authenticated capture returned clean consistent HFSX/write_count1030387 and
+verified Fastboot. No kernel panic/runtime GPU fault. Prior compute/raster/
+vertex/transfer/parent/A8 four-seed probes PASS, with corrected boot labels.
+The expected missing-required-constant refusal is observed, then the native
+checker throws `-[_MTLFunction bitCodeOffset]: unrecognized selector`. The same
+base-object mistake restarts backboardd repeatedly; no real draw/physical image
+capture completes and no GUI is established. App-launch checks remain disabled.
+
+Inspect actual20H392 _MTLFunctionInternal methods and machine code. Its native
+constructor memcpy alone does not establish all opaque data ownership; the
+native newFunctionWithPluginData:bitcodeType: clone handles the original
+bitcode offset/type and owning references. Use that factory with the original
+plugin/type, validate the concrete class/size, and attach our no-ivar subclass
+only to the fresh owned clone. Its required-value validation is complete for
+our paired compiler; use the reviewed native specialization-hash setter instead
+of writing a base ivar. Serialize library metadata access for async factories.
+These fixes are actual ABI/ownership corrections, not evidence of a GUI fix.
+
+40 combined host cases PASS/no skips; full native Metal/AIR/checker/shader/
+actualABI/signature rebuild PASS, same unchanged Mesa inputs, final
+local20261025-190743/noCI, pairing16546a304b2f9de0619aa2601c05df62ed4ba63af659e71337e207a9f6f0de47.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V27 image0ded6a914c7690097c4ecd71e541b7d112a74f14b0ee30d9a2df0193e9b35bff,
+nonce3210370b8664982d; complete loader/ADT/liveFDT/firmware/power/DVFS/source-window/
+return preflight PASS. Fresh V30 from clean consistent HFSX/write_count1030387:
+14ranges/270336bytes/zero new/zero freed; full staged files/signatures/seal/
+readback/native readonly fsck PASS. V30 is PREPARED, NOT APPLIED. Next apply
+once with complete live preimages/readback and run one combined V27 capture.
+Actual new specialization and correct GUI remain unproven; broader goal stays
+open. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3210370b8664982d redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native function-constant block built; fresh V29 staged — 2026-10-25
 
 Source based253f1a plus this complete related block. Implement Redfin-only native
