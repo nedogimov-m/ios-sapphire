@@ -9,6 +9,7 @@
 #include <IOKit/IOKitLib.h>
 #include <dlfcn.h>
 #include <stdint.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/sysctl.h>
@@ -19,6 +20,18 @@
 @interface NSObject (RedfinMetalSurface)
 - (id)newTextureWithDescriptor:(MTLTextureDescriptor *)descriptor iosurface:(IOSurfaceRef)surface plane:(NSUInteger)plane;
 @end
+
+extern int memorystatus_control(uint32_t,int32_t,uint32_t,void *,size_t);
+struct metal_limits {int32_t active;uint32_t active_attributes;int32_t inactive;uint32_t inactive_attributes;};
+static int memory_limit(void)
+{
+    /* Same actual8796 own-PID set/get used by the native Photos helper.
+     * A job's plist limit did not reach this process in the observed boot. */
+    struct metal_limits wanted={512,1,512,1},actual={0};
+    if (memorystatus_control(7,getpid(),0,&wanted,sizeof(wanted)) ||
+        memorystatus_control(8,getpid(),0,&actual,sizeof(actual))) return errno ? errno : EIO;
+    return actual.active==512 && actual.inactive==512 ? 0 : EINVAL;
+}
 
 static int registry_number(io_service_t service,CFStringRef key)
 {
@@ -139,6 +152,9 @@ int main(void)
         if (gpu) IOObjectRelease(gpu);
         if (mode!=1 && mode!=2) return 0;
         printf("REDFIN METAL CHECK BOOT: %016llx mode=%d pid=%d\n",(unsigned long long)nonce,mode,getpid());
+        int admitted=memory_limit();
+        printf("REDFIN METAL CHECK MEMORY: native-own-pid=1 active=512 inactive=512 error=%d\n",admitted);
+        if (admitted) return 2;
         @try {
             /* This initializes Metal's real device array before private registration. */
             id<MTLDevice> device=MTLCreateSystemDefaultDevice();

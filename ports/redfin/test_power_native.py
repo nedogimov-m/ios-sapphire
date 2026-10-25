@@ -102,7 +102,7 @@ void reset_model(unsigned mode){
  pmic[P_ADC][0x42]=0x81;pmic[P_ADC][0x43]=0x80;pmic[P_ADC][0x44]=0x12;pmic[P_ADC][0x45]=0xa0;pmic[P_ADC][0x46]=0;
  pmic[P_ADC][0x50]=0x73;pmic[P_ADC][0x51]=0x2a;
  for(unsigned i=0;i<3;i++){
-  unsigned cores=i?1:6;osm[i][0]=1;osm[i][0x920/4]=0;
+  unsigned cores=i?2:6;osm[i][0]=1;osm[i][0x920/4]=0;
   osm[i][0x110/4]=cores<<16;
   osm[i][(0x110+32)/4]=(1u<<30)|(cores<<16)|50;
   osm[i][(0x110+64)/4]=(1u<<30)|(cores<<16)|100;
@@ -212,6 +212,17 @@ class PowerNativeTests(unittest.TestCase):
         before=self.lib.metric(1);self.lib.set_domain_reg(0,0x150,0);self.lib.pressure(3)
         self.assertEqual(self.lib.domain_reg(0,0x920),2)
         self.assertEqual(self.lib.metric(1)-before,1)
+
+    def test_gold_prime_use_native_lut_core_count_two_and_refuse_boost_only_rows(self):
+        self.begin()
+        # One CPU belongs to each Gold/Prime domain, but native DT max_cores
+        # is2. Rows tagged1 alone cannot become its ordinary thermal ceiling.
+        for row in range(40):
+            offset=0x110+32*row
+            value=self.lib.domain_reg(1,offset)
+            self.lib.set_domain_reg(1,offset,(value&~(7<<16))|(1<<16))
+        self.lib.domains();self.lib.pressure(0)
+        self.assertEqual([self.lib.domain_reg(i,0x920) for i in range(3)],[2,0,2])
 
 
 if __name__=='__main__':unittest.main()

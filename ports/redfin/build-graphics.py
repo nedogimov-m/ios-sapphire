@@ -221,7 +221,11 @@ def main():
                     dependency=line.strip().split(' ',1)[0]
                     if dependency in FRAMEWORK_NAMES:
                         run(['install_name_tool','-change',dependency,FRAMEWORK_NAMES[dependency],checker])
-                run(['codesign','--force','--sign','-',checker])
+                checker_entitlements=metal/'metal-check.entitlements.plist'
+                checker_entitlements.write_bytes(plistlib.dumps({'application-identifier':'com.redfin.metal-check',
+                    'platform-application':True,'com.apple.private.memorystatus':True}))
+                run(['codesign','--force','--sign','-','--timestamp=none','--identifier','com.redfin.metal-check',
+                    '--entitlements',checker_entitlements,checker])
                 run(['codesign','--verify','--strict',checker])
                 shader=bundle/'lib/redfin-check.metallib'
                 run(['xcrun','--sdk','iphoneos','metal','-target','air64-apple-ios16.0',

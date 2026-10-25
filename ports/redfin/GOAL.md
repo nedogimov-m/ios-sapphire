@@ -10,6 +10,13 @@ features whose final physical/manual checks need the user. Defer only those
 human-dependent actions/checks, and keep progressing on the rest. Do not wait
 for manual GUI feedback before continuing independent implementation/tests.
 
+Latest prepared block (2026-10-25, base222c4fa): native Security enforcement,
+actual own-PID Metal memory admission and native DT OSM max_cores6/2/2 are
+implemented.97selected checks and complete buildsPASS. Kernel local
+20261025-084355/noCI,36b98fbb...; V12 staged/readback/fsckPASS at clean
+generation801955 and V7/c539c81afb12dd77 preflightPASS. Apply V12 once, then
+collect one integrated run. No new physical Metal/TCC/OSM result yet.
+
 ## Requested results
 
 - Preserve working GUI, touch, Phone, Wi-Fi and internet.

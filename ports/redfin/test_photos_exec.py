@@ -34,17 +34,20 @@ class PhotosExecTests(unittest.TestCase):
             args = (' '.join(sorted(REQUIRED)).replace('redfingui=1', f'redfingui={mode}') +
                     ' redfinbootid=0x73a9959b7d8084af').encode()
             for path in (b'executable_path=/redfin/bin/photos-init',
+                         b'executable_path=/redfin/bin/gui-check',b'executable_path=/redfin/bin/metal-check',
                          b'/redfin/bin/photos-init', b'executable_path=/tmp/photos-init',
+                         b'executable_path=/tmp/metal-check',b'executable_path=/redfin/bin/metal-check-other',
                          b'executable_path=/redfin/bin/photos-init-other', None):
                 self.assertEqual(self.lib.selected(args, len(args)+1, path),
-                    int(mode == 3 and path == b'executable_path=/redfin/bin/photos-init'))
+                    int(mode == 3 and path in (b'executable_path=/redfin/bin/photos-init',
+                        b'executable_path=/redfin/bin/gui-check',b'executable_path=/redfin/bin/metal-check')))
             self.assertEqual(self.lib.selected(args, len(args), b'executable_path=/redfin/bin/photos-init'), 0)
 
     def test_only_actual_valid_signed_platform_and_validated_entitlements_are_admitted(self):
-        required = 0x20004001
+        required = 0x20005201
         self.assertEqual(self.lib.admit(required, 1), 1)
         self.assertEqual(self.lib.admit(required | 2 | 0x4000000, 1), 1)
-        for bit in (1, 0x4000, 0x20000000):
+        for bit in (1, 0x200, 0x1000, 0x4000, 0x20000000):
             self.assertEqual(self.lib.admit(required & ~bit, 1), 0)
         self.assertEqual(self.lib.admit(required, 0), 0)
 

@@ -1,5 +1,19 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native entitlement enforcement, probe admission and Redfin OSM — 2026-10-25
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and paired
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain the baseline.
+Adapt actual20H392 SecTaskEntitlementsValidated's native4201 requirement
+through CS_KILL/CS_ENFORCEMENT in the existing hash-validated root branch;
+no DEBUGGED status or TCC interception. Use actual8796 memorystatus commands
+7/8 and signed own-process entitlement for the Metal probe, following the
+already-verified Photos admission. Google500b3a2059c1eec0fec08ec56add06320ea901a8
+qcom-cpufreq-hw uses freq-domain args[1]; captured Redfin DT supplies6/2/2,
+independently of6/1/1CPU membership. Correct the LUT selection and strictly
+validate all eight bindings. Actual Metal execution, native TCC acceptance
+and big-core transitions require the next combined hardware capture.
+
 ## Actual native Metal/AIR and platform readiness — 2026-10-25
 
 Re-reviewed preferred kernel8e611870 MiniIOMobileFramebuffer's native Metal

@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from ports.redfin import platform_power
 
@@ -141,6 +142,19 @@ void reset_tracker(void){tracker=(struct redfin_soc_tracker){0};}
                 original=value[key];value[key]=bad;path.write_text(json.dumps(value))
                 with self.assertRaises(ValueError):platform_power.load_anchor(path)
                 value[key]=original
+
+    def test_frequency_binding_uses_the_native_second_cell_instead_of_cpu_membership(self):
+        from ports.redfin.memory import _tree
+        import copy,struct
+        path=HERE.parents[1]/'research/redfin-root/device.dtb'
+        if not path.is_file():self.skipTest('captured native FDT required')
+        raw=path.read_bytes();nodes,layout=_tree(raw)
+        self.assertEqual(platform_power.validate(raw)['lut_max_cores'],[6,2,2])
+        changed=copy.deepcopy(nodes)
+        key='/cpus/cpu@600';value=changed[key]['qcom,freq-domain']
+        changed[key]['qcom,freq-domain']=value[:-4]+struct.pack('>I',1)
+        with patch.object(platform_power,'_tree',return_value=(changed,layout)):
+            with self.assertRaisesRegex(ValueError,'max_cores'):platform_power.validate(raw)
 
 
 if __name__=='__main__':unittest.main()

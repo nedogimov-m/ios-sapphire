@@ -35,13 +35,19 @@ def validate(blob):
         node(smb+'/qcom,'+name+'@'+format(base,'x'),reg=(base,0x100))
     for base,tm in [(0x0c222000,0x0c263000),(0x0c223000,0x0c265000)]:
         node('/soc/tsens@'+format(base,'x'),b'qcom,tsens26xx',(base,8,tm,0x1ff))
-    node('/soc/qcom,cpufreq-hw',b'qcom,cpufreq-hw',
+    frequency=node('/soc/qcom,cpufreq-hw',b'qcom,cpufreq-hw',
          (0x18323000,0x1000,0x18325800,0x1000,0x18327800,0x1000))
+    need(frequency.get('#freq-domain-cells')==struct.pack('>I',2),'native frequency domain ABI')
+    for cpu in range(8):
+        info=node('/cpus/cpu@'+format(cpu<<8,'x'))
+        domain=0 if cpu<6 else cpu-5;maximum=6 if cpu<6 else 2
+        need(info.get('qcom,freq-domain')==frequency.get('phandle',b'')+struct.pack('>II',domain,maximum),
+             'native LUT max_cores differs from domain membership')
     node('/soc/qcom,spmi@c440000/qcom,pm8150@0/qcom,pm8150_rtc',b'qcom,pm8941-rtc')
     battery=node('/soc/google,battery',b'google,battery')
     need(battery.get('google,chg-battery-capacity')==struct.pack('>I',4000),'native nominal capacity')
     return dict(version=1,live_fdt_sha256=hashlib.sha256(blob).hexdigest(),values=VALUES,
-                tsens='26xx',cpufreq='standard-OSM',battery='PM7250B/QG/ADC5/SMB5')
+                tsens='26xx',cpufreq='standard-OSM',lut_max_cores=[6,2,2],battery='PM7250B/QG/ADC5/SMB5')
 
 
 def load_anchor(path):

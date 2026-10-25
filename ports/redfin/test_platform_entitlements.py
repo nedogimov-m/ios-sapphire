@@ -45,6 +45,8 @@ class PlatformEntitlementTests(unittest.TestCase):
 #define CS_SIGNED 0x20000000u
 #define CS_PLATFORM_BINARY 0x04000000u
 #define CS_ENTITLEMENTS_VALIDATED 0x4000u
+#define CS_KILL 0x200u
+#define CS_ENFORCEMENT 0x1000u
 #define MNT_ROOTFS 0x4000u
 #define CS_VALIDATION_CATEGORY_INVALID 0u
 #define CS_VALIDATION_CATEGORY_PLATFORM 1u
@@ -92,8 +94,13 @@ unsigned metric(unsigned i){unsigned n[]={attached,sets,category};return i<3?n[i
 
     def test_actual_root_mount_and_native_root_flag_publish_consistent_restricted_status(self):
         for scenario in (0, 1, 2):
-            self.assertEqual(self.lib.run(scenario, 0x12000001, 0), 0x36004001)
+            self.assertEqual(self.lib.run(scenario, 0x12000001, 0), 0x36005201)
             self.assertEqual([self.lib.metric(i) for i in range(3)], [1, 1, 1])
+            flags=self.lib.run(scenario,1,0)
+            # Actual20H392 Security requires VALID|KILL|ENT_VALIDATED.
+            self.assertEqual(flags&0x4201,0x4201)
+            self.assertEqual(flags&0x1000,0x1000)
+            self.assertEqual(flags&0x10000000,0)  # never manufacture DEBUGGED
 
     def test_outside_or_absent_mount_does_not_gain_platform_or_restricted_entitlements(self):
         for scenario in (3, 4):
@@ -106,9 +113,9 @@ unsigned metric(unsigned i){unsigned n[]={attached,sets,category};return i<3?n[i
         self.assertEqual(self.lib.metric(1), 0)
 
     def test_existing_immutable_object_is_reused_and_other_validation_categories_are_preserved(self):
-        self.assertEqual(self.lib.run(7, 1, 4), 0x24004001)
+        self.assertEqual(self.lib.run(7, 1, 4), 0x24005201)
         self.assertEqual([self.lib.metric(i) for i in range(3)], [0, 0, 4])
-        self.assertEqual(self.lib.run(7, 1, 10), 0x24004001)
+        self.assertEqual(self.lib.run(7, 1, 10), 0x24005201)
         self.assertEqual([self.lib.metric(i) for i in range(3)], [0, 1, 1])
 
 

@@ -208,7 +208,9 @@ static bool power_temperatures(int32_t *hottest)
 static void power_domains_init(void)
 {
     for (unsigned i=0;i<3;++i) {
-        power_domain *d=&power_domains[i];d->cores=i ? 1 : 6;
+        /* qcom,freq-domain's SECOND argument, not this domain's CPU count:
+         * both one-CPU Gold/Prime domains use native max_cores2 in their LUT. */
+        power_domain *d=&power_domains[i];d->cores=i ? 2 : 6;
         d->normal=UINT32_MAX;
         d->base=ml_io_map_unmappable(power_contract[15+i],0x1000,VM_WIMG_IO);
         if (!d->base || !(power_rd(d->base,0)&1)) continue;
@@ -224,9 +226,9 @@ static void power_domains_init(void)
         }
         d->boot=d->current=power_rd(d->base,0x920);
         d->valid=d->count>1 && d->count<40 && d->boot<d->count && d->normal<d->count;
-        IOLog("REDFIN THERMAL OSM: domain=%u rows=%u boot-row=%u boot-khz=%u normal-row=%u normal-khz=%u valid=%u standard-layout=1\n",
+        IOLog("REDFIN THERMAL OSM: domain=%u rows=%u boot-row=%u boot-khz=%u normal-row=%u normal-khz=%u valid=%u standard-layout=1 LUT-max-cores=%u\n",
             i,d->count,d->boot,d->valid ? d->khz[d->boot] : 0,d->normal,
-            d->valid ? d->khz[d->normal] : 0,d->valid);
+            d->valid ? d->khz[d->normal] : 0,d->valid,d->cores);
     }
 }
 static void power_limit_domains(unsigned pressure)

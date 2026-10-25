@@ -1,0 +1,63 @@
+diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -282,7 +282,11 @@
+ 	 * Merely being signed, or carrying a requested key, is insufficient. */
+ 	if (on_root && (cs_blob->csb_flags & CS_VALID)) {
+ 		if (ent != NULL) {
+-			*cs_flags |= CS_ENTITLEMENTS_VALIDATED;
++			/* Native Security only accepts VALID|KILL|ENT_VALIDATED (or an
++			 * explicit debugger). Opt this already hash-validated root code
++			 * into real per-process enforcement and invalid-page SIGKILL;
++			 * do not replace Security/TCC or mark it DEBUGGED. */
++			*cs_flags |= CS_ENTITLEMENTS_VALIDATED | CS_KILL | CS_ENFORCEMENT;
+ 		}
+ 		unsigned int category = csblob_get_validation_category(cs_blob);
+ 		if (category == CS_VALIDATION_CATEGORY_INVALID || category == CS_VALIDATION_CATEGORY_NONE) {
+diff --git a/bsd/kern/redfin_photos_exec.h b/bsd/kern/redfin_photos_exec.h
+--- a/bsd/kern/redfin_photos_exec.h
++++ b/bsd/kern/redfin_photos_exec.h
+@@ -9,14 +9,15 @@
+ {
+     return args && saved && redfin_gpu_gui_profile(args, bytes, NULL) &&
+         (!strcmp(saved, "executable_path=/redfin/bin/photos-init") ||
+-         !strcmp(saved, "executable_path=/redfin/bin/gui-check"));
++         !strcmp(saved, "executable_path=/redfin/bin/gui-check") ||
++         !strcmp(saved, "executable_path=/redfin/bin/metal-check"));
+ }
+ static inline bool redfin_photos_exec_signature(unsigned flags, bool platform)
+ {
+     /* Native load_machfile must have validated the initial code page and the
+      * original root-signature policy must have assigned the platform status.
+      * A requested entitlement alone can never make a damaged helper valid. */
+-    const unsigned required = 0x20000000u | 0x4000u | 1u;
++    const unsigned required = 0x20000000u | 0x4000u | 0x1200u | 1u;
+     return platform && (flags & required) == required;
+ }
+ #endif
+diff --git a/iokit/Kernel/arm/RedfinPower.inc b/iokit/Kernel/arm/RedfinPower.inc
+--- a/iokit/Kernel/arm/RedfinPower.inc
++++ b/iokit/Kernel/arm/RedfinPower.inc
+@@ -208,7 +208,9 @@
+ static void power_domains_init(void)
+ {
+     for (unsigned i=0;i<3;++i) {
+-        power_domain *d=&power_domains[i];d->cores=i ? 1 : 6;
++        /* qcom,freq-domain's SECOND argument, not this domain's CPU count:
++         * both one-CPU Gold/Prime domains use native max_cores2 in their LUT. */
++        power_domain *d=&power_domains[i];d->cores=i ? 2 : 6;
+         d->normal=UINT32_MAX;
+         d->base=ml_io_map_unmappable(power_contract[15+i],0x1000,VM_WIMG_IO);
+         if (!d->base || !(power_rd(d->base,0)&1)) continue;
+@@ -224,9 +226,9 @@
+         }
+         d->boot=d->current=power_rd(d->base,0x920);
+         d->valid=d->count>1 && d->count<40 && d->boot<d->count && d->normal<d->count;
+-        IOLog("REDFIN THERMAL OSM: domain=%u rows=%u boot-row=%u boot-khz=%u normal-row=%u normal-khz=%u valid=%u standard-layout=1\n",
++        IOLog("REDFIN THERMAL OSM: domain=%u rows=%u boot-row=%u boot-khz=%u normal-row=%u normal-khz=%u valid=%u standard-layout=1 LUT-max-cores=%u\n",
+             i,d->count,d->boot,d->valid ? d->khz[d->boot] : 0,d->normal,
+-            d->valid ? d->khz[d->normal] : 0,d->valid);
++            d->valid ? d->khz[d->normal] : 0,d->valid,d->cores);
+     }
+ }
+ static void power_limit_domains(unsigned pressure)

@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native validation, Metal memory and actual OSM fix built/staged — 2026-10-25
+
+Source base222c4fa plus this commit. Local kernel20261025-084355/noCI,
+SHA25636b98fbbcfab1582cbd22ea617bc8552cf66b4279f37416db2cee325922d0956.
+Complete coherent implementation and97selected host tests/native builds,
+signature/import checks and ordered kernel-overlay verificationPASS.
+Actual20H392 Security requires native VALID|KILL|ENT_VALIDATED; the existing
+hash-validated root-entitlement branch now enables real CS_KILL and
+CS_ENFORCEMENT. It does not fabricate DEBUGGED or replace Security/TCC.
+Metal checker now sets/reads its actual own-PID512MiB memorystatus limit
+before opening the renderer; its signed private entitlement follows the
+already-proved Photos helper. Native OSM now uses DT max_cores6/2/2 rather
+than CPU-domain membership6/1/1. All thermal/LUT/ownership guards remain.
+
+Fresh V12 staged against clean HFSX generation801955:86016bytes,one new
+block,zero freed; full files and signed bundle readback/native readonly
+fsckPASS. V12 is NOT applied yet. Fresh gui-platform-v7 imageSHA256
+b85fd91c647eedc94f06980c0c79a0b8426f5b88d4fc957b50f2a84a64356371,
+noncec539c81afb12dd77,preflightPASS. Next: apply V12 once, then one combined
+hardware capture. New enforcement/TCC, actual Metal compute/pixels and
+Gold/Prime frequencies remain physically unverified. System Metal discovery
+stays disabled until genuine probe results. Sensors and real account
+authorization remain required. Preferred upstream pins remain unchanged;
+see UPSTREAM.md for the native ABI/hardware adaptation.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xc539c81afb12dd77 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V6 preserved proof/native Wi-Fi reboot persistence; Metal jetsam/TCC cause — 2026-10-25
 
 Source2f54200; kernel local20261025-081227/noCI,
