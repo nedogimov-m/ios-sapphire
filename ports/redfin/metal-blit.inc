@@ -61,6 +61,7 @@ rwa_blit_rows(struct rwa_device *device,struct pipe_resource *source,struct pipe
    void *shader=rwa_redfin_row_shader(device,words?32:8,why,bytes);if(!shader)return -1;
    if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,bytes))return -1;
    struct pipe_context *pipe=device->pipe;
+   if(pipe->memory_barrier)pipe->memory_barrier(pipe,PIPE_BARRIER_ALL);
    struct pipe_shader_buffer buffers[2]={{.buffer=source,.buffer_size=source->width0},
       {.buffer=destination,.buffer_size=destination->width0}};
    struct pipe_constant_buffer constants={.user_buffer=&plan,.buffer_size=sizeof(plan)};

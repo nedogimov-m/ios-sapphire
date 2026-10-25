@@ -1,0 +1,51 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -229,6 +229,9 @@
+ static int rwa_redfin_linear_resolve(struct rwa_texture *,char *,size_t);
+ static int rwa_redfin_linear_resolve_all(struct rwa_device *,char *,size_t);
+ static void rwa_redfin_linear_release(struct rwa_texture *);
++struct redfin_buffer_texture {struct rwa_buffer *parent;unsigned offset,pitch;};
++static int rwa_redfin_buffer_texture_storage(struct rwa_texture *,const struct pipe_resource *,const struct redfin_buffer_texture *,char *,size_t);
++static int rwa_blit_rows(struct rwa_device *,struct pipe_resource *,struct pipe_resource *,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,char *,size_t);
+ static int rwa_redfin_buffer_prepare(struct rwa_buffer *,char *,size_t);
+ static int rwa_redfin_buffer_texture_prepare(struct rwa_texture *,char *,size_t);
+ static void rwa_redfin_buffer_written(struct rwa_buffer *);
+@@ -1087,7 +1090,7 @@
+ 
+ static struct rwa_texture *
+ texture_of_shape(struct rwa_device *device, const struct rwa_texture_shape *shape,
+-                 const struct rwa_surface_import *import, char *why, size_t why_size)
++                 const struct rwa_surface_import *import, const struct redfin_buffer_texture *buffer_view, char *why, size_t why_size)
+ {
+    if (!shape) {
+       say(why, why_size, "a texture with no descriptor");
+@@ -1421,6 +1424,10 @@
+       .width0 = width, .height0 = height, .depth0 = depth,
+       .array_size = array_size, .last_level = mips - 1, .nr_samples = query_samples,
+       .bind = bind, .usage = PIPE_USAGE_DEFAULT };
++   if(buffer_view) {
++      if(rwa_redfin_buffer_texture_storage(texture,&templ,buffer_view,why,why_size)) {free(texture);return NULL;}
++      return texture;
++   }
+ 
+    if (import) {
+       /*
+@@ -1532,7 +1539,7 @@
+ rwa_texture_create(struct rwa_device *device, const struct rwa_texture_shape *shape,
+                    char *why, size_t why_size)
+ {
+-   return texture_of_shape(device, shape, NULL, why, why_size);
++   return texture_of_shape(device, shape, NULL, NULL, why, why_size);
+ }
+ 
+ struct rwa_texture *
+@@ -1555,7 +1562,7 @@
+    const struct rwa_surface_import import = {
+       .id = surface_id, .offset = offset, .row_bytes = row_bytes };
+ 
+-   return texture_of_shape(device, shape, &import, why, why_size);
++   return texture_of_shape(device, shape, &import, NULL, why, why_size);
+ }
+ 
+ void

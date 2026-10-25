@@ -7,10 +7,13 @@ def adapt(text):
     point='\tint (*commands_begin)(struct rwa_device *, char *, size_t);'
     text=replace_once(text,point,point+'''
     int (*redfin_texture_buffer_link)(struct rwa_texture *,struct rwa_buffer *,uint64_t,uint64_t,char *,size_t);''')
+    text=replace_once(text,point,point+'''
+    struct rwa_texture *(*redfin_texture_from_buffer)(struct rwa_device *,struct rwa_buffer *,const struct rwa_texture_shape *,uint64_t,uint64_t,char *,size_t);''')
     point='\t*(void **)&mesa.commands_begin = dlsym(mesa.handle, "rwa_commands_begin");'
     text=replace_once(text,point,point+'\n    *(void **)&mesa.redfin_texture_buffer_link=dlsym(mesa.handle,"rwa_redfin_texture_buffer_link");')
+    text=replace_once(text,point,point+'\n    *(void **)&mesa.redfin_texture_from_buffer=dlsym(mesa.handle,"rwa_redfin_texture_from_buffer");')
     point='if (mesa.redfin_buffer_from_surface == NULL ||'
-    text=replace_once(text,point,'if (mesa.redfin_texture_buffer_link == NULL || mesa.redfin_buffer_from_surface == NULL ||')
+    text=replace_once(text,point,'if (mesa.redfin_texture_from_buffer == NULL || mesa.redfin_texture_buffer_link == NULL || mesa.redfin_buffer_from_surface == NULL ||')
     first=text.index('@interface RedwoodMetalTexture :');last=text.index('\n@end',first)
     chunk=text[first:last]
     point='\tstruct rwa_texture_shape _shape;'

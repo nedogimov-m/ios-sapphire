@@ -1,5 +1,42 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native parent BO/A8/completed-frame block built; fresh V27 staged — 2026-10-25
+
+Source base69e819e plus this complete related block. Add the missing frontend
+A8Unorm mapping, preserving AIR/FD6's actual alpha format rather than mapping
+it to R8. Native sampling covers CoreAnimation's exact640x358/offset64/pitch640
+request, zero RGB/alpha semantics, two CPU seeds, guards and parent lifetime.
+Replace the extra page-aligned wrapped-surface requirement for buffer textures
+with retained views of the parent's actual native fd_bo/suballocation. Validate
+logical rows/extent/native layout; use real GPU conversion for unaligned views.
+The shared byte/word row copier preserves exact pixel spans. Add precise stages
+for the prior opaque external-memory probe failure. Capture at most12auxiliary
+images, then36full-screen FINAL targets after their genuine command fence and
+all resolves; preserve ordinary batching after the bounded initial observations.
+
+38 combined host cases PASS/no skips. Full fresh Mesa/AIR/native Metal/checker/
+shader/actual20H392 API/signature build PASS, research/redfin-metal-alpha-v2,
+local20261025-180921/noCI, pairing56c8240e96031f7eaaaf45e42e79ec220bdf96042ad55980eb03fb10ec8a48d9.
+The first HOST-ONLY build failed because the new branch preceded its template
+declaration; corrected the patch and rebuilt a fresh source tree. The boot
+validator initially needed the ordinary repository PYTHONPATH, then PASS.
+Kernel unchanged/reused local20261025-134128/noCI,
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V24 imagecff93d0759077134a7e40053fc4aa356ae2ac10f9259ea30a7204123a0d58c93, nonce651d2fe9c2873710;
+complete native loader/ADT/liveFDT/firmware/power/DVFS/source-window/return
+preflight PASS.
+
+Fresh V27 from clean consistent HFSX/write_count996163: 167ranges/
+25239552bytes/5new/zero freed. Full staged native files, signatures/seal,
+readback and readonly fsck PASS. V27 is PREPARED, NOT APPLIED; V26 and older
+applied stages are stale, V22 remains failed HOST-ONLY/do not apply. Policies
+keep automatic app launches disabled and the explicit compositor observer on.
+Phone/Photos work normally per user and are outside these tests. Next apply
+V27 once with complete live preimages/readback and collect one combined V24
+run. Actual native BO/A8 results and corrected GUI remain unobserved; no
+checkerboard fix or FPS is claimed. Broader goal remains open.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x651d2fe9c2873710 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V23 converted buffer views PASS; actual A8 import missing — 2026-10-25
 
 Source5b19832, graphics local20261025-172359/noCI, unchanged kernel

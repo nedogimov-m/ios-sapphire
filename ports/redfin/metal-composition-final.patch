@@ -1,0 +1,28 @@
+diff --git a/src/compiler/air/air_metal.c b/src/compiler/air/air_metal.c
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -232,6 +232,8 @@
+ struct redfin_buffer_texture {struct rwa_buffer *parent;unsigned offset,pitch;};
+ static int rwa_redfin_buffer_texture_storage(struct rwa_texture *,const struct pipe_resource *,const struct redfin_buffer_texture *,char *,size_t);
+ static int rwa_blit_rows(struct rwa_device *,struct pipe_resource *,struct pipe_resource *,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,char *,size_t);
++static void rwa_redfin_trace_begin(struct rwa_device *);
++static void rwa_redfin_trace_end(struct rwa_device *);
+ static int rwa_redfin_buffer_prepare(struct rwa_buffer *,char *,size_t);
+ static int rwa_redfin_buffer_texture_prepare(struct rwa_texture *,char *,size_t);
+ static void rwa_redfin_buffer_written(struct rwa_buffer *);
+@@ -3219,6 +3221,7 @@
+    if(!error) {
+       if(device->linear_epoch==UINT64_MAX) {device->command_scope.active=false;device->command_scope.failed=true;error=-1;}
+       else ++device->linear_epoch;
++      if(!error)rwa_redfin_trace_begin(device);
+    }
+    if (error) say(why,why_size,"Metal command scope is already active or retired");
+    return error;
+@@ -3231,6 +3234,7 @@
+    if(!error) {
+       device->pipe->set_framebuffer_state(device->pipe,&(struct pipe_framebuffer_state){0});
+       error=rwa_redfin_linear_resolve_all(device,why,why_size);
++      if(!error)rwa_redfin_trace_end(device);
+    }
+    else if (why && why_size && !why[0]) say(why,why_size,"Metal command scope retired after a failed completion");
+    return error;

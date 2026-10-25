@@ -30,8 +30,13 @@ class MetalTraceTests(unittest.TestCase):
     def test_corruption_dimensions_duplicate_and_out_of_order_frames_are_refused(self):
         valid=self.record()
         for data in [valid.replace(b'raw=48',b'raw=49'),valid.replace(b'width=4',b'width=81'),
-            valid.replace(b'data=A',b'data=B'),valid+valid,self.record(frame=2),valid[:-2],valid.replace(b'draw=2 ',b'draw=513 ')]:
+            valid.replace(b'data=A',b'data=B'),valid+valid,self.record(frame=2),valid[:-2],valid.replace(b'draw=2 ',b'draw=8193 ')]:
             with self.assertRaises(ValueError):decoder.decode(data,'0123456789abcdef')
+
+    def test_completed_command_image_keeps_its_real_role_and_later_draw_number(self):
+        record=self.record().replace(b'role=OUTPUT',b'role=FINAL').replace(b'draw=2 ',b'draw=1724 ')
+        result=decoder.decode(record,'0123456789abcdef')
+        self.assertEqual(result[0][0]['role'],'FINAL');self.assertEqual(result[0][0]['draw'],1724)
 
     def test_actual_native_crc_matches_independent_zlib_for_readback_lengths(self):
         native=(HERE/'metal-composition-trace.inc').read_text()

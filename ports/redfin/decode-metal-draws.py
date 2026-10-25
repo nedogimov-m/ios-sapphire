@@ -10,7 +10,7 @@ import zlib
 
 ROOT=Path(__file__).resolve().parents[2]
 RECORD=re.compile(rb'REDFIN METAL DRAW IMAGE: boot=([0-9a-f]{16}) frame=([0-9]+) draw=([0-9]+) '
-    rb'role=(OUTPUT|INPUTV|INPUTF) slot=([0-9]+) surface=([0-9]+) format=([0-9]+) '
+    rb'role=(FINAL|OUTPUT|INPUTV|INPUTF) slot=([0-9]+) surface=([0-9]+) format=([0-9]+) '
     rb'source=([0-9]+)x([0-9]+) width=([0-9]+) height=([0-9]+) raw=([0-9]+) '
     rb'crc32=([0-9a-f]{8}) data=([A-Za-z0-9+/]+)')
 
@@ -32,7 +32,7 @@ def decode(data,boot):
         if not match:raise ValueError('malformed native Metal draw record')
         _,frame,draw,role,slot,surface,fmt,sw,sh,width,height,raw,crc,encoded=match.groups()
         frame,draw,slot,surface,fmt,sw,sh,width,height,raw=map(int,(frame,draw,slot,surface,fmt,sw,sh,width,height,raw))
-        if not(frame==len(records)+1<=48 and 1<=draw<=512 and slot<32 and surface<2**32 and fmt<2**32 and
+        if not(frame==len(records)+1<=48 and 1<=draw<=8192 and slot<32 and surface<2**32 and fmt<2**32 and
             1<=sw<=16384 and 1<=sh<=16384 and 1<=width<=80 and 1<=height<=174 and raw==width*height*3):
             raise ValueError('native Metal draw bounds/sequence mismatch')
         rgb=base64.b64decode(encoded,validate=True)

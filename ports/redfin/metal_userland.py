@@ -546,6 +546,7 @@ def adapt_drawable(text):
         '#define REDFIN_SURFACE_SCOPE int locked_ __attribute__((cleanup(redfin_surface_leave)))=redfin_surface_enter(); (void)locked_\n')
     text = replace_once(text, 'static const struct rwd_format rwd_formats[] = {',
         'static const struct rwd_format rwd_formats[] = {\n'
+        '\t{ 1, \'A008\', 1, 0, "MTLPixelFormatA8Unorm" },\n'
         '\t/* Native kCVPixelFormatType_TwoComponent8; AIR already uses R8G8. */\n'
         '\t{ 30, \'2C08\', 2, 0, "MTLPixelFormatRG8Unorm" },\n'
         '\t{ 31, \'2C08\', 2, 0, "MTLPixelFormatRG8Unorm_sRGB" },')

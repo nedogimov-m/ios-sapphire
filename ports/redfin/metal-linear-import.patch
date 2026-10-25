@@ -9,7 +9,7 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
  #include "freedreno_screen.h"
  #include "freedreno_surface.h"
  #include "freedreno_util.h"
-@@ -1576,6 +1577,85 @@
+@@ -1576,6 +1577,112 @@
     return NULL;
  }
  
@@ -54,6 +54,33 @@ diff --git a/src/gallium/drivers/freedreno/freedreno_resource.c b/src/gallium/dr
 +   struct pipe_resource *buffer=redfin_buffer_from_bo(screen,fd_bo_ref(rsc->bo));
 +   if(buffer){*pitch=fd_resource_pitch(rsc,0);*offset=(unsigned)start;}
 +   return buffer;
++}
++struct pipe_resource *
++redfin_freedreno_texture_alias(struct pipe_screen *pscreen,struct pipe_resource *source,
++    const struct pipe_resource *shape,unsigned offset,unsigned pitch)
++{
++   if(!source||source->screen!=pscreen||source->target!=PIPE_BUFFER||!shape||
++      shape->target!=PIPE_TEXTURE_2D||shape->last_level||shape->array_size!=1||shape->nr_samples>1||
++      !is_a6xx(fd_screen(pscreen))||!shape->width0||!shape->height0||!pitch)return NULL;
++   unsigned cpp=util_format_get_blocksize(shape->format);
++   if(!cpp||cpp>16||(cpp&(cpp-1))||util_format_is_compressed(shape->format)||util_format_is_depth_or_stencil(shape->format))return NULL;
++   struct fd_resource *parent=fd_resource(source);
++   uint64_t bytes=(uint64_t)pitch*shape->height0;
++   if(!parent->bo||offset>source->width0||bytes>source->width0-offset||bytes>UINT32_MAX||
++      ((fd_bo_get_iova(parent->bo)+offset)&63u)||
++      (uint64_t)shape->width0*util_format_get_blocksize(shape->format)>pitch)return NULL;
++   struct fd_resource *rsc=alloc_resource_struct(pscreen,shape);
++   if(!rsc)return NULL;
++   struct pipe_resource *resource=&rsc->b.b;
++   rsc->internal_format=shape->format;rsc->b.is_shared=true;
++   fd_resource_layout_init(resource);fd_resource_set_bo(rsc,fd_bo_ref(parent->bo));
++   rsc->layout.layer_first=true;rsc->layout.pitch0=pitch;
++   struct fdl_slice *slice=fd_resource_slice(rsc,0);slice->offset=offset;slice->size0=(unsigned)bytes;
++   rsc->layout.pitchalign=MAX2(fdl_cpp_shift(&rsc->layout)+util_logbase2(fd_screen(pscreen)->info->gmem_align_w),6);
++   if(fd_resource_pitch(rsc,0)!=pitch||fd_screen(pscreen)->layout_resource_for_modifier(rsc,DRM_FORMAT_MOD_LINEAR)<0) {
++      fd_resource_destroy(pscreen,resource);return NULL;
++   }
++   rsc->valid=true;return resource;
 +}
 +int
 +redfin_freedreno_gpu_blit(struct pipe_context *pipe,const struct pipe_blit_info *info)

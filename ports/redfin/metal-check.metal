@@ -30,6 +30,13 @@ fragment float4 redfin_position_sample_fragment(float4 position [[position]],
     texture2d<float,access::read> source [[texture(0)]])
 { return source.read(uint2(position.xy)); }
 
+fragment float4 redfin_alpha_sample_fragment(float4 position [[position]],
+    texture2d<float,access::read> source [[texture(0)]])
+{
+    float4 value=source.read(uint2(position.xy));
+    return float4(value.a,value.r,value.g+value.b,1);
+}
+
 struct RedfinStreamInput {
     float2 position [[attribute(0)]];
     float2 uv [[attribute(1)]];

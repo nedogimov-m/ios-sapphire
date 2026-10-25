@@ -6,7 +6,9 @@
 static struct {
    bool checked,enabled;
    char boot[17];
-   unsigned draws,images,attempts,aux_images,seen_count;
+   unsigned draws,images,attempts,aux_images,final_images,commands,seen_count;
+   struct rwa_texture *candidate;
+   unsigned candidate_draw;
    struct {const struct rwa_texture *texture;uint32_t crc,alpha_crc;unsigned role;} seen[128];
 } redfin_composition_trace;
 
@@ -43,8 +45,9 @@ rwa_redfin_trace_texture(struct rwa_texture *texture,const char *role,unsigned s
    if(!texture||redfin_composition_trace.images>=48||redfin_composition_trace.attempts>=1024)return;
    struct rwa_device *device=texture->device;struct pipe_resource *resource=texture->res;
    enum pipe_format format=resource->format;
-   bool main_output=!strcmp(role,"OUTPUT")&&!slot&&resource->width0>=512&&resource->height0>=512;
-   if(!main_output&&redfin_composition_trace.aux_images>=12)return;
+   bool final=!strcmp(role,"FINAL");
+   if(!final&&redfin_composition_trace.aux_images>=12)return;
+   if(final&&redfin_composition_trace.final_images>=36)return;
    if(format_is_depth_stencil(format)||util_format_get_blockwidth(format)!=1||
       util_format_get_blockheight(format)!=1||resource->nr_samples>1||resource->target!=PIPE_TEXTURE_2D)return;
    ++redfin_composition_trace.attempts;
@@ -97,7 +100,7 @@ rwa_redfin_trace_texture(struct rwa_texture *texture,const char *role,unsigned s
       free(rgb);free(alpha);free(line);return;
    }
    {
-      unsigned kind=!strcmp(role,"OUTPUT");
+      unsigned kind=final?2:!strcmp(role,"OUTPUT");
       unsigned i=0;
       for(;i<redfin_composition_trace.seen_count;++i)
          if(redfin_composition_trace.seen[i].texture==texture&&redfin_composition_trace.seen[i].role==kind)break;
@@ -129,7 +132,8 @@ rwa_redfin_trace_texture(struct rwa_texture *texture,const char *role,unsigned s
    }
    line[at++]='\n';
    if(write(STDERR_FILENO,line,at)==(ssize_t)at) {
-      ++redfin_composition_trace.images;if(!main_output)++redfin_composition_trace.aux_images;
+      ++redfin_composition_trace.images;
+      if(final)++redfin_composition_trace.final_images;else ++redfin_composition_trace.aux_images;
    }
    free(rgb);free(alpha);free(line);
 }
@@ -163,10 +167,15 @@ rwa_redfin_trace_stage(struct rwa_render *render,const struct air_shader_info *i
 static int
 rwa_redfin_trace_draw(struct rwa_render *render,const struct rwa_draw *draw,char *why,size_t why_size)
 {
-   if(!rwa_redfin_trace_selected()||redfin_composition_trace.draws>=512||redfin_composition_trace.images>=48)return 0;
+   if(!rwa_redfin_trace_selected()||redfin_composition_trace.draws>=8192)return 0;
+   unsigned number=++redfin_composition_trace.draws;
+   struct rwa_texture *target=draw->color_count?draw->color[0]:NULL;
+   if(target&&target->redfin_surface&&target->res->width0>=512&&target->res->height0>=512) {
+      redfin_composition_trace.candidate=target;redfin_composition_trace.candidate_draw=number;
+   }
+   if(number>512||redfin_composition_trace.aux_images>=12||redfin_composition_trace.images>=48)return 0;
    struct rwa_device *device=render->device;
    if(redfin_metal_scope_drain(&device->command_scope,command_scope_finish,device,why,why_size))return -1;
-   unsigned number=++redfin_composition_trace.draws;
    fprintf(stderr,"REDFIN METAL DRAW: boot=%s draw=%u vertex=%s fragment=%s primitive=%u start=%u count=%u instances=%u base-instance=%u colors=%u actual-drain=1 diagnostic-timing=1\n",
       redfin_composition_trace.boot,number,render->generated_vertex?"generated":render->vinfo.entry_point,
       render->finfo.entry_point,draw->primitive,draw->vertex_start,draw->vertex_count,draw->instance_count,draw->base_instance,draw->color_count);
@@ -180,4 +189,22 @@ rwa_redfin_trace_draw(struct rwa_render *render,const struct rwa_draw *draw,char
       draw->fragment_buffer_table_count,"INPUTF",number);
    for(unsigned i=0;i<MIN2(draw->color_count,2);++i)rwa_redfin_trace_texture(draw->color[i],"OUTPUT",i,number);
    return 0;
+}
+static void
+rwa_redfin_trace_begin(struct rwa_device *device)
+{
+   (void)device;
+   if(rwa_redfin_trace_selected()){redfin_composition_trace.candidate=NULL;redfin_composition_trace.candidate_draw=0;}
+}
+static void
+rwa_redfin_trace_end(struct rwa_device *device)
+{
+   if(!rwa_redfin_trace_selected())return;
+   struct rwa_texture *target=redfin_composition_trace.candidate;
+   redfin_composition_trace.candidate=NULL;
+   if(!target||target->device!=device||redfin_composition_trace.final_images>=36)return;
+   unsigned command=++redfin_composition_trace.commands;
+   fprintf(stderr,"REDFIN METAL COMMAND IMAGE: boot=%s command=%u draw=%u surface=%u actual-end-fence-and-resolve=1\n",
+      redfin_composition_trace.boot,command,redfin_composition_trace.candidate_draw,target->redfin_surface);
+   rwa_redfin_trace_texture(target,"FINAL",0,redfin_composition_trace.candidate_draw);
 }

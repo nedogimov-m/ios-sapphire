@@ -1,5 +1,38 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native BO views, actual A8 semantics and completed-frame evidence — 2026-10-25
+
+Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab. V23's real CoreAnimation
+requests include A8Unorm640x358/offset64/pitch640. AIR already maps Metal1 to
+PIPE_FORMAT_A8_UNORM; Mesa25.0.7 fdl6 has a native A8 format, including alpha
+swizzle. Add the missing frontend mapping and a native shader probe checking
+alpha plus zero RGB, two fresh CPU seeds, guards and lifetime for that exact case.
+
+An ordinary Metal buffer may be a heap-suballocated BO whose CPU address is
+not a VM-page boundary. Drop that incidental restriction by creating the texture
+over the actual parent's native fd_bo, retaining its real suballocation and
+following fd_resource_from_handle's validated LINEAR layout/ownership setup.
+Check the logical parent span and actual resource extent before alias creation;
+never extend it to extra BO padding. Metadata/shape validation does not allocate
+a throwaway texture. No extra wrapped surface or CPU pixel copy is needed for
+buffer views; their public buffer/offset/pitch and ownership remain genuine.
+
+Unaligned layouts retain the actual parent pipe_resource and use the same native
+GPU row converter in both directions. Its common byte/word copy now preserves
+the exact pixel span, including widths not divisible by4. Shared direct views
+invalidate native sampler state once per command for possible fresh CPU writes;
+immutable repeated reads add no raster fence. The independent external-memory
+probe now identifies its precise failing stage instead of returning an opaque0.
+
+Capture at most12auxiliary per-draw images, then preserve ordinary batching.
+Reserve36images for actual full-screen IOSurface targets at command end, after
+the real final fence and every resolve. Record the command/draw/surface and
+capture a distinct FINAL role while its command still retains the texture.
+This distinguishes a completed compositor output from an intermediate pass and
+the later physical-panel capture. Optional maps still alter scheduling latency;
+an observer-disabled run remains required for ordinary rendering/FPS conclusions.
+
 ## Real parent-buffer textures and ordered alias visibility — 2026-10-25
 
 Preferred pins remain userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and

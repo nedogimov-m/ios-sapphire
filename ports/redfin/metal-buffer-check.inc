@@ -33,7 +33,7 @@ static BOOL buffer_external_pages(id<MTLDevice> device,id<MTLComputePipelineStat
     uint8_t *base=allocation,*original=base+page;memset(base,0x93,page*3);
     __block unsigned released=0;__block BOOL releaseRange=NO;
     dispatch_semaphore_t releaseEvent=dispatch_semaphore_create(0);
-    BOOL valid=YES,created=NO;
+    BOOL valid=YES,created=NO,wrote=NO,read=NO,tail=NO,guards=NO;
     @autoreleasepool {
         id<MTLCommandQueue> queue=[device newCommandQueue];
         id<MTLBuffer> seed=[device newBufferWithLength:4 options:MTLResourceStorageModeShared];
@@ -51,8 +51,13 @@ static BOOL buffer_external_pages(id<MTLDevice> device,id<MTLComputePipelineStat
                 [encoder setBuffer:seed offset:0 atIndex:1];
                 [encoder dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(64,1,1)];[encoder endEncoding];
                 valid=valid&&blit_completed(command,"GPU-writes-original-external-pages");
-                for(unsigned i=0;valid&&i<64;++i)valid=((uint32_t *)original)[i]==(i^nonce)*1664525u+1013904223u;
-                for(NSUInteger i=256;valid&&i<page;++i)valid=original[i]==0x93;
+                for(unsigned i=0;valid&&i<64;++i)if(((uint32_t *)original)[i]!=(i^nonce)*1664525u+1013904223u) {
+                    printf("REDFIN METAL EXTERNAL WRITE: word=%u actual=%08x expected=%08x\n",i,((uint32_t *)original)[i],(i^nonce)*1664525u+1013904223u);valid=NO;
+                }
+                for(NSUInteger i=256;valid&&i<page;++i)if(original[i]!=0x93) {
+                    printf("REDFIN METAL EXTERNAL WRITE GUARD: byte=%lu actual=%02x\n",(unsigned long)i,original[i]);valid=NO;
+                }
+                wrote=valid;
             }
         }
         if(valid) {
@@ -64,8 +69,13 @@ static BOOL buffer_external_pages(id<MTLDevice> device,id<MTLComputePipelineStat
                 [encoder setBuffer:external offset:0 atIndex:1];
                 [encoder dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(64,1,1)];[encoder endEncoding];
                 valid=valid&&blit_completed(command,"GPU-reads-original-external-pages");
-                for(unsigned i=0;valid&&i<64;++i)valid=((uint32_t *)output.contents)[i]==(i^(nonce^0xb1c079d3u))*1664525u+1013904223u;
-                for(NSUInteger i=256;valid&&i<page;++i)valid=((uint8_t *)output.contents)[i]==0xa5;
+                for(unsigned i=0;valid&&i<64;++i)if(((uint32_t *)output.contents)[i]!=(i^(nonce^0xb1c079d3u))*1664525u+1013904223u) {
+                    printf("REDFIN METAL EXTERNAL READ: word=%u actual=%08x expected=%08x\n",i,((uint32_t *)output.contents)[i],(i^(nonce^0xb1c079d3u))*1664525u+1013904223u);valid=NO;
+                }
+                for(NSUInteger i=256;valid&&i<page;++i)if(((uint8_t *)output.contents)[i]!=0xa5) {
+                    printf("REDFIN METAL EXTERNAL READ GUARD: byte=%lu actual=%02x\n",(unsigned long)i,((uint8_t *)output.contents)[i]);valid=NO;
+                }
+                read=valid;
             }
         }
         if(valid) {
@@ -77,13 +87,17 @@ static BOOL buffer_external_pages(id<MTLDevice> device,id<MTLComputePipelineStat
                  * retention must keep its original pages and deallocator alive. */
                 [external release];external=nil;valid=valid&&!released;
                 valid=valid&&blit_completed(command,"external-lifetime-unaligned-copy")&&!memcmp(original+page-3,(uint8_t *)seed.contents+1,3);
+                tail=valid;
             }
         }
         for(NSUInteger i=0;valid&&i<page;++i)valid=base[i]==0x93&&base[2*page+i]==0x93;
+        guards=valid;
         [external release];[output release];[seed release];[queue release];
     }
     BOOL releasedNow=!created||!dispatch_semaphore_wait(releaseEvent,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC));
     valid=valid&&created&&releasedNow&&releaseRange&&released==1;
+    printf("REDFIN METAL EXTERNAL DETAIL: created=%u GPU-write=%u GPU-read=%u tail=%u outside-guards=%u deallocator-arrived=%u correct-range=%u releases=%u\n",
+        created,wrote,read,tail,guards,releasedNow,releaseRange,released);
     if(releasedNow){free(allocation);dispatch_release(releaseEvent);}
     /* On a genuine completion/lifetime failure the diagnostic leaves its pages
      * and callback semaphore alive until process exit, never frees live DMA. */

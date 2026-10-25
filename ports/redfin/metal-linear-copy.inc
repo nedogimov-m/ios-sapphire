@@ -43,42 +43,18 @@ rwa_redfin_copy_rows(struct rwa_texture *texture,bool output,char *why,size_t wh
    struct rwa_device *device=texture->device;struct pipe_context *pipe=device->pipe;
    struct pipe_resource *source=output?texture->linear_shadow_buffer:texture->linear_original;
    struct pipe_resource *destination=output?texture->linear_original:texture->linear_shadow_buffer;
-   struct redfin_linear_copy_plan plan;
    unsigned cpp=util_format_get_blocksize(texture->res->format);
-   if(!redfin_linear_copy_plan_make(&plan,texture->res->width0*cpp,texture->res->height0,
-      output?texture->linear_shadow_pitch:texture->linear_pitch,
-      output?texture->linear_pitch:texture->linear_shadow_pitch,
+   int result=rwa_blit_rows(device,source,destination,
       output?texture->linear_shadow_offset:texture->linear_offset,
       output?texture->linear_offset:texture->linear_shadow_offset,
-      source->width0,destination->width0)) {
-      say(why,why_size,"native IOSurface row conversion escapes its actual buffers");return -1;
+      output?texture->linear_shadow_pitch:texture->linear_pitch,
+      output?texture->linear_pitch:texture->linear_shadow_pitch,
+      (uint64_t)texture->res->width0*cpp,texture->res->height0,why,why_size);
+   if(!result&&redfin_freedreno_alias_written(pipe,output?texture->linear_original:texture->res)) {
+      device->command_scope.failed=true;say(why,why_size,"native GPU alias transition refused");result=-1;
    }
-   void *shader=rwa_redfin_row_shader(device,32,why,why_size);if(!shader)return -1;
-   if(redfin_metal_scope_prepare(&device->command_scope,false,command_scope_finish,device,why,why_size))return -1;
-   if(pipe->memory_barrier)pipe->memory_barrier(pipe,PIPE_BARRIER_ALL);
-   const struct pipe_shader_buffer buffers[2]={
-      {.buffer=source,.buffer_size=source->width0},
-      {.buffer=destination,.buffer_size=destination->width0}};
-   struct pipe_constant_buffer constants={.user_buffer=&plan,.buffer_size=sizeof(plan)};
-   pipe->bind_compute_state(pipe,shader);
-   pipe->set_constant_buffer(pipe,PIPE_SHADER_COMPUTE,0,false,&constants);
-   pipe->set_shader_buffers(pipe,PIPE_SHADER_COMPUTE,0,2,buffers,2);
-   const struct pipe_grid_info grid={.work_dim=2,.block={64,1,1},
-      .grid={(plan.words+63)/64,plan.rows,1}};
-   pipe->launch_grid(pipe,&grid);
-   int result=redfin_metal_scope_complete(&device->command_scope,false,command_scope_finish,device,why,why_size);
    if(!result) {
-      if(pipe->memory_barrier)pipe->memory_barrier(pipe,PIPE_BARRIER_ALL);
-      if(redfin_freedreno_alias_written(pipe,output?texture->linear_original:texture->res)) {
-         device->command_scope.failed=true;say(why,why_size,"native GPU alias transition refused");result=-1;
-      }
-   }
-   pipe->set_shader_buffers(pipe,PIPE_SHADER_COMPUTE,0,2,NULL,0);
-   pipe->set_constant_buffer(pipe,PIPE_SHADER_COMPUTE,0,false,NULL);
-   pipe->bind_compute_state(pipe,NULL);
-   if(!result) {
-      unsigned direction=output?1:0;
-      uint64_t count=++device->linear_copies[direction];
+      unsigned direction=output?1:0;uint64_t count=++device->linear_copies[direction];
       if(count<=4)fprintf(stderr,"REDFIN METAL LINEAR COPY: direction=%s width=%u height=%u pitch=%u aligned-pitch=%u actual-GPU-finish=1 CPU-pixel-copy=0\n",
          output?"resolve":"import",texture->res->width0,texture->res->height0,
          texture->linear_pitch,texture->linear_shadow_pitch);
@@ -87,12 +63,12 @@ rwa_redfin_copy_rows(struct rwa_texture *texture,bool output,char *why,size_t wh
 }
 
 static int
-rwa_redfin_linear_import(struct rwa_texture *texture,const struct pipe_resource *templ,
-    unsigned surface,unsigned offset,unsigned pitch,char *why,size_t why_size)
+rwa_redfin_linear_backing(struct rwa_texture *texture,const struct pipe_resource *templ,
+    struct pipe_resource *original,unsigned surface,unsigned offset,unsigned pitch,char *why,size_t why_size)
 {
    struct rwa_device *device=texture->device;
    unsigned cpp=util_format_get_blocksize(templ->format);
-   texture->linear_original=redfin_freedreno_import_buffer(device->screen,surface);
+   texture->linear_original=original; /* owns this real native resource reference */
    if(!texture->linear_original||!redfin_linear_layout_fits(templ->width0,templ->height0,cpp,
       pitch,offset,texture->linear_original->width0))goto fail;
    const uint64_t modifier=DRM_FORMAT_MOD_LINEAR;
@@ -117,6 +93,15 @@ fail:
    return -1;
 }
 
+
+static int
+rwa_redfin_linear_import(struct rwa_texture *texture,const struct pipe_resource *templ,
+    unsigned surface,unsigned offset,unsigned pitch,char *why,size_t why_size)
+{
+   return rwa_redfin_linear_backing(texture,templ,redfin_freedreno_import_buffer(texture->device->screen,surface),
+      surface,offset,pitch,why,why_size);
+}
+
 static int
 rwa_redfin_linear_prepare(struct rwa_texture *texture,char *why,size_t why_size)
 {
@@ -128,7 +113,7 @@ rwa_redfin_linear_prepare(struct rwa_texture *texture,char *why,size_t why_size)
     * Resolve to the original only after the command's real rendering fence. */
    if(texture->linear_dirty)return 0;
    for(struct rwa_texture *other=device->linear_textures;other;other=other->linear_next)
-      if(other!=texture&&other->linear_surface==texture->linear_surface&&other->linear_dirty)
+      if(texture->linear_surface&&other!=texture&&other->linear_surface==texture->linear_surface&&other->linear_dirty)
          if(rwa_redfin_linear_resolve(other,why,why_size))return -1;
    if(device->command_scope.active&&texture->linear_epoch==device->linear_epoch)return 0;
    int result=rwa_redfin_copy_rows(texture,false,why,why_size);
@@ -142,7 +127,7 @@ rwa_redfin_linear_written(struct rwa_texture *texture)
    if(texture->linear_original) {
       texture->linear_dirty=true;
       for(struct rwa_texture *other=texture->device->linear_textures;other;other=other->linear_next)
-         if(other!=texture&&other->linear_surface==texture->linear_surface)other->linear_epoch=0;
+         if(texture->linear_surface&&other!=texture&&other->linear_surface==texture->linear_surface)other->linear_epoch=0;
    }
    if(texture->buffer_parent) {
       texture->buffer_pending=true;

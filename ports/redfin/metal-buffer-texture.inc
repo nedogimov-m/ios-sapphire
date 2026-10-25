@@ -50,6 +50,16 @@ rwa_redfin_buffer_texture_prepare(struct rwa_texture *texture,char *why,size_t b
       }
       if(t!=texture&&rwa_redfin_linear_resolve(t,why,bytes))return -1;
    }
+   /* Shared parent pages may have fresh CPU writes between commands without
+    * didModifyRange. Invalidate native sampler state once per command; this
+    * records cache work and does not add a raster fence for immutable reads. */
+   if(!texture->linear_original&&(!device->command_scope.active||texture->linear_epoch!=device->linear_epoch)) {
+      if(device->pipe->memory_barrier)device->pipe->memory_barrier(device->pipe,PIPE_BARRIER_ALL);
+      if(redfin_freedreno_alias_written(device->pipe,texture->res)) {
+         say(why,bytes,"native parent texture cache transition refused");return -1;
+      }
+      texture->linear_epoch=device->linear_epoch;
+   }
    return 0;
 }
 static void
@@ -87,4 +97,39 @@ rwa_redfin_buffer_texture_release(struct rwa_texture *texture)
    while(*at&&*at!=texture)at=&(*at)->buffer_next;
    if(*at==texture)*at=texture->buffer_next;
    texture->buffer_parent=NULL;texture->buffer_next=NULL;
+}
+
+static int
+rwa_redfin_buffer_texture_storage(struct rwa_texture *texture,const struct pipe_resource *shape,
+    const struct redfin_buffer_texture *view,char *why,size_t bytes)
+{
+   struct rwa_buffer *parent=view->parent;unsigned cpp=util_format_get_blocksize(shape->format);
+   if(parent->device!=texture->device||shape->target!=PIPE_TEXTURE_2D||shape->last_level||shape->nr_samples>1||
+      util_format_is_compressed(shape->format)||format_is_depth_stencil(shape->format)||
+      !redfin_linear_layout_fits(shape->width0,shape->height0,cpp,view->pitch,view->offset,parent->size)) {
+      say(why,bytes,"buffer texture exceeds its actual parent layout");return -1;
+   }
+   bool shadow=(view->offset&63u)||view->pitch%MAX2(64u,cpp*16u);
+   if(!shadow)texture->res=redfin_freedreno_texture_alias(texture->device->screen,parent->res,shape,view->offset,view->pitch);
+   if(!texture->res) {
+      struct pipe_resource *original=NULL;pipe_resource_reference(&original,parent->res);
+      if(rwa_redfin_linear_backing(texture,shape,original,0,view->offset,view->pitch,why,bytes))return -1;
+   }
+   if(rwa_redfin_texture_buffer_link(texture,parent,view->offset,view->pitch,why,bytes)) {
+      rwa_redfin_linear_release(texture);pipe_resource_reference(&texture->res,NULL);return -1;
+   }
+   return 0;
+}
+
+struct rwa_texture *
+rwa_redfin_texture_from_buffer(struct rwa_device *device,struct rwa_buffer *parent,const struct rwa_texture_shape *shape,
+    uint64_t offset,uint64_t pitch,char *why,size_t bytes)
+{
+   if(!device||device->software||!parent||parent->device!=device||!shape||shape->type!=2||
+      shape->depth!=1||shape->array_length!=1||shape->mip_levels!=1||shape->sample_count!=1||
+      offset>UINT32_MAX||pitch>UINT32_MAX) {
+      say(why,bytes,"unsupported native buffer texture descriptor");return NULL;
+   }
+   const struct redfin_buffer_texture view={parent,(unsigned)offset,(unsigned)pitch};
+   return texture_of_shape(device,shape,NULL,&view,why,bytes);
 }
