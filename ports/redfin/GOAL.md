@@ -9,6 +9,15 @@ human-dependent actions, and continue independent work.
 
 ## Latest checkpoint
 
+V12 recovery boot b2113da1ed6dead5 is clean/not inconsistent861710, file logs
+captured, verified Fastboot. V16 applied/stale. Actual GMEM5/sysmem0 and all
+native Metal dependency/pixel/guard probes PASS; real animation13.500fps versus
+60callback Hz, no sustained speed improvement. Phone survives, Photos fails.
+Photos cause is native TCC error6: Sandbox extension issuance fails; inherited
+0050 returns ENOENT for issue5/consume6. Implement real bounded process-bound
+capabilities, preserving TCC decisions. Cold ADSP order fixed in working tree
+and local115006kernel built (unbooted); direct VD6281/GENI/SLG51000 remains.
+
 V12 observed: V16 applied once/stale. Actual ADSP source, LCX/LMX votes and
 AOP on pass, then the WLAN owner stalls before any PAS reply (cold PAS shutdown
 is the first candidate). Other CPUs/GPU/thermal keep running, no recorded panic.

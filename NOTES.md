@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native journal replay clean; real GMEM dependency PASS; exact Photos Sandbox failure — 2026-10-25
+
+Source b6a9bec; ordinary temporary V12-recovery/c96d4fcc81b1acf8327c9ea4747f5abbe54089f523f578a6e2b3bc52b751ca92,
+nonce b2113da1ed6dead5, same kernel bffe7c0d.../local20261025-113137/noCI,
+optional ADSP node absent. Native HFS replay/shutdown leaves clean HFSX/not
+inconsistent/write_count861710; all readonly user-file logs captured and
+verified Fastboot. No raw filesystem repair or new root modification. V16 is
+applied/stale; future staging must start from861710, never reuse V15/V16.
+
+Actual Metal checker:192compute commands, BGRA/RG8/three-blend pixels, two-pass
+render-target-to-sampler dependency and all guards PASS. Paired FD620 counter
+proves5GMEM/0sysmem batches. This proves genuine tile rendering, not faster UI:
+warmed six-layer workload135completed GPU presents/10.000301s=13.500fps,
+601native callbacks/60.000Hz. Stable60/90fps is still unfinished. Phone246
+survives; Photos still aborts; SpringBoard26/backboardd remain stable. Native
+CoreMotion advertises availability but receives zero samples; no HID source
+published because ADSP was not started. Availability alone is not success.
+
+Critical native Photos cause now observed: framework returns NSError
+kTCCErrorDomain/code6, "server error: Failed to issue Sandbox Extension for
+kTCCServicePhotos" from the actual assetsd attribution. Entitlement checks
+were already allowed; do not grant a TCC answer or edit its DB. Inherited
+0050 deliberately returns ENOENT for Sandbox extension issue5/consume6. Next
+implement real bounded opaque capability issuance/consume/release, bound to
+native process generations/authorized TCC issuer and preserving native policy.
+Installed libsystem_sandbox UUID bee5f480cdb834ddaa8ee4e6d4ace436: issue5
+has seven64-bit fields(class,kind,resource,flags,output2048,pid,pidversion);
+consume6 has token,length,output_handle; release7 has handle,0,0. Disassembly
+and full error evidence remain private. No permission bypass is added.
+
+Native ADSP cold-order fix is implemented/building in the working tree:
+readonly host2 cold witness; separately owned wired metadata page; INIT and
+MEM_SETUP before any DSP RAM access, then copy/SMP2P/AUTH. No inactive-DSP
+PAS shutdown. Native entry/return traces identify future stalls.46selected
+host cases PASS; local cold kernel20261025-115006 built, not yet tested on
+hardware. VD6281 still needs both native GENI I2C and its SLG51000 LDO7 supply.
+Exact recovery args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb2113da1ed6dead5 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V12 ADSP power accepted, worker stalls before PAS reply; recovery boot required — 2026-10-25
 
 Source b6a9bec, kernel bffe7c0d.../local20261025-113137/noCI, V12/d15ba0e2...
