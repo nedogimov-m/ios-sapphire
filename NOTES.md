@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN combined90Hz/EAGL, reboot Keychain and Phone verified — 2026-10-25
+
+Source a07a2ce; kernel unchanged/local20261025-062535/noCI,
+SHA2564c26d9c20147ea4d15e5d18a0692e83346ac57ce64eaf48fa70a36c33a30dc4e.
+Fresh V9 apply:25ranges/83blocks/339968bytes, one new block/zero freed;
+all preimages saved/matched and complete signed files read back exactly,
+native readonly fsckPASS, empty journal unchanged. Never reuse applied V9.
+Fresh gui-platform-v3 imageSHA2567abbf382edeec3934065145f55204197a24169d027d87393603c11b182441854,
+authenticated/image-bound boot24640daa371b61c8. No panic/window-server
+restart or Mesa submit/fence failure. Actual EAGL insertion now succeeds;
+native shader/IOSurface checks and backboardd completed submissions/frames
+PASS. This short mostly idle capture does not establish sustained60/90fps.
+
+Physical TE mean16677->11120us; independent INTF21->32frames/350ms,
+verified90Hz mode8. Native MobileGestalt identity/model remain matched.
+SecItem probe existing1/read-status0/exact1 proves native decrypt persistence
+across this reboot. Existing Wi-Fi passwords/autojoin still need the actual
+MobileWiFi pathway checked; no real password is claimed newly saved yet.
+The ordinary native LS async opens now both accept. Phone pid259 survives
+5/17s with stable SpringBoard26. Photos launches pid269 but aborts; assetsd
+pid240 also aborts, and the native initializer reports PHPhotosErrorXPC4103
+because com.apple.photos.service is unavailable. Symbolicate those actual
+assertion stacks before another linked fix; do not replace a photo schema.
+
+Native time-view geometry is finally measured: x30 shifts to53.35points,
+y14/h18, outside the real camera rectangle; later stable/repeated layouts
+remain outside without accumulating drift. UIKit reports native-max-fps60
+while the physical panel is90Hz. Next full block must bind app/display
+refresh metadata to verified hardware, alongside Photos service diagnosis,
+actual MobileWiFi persistence/startup and the native power/thermal drivers.
+Hardware inventory identifies PM7250B/QG/ADC5, SMB5 and TSENS26xx; generic
+qcom,tsens-v2/RRADC layouts are not the exact live Redfin interfaces.
+Re-reviewed upstream kernelHEAD d82c64a3a31cd27a0a0afbf6e213e467e44b1b4c
+and userlandHEAD a79ff0772a3454fd1ef127e181e5b3bce6c9ce18; no unreviewed
+update was installed. Metal and every actual sensor remain required work.
+
+Root finishes clean/not-inconsistent/write_count783850; all8file logs
+captured read-only and device returned to verified Fastboot. Human screen/
+cable/motion/account checks remain deferred; do not wait for them.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x24640daa371b61c8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete90Hz bridge/Photos/app-check follow-up staged — 2026-10-25
 
 Source based on f241ad4; kernel remains local20261025-062535/noCI,

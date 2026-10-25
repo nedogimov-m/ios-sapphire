@@ -51,58 +51,41 @@ thermal/sensor support and credential persistence remain unfinished.
 
 ## Current independent work and evidence
 
-Whole native platform/display block source is df42261, with its standalone
-builder import correction. Local kernel20261025-061234/noCI PASS; SHA256
-522ea9fd7ded64cd6b327ddc16a100721feae172e576bdecc45651ce7521b042.
-All138distinct selected host cases PASS. Native Photos/UI/app checker are
-signed and every nonweak import resolves through installed20H392 (52libs).
+Source a07a2ce, integrated gui-platform-v3 authenticated boot24640daa371b61c8.
+Kernel local20261025-062535/noCI (4c26d9c2...), unchanged from descriptorV2.
+Fresh V9 complete update has all25ranges/83blocks/339968bytes backed up and
+readback-verified; native readonly fsckPASS, one new block/zero freed.
+V9 is applied and must never be reused. Capture ends with clean root,
+write_count783850 and verified Fastboot. Exact args/builds/results are in
+newest NOTES. Private wrapping material must persist unchanged.
 
-Implemented; actual verification status follows below: persistent private AES256/RFC3394
-AKS wrap/unwrap, synthetic SecItem reboot probe, actual model publication,
-canonical native Photos URL guard, full1080x2340viewport/inverse touch,
-UUID/type-guarded native status-bar camera avoidance, physical90Hz FIFO/TE
-transaction, native display mode metadata/current IDs and corrected native
-time/time/counter callback ABI. Nested immutable-payload comparisons are
-removed while the complete outer GPU audit still checks every payload once.
-The opt-in native checker opens Phone/Photos and records process/SpringBoard
-survival without calls/messages/account actions.
+Confirmed in this combined autonomous run: physical90Hz (TE16677->11120us,
+INTF21->32frames/350ms), complete1080x2340viewport/inverse touch, current
+90Hz-compatible EAGL installation, native shader/IOSurface and backboardd
+completed rendering/fences without GPU fault/Mesa submit failure or panic.
+Phone opens through native async LaunchServices and survives5/17s with
+stable SpringBoard. SecItem existing1/read0/exact1 proves reboot persistence.
+Time moves from x30 to53.35points outside the physical camera; measured
+repeated layouts show no cumulative drift. Actual serial/model publication
+remains valid. No human smoothness/cable/motion/account check is required yet.
 
-Image ports/redfin/out/gui-platform-v1/redfin-xnu.img has preflightPASS;
-nonce3635d632d4fbfca8, SHA256
-dfcf8cdcfa402d32bac0888ed0df5b166fa913172f5f3c6856d53a1b930d45ae.
-Exact pending full-panel90Hz capture args are in the newest NOTES entry.
-Capture excludes the separate userspace-wait payload by the existing policy.
+Outstanding linked userland work: Photos and assetsd abort, native creation
+now reaches the ordinary URL instance API but returns PhotosXPC4103 because
+the native assets service is unavailable. Symbolicate actual crashes and fix
+the service. UIKit still reports60maxFPS while panel TE proves90; publish the
+verified physical rate through the native app/display path. Check native
+MobileWiFi password persistence/autojoin and reduce radio startup latency.
+The synthetic SecItem proof alone does not prove an actual saved Wi-Fi key.
 
-V8 installation is complete:22backed-up/readback-verified ranges,195blocks/
-798720bytes,38new blocks, zero freed; all signed files match completely,
-native readonly fsckPASS, root clean/write_count761257, empty journal/JIB
-unchanged, verified Fastboot. Do not reuse V8 for another update. The next
-fresh V9 read phase must include the newly installed UI/GUI checker files.
-Private backups/preimages stay under research/redfin-graphics/root-update-v8.
-
-Authenticated V1/V2 boots prove actual panel90Hz: TE about16683->11124us
-and INTF21->31frames/350ms, native FIFO completion and90Hz mode publication.
-Full display/HID viewport and authenticated lock-screen RAM capture pass.
-V2's AKS descriptor preparation fix eliminates the panic; native SecItem
-add/read succeeds exactly. Model/serial MobileGestalt digests match actual
-hardware. Root is clean/write_count770135; eight file logs captured read-only;
-device is verified Fastboot. V2 kernel/build/image/nonce are in NOTES.
-
-Remaining linked corrections before the next combined/persistence run:
-rebuild the installed loader/EAGL bridge with the current90Hz profile (the
-old compiled profile silently skips system acceleration); use the actual
-PHPhotoLibrary instance URL/create-or-upgrade API because system Media is
-identifier0 and is not a well-known library; improve native app launch
-checks with async errors/foreground options. Status-bar library installs,
-but correct time placement and system smoothness are not yet observed.
-No Phone/Photos UI success is inferred from rejected legacy LS opens.
-
-Next fresh V9 read must include installed UI/gui-check files and bridge
-updates. Never reuse V8. Keep backup/redfin/ios-keychain-material.json
-unchanged and private; future saved keys depend on it. Complete the linked
-source fixes, then combined build/preflight/integrated test and native
-Keychain persistence. Continue power/charging, thermals/all actual sensors
-and Metal implementation; defer only human-dependent checks/authorization.
+Implement the next complete block before combined testing/new boot. Native
+power inventory is PM7250B/QG/ADC5/SMB5 and TSENS26xx, plus three standard
+OSM cpufreq-hw domains. Adapt these real interfaces and the preferred
+IOPMPowerSource/thermal notification model; do not substitute the mismatched
+Redwood PMIC/EPSS or generic RRADC/tsens-v2 layouts. Preferred new kernelHEAD
+d82c64a3a31cd27a0a0afbf6e213e467e44b1b4c and userlandHEADa79ff077... have
+been read-only reviewed; existing graphics references remain8e611870/906425b.
+Power/charging/thermals, all actual sensors, native Metal and real Apple
+account authorization remain mandatory. Defer only human-dependent actions.
 
 ## Operating constraints
 
