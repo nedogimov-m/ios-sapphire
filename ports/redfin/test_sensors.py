@@ -20,19 +20,22 @@ static struct rf_sensor_assets assets;
 static struct rf_ssc_ops operations;
 static uint8_t fragment[936],sent[2048];
 static unsigned sent_bytes,published,withdrawn,live;
+static uint64_t clock_ns;
 static int32_t x;
 static int check(void *p){return p==&session&&live?0:-1;}
 static int send(void *p,const uint8_t *data,uint32_t n){if(check(p)||n>sizeof(sent))return -1;memcpy(sent,data,n);sent_bytes=n;return 0;}
-static uint64_t now(void *p){(void)p;return UINT64_C(100000000000);}
+static uint64_t now(void *p){(void)p;return clock_ns;}
 static void sample(void *p,unsigned kind,const struct rf_ssc_sensor *s){(void)p;(void)kind;++published;x=s->fixed[0];}
 static void withdraw(void *p,unsigned kind){(void)p;(void)kind;++withdrawn;}
 static void event(void *p,const char *why,unsigned a,unsigned b){(void)p;(void)why;(void)a;(void)b;}
 void reset(const uint8_t *data,unsigned n){memset(&session,0,sizeof(session));memset(&assets,0,sizeof(assets));
- sent_bytes=published=withdrawn=0;live=1;x=0;
+ sent_bytes=published=withdrawn=0;live=1;x=0;clock_ns=UINT64_C(100000000000);
  memcpy(fragment,data,n);strcpy(assets.file[0].name,"reg/000");assets.file[0].data=fragment;assets.file[0].bytes=n;assets.count=1;
  operations=(struct rf_ssc_ops){&session,check,send,now,sample,withdraw,event};}
 int begin(void){return rf_ssc_begin(&session,&operations,&assets);}
 int poll(void){return rf_ssc_poll(&session);}
+void advance(unsigned seconds){clock_ns+=(uint64_t)seconds*1000000000u;}
+unsigned sent_byte(unsigned i){return i<sent_bytes?sent[i]:0;}
 int receive(const uint8_t *data,unsigned n){return rf_ssc_receive(&session,data,n);}
 unsigned metric(unsigned i){unsigned v[]={session.pending,session.failed,published,withdrawn,session.registry_verified,session.phase,sent_bytes,session.sensor[0].configured};return i<8?v[i]:0;}
 int32_t value(void){return x;}
@@ -137,6 +140,28 @@ class SensorTests(unittest.TestCase):
         self.assertEqual(self.lib.begin(), 0); transaction = self.lib.metric(0)
         self.receive(b'\x02' + struct.pack('<HHH', transaction, 0x20, 7) + b'\x02\x04\x00\x01\x00\x03\x00', ok=False)
         self.assertEqual((self.lib.metric(1), self.lib.metric(2)), (1, 0))
+
+    def test_empty_native_registry_update_preserves_subscription_and_later_discovery(self):
+        self.assertEqual(self.lib.begin(), 0)
+        sent=bytes(self.lib.sent_byte(i) for i in range(self.lib.metric(6)))
+        self.assertIn(field(1,b'registry')+b'\x10\x01\x18\x00',sent)
+        self.receive(indication(WELL,768,field(1,b'registry')))
+        self.ack();self.lib.advance(12)
+        self.assertEqual(self.lib.poll(),0)
+        self.assertEqual((self.lib.metric(0),self.lib.metric(1),self.lib.metric(2)),(0,0,0))
+        self.receive(indication(WELL,768,field(1,b'registry')+field(2,REG)))
+        self.assertEqual(self.lib.poll(),0)
+        self.assertTrue(self.lib.metric(0),'only the real later SUID permits registry writes')
+
+    def test_empty_registry_updates_cannot_extend_the_bounded_startup_deadline(self):
+        self.assertEqual(self.lib.begin(),0);self.ack()
+        for _ in range(3):
+            self.lib.advance(10)
+            self.receive(indication(WELL,768,field(1,b'registry')))
+            self.assertEqual(self.lib.poll(),0)
+        self.lib.advance(1)
+        self.assertNotEqual(self.lib.poll(),0)
+        self.assertEqual((self.lib.metric(1),self.lib.metric(2)),(1,0))
 
     def test_registry_subset_accepts_order_extras_and_newer_version_but_not_changed_value(self):
         e = group(); a = group(version=2)

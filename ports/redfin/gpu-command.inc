@@ -3,6 +3,7 @@
  * is held until the already armed platform reset; no unsafe rollback/retry. */
 #include "redfin_gpu_mapping.h"
 #include "redfin_gpu_power.h"
+#include "redfin_gpu_dvfs.h"
 static const uint64_t gx_ranges[]={0x03d00000,0x40000,0x18220000,0x10000};
 static struct {
     struct gm_context *context;
@@ -15,13 +16,16 @@ static struct {
     struct rf_a6_bw bandwidth;
     struct rf_a6_bcm bcm[9]; /* SH0,MC0,ACV,CN0,CE0,SN6,SN0,SH4,SN10. */
     struct rf_cmddb_resource gfx;
+    const struct rf_dvfs_profile *dvfs_profile;
+    uint64_t dvfs_activity;
+    uint32_t dvfs_index,dvfs_bandwidth,dvfs_changes;
     vm_offset_t gpu,rsc,scratch;
     struct rf_gp_slot inherited[8];
     uint32_t rsc_id,rsc_config,rsc_irq,commands,proxy[9],proxy_held,cfg_held;
     uint32_t rptr,wptr,status,fault,interrupt,protect,values[4],wanted[4];
     uint64_t started,allocated;
     unsigned allocations,stage,registers,submissions,pas_phase,pas_completed;
-    bool bound,entered,poisoned,sqe_started;
+    bool bound,entered,poisoned,sqe_started,dvfs_enabled;
 } gx;
 
 static bool gx_contract(struct gm_context *c)
@@ -47,7 +51,12 @@ static bool gx_contract(struct gm_context *c)
     }
     struct rf_a6_zap plan;
     if(rf_a6_zap_plan(files[1],sizes[1],sizes[2],&plan))return false;
-    if(c){gx.zap_plan=plan;gx.context=c;gx.bound=true;}
+    const void *optional=NULL;unsigned optional_bytes=0;
+    bool dvfs=SecureDTGetProperty(entry,"dvfs-policy",&optional,&optional_bytes)==kSuccess;
+    if(dvfs&&(!gm_property(c,"/redfin-gpu-command","dvfs-policy",rf_dvfs_policy,sizeof(rf_dvfs_policy))||
+        !gm_property(c,"/redfin-gpu-command","dvfs-opps",rf_dvfs_opps,sizeof(rf_dvfs_opps))||
+        !gm_property(c,"/redfin-gpu-command","dvfs-bins",rf_dvfs_profiles,sizeof(rf_dvfs_profiles))))return false;
+    if(c){gx.zap_plan=plan;gx.context=c;gx.bound=true;gx.dvfs_enabled=dvfs;}
     return true;
 }
 
@@ -242,6 +251,32 @@ static int gx_proxy_vote(struct gm_context *c,unsigned index)
     printf("REDFIN GPU PROXY: index=%u address=%#x data=%#x accepted=1 retained=1\n",index,address,data);
     return gx_rsc_snapshot(c,false,false);
 }
+static int gx_dvfs_make(struct gm_context *c)
+{
+    int error=rf_a6_perf_make(&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&gx.performance);
+    if(error||!gx.dvfs_enabled)return error;
+    /* Native qfprom provider uses readb, not a write, secure call or guessed
+     * speed bin. Map one page and read only the exact two cell bytes twice. */
+    vm_offset_t fuse=ml_io_map_unmappable(0x780000,0x1000,VM_WIMG_IO);
+    if(!fuse)return ENOMEM;
+    volatile const uint8_t *cell=(volatile const uint8_t *)(fuse+0x1ea);
+    uint16_t first=(uint16_t)cell[0]|(uint16_t)cell[1]<<8;
+    __asm__ volatile("dmb oshld":::"memory");
+    uint16_t second=(uint16_t)cell[0]|(uint16_t)cell[1]<<8;
+    if(first!=second||gx_check(c))return EAGAIN;
+    uint32_t bin=(first>>5)&255u;
+    const struct rf_dvfs_profile *profile=rf_dvfs_profile(bin);
+    struct rf_a6_perf performance;
+    error=profile?rf_dvfs_perf_make(profile,&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&performance):ENOTSUP;
+    if(error) {
+        printf("REDFIN GPU DVFS: native-bin=%u result=%d minimum-only=1 raw-fuse-not-logged=1\n",bin,error);
+        return 0;
+    }
+    gx.performance=performance;gx.dvfs_profile=profile;gx.dvfs_index=1;gx.dvfs_bandwidth=5;
+    printf("REDFIN GPU DVFS: native-bin=%u levels=%u maximum-khz=%u physical-readonly-fuse=1 thermal-required=1\n",
+        bin,profile->count,profile->level[profile->count-1].khz);
+    return 0;
+}
 static int gx_resources(struct gm_context *c)
 {
     static const uint8_t names[9][8]={"SH0","MC0","ACV","CN0","CE0","SN6","SN0","SH4","SN10"};
@@ -253,7 +288,7 @@ static int gx_resources(struct gm_context *c)
         printf("REDFIN GPU BCM: name=%.8s address=%#x unit=%u width=%u VCD=%u\n",
             names[i],gx.bcm[i].address,gx.bcm[i].unit,gx.bcm[i].width,gx.bcm[i].vcd);
     }
-    int error=rf_a6_perf_make(&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&gx.performance);
+    int error=gx_dvfs_make(c);
     if(!error)error=rf_a6_bw_make(gx.bcm,&gx.bcm[8],&gx.bandwidth);if(error)return error;
     gx.rsc=ml_io_map_unmappable(0x18220000,0x10000,VM_WIMG_IO);if(!gx.rsc)return ENOMEM;
     gx.rsc_id=gm_scalar_read(gx.rsc);gx.rsc_config=gm_scalar_read(gx.rsc+0xc);

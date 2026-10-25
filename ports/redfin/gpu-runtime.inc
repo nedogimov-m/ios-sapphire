@@ -236,6 +236,37 @@ static int gr_wait_sample(void *argument,bool *complete)
 }
 static void gr_wait_pause(void *argument,unsigned microseconds)
 {(void)argument;delay(microseconds);}
+/* The native HFI queue shares the existing serialized GPU owner. Only that
+ * owner changes a native DCVS index; no PMIC, PLL or RSC register is written
+ * by a thermal observer or a second independent power driver. */
+static int gr_dvfs(bool activity)
+{
+    if(!gx.dvfs_profile)return 0;
+    int error=gr_live();if(error)return error;
+    if(gm_scalar_read(gx.gpu+4*0x806)!=gx.wptr)return EBUSY;
+    uint64_t now=gm_time_ns(gx.context);
+    if(activity)gx.dvfs_activity=now;
+    bool busy=gx.dvfs_activity&&now>=gx.dvfs_activity&&now-gx.dvfs_activity<=RF_DVFS_IDLE_NS;
+    struct rf_dvfs_thermal sample={0};
+    (void)redfin_gpu_thermal(&sample.sampled_ns,&sample.hottest_mc,&sample.battery_mc,&sample.pressure);
+    unsigned wanted=rf_dvfs_target(gx.dvfs_profile,now,busy,&sample);
+    if(!wanted||wanted>=gx.performance.gpu_levels)return EINVAL;
+    unsigned bandwidth=gx.dvfs_profile->level[wanted].bw;
+    if(wanted==gx.dvfs_index&&bandwidth==gx.dvfs_bandwidth)return 0;
+    uint32_t vote[]={0,1,wanted,bandwidth};
+    error=redfin_gpu_audit();if(!error)error=gx_hfi(gx.context,30,vote,4);
+    if(!error)error=redfin_gpu_audit();
+    if(error){redfin_gpu_poison("native DCVS request lost its actual HFI ACK");return error;}
+    gx.dvfs_index=wanted;gx.dvfs_bandwidth=bandwidth;++gx.dvfs_changes;
+    if(gx.dvfs_changes<=16||!(gx.dvfs_changes%64))
+        printf("REDFIN GPU DVFS: change=%u requested-khz=%u index=%u bw=%u busy=%u pressure=%u hot-mC=%d battery-mC=%d real-HFI-ack=1\n",
+            gx.dvfs_changes,gx.performance.gpu[wanted].khz,wanted,bandwidth,busy,sample.pressure,sample.hottest_mc,sample.battery_mc);
+    return 0;
+}
+int redfin_gpu_dvfs_idle(void)
+{return redfin_gpu_ready()?gr_dvfs(false):ENXIO;}
+uint64_t redfin_gpu_max_frequency(void)
+{return gx.dvfs_profile?(uint64_t)gx.dvfs_profile->level[gx.dvfs_profile->count-1].khz*1000:UINT64_C(275000000);}
 int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence)
 {
     if(!fence || gr.fence==UINT32_MAX)return EINVAL;
@@ -248,6 +279,7 @@ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned c
     if(!n)return EINVAL;
     uint32_t rptr=gm_scalar_read(gx.gpu+4*0x806),ring_words=RF_A6_RING_BYTES/4;
     if(rptr!=gx.wptr || n>=ring_words){redfin_gpu_poison("ring was not idle");return EBUSY;}
+    error=gr_dvfs(true);if(error)return error;
     uint64_t publish_at=gm_time_ns(gx.context);
     uint32_t *ring=gx.data[0].host;
     for(unsigned i=0;i<n;i++)ring[(gx.wptr+i)%ring_words]=packets[i];

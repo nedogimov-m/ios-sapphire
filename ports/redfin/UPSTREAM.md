@@ -1,5 +1,39 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native GPU bins, thermal/idle DCVS and SSC startup subscription — 2026-10-25
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+redwood_adreno.c step_core_power: supply a native ascending GPU/voltage table
+and use the GMU's acknowledged GX_BW_PERF_VOTE. Its315/450/550MHz table is
+foreign to Redfin. Paired userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+remains unchanged. Native Google msm500b3a2059c1eec0fec08ec56add06320ea901a8
+kgsl_gmu.c/gmu_dcvs_set, kgsl_hfi.h and drivers/nvmem/qfprom.c establish
+indices/ACK/rail dependencies and bytewise readonly fuse access. The actual
+captured Redfin DT supplies all8OPPs,5speed-bin profiles, DDR use cases and
+speed cell0x7801ea/two bytes/bits5..12. Only a matching actual fused bin admits
+its full native table; unknown/unavailable bins retain275MHz.
+
+A coherent snapshot from actual TSENS/QG observations drives caps through the
+existing serialized GPU lease and GMU HFI queue. Invalid/stale temperatures
+permit only the minimum. A separate100ms worker shares the GPU mutex/lease
+and returns an idle engine to its minimum after200ms. Every vote preserves
+actual native frequency/voltage/DDR pairing and requires the real matching
+HFI ACK plus full surrounding ownership audits. Native msm MAX_FREQ reports
+the selected bin's actual allowed maximum. This is request implementation,
+not a measured physical-frequency/FPS claim.107selected combined host checks
+and the full native kernel build PASS; V14 hardware is pending.
+
+Read native Qualcomm SSC SUID/registry source at
+Rivko/android-firmware-qti-sdm67020bb8ae36c93fc16bbadda0e0a83f930c0c8a271:
+sns_suid_sensor.c, sns_registry_sensor.c and sns_registry.c. Native requests
+append a registered update subscription. An initial empty registry list is
+valid startup state; retain it with a bounded30s deadline and query actual
+registry instances without default-only filtering. Importantly, this source
+also documents registry initialization blocking on HLOS sdsprpc/file service.
+That host dependency still needs implementation/observation; merely keeping
+the subscription cannot establish registry/sensor success. No SUID, native
+registry result or sample is fabricated. All downloaded source remains local.
+
 ## Native Sandbox extension ABI and ADSP cold order — 2026-10-25
 
 Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab,

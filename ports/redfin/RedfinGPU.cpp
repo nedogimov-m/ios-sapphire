@@ -26,6 +26,7 @@
 #include <sys/proc.h>
 #include <sys/errno.h>
 #include <kern/clock.h>
+#include <kern/thread.h>
 #include <libkern/c++/OSData.h>
 #include <mach/mach_time.h>
 #include "RedfinGPUService.h"
@@ -137,6 +138,14 @@ bool RedwoodGPU::start(IOService *provider)
     if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
     registerService();return true;
 }
+static void redfinGpuGovernor(void *,wait_result_t)
+{
+    while(redfin_gpu_ready()) {
+        {GPUTransaction transaction;(void)redfin_gpu_dvfs_idle();}
+        IOSleep(100);
+    }
+    thread_terminate(current_thread());
+}
 void RedfinGPUStart(void)
 {
     if(__atomic_exchange_n(&gStarts,1,__ATOMIC_ACQ_REL) || !redfin_gpu_ready())return;
@@ -150,6 +159,16 @@ void RedfinGPUStart(void)
         IOLog("REDFIN GPU SERVICE: RedwoodGPU msm1.7 ready, native A620; synchronous actual fences\n");
         IOLog("REDFIN GPU SERVICE: client-bound fence evidence enabled\n");
         RedfinMetalConfigure(NULL);
+        thread_t governor=THREAD_NULL;
+        kern_return_t status=kernel_thread_start(redfinGpuGovernor,NULL,&governor);
+        if(status==KERN_SUCCESS) {
+            thread_set_thread_name(governor,"redfin GPU thermal and idle");thread_deallocate(governor);
+        } else {
+            /* Without the independent idle/thermal poller, keep the existing
+             * minimum OPP rather than admitting an unmonitored boost. */
+            IOLog("REDFIN GPU DVFS: governor thread creation failed; stopping runtime\n");
+            GPUTransaction transaction;redfin_gpu_poison("GPU governor unavailable");
+        }
     }
     gpu->release();
 }
@@ -406,7 +425,7 @@ static bool parameter(uint32_t param,uint64_t *value)
     case 1:case 6:case 8:case 9:case 0x0a:case 0x11:*value=0;return true;
     case 2:*value=512*1024;return true;
     case 3:*value=0x06020001;return true;
-    case 4:*value=275000000;return true;
+    case 4:*value=redfin_gpu_max_frequency();return true;
     case 5:*value=mach_absolute_time();return true;
     case 7:*value=1;return true;
     case 0x10:*value=14;return true;

@@ -33,6 +33,11 @@ static bool power_spmi_ok,power_attempted;
 static int power_running,power_pressure,power_hottest=-273150,power_battery_mc=-273150;
 static int power_soc=-1,power_uv=-1,power_ua,power_external=-1,power_charging=-1;
 static unsigned power_samples,power_errors,power_throttles;
+/* One writer publishes a coherent actual-temperature snapshot. GPU callers
+ * never acquire the PMIC/OSM worker's ownership or issue a power MMIO write. */
+static uint32_t power_gpu_sequence,power_gpu_pressure;
+static uint64_t power_gpu_sampled,power_gpu_battery_at;
+static int32_t power_gpu_hottest,power_gpu_battery;
 enum {P_REVID,P_QG,P_SDAM,P_ADC,P_CHGR,P_DCDC,P_BATIF,P_USB,P_DC,P_TYPEC,P_RTC,P_COUNT};
 struct power_target {unsigned ppid,apid,owner;uint32_t mapping;vm_offset_t writer;};
 static power_target power_targets[P_COUNT]={{0x201,512,0,0,0},{0x248,512,0,0,0},{0x2b1,512,0,0,0},
@@ -417,6 +422,34 @@ SYSCTL_INT(_kern_redfin_power,OID_AUTO,battery_uv,CTLFLAG_RD|CTLFLAG_LOCKED,&pow
 SYSCTL_INT(_kern_redfin_power,OID_AUTO,battery_ua,CTLFLAG_RD|CTLFLAG_LOCKED,&power_ua,0,"actual QG battery uA positive into battery");
 SYSCTL_INT(_kern_redfin_power,OID_AUTO,external,CTLFLAG_RD|CTLFLAG_LOCKED,&power_external,0,"SMB5 input source present");
 SYSCTL_INT(_kern_redfin_power,OID_AUTO,charging,CTLFLAG_RD|CTLFLAG_LOCKED,&power_charging,0,"SMB5 actual charging state");
+extern "C" int redfin_gpu_thermal(uint64_t *sampled,int32_t *hottest,int32_t *battery,unsigned *pressure)
+{
+    if(!sampled||!hottest||!battery||!pressure)return EINVAL;
+    for(unsigned retry=0;retry<4;++retry) {
+        uint32_t before=__atomic_load_n(&power_gpu_sequence,__ATOMIC_ACQUIRE);
+        if(before&1u)continue;
+        uint64_t time=__atomic_load_n(&power_gpu_sampled,__ATOMIC_RELAXED);
+        int32_t hot=__atomic_load_n(&power_gpu_hottest,__ATOMIC_RELAXED);
+        int32_t bat=__atomic_load_n(&power_gpu_battery,__ATOMIC_RELAXED);
+        unsigned level=__atomic_load_n(&power_gpu_pressure,__ATOMIC_RELAXED);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if(before!=__atomic_load_n(&power_gpu_sequence,__ATOMIC_ACQUIRE))continue;
+        *sampled=time;*hottest=hot;*battery=bat;*pressure=level;return time?0:ENXIO;
+    }
+    return EAGAIN;
+}
+static void power_gpu_publish(bool measured)
+{
+    uint64_t now=power_now();
+    bool fresh=measured&&power_spmi_ok&&power_gpu_battery_at&&now>=power_gpu_battery_at&&
+        now-power_gpu_battery_at<=UINT64_C(2000000000);
+    __atomic_fetch_add(&power_gpu_sequence,1,__ATOMIC_ACQ_REL);
+    __atomic_store_n(&power_gpu_hottest,power_hottest,__ATOMIC_RELAXED);
+    __atomic_store_n(&power_gpu_battery,power_battery_mc,__ATOMIC_RELAXED);
+    __atomic_store_n(&power_gpu_pressure,(uint32_t)power_pressure,__ATOMIC_RELAXED);
+    __atomic_store_n(&power_gpu_sampled,fresh?now:0,__ATOMIC_RELAXED);
+    __atomic_fetch_add(&power_gpu_sequence,1,__ATOMIC_RELEASE);
+}
 static void redfin_power_worker(void *parameter,wait_result_t result __unused)
 {
     IORegistryEntry *node=(IORegistryEntry *)parameter;
@@ -437,6 +470,7 @@ static void redfin_power_worker(void *parameter,wait_result_t result __unused)
         if (pmic && power_spmi_ok && !(tick%4)) {
             struct redfin_power_sample sample;int error=power_battery(&sample);
             if (!error) {
+                power_gpu_battery_at=power_now();
                 ++power_samples;power_battery_mc=sample.temperature_mc;power_soc=sample.soc_hundredths;
                 power_uv=sample.voltage_uv;power_ua=sample.current_ua;power_external=sample.external;power_charging=sample.charging;
                 power_charge_policy(&sample);redfin_power_report(&sample);
@@ -447,6 +481,7 @@ static void redfin_power_worker(void *parameter,wait_result_t result __unused)
                     if (!power_write(P_QG,0x48bf,&raw,1)) last_soc=soc;
                 }
             } else {
+                power_gpu_battery_at=0;
                 ++power_errors;if (redfin_battery) redfin_battery->stale();
                 /* A bad/missing battery temperature cannot authorize charging. */
                 if (power_spmi_ok) (void)power_bit(0x1043,1,true);
@@ -454,6 +489,7 @@ static void redfin_power_worker(void *parameter,wait_result_t result __unused)
             }
         }
         if (measured) power_pressure=(int)redfin_thermal_pressure(power_hottest,power_battery_mc,(unsigned)power_pressure);
+        power_gpu_publish(measured);
         if (power_running) power_limit_domains(missing>=16 ? 4u : (unsigned)power_pressure);
         if (!(tick%40)) IOLog("REDFIN POWER STATUS: samples=%u errors=%u hot-mC=%d battery-mC=%d SOC-hundredths=%d V-uV=%d I-uA=%d external=%d charging=%d pressure=%d throttle-writes=%u\n",
             power_samples,power_errors,power_hottest,power_battery_mc,power_soc,power_uv,power_ua,power_external,power_charging,power_pressure,power_throttles);

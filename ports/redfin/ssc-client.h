@@ -28,8 +28,8 @@ struct rf_ssc_ops {
 struct rf_ssc_client {
     unsigned begun,failed,phase,registry_index,registry_verified,lookup_index,request_kind,request_sensor;
     uint16_t serial,pending;
-    uint64_t deadline,client;
-    unsigned client_seen,registry_found,read_verified;
+    uint64_t deadline,client,registry_deadline;
+    unsigned client_seen,registry_found,read_verified,registry_empty;
     struct rf_sns_suid registry;
     const struct rf_sensor_assets *assets;
     const struct rf_sensor_asset *fragment;

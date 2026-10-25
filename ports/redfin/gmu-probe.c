@@ -44,7 +44,7 @@ struct gm_context {
     redfin_gmu_parent_valid_fn parent_valid;
     unsigned args_bytes;
     char args[608];
-    struct gm_binding bindings[40];
+    struct gm_binding bindings[64];
     uint64_t breadcrumbs;
     unsigned binding_count, dtcm_writes, smmu_reads, smmu_guard, smmu_breadcrumbs;
     unsigned smmu_mode, cb_reads, cb_breadcrumbs;

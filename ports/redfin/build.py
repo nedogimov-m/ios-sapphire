@@ -470,6 +470,7 @@ def main():
         if private_keychain is not None:
             keychain_material.apply(tree, private_keychain)
         platform_power_proof = None
+        gpu_dvfs_proof = None
         if a.platform_power:
             platform_power_proof=platform_power.apply(tree,a.dtb.read_bytes(),private_rtc)
         from memory import _tree
@@ -510,6 +511,9 @@ def main():
                     if a.gpu_gui:
                         from gpu_command import add_runtime_contract
                         add_runtime_contract(tree)
+                        if a.platform_power:
+                            from ports.redfin import gpu_dvfs
+                            gpu_dvfs_proof=gpu_dvfs.add_contract(tree,nodes)
                         if a.metal_mode:
                             from gpu_command import add_metal_contract
                             add_metal_contract(tree,a.metal_mode)
@@ -851,6 +855,7 @@ def main():
         manifest['keychain_material'] = keychain_material.report(a.keychain_material, private_keychain)
     if a.platform_power:
         manifest['platform_power'] = platform_power_proof
+        manifest['gpu_dvfs'] = gpu_dvfs_proof
     if a.display_hz is not None:
         manifest['display_hz'] = a.display_hz
     if a.display_fit:

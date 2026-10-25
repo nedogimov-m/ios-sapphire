@@ -30,7 +30,9 @@ static int request(struct rf_ssc_client *s,const struct rf_sns_suid *uid,unsigne
 }
 static int lookup(struct rf_ssc_client *s,const char *name,unsigned kind,unsigned sensor)
 {
-    uint8_t body[128];int n=rf_sns_lookup_body(body,sizeof(body),name,true,true);
+    /* Registry is a service, rather than a default physical sensor. Keep its
+     * native update subscription and accept its actual (single) instance. */
+    uint8_t body[128];int n=rf_sns_lookup_body(body,sizeof(body),name,true,kind!=1);
     const struct rf_sns_suid well={UINT64_C(0xabababababababab),UINT64_C(0xabababababababab)};
     return n<0?-1:request(s,&well,RF_SNS_LOOKUP_REQUEST,body,(unsigned)n,kind,sensor);
 }
@@ -38,6 +40,7 @@ int rf_ssc_begin(struct rf_ssc_client *s,const struct rf_ssc_ops *o,const struct
 {
     if(!s||!o||!assets||s->begun||!o->check||!o->send||!o->sample||!o->withdraw||!o->event||!o->now_ns)return -1;
     s->begun=1;s->ops=o;s->assets=assets;s->phase=1;
+    s->registry_deadline=o->now_ns(o->context)+UINT64_C(30000000000);
     return lookup(s,"registry",1,0);
 }
 struct attr_context {struct rf_ssc_sensor *sensor;const char *datatype;};
@@ -86,6 +89,13 @@ static int event(void *context,const struct rf_sns_suid *uid,const struct rf_sns
         int error=rf_sns_lookup_decode(e->payload,&type,uids,16,&count);if(error)return fail(s,"lookup-decode",error,0);
         unsigned i;
         if(type.bytes==8&&!memcmp(type.data,"registry",8)) {
+            /* SSC advertises its client service before the registry sensor
+             * finishes startup. An empty SUID update is not a transport error.
+             * Retain the same registered native request; never invent a SUID. */
+            if(!count&&!s->registry_found) {
+                if(!s->registry_empty++)s->ops->event(s->ops->context,"registry-pending",0,0);
+                return 0;
+            }
             if(count!=1)return fail(s,"registry-unavailable",count,0);
             if(s->registry_found&&!uid_equal(&s->registry,&uids[0]))return fail(s,"registry-changed",0,0);
             s->registry=uids[0];s->registry_found=1;return 0;
@@ -189,7 +199,7 @@ int rf_ssc_poll(struct rf_ssc_client *s)
     uint64_t now=s->ops->now_ns(s->ops->context);
     if(s->pending)return now>s->deadline?fail(s,"request-timeout",s->request_kind,s->pending):0;
     if(s->phase==1) {
-        if(!s->registry_found)return now>s->deadline?fail(s,"registry-timeout",0,0):0;
+        if(!s->registry_found)return now>s->registry_deadline?fail(s,"registry-timeout",s->registry_empty,0):0;
         s->phase=2;
     }
     if(s->phase==2) {

@@ -1,0 +1,380 @@
+diff --git a/bsd/dev/redfin_gpu_command.inc b/bsd/dev/redfin_gpu_command.inc
+--- a/bsd/dev/redfin_gpu_command.inc
++++ b/bsd/dev/redfin_gpu_command.inc
+@@ -3,6 +3,7 @@
+  * is held until the already armed platform reset; no unsafe rollback/retry. */
+ #include "redfin_gpu_mapping.h"
+ #include "redfin_gpu_power.h"
++#include "redfin_gpu_dvfs.h"
+ static const uint64_t gx_ranges[]={0x03d00000,0x40000,0x18220000,0x10000};
+ static struct {
+     struct gm_context *context;
+@@ -15,13 +16,16 @@
+     struct rf_a6_bw bandwidth;
+     struct rf_a6_bcm bcm[9]; /* SH0,MC0,ACV,CN0,CE0,SN6,SN0,SH4,SN10. */
+     struct rf_cmddb_resource gfx;
++    const struct rf_dvfs_profile *dvfs_profile;
++    uint64_t dvfs_activity;
++    uint32_t dvfs_index,dvfs_bandwidth,dvfs_changes;
+     vm_offset_t gpu,rsc,scratch;
+     struct rf_gp_slot inherited[8];
+     uint32_t rsc_id,rsc_config,rsc_irq,commands,proxy[9],proxy_held,cfg_held;
+     uint32_t rptr,wptr,status,fault,interrupt,protect,values[4],wanted[4];
+     uint64_t started,allocated;
+     unsigned allocations,stage,registers,submissions,pas_phase,pas_completed;
+-    bool bound,entered,poisoned,sqe_started;
++    bool bound,entered,poisoned,sqe_started,dvfs_enabled;
+ } gx;
+ 
+ static bool gx_contract(struct gm_context *c)
+@@ -47,7 +51,12 @@
+     }
+     struct rf_a6_zap plan;
+     if(rf_a6_zap_plan(files[1],sizes[1],sizes[2],&plan))return false;
+-    if(c){gx.zap_plan=plan;gx.context=c;gx.bound=true;}
++    const void *optional=NULL;unsigned optional_bytes=0;
++    bool dvfs=SecureDTGetProperty(entry,"dvfs-policy",&optional,&optional_bytes)==kSuccess;
++    if(dvfs&&(!gm_property(c,"/redfin-gpu-command","dvfs-policy",rf_dvfs_policy,sizeof(rf_dvfs_policy))||
++        !gm_property(c,"/redfin-gpu-command","dvfs-opps",rf_dvfs_opps,sizeof(rf_dvfs_opps))||
++        !gm_property(c,"/redfin-gpu-command","dvfs-bins",rf_dvfs_profiles,sizeof(rf_dvfs_profiles))))return false;
++    if(c){gx.zap_plan=plan;gx.context=c;gx.bound=true;gx.dvfs_enabled=dvfs;}
+     return true;
+ }
+ 
+@@ -242,6 +251,32 @@
+     printf("REDFIN GPU PROXY: index=%u address=%#x data=%#x accepted=1 retained=1\n",index,address,data);
+     return gx_rsc_snapshot(c,false,false);
+ }
++static int gx_dvfs_make(struct gm_context *c)
++{
++    int error=rf_a6_perf_make(&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&gx.performance);
++    if(error||!gx.dvfs_enabled)return error;
++    /* Native qfprom provider uses readb, not a write, secure call or guessed
++     * speed bin. Map one page and read only the exact two cell bytes twice. */
++    vm_offset_t fuse=ml_io_map_unmappable(0x780000,0x1000,VM_WIMG_IO);
++    if(!fuse)return ENOMEM;
++    volatile const uint8_t *cell=(volatile const uint8_t *)(fuse+0x1ea);
++    uint16_t first=(uint16_t)cell[0]|(uint16_t)cell[1]<<8;
++    __asm__ volatile("dmb oshld":::"memory");
++    uint16_t second=(uint16_t)cell[0]|(uint16_t)cell[1]<<8;
++    if(first!=second||gx_check(c))return EAGAIN;
++    uint32_t bin=(first>>5)&255u;
++    const struct rf_dvfs_profile *profile=rf_dvfs_profile(bin);
++    struct rf_a6_perf performance;
++    error=profile?rf_dvfs_perf_make(profile,&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&performance):ENOTSUP;
++    if(error) {
++        printf("REDFIN GPU DVFS: native-bin=%u result=%d minimum-only=1 raw-fuse-not-logged=1\n",bin,error);
++        return 0;
++    }
++    gx.performance=performance;gx.dvfs_profile=profile;gx.dvfs_index=1;gx.dvfs_bandwidth=5;
++    printf("REDFIN GPU DVFS: native-bin=%u levels=%u maximum-khz=%u physical-readonly-fuse=1 thermal-required=1\n",
++        bin,profile->count,profile->level[profile->count-1].khz);
++    return 0;
++}
+ static int gx_resources(struct gm_context *c)
+ {
+     static const uint8_t names[9][8]={"SH0","MC0","ACV","CN0","CE0","SN6","SN0","SH4","SN10"};
+@@ -253,7 +288,7 @@
+         printf("REDFIN GPU BCM: name=%.8s address=%#x unit=%u width=%u VCD=%u\n",
+             names[i],gx.bcm[i].address,gx.bcm[i].unit,gx.bcm[i].width,gx.bcm[i].vcd);
+     }
+-    int error=rf_a6_perf_make(&gx.gfx,&gm_start.resources[1],&gm_start.resources[2],&gx.performance);
++    int error=gx_dvfs_make(c);
+     if(!error)error=rf_a6_bw_make(gx.bcm,&gx.bcm[8],&gx.bandwidth);if(error)return error;
+     gx.rsc=ml_io_map_unmappable(0x18220000,0x10000,VM_WIMG_IO);if(!gx.rsc)return ENOMEM;
+     gx.rsc_id=gm_scalar_read(gx.rsc);gx.rsc_config=gm_scalar_read(gx.rsc+0xc);
+diff --git a/bsd/dev/redfin_gpu_runtime.inc b/bsd/dev/redfin_gpu_runtime.inc
+--- a/bsd/dev/redfin_gpu_runtime.inc
++++ b/bsd/dev/redfin_gpu_runtime.inc
+@@ -236,6 +236,37 @@
+ }
+ static void gr_wait_pause(void *argument,unsigned microseconds)
+ {(void)argument;delay(microseconds);}
++/* The native HFI queue shares the existing serialized GPU owner. Only that
++ * owner changes a native DCVS index; no PMIC, PLL or RSC register is written
++ * by a thermal observer or a second independent power driver. */
++static int gr_dvfs(bool activity)
++{
++    if(!gx.dvfs_profile)return 0;
++    int error=gr_live();if(error)return error;
++    if(gm_scalar_read(gx.gpu+4*0x806)!=gx.wptr)return EBUSY;
++    uint64_t now=gm_time_ns(gx.context);
++    if(activity)gx.dvfs_activity=now;
++    bool busy=gx.dvfs_activity&&now>=gx.dvfs_activity&&now-gx.dvfs_activity<=RF_DVFS_IDLE_NS;
++    struct rf_dvfs_thermal sample={0};
++    (void)redfin_gpu_thermal(&sample.sampled_ns,&sample.hottest_mc,&sample.battery_mc,&sample.pressure);
++    unsigned wanted=rf_dvfs_target(gx.dvfs_profile,now,busy,&sample);
++    if(!wanted||wanted>=gx.performance.gpu_levels)return EINVAL;
++    unsigned bandwidth=gx.dvfs_profile->level[wanted].bw;
++    if(wanted==gx.dvfs_index&&bandwidth==gx.dvfs_bandwidth)return 0;
++    uint32_t vote[]={0,1,wanted,bandwidth};
++    error=redfin_gpu_audit();if(!error)error=gx_hfi(gx.context,30,vote,4);
++    if(!error)error=redfin_gpu_audit();
++    if(error){redfin_gpu_poison("native DCVS request lost its actual HFI ACK");return error;}
++    gx.dvfs_index=wanted;gx.dvfs_bandwidth=bandwidth;++gx.dvfs_changes;
++    if(gx.dvfs_changes<=16||!(gx.dvfs_changes%64))
++        printf("REDFIN GPU DVFS: change=%u requested-khz=%u index=%u bw=%u busy=%u pressure=%u hot-mC=%d battery-mC=%d real-HFI-ack=1\n",
++            gx.dvfs_changes,gx.performance.gpu[wanted].khz,wanted,bandwidth,busy,sample.pressure,sample.hottest_mc,sample.battery_mc);
++    return 0;
++}
++int redfin_gpu_dvfs_idle(void)
++{return redfin_gpu_ready()?gr_dvfs(false):ENXIO;}
++uint64_t redfin_gpu_max_frequency(void)
++{return gx.dvfs_profile?(uint64_t)gx.dvfs_profile->level[gx.dvfs_profile->count-1].khz*1000:UINT64_C(275000000);}
+ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence)
+ {
+     if(!fence || gr.fence==UINT32_MAX)return EINVAL;
+@@ -248,6 +279,7 @@
+     if(!n)return EINVAL;
+     uint32_t rptr=gm_scalar_read(gx.gpu+4*0x806),ring_words=RF_A6_RING_BYTES/4;
+     if(rptr!=gx.wptr || n>=ring_words){redfin_gpu_poison("ring was not idle");return EBUSY;}
++    error=gr_dvfs(true);if(error)return error;
+     uint64_t publish_at=gm_time_ns(gx.context);
+     uint32_t *ring=gx.data[0].host;
+     for(unsigned i=0;i<n;i++)ring[(gx.wptr+i)%ring_words]=packets[i];
+diff --git a/bsd/dev/redfin_gpu_service.h b/bsd/dev/redfin_gpu_service.h
+--- a/bsd/dev/redfin_gpu_service.h
++++ b/bsd/dev/redfin_gpu_service.h
+@@ -13,6 +13,9 @@
+ void *redfin_gpu_bind(void);
+ void redfin_gpu_unbind(void *previous);
+ int redfin_gpu_audit(void);
++int redfin_gpu_thermal(uint64_t *,int32_t *,int32_t *,unsigned *);
++int redfin_gpu_dvfs_idle(void);
++uint64_t redfin_gpu_max_frequency(void);
+ uint64_t redfin_gpu_address(uint64_t size);
+ int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
+ int redfin_gpu_map_display(uint64_t address,uint64_t physical);
+diff --git a/iokit/Kernel/arm/RedfinGPUService.h b/iokit/Kernel/arm/RedfinGPUService.h
+--- a/iokit/Kernel/arm/RedfinGPUService.h
++++ b/iokit/Kernel/arm/RedfinGPUService.h
+@@ -13,6 +13,9 @@
+ void *redfin_gpu_bind(void);
+ void redfin_gpu_unbind(void *previous);
+ int redfin_gpu_audit(void);
++int redfin_gpu_thermal(uint64_t *,int32_t *,int32_t *,unsigned *);
++int redfin_gpu_dvfs_idle(void);
++uint64_t redfin_gpu_max_frequency(void);
+ uint64_t redfin_gpu_address(uint64_t size);
+ int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only);
+ int redfin_gpu_map_display(uint64_t address,uint64_t physical);
+diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -26,6 +26,7 @@
+ #include <sys/proc.h>
+ #include <sys/errno.h>
+ #include <kern/clock.h>
++#include <kern/thread.h>
+ #include <libkern/c++/OSData.h>
+ #include <mach/mach_time.h>
+ #include "RedfinGPUService.h"
+@@ -137,6 +138,14 @@
+     if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
+     registerService();return true;
+ }
++static void redfinGpuGovernor(void *,wait_result_t)
++{
++    while(redfin_gpu_ready()) {
++        {GPUTransaction transaction;(void)redfin_gpu_dvfs_idle();}
++        IOSleep(100);
++    }
++    thread_terminate(current_thread());
++}
+ void RedfinGPUStart(void)
+ {
+     if(__atomic_exchange_n(&gStarts,1,__ATOMIC_ACQ_REL) || !redfin_gpu_ready())return;
+@@ -150,6 +159,16 @@
+         IOLog("REDFIN GPU SERVICE: RedwoodGPU msm1.7 ready, native A620; synchronous actual fences\n");
+         IOLog("REDFIN GPU SERVICE: client-bound fence evidence enabled\n");
+         RedfinMetalConfigure(NULL);
++        thread_t governor=THREAD_NULL;
++        kern_return_t status=kernel_thread_start(redfinGpuGovernor,NULL,&governor);
++        if(status==KERN_SUCCESS) {
++            thread_set_thread_name(governor,"redfin GPU thermal and idle");thread_deallocate(governor);
++        } else {
++            /* Without the independent idle/thermal poller, keep the existing
++             * minimum OPP rather than admitting an unmonitored boost. */
++            IOLog("REDFIN GPU DVFS: governor thread creation failed; stopping runtime\n");
++            GPUTransaction transaction;redfin_gpu_poison("GPU governor unavailable");
++        }
+     }
+     gpu->release();
+ }
+@@ -406,7 +425,7 @@
+     case 1:case 6:case 8:case 9:case 0x0a:case 0x11:*value=0;return true;
+     case 2:*value=512*1024;return true;
+     case 3:*value=0x06020001;return true;
+-    case 4:*value=275000000;return true;
++    case 4:*value=redfin_gpu_max_frequency();return true;
+     case 5:*value=mach_absolute_time();return true;
+     case 7:*value=1;return true;
+     case 0x10:*value=14;return true;
+diff --git a/iokit/Kernel/arm/RedfinPower.inc b/iokit/Kernel/arm/RedfinPower.inc
+--- a/iokit/Kernel/arm/RedfinPower.inc
++++ b/iokit/Kernel/arm/RedfinPower.inc
+@@ -33,6 +33,11 @@
+ static int power_running,power_pressure,power_hottest=-273150,power_battery_mc=-273150;
+ static int power_soc=-1,power_uv=-1,power_ua,power_external=-1,power_charging=-1;
+ static unsigned power_samples,power_errors,power_throttles;
++/* One writer publishes a coherent actual-temperature snapshot. GPU callers
++ * never acquire the PMIC/OSM worker's ownership or issue a power MMIO write. */
++static uint32_t power_gpu_sequence,power_gpu_pressure;
++static uint64_t power_gpu_sampled,power_gpu_battery_at;
++static int32_t power_gpu_hottest,power_gpu_battery;
+ enum {P_REVID,P_QG,P_SDAM,P_ADC,P_CHGR,P_DCDC,P_BATIF,P_USB,P_DC,P_TYPEC,P_RTC,P_COUNT};
+ struct power_target {unsigned ppid,apid,owner;uint32_t mapping;vm_offset_t writer;};
+ static power_target power_targets[P_COUNT]={{0x201,512,0,0,0},{0x248,512,0,0,0},{0x2b1,512,0,0,0},
+@@ -417,6 +422,34 @@
+ SYSCTL_INT(_kern_redfin_power,OID_AUTO,battery_ua,CTLFLAG_RD|CTLFLAG_LOCKED,&power_ua,0,"actual QG battery uA positive into battery");
+ SYSCTL_INT(_kern_redfin_power,OID_AUTO,external,CTLFLAG_RD|CTLFLAG_LOCKED,&power_external,0,"SMB5 input source present");
+ SYSCTL_INT(_kern_redfin_power,OID_AUTO,charging,CTLFLAG_RD|CTLFLAG_LOCKED,&power_charging,0,"SMB5 actual charging state");
++extern "C" int redfin_gpu_thermal(uint64_t *sampled,int32_t *hottest,int32_t *battery,unsigned *pressure)
++{
++    if(!sampled||!hottest||!battery||!pressure)return EINVAL;
++    for(unsigned retry=0;retry<4;++retry) {
++        uint32_t before=__atomic_load_n(&power_gpu_sequence,__ATOMIC_ACQUIRE);
++        if(before&1u)continue;
++        uint64_t time=__atomic_load_n(&power_gpu_sampled,__ATOMIC_RELAXED);
++        int32_t hot=__atomic_load_n(&power_gpu_hottest,__ATOMIC_RELAXED);
++        int32_t bat=__atomic_load_n(&power_gpu_battery,__ATOMIC_RELAXED);
++        unsigned level=__atomic_load_n(&power_gpu_pressure,__ATOMIC_RELAXED);
++        __atomic_thread_fence(__ATOMIC_ACQUIRE);
++        if(before!=__atomic_load_n(&power_gpu_sequence,__ATOMIC_ACQUIRE))continue;
++        *sampled=time;*hottest=hot;*battery=bat;*pressure=level;return time?0:ENXIO;
++    }
++    return EAGAIN;
++}
++static void power_gpu_publish(bool measured)
++{
++    uint64_t now=power_now();
++    bool fresh=measured&&power_spmi_ok&&power_gpu_battery_at&&now>=power_gpu_battery_at&&
++        now-power_gpu_battery_at<=UINT64_C(2000000000);
++    __atomic_fetch_add(&power_gpu_sequence,1,__ATOMIC_ACQ_REL);
++    __atomic_store_n(&power_gpu_hottest,power_hottest,__ATOMIC_RELAXED);
++    __atomic_store_n(&power_gpu_battery,power_battery_mc,__ATOMIC_RELAXED);
++    __atomic_store_n(&power_gpu_pressure,(uint32_t)power_pressure,__ATOMIC_RELAXED);
++    __atomic_store_n(&power_gpu_sampled,fresh?now:0,__ATOMIC_RELAXED);
++    __atomic_fetch_add(&power_gpu_sequence,1,__ATOMIC_RELEASE);
++}
+ static void redfin_power_worker(void *parameter,wait_result_t result __unused)
+ {
+     IORegistryEntry *node=(IORegistryEntry *)parameter;
+@@ -437,6 +470,7 @@
+         if (pmic && power_spmi_ok && !(tick%4)) {
+             struct redfin_power_sample sample;int error=power_battery(&sample);
+             if (!error) {
++                power_gpu_battery_at=power_now();
+                 ++power_samples;power_battery_mc=sample.temperature_mc;power_soc=sample.soc_hundredths;
+                 power_uv=sample.voltage_uv;power_ua=sample.current_ua;power_external=sample.external;power_charging=sample.charging;
+                 power_charge_policy(&sample);redfin_power_report(&sample);
+@@ -447,6 +481,7 @@
+                     if (!power_write(P_QG,0x48bf,&raw,1)) last_soc=soc;
+                 }
+             } else {
++                power_gpu_battery_at=0;
+                 ++power_errors;if (redfin_battery) redfin_battery->stale();
+                 /* A bad/missing battery temperature cannot authorize charging. */
+                 if (power_spmi_ok) (void)power_bit(0x1043,1,true);
+@@ -454,6 +489,7 @@
+             }
+         }
+         if (measured) power_pressure=(int)redfin_thermal_pressure(power_hottest,power_battery_mc,(unsigned)power_pressure);
++        power_gpu_publish(measured);
+         if (power_running) power_limit_domains(missing>=16 ? 4u : (unsigned)power_pressure);
+         if (!(tick%40)) IOLog("REDFIN POWER STATUS: samples=%u errors=%u hot-mC=%d battery-mC=%d SOC-hundredths=%d V-uV=%d I-uA=%d external=%d charging=%d pressure=%d throttle-writes=%u\n",
+             power_samples,power_errors,power_hottest,power_battery_mc,power_soc,power_uv,power_ua,power_external,power_charging,power_pressure,power_throttles);
+diff --git a/bsd/dev/redfin_gpu_dvfs.h b/bsd/dev/redfin_gpu_dvfs.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gpu_dvfs.h
+@@ -0,0 +1,77 @@
++/* SPDX-License-Identifier: MIT */
++/* Native Redfin DT/Google msm 500b3a2059c1ee GPU bins and GMU DCVS ABI.
++ * Frequencies are never inferred from a marketing name. The physical readonly
++ * QFPROM cell selects one of the exact native profiles; unknown bins stay low.
++ * Include after redfin_gpu_command.h. */
++#ifndef REDFIN_GPU_DVFS_H
++#define REDFIN_GPU_DVFS_H
++#include <stddef.h>
++#define RF_DVFS_LEVELS 7u
++#define RF_DVFS_FRESH_NS UINT64_C(1000000000)
++#define RF_DVFS_IDLE_NS UINT64_C(200000000)
++static const uint32_t rf_dvfs_policy[]={1,0x780000,0x7000,0x1ea,2,5,8,1000,200};
++static const uint32_t rf_dvfs_opps[][2]={
++    {275000000,64},{400000000,128},{500000000,192},{540000000,256},
++    {625000000,256},{670000000,320},{700000000,320},{750000000,384}
++};
++struct rf_dvfs_level {uint32_t khz,voltage,bw,minimum,maximum;};
++struct rf_dvfs_profile {uint32_t bin,count;struct rf_dvfs_level level[RF_DVFS_LEVELS];};
++#define RF_DVFS_LOW {275000,64,5,5,7}
++#define RF_DVFS_400 {400000,128,7,5,8}
++#define RF_DVFS_500 {500000,192,8,7,10}
++#define RF_DVFS_625 {625000,256,10,9,12}
++#define RF_DVFS_FAST {{0},RF_DVFS_LOW,RF_DVFS_400,RF_DVFS_500,RF_DVFS_625,{670000,320,10,9,12},{750000,384,10,9,12}}
++#define RF_DVFS_MID {{0},RF_DVFS_LOW,RF_DVFS_400,RF_DVFS_500,RF_DVFS_625}
++static const struct rf_dvfs_profile rf_dvfs_profiles[]={
++    {0,7,RF_DVFS_FAST},{132,5,RF_DVFS_MID},
++    {115,4,{{0},RF_DVFS_LOW,RF_DVFS_400,{540000,256,8,7,12}}},
++    {158,7,RF_DVFS_FAST},{165,5,RF_DVFS_MID}
++};
++#undef RF_DVFS_FAST
++#undef RF_DVFS_MID
++#undef RF_DVFS_625
++#undef RF_DVFS_500
++#undef RF_DVFS_400
++#undef RF_DVFS_LOW
++struct rf_dvfs_thermal {uint64_t sampled_ns;int32_t hottest_mc,battery_mc;uint32_t pressure;};
++static inline const struct rf_dvfs_profile *rf_dvfs_profile(uint32_t bin)
++{
++    for(unsigned i=0;i<sizeof(rf_dvfs_profiles)/sizeof(rf_dvfs_profiles[0]);++i)
++        if(rf_dvfs_profiles[i].bin==bin)return &rf_dvfs_profiles[i];
++    return NULL;
++}
++static inline int rf_dvfs_perf_make(const struct rf_dvfs_profile *profile,
++    const struct rf_cmddb_resource *gfx,const struct rf_cmddb_resource *cx,
++    const struct rf_cmddb_resource *mx,struct rf_a6_perf *out)
++{
++    if(!profile||profile!=rf_dvfs_profile(profile->bin)||!out)return EINVAL;
++    struct rf_a6_perf p;int error=rf_a6_perf_make(gfx,cx,mx,&p);if(error)return error;
++    p.gpu_levels=profile->count;
++    for(unsigned i=0;i<profile->count;++i) {
++        const struct rf_dvfs_level *level=&profile->level[i];
++        p.gpu[i].khz=level->khz;p.gpu[i].acd=UINT32_MAX;
++        error=rf_a6_arc_vote(gfx,mx,(uint16_t)level->voltage,&p.gpu[i].vote);
++        if(error)return error;
++    }
++    *out=p;return 0;
++}
++/* Return a native GMU index, never an unchecked frequency or voltage. Missing
++ * or stale real TSENS/battery inputs permit only the proven minimum OPP. */
++static inline unsigned rf_dvfs_target(const struct rf_dvfs_profile *profile,
++    uint64_t now,bool busy,const struct rf_dvfs_thermal *sample)
++{
++    if(!profile||profile!=rf_dvfs_profile(profile->bin))return 0;
++    if(!busy||!sample||!sample->sampled_ns||now<sample->sampled_ns||
++        now-sample->sampled_ns>RF_DVFS_FRESH_NS||sample->pressure>4||
++        sample->hottest_mc < -40000||sample->hottest_mc>120000||
++        sample->battery_mc < -20000||sample->battery_mc>85000)return 1;
++    unsigned pressure=sample->pressure;
++    if((sample->hottest_mc>=90000||sample->battery_mc>=55000)&&pressure<3)pressure=3;
++    else if((sample->hottest_mc>=80000||sample->battery_mc>=50000)&&pressure<2)pressure=2;
++    else if((sample->hottest_mc>=70000||sample->battery_mc>=45000)&&pressure<1)pressure=1;
++    uint32_t cap=pressure>=3?275000:pressure==2?400000:pressure==1?500000:UINT32_MAX;
++    unsigned result=1;
++    for(unsigned i=2;i<profile->count;++i)if(profile->level[i].khz<=cap)result=i;
++    return result;
++}
++#endif
+diff --git a/bsd/dev/redfin_gmu_probe.c b/bsd/dev/redfin_gmu_probe.c
+--- a/bsd/dev/redfin_gmu_probe.c
++++ b/bsd/dev/redfin_gmu_probe.c
+@@ -44,7 +44,7 @@
+     redfin_gmu_parent_valid_fn parent_valid;
+     unsigned args_bytes;
+     char args[608];
+-    struct gm_binding bindings[40];
++    struct gm_binding bindings[64];
+     uint64_t breadcrumbs;
+     unsigned binding_count, dtcm_writes, smmu_reads, smmu_guard, smmu_breadcrumbs;
+     unsigned smmu_mode, cb_reads, cb_breadcrumbs;

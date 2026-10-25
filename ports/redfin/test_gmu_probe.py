@@ -110,6 +110,8 @@ class RedfinGMUContractTests(unittest.TestCase):
                            check=True, capture_output=True)
             subprocess.run(['git', 'apply', str(patch)], cwd=root,
                            check=True, capture_output=True)
+            subprocess.run(['git','apply','--include=bsd/dev/*',str(HERE/'native-gpu-dvfs.patch')],
+                           cwd=root,check=True,capture_output=True)
             wanted = {
                 'bsd/dev/redfin_gmu_probe.c': HERE/'gmu-probe.c',
                 'bsd/dev/redfin_gmu_probe.h': HERE/'gmu-probe.h',
@@ -129,6 +131,7 @@ class RedfinGMUContractTests(unittest.TestCase):
                 'bsd/dev/redfin_gpu_runtime.h': HERE/'include/redfin_gpu_runtime.h',
                 'bsd/dev/redfin_gpu_service.h': HERE/'gpu-service.h',
                 'bsd/dev/redfin_gpu_runtime.inc': HERE/'gpu-runtime.inc',
+                'bsd/dev/redfin_gpu_dvfs.h': HERE/'include/redfin_gpu_dvfs.h',
             }
             actual = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
             self.assertEqual(actual, set(wanted))
@@ -381,6 +384,7 @@ HARNESS = r'''
 int redfin_gui_cpu0(void){return 0;}
 int redfin_gpu_power_probe(void){return ENOTSUP;}
 bool redfin_gpu_ready(void){return false;}
+bool redfin_gpu_runtime_caller(void){return false;}
 void RedfinGPUStart(void){}
 typedef uintptr_t vm_offset_t;
 typedef uintptr_t vm_size_t;

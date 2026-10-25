@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full native GPU DVFS/thermal/idle and SSC startup block built — 2026-10-25
+
+Source base29535d2 plus this implementation. GPU had only one active275MHz
+OPP. Bind the actual native8OPPs/5speed bins/read-only physical QFPROM cell;
+select the fused native profile and its actual rail/DDR votes. Start remains
+at275MHz. Busy rendering may request the native permitted maximum only while
+coherent actual TSENS and QG temperatures are fresh; pressure/hot/battery
+limits reduce it, missing/stale data permits only275MHz. A100ms idle/thermal
+worker shares the one GPU mutex/current-thread lease, lowering after200ms
+idle. Every frequency change uses the real acknowledged native HFI request,
+full ownership audits and fails closed on uncertain completion. This is not
+an overclock or a claimed physical frequency/FPS observation.
+
+SSC retains its native subscription after an initial empty registry list,
+uses a bounded30s registry wait and queries all registry service instances.
+Native Qualcomm source now explicitly identifies a further possible blocker:
+registry file initialization waits for HLOS sdsprpc. That host dependency is
+not implemented/proved by this block; real SSC/HID/CoreMotion and direct
+VD6281 remain unfinished. Photos/Phone survival inV13 is the last observation.
+
+107combined host cases PASS/no skips, including actual adapter ACK/audit
+faults, stale/hot/future input, idle/cap transitions, every native bin/rail,
+C/host wire pairing, real captured FDT mutations and SSC delayed discovery/
+bounded timeout. Complete ordered-overlay/native kernel build PASS. Local
+20261025-123240/noCI, kernel
+9d7509116bdedbe3909bd05621170c95b132ecd4dae02f12533fec8ee5d862fe.
+V14 image5ba6440557e4daf593fef5253f8d17602ecb4787e0ca2f747c1a8fad73d898b8,
+nonce8b7559237da7931f, real loader/ADT/liveFDT/firmware/nativeDVFS/128MiB
+source-window/return preflight PASS; Image130660880bytes. No offline root
+update. Current clean root873717; V16 remains applied/stale and must never
+be reused. Next one combined autonomous hardware capture.
+Exact V14 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x8b7559237da7931f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V13 Photos survives; native ADSP/SSC starts; registry discovery next — 2026-10-25
 
 Source40b3536, kernel local20261025-121323/noCI639a8eaa...,
