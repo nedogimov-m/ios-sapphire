@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V23 converted buffer views PASS; actual A8 import missing — 2026-10-25
+
+Source5b19832, graphics local20261025-172359/noCI, unchanged kernel
+local20261025-134128/noCI7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V23 image dfb1957e3d12f7bee7386e5b39d2c3604c55a6237ac3d5247f1baadf74c46214,
+noncea2799db38c069112. V26 applied once:167ranges/23891968bytes/4new/
+zero freed; complete preimages/signed-file/readback/readonly fsck PASS.
+V26 is now applied/stale. Authenticated capture leaves clean consistent HFSX/
+write_count996163 and verified Fastboot. No kernel panic/runtime GPU fault;
+backboardd62 remains alive; automatic app launches remain disabled.
+
+All prior192compute/raster/MRT/fetch/vertex/sampling/pitch/resolve, blit/guards/
+invalid-range recovery and mip probes PASS. Converted external buffer views at
+offset68/pitch48, two peer aliases, both native write/read directions, outside
+guards and parent/deallocator lifetime PASS. Ordinary-parent views are refused:
+their heap-suballocated CPU mapping need not be page aligned, so that frontend
+restriction is wrong. The older independent external-page probe now returns0
+without a stage-specific failure; add exact diagnostic stages before interpreting
+it as a GPU/data/lifetime failure. Do not claim all new buffer cases passed.
+
+Actual CoreAnimation now successfully receives RGBA16Float256x1/pitch2048 and
+RG8 23x23/pitch64 parent-backed views. Its next actual requests are A8Unorm
+(Metal format1), including640x358/offset64/pitch640 over a229376-byte parent.
+The frontend's format table omits A8 even though paired AIR already maps it to
+PIPE_FORMAT_A8_UNORM and FD6 has a native alpha format. Add correct alpha-channel
+import and an actual sampling probe. Prefer direct views of the parent's real
+native BO, including heap suballocation, over creating extra wrapped surfaces;
+preserve native layout/bounds/alias ownership and real GPU conversion where needed.
+
+48verified images reach draw172, but the final physical present12 still shows
+checkerboard/bad fills. Per-draw capture still exhausts before the last composed
+frame. Add bounded end-of-command snapshots of the actual full-screen target
+after its genuine fence/resolve, preserving ordinary batching after the initial
+auxiliary observations. No corrected GUI/FPS is established. Broader goal stays
+open. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa2799db38c069112 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN real parent-buffer texture block built; fresh V26 staged — 2026-10-25
 
 Source base0cd8774 plus this completed related block. Implement the actual
