@@ -123,6 +123,12 @@ programs from disk with no compilation; sampled cached complex pipelines take
 about5..6ms. New variants still take hundreds of milliseconds and command/queue
 waits remain, so smooth system60/90FPS is still unfinished.
 
+GPU transfers and converted buffer views now also pass mixed native ordering:
+27GPU operations across three changing compute/render/copy alias chains share
+one final CPU wait, with correct pixels/guards. GPU-written indices and unaligned
+uniforms retain their required CPU synchronization and bounds checks. All prior
+native graphics contracts still pass; ordinary UI FPS remains unmeasured.
+
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata
 have complete, independently verified local backups. Android userdata has

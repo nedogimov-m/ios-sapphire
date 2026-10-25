@@ -1,5 +1,42 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V39 real A620 queued GPU/CPU-consumer ordering PASS — 2026-10-26
+
+Source57b155b; graphics local20261026-010258/noCI,
+pairinged0dccbcf9deffa0c641a505e73cb889bed017ba600e892c129f69d1c4d3e7dc.
+Kernel unchanged/reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+V39 imagedefb9201c30e290bb341e2d12eb3d83b336b01256300a0a15474922c09acd15f, nonce0b5323cf1be27961.
+Fresh V42 applied once:152ranges/25374720bytes/4new/zero freed;
+all live preimages/full readback/signatures/native readonly fsck PASS. V42 is
+applied/stale, never reuse. Authenticated current boot userspace-alive, no panic,
+one backboardd62, clean consistent HFSX/write_count1174693, verified Fastboot.
+
+NEW native A620 ordering test PASS: three changed compute/shadow/render/raw-alias/
+unaligned-download chains in one command,27queued GPU operations, ONE successful
+real finish, ZERO CPU drains,3parent resolves; every pixel and guard matches.
+GPU-copied valid indices render correct pixels; GPU-filled65535 is refused by
+real stream bounds before fetch. Each index CPU consumer pays its actual fence.
+Two GPU-written float4 values at UBO offset4 pass immutable upload pixels/guards,
+with2CPU drains and3actual finishes including final completion. No completion or
+original-page check is bypassed. All prior192compute/two queues/70cache variants/
+evictions/half/MRT/varying/sampler/blit/pitch/alias/A8/bool/constants/guards and
+fresh-context persistence PASS; second context has2AIR/6ir3 file hits. Launchd
+records checker67 exit(0). Complete checks-on evidence retained privately.
+
+System backboardd command8 queues24operations, one real finish and zero CPU
+drains. Its21draws still cost102138us total/95267encoding with4submits/24866us
+submit I/O,2allocations/1319us,20other calls/7475us and zero variant compiles.
+This correctness/cold-cache boot does NOT establish ordinary latency or FPS.
+During the run, prepare ordinary graphics local20261026-010624/noCI with the
+exact same compiler identity/pairing and full native/20H392 ABI/signatures PASS.
+V40 image4fe598549d46965cc9b7e7b21fe906bcefd678952e322316a704652131c82531,
+nonce8bc66619bc511d0b, complete preflight PASS. Fresh V43 reads current epoch
+1174693 to disable only probe jobs/cached policies. Phone/Photos opens and all
+heavy image/parameter capture remain off. Ordinary warm system/FPS and broader
+goal remain unfinished. Exact V39 observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0b5323cf1be27961 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN GPU queue ordering block built; combined A620 check next — 2026-10-26
 
 Source base11a1b03 plus this block. Graphics local20261026-010258/noCI,

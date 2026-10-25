@@ -26,6 +26,13 @@ The native combined checker requires changing GPU-only alias-chain pixels/guards
 with one actual final wait and no CPU drain, and dependent index/UBO CPU consumers
 with actual waits. Device evidence remains pending; this is not a system FPS claim.
 
+V39 now passes the actual A620 block:27GPU operations across3changing alias
+chains pay one final real finish and no CPU drains; all pixels/guards match.
+GPU-written valid/invalid indices prove CPU synchronization and bounded refusal;
+two GPU-written unaligned float4 uploads preserve both rendered values with
+actual waits. All previous native contracts pass and checker67 exits0. No panic
+or window-server restart is observed. Ordinary warm performance remains pending.
+
 ## Persistent AIR and ir3 compilation with a native compiler identity — 2026-10-26
 
 Review preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's
