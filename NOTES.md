@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN ordinary warm-cache V38 prepared; fresh V41 ready — 2026-10-26
+
+Source45d4ee9; full ordinary native/actual20H392 ABI/signatures PASS:
+research/redfin-metal-persistence-v2, local20261026-002605/noCI,
+pairingdf1f49f1eb4a2ca0fd01470daffdfb62ef38703a110f851dd9d7969fbba60891.
+The compiler fingerprint/source pairing exactly match successful V37; complete
+checks-on bundle/results/ABI evidence preserved separately. Only probe startup
+policies change consistently in files, manifests and cached jobs. Backboardd
+and all ordinary caches remain enabled; no cache file is edited or removed.
+Phone/Photos auto-launch and all heavy capture remain disabled. Kernel unchanged/
+reused local20261025-134128/noCI
+7fadbcd8fec3c8fe231a4bdb8a48fc79236c58eead66f4749a74f194bb8225eb.
+
+Fresh V38 image0deda5cedff4528981575f8e6ca2158db183a78f1966a35bc5193c590a7860ec,
+nonce698e2195ba273574; full loader/ADT/liveFDT/firmware/power/DVFS/source-window/
+return preflight PASS. Fresh V41 from clean consistent HFSX/write_count1158426:
+6ranges/258048bytes/zero new/zero freed; full staged files/readback/signatures/
+seal/native readonly fsck PASS. V41 PREPARED, NOT APPLIED; all earlier applied
+stages remain stale. Next apply once and collect ordinary V38 with the previous
+boot's real persistent entries. Actual fresh-context resource persistence is
+proved in V37, but warm system startup latency remains PENDING. Sustained GUI
+rendering and broader goal remain unfinished. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x698e2195ba273574 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+
 ## REDFIN V37 actual A620 AIR/ir3 persistent reuse PASS — 2026-10-26
 
 Source7e46435; graphics local20261026-001711/noCI,
