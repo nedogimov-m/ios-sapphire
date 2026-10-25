@@ -1,0 +1,447 @@
+diff --git a/bsd/kern/redfin_sandbox_capabilities.h b/bsd/kern/redfin_sandbox_capabilities.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/redfin_sandbox_capabilities.h
+@@ -0,0 +1,51 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_SANDBOX_CAPABILITIES_H
++#define REDFIN_SANDBOX_CAPABILITIES_H
++#include <stdint.h>
++#include <stddef.h>
++#include <stdbool.h>
++#define RF_SBX_TOKEN_BYTES 2048u
++#define RF_SBX_CLASS_BYTES 160u
++#define RF_SBX_PATH_BYTES 1024u
++#define RF_SBX_ENTRIES 512u
++#define RF_SBX_HANDLES 2048u
++#define RF_SBX_TARGET_PID 0x10000u
++#define RF_SBX_TARGET_VERSION 0x20000u
++struct rf_sbx_actor {uint32_t pid,version,uid,issuer;};
++struct rf_sbx_request {
++    uint32_t kind,flags,target_pid,target_version;
++    char class_name[RF_SBX_CLASS_BYTES],resource[RF_SBX_PATH_BYTES];
++};
++struct rf_sbx_entry {
++    uint32_t used,references,issuer_uid,target_pid,target_version,flags,kind;
++    uint64_t generation;
++    uint8_t tag[32];
++    char class_name[RF_SBX_CLASS_BYTES],resource[RF_SBX_PATH_BYTES];
++};
++struct rf_sbx_handle {uint64_t value,generation;uint32_t entry,pid,version;};
++struct rf_sbx_registry {
++    uint64_t generation;
++    struct rf_sbx_entry entry[RF_SBX_ENTRIES];
++    struct rf_sbx_handle handle[RF_SBX_HANDLES];
++};
++struct rf_sbx_ops {
++    void *context;
++    int (*random)(void *,uint8_t *,size_t);
++    /* Actual HMAC-SHA256 with a private per-boot key held by the adapter. */
++    int (*mac)(void *,const uint8_t *,size_t,uint8_t[32]);
++    void (*lock)(void *);
++    void (*unlock)(void *);
++};
++#ifdef __cplusplus
++extern "C" {
++#endif
++int rf_sbx_issue(struct rf_sbx_registry *,const struct rf_sbx_ops *,const struct rf_sbx_actor *,
++    const struct rf_sbx_request *,char token[RF_SBX_TOKEN_BYTES]);
++int rf_sbx_consume(struct rf_sbx_registry *,const struct rf_sbx_ops *,const struct rf_sbx_actor *,
++    const char *,size_t bytes,uint64_t *handle);
++int rf_sbx_release(struct rf_sbx_registry *,const struct rf_sbx_ops *,const struct rf_sbx_actor *,uint64_t handle);
++void rf_sbx_exit(struct rf_sbx_registry *,const struct rf_sbx_ops *,const struct rf_sbx_actor *);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/bsd/kern/redfin_sandbox_capabilities.c b/bsd/kern/redfin_sandbox_capabilities.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/redfin_sandbox_capabilities.c
+@@ -0,0 +1,195 @@
++/* SPDX-License-Identifier: MIT
++ * Opaque HMAC-authenticated capabilities for native Sandbox issue/consume/
++ * release. Only the kernel's real TCC manager may issue one. Tokens preserve
++ * class/resource/uid/process scope and remain valid for this boot; active
++ * references have actual generation-bound handles and process-exit cleanup.
++ * No permission/profile/entitlement answer is manufactured by this transport.
++ */
++#include "redfin_sandbox_capabilities.h"
++#include <string.h>
++#if defined(KERNEL)
++#include <sys/errno.h>
++#else
++#include <errno.h>
++#endif
++#define HEADER 68u
++#define PAYLOAD_MAX (HEADER+RF_SBX_CLASS_BYTES-1+RF_SBX_PATH_BYTES-1+32)
++_Static_assert(4*((PAYLOAD_MAX+2)/3)+7<=RF_SBX_TOKEN_BYTES,"native token output bound");
++static int operations(const struct rf_sbx_ops *o)
++{return o&&o->random&&o->mac&&o->lock&&o->unlock;}
++static int actor(const struct rf_sbx_actor *p){return p&&p->pid&&p->version;}
++static int equal(const uint8_t *a,const uint8_t *b,unsigned n)
++{unsigned diff=0;for(unsigned i=0;i<n;++i)diff|=a[i]^b[i];return !diff;}
++static int terminated(const char *s,unsigned max)
++{
++    if(!s)return -1;
++    for(unsigned i=0;i<max;++i){if(!s[i])return (int)i;if((uint8_t)s[i]<32||(uint8_t)s[i]>126)return -1;}
++    return -1;
++}
++static int prefix(const char *s,const char *p){return !strncmp(s,p,strlen(p));}
++static int path_valid(const char *s)
++{
++    int n=terminated(s,RF_SBX_PATH_BYTES);
++    if(n<1||s[0]!='/')return 0;
++    const char *root=prefix(s,"/private/var/mobile/Media")?"/private/var/mobile/Media":
++        prefix(s,"/var/mobile/Media")?"/var/mobile/Media":NULL;
++    if(!root)return 0;
++    size_t r=strlen(root);if(s[r]&&s[r]!='/')return 0;
++    for(int i=0;i<n;) {
++        int start=++i;while(i<n&&s[i]!='/')++i;int count=i-start;
++        if(!count||(count==1&&s[start]=='.')||(count==2&&s[start]=='.'&&s[start+1]=='.'))return 0;
++    }
++    return 1;
++}
++static int request_valid(const struct rf_sbx_request *q)
++{
++    if(!q||terminated(q->class_name,RF_SBX_CLASS_BYTES)<1||terminated(q->resource,RF_SBX_PATH_BYTES)<0||
++       (q->flags&~(RF_SBX_TARGET_PID|RF_SBX_TARGET_VERSION))||
++       ((q->flags&RF_SBX_TARGET_VERSION)&&!(q->flags&RF_SBX_TARGET_PID))||
++       (!!(q->flags&RF_SBX_TARGET_PID)!=!!q->target_pid)||
++       (!!(q->flags&RF_SBX_TARGET_VERSION)!=!!q->target_version))return EINVAL;
++    bool tcc=prefix(q->class_name,"com.apple.tcc.")&&q->class_name[14];
++    if(q->kind==3)return tcc&&!q->resource[0]?0:EACCES;
++    if(q->kind==0) {
++        /* This installed TCCD uses issue_file(TCC-class,"/",0) when the
++         * service does not use its generic variant. The service class still
++         * scopes the capability; it is not an app-sandbox root-file grant. */
++        if(tcc&&!strcmp(q->resource,"/"))return 0;
++        bool access=tcc||!strcmp(q->class_name,"com.apple.app-sandbox.read")||!strcmp(q->class_name,"com.apple.app-sandbox.read-write");
++        return access&&path_valid(q->resource)?0:EACCES;
++    }
++    return ENOTSUP;
++}
++static void put32(uint8_t *p,uint32_t n){for(unsigned i=0;i<4;++i)p[i]=(uint8_t)(n>>(8*i));}
++static uint32_t get32(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
++static void put16(uint8_t *p,unsigned n){p[0]=(uint8_t)n;p[1]=(uint8_t)(n>>8);}
++static unsigned get16(const uint8_t *p){return (unsigned)p[0]|(unsigned)p[1]<<8;}
++static const char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
++static void encode(const uint8_t *raw,unsigned bytes,char out[RF_SBX_TOKEN_BYTES])
++{
++    memcpy(out,"rfsb1:",6);unsigned n=6;
++    for(unsigned i=0;i<bytes;i+=3) {
++        unsigned left=bytes-i,v=(unsigned)raw[i]<<16;
++        if(left>1)v|=(unsigned)raw[i+1]<<8;
++        if(left>2)v|=raw[i+2];
++        out[n++]=alphabet[(v>>18)&63];out[n++]=alphabet[(v>>12)&63];
++        out[n++]=left>1?alphabet[(v>>6)&63]:'=';out[n++]=left>2?alphabet[v&63]:'=';
++    }
++    out[n]=0;
++}
++static int base64_value(unsigned c)
++{
++    if(c>='A'&&c<='Z')return (int)c-'A';
++    if(c>='a'&&c<='z')return (int)c-'a'+26;
++    if(c>='0'&&c<='9')return (int)c-'0'+52;
++    if(c=='-')return 62;
++    if(c=='_')return 63;
++    return -1;
++}
++static int decode(const char *token,size_t bytes,uint8_t raw[PAYLOAD_MAX],unsigned *length)
++{
++    if(!token||bytes<7||bytes>RF_SBX_TOKEN_BYTES||memcmp(token,"rfsb1:",6)||token[bytes-1]||(bytes-7)%4)return EINVAL;
++    unsigned n=0;
++    for(size_t i=6;i<bytes-1;i+=4) {
++        int a=base64_value((uint8_t)token[i]),b=base64_value((uint8_t)token[i+1]);
++        int c=token[i+2]=='='?0:base64_value((uint8_t)token[i+2]),d=token[i+3]=='='?0:base64_value((uint8_t)token[i+3]);
++        unsigned pad=token[i+2]=='='?2:token[i+3]=='='?1:0;
++        if(a<0||b<0||c<0||d<0||(pad&&(i+4!=bytes-1||token[i+3]!='='))||
++            (pad==2&&(b&15))||(pad==1&&(c&3))||n+3-pad>PAYLOAD_MAX)return EINVAL;
++        unsigned v=(unsigned)a<<18|(unsigned)b<<12|(unsigned)c<<6|(unsigned)d;
++        raw[n++]=(uint8_t)(v>>16);if(pad<2)raw[n++]=(uint8_t)(v>>8);if(!pad)raw[n++]=(uint8_t)v;
++    }
++    if(n<HEADER+33)return EINVAL;
++    *length=n;return 0;
++}
++static int payload_request(const uint8_t *raw,unsigned bytes,struct rf_sbx_request *q,uint32_t *uid)
++{
++    if(bytes<HEADER+33||memcmp(raw,"RFSBX01\0",8)||get32(raw+28))return EINVAL;
++    unsigned cn=get16(raw+64),rn=get16(raw+66);
++    if(!cn||cn>=RF_SBX_CLASS_BYTES||rn>=RF_SBX_PATH_BYTES||bytes!=HEADER+cn+rn+32)return EINVAL;
++    memset(q,0,sizeof(*q));q->kind=get32(raw+8);q->flags=get32(raw+12);*uid=get32(raw+16);
++    q->target_pid=get32(raw+20);q->target_version=get32(raw+24);
++    memcpy(q->class_name,raw+HEADER,cn);memcpy(q->resource,raw+HEADER+cn,rn);
++    /* Embedded NULs cannot change the authenticated string's meaning. */
++    if(terminated(q->class_name,sizeof(q->class_name))!=(int)cn||terminated(q->resource,sizeof(q->resource))!=(int)rn)return EINVAL;
++    return request_valid(q);
++}
++static int find(struct rf_sbx_registry *r,const uint8_t tag[32])
++{
++    int found=-1;
++    for(unsigned i=0;i<RF_SBX_ENTRIES;++i)if(r->entry[i].used&&equal(r->entry[i].tag,tag,32))found=(int)i;
++    return found;
++}
++int rf_sbx_issue(struct rf_sbx_registry *r,const struct rf_sbx_ops *o,const struct rf_sbx_actor *p,
++    const struct rf_sbx_request *q,char token[RF_SBX_TOKEN_BYTES])
++{
++    if(!r||!operations(o)||!actor(p)||!token)return EINVAL;
++    if(!p->issuer)return EACCES;
++    int error=request_valid(q);if(error)return error;
++    unsigned cn=(unsigned)strlen(q->class_name),rn=(unsigned)strlen(q->resource),bytes=HEADER+cn+rn;
++    uint8_t raw[PAYLOAD_MAX]={0};memcpy(raw,"RFSBX01\0",8);put32(raw+8,q->kind);put32(raw+12,q->flags);
++    put32(raw+16,p->uid);put32(raw+20,q->target_pid);put32(raw+24,q->target_version);put16(raw+64,cn);put16(raw+66,rn);
++    if(o->random(o->context,raw+32,32))return EIO;
++    memcpy(raw+HEADER,q->class_name,cn);memcpy(raw+HEADER+cn,q->resource,rn);
++    if(o->mac(o->context,raw,bytes,raw+bytes))error=EIO;
++    if(!error)encode(raw,bytes+32,token);
++    memset(raw,0,sizeof(raw));return error;
++}
++int rf_sbx_consume(struct rf_sbx_registry *r,const struct rf_sbx_ops *o,const struct rf_sbx_actor *p,
++    const char *token,size_t bytes,uint64_t *handle)
++{
++    if(!r||!operations(o)||!actor(p)||!handle)return EINVAL;
++    uint8_t raw[PAYLOAD_MAX],tag[32];unsigned length=0;int error=decode(token,bytes,raw,&length);if(error)return error;
++    if(o->mac(o->context,raw,length-32,tag)||!equal(tag,raw+length-32,32)){memset(raw,0,sizeof(raw));return EACCES;}
++    struct rf_sbx_request q;uint32_t uid=0;error=payload_request(raw,length,&q,&uid);memset(raw,0,sizeof(raw));if(error)return error;
++    if((q.flags&RF_SBX_TARGET_PID)?q.target_pid!=p->pid||((q.flags&RF_SBX_TARGET_VERSION)&&q.target_version!=p->version):uid!=p->uid)return EACCES;
++    uint64_t value=0;if(o->random(o->context,(uint8_t *)&value,sizeof(value)))return EIO;
++    value&=UINT64_C(0x7fffffffffffffff);if(!value)return EIO;
++    o->lock(o->context);int index=find(r,tag),entry=-1,slot=-1;
++    for(unsigned i=0;i<RF_SBX_ENTRIES;++i)if(!r->entry[i].used){entry=(int)i;break;}
++    for(unsigned i=0;i<RF_SBX_HANDLES;++i) {
++        if(r->handle[i].value==value){error=EAGAIN;break;}
++        if(!r->handle[i].value&&slot<0)slot=(int)i;
++    }
++    if(!error&&(slot<0||(index<0&&(entry<0||r->generation==UINT64_MAX))))error=ENOSPC;
++    if(!error&&index<0) {
++        index=entry;struct rf_sbx_entry *e=&r->entry[index];memset(e,0,sizeof(*e));
++        e->used=1;e->generation=++r->generation;e->issuer_uid=uid;e->kind=q.kind;e->flags=q.flags;
++        e->target_pid=q.target_pid;e->target_version=q.target_version;
++        memcpy(e->tag,tag,32);memcpy(e->class_name,q.class_name,sizeof(e->class_name));memcpy(e->resource,q.resource,sizeof(e->resource));
++    }
++    if(!error) {
++        struct rf_sbx_entry *e=&r->entry[index];
++        if(e->references==UINT32_MAX)error=ENOSPC;
++        else {struct rf_sbx_handle *h=&r->handle[slot];h->value=value;h->generation=e->generation;h->entry=(uint32_t)index;
++            h->pid=p->pid;h->version=p->version;++e->references;*handle=value;}
++    }
++    o->unlock(o->context);memset(tag,0,sizeof(tag));memset(&q,0,sizeof(q));return error;
++}
++static void drop(struct rf_sbx_registry *r,struct rf_sbx_handle *h)
++{
++    if(h->entry<RF_SBX_ENTRIES) {
++        struct rf_sbx_entry *e=&r->entry[h->entry];
++        if(e->used&&e->generation==h->generation&&e->references) {
++            --e->references;if(!e->references)memset(e,0,sizeof(*e));
++        }
++    }
++    memset(h,0,sizeof(*h));
++}
++int rf_sbx_release(struct rf_sbx_registry *r,const struct rf_sbx_ops *o,const struct rf_sbx_actor *p,uint64_t handle)
++{
++    if(!r||!operations(o)||!actor(p)||!handle)return EINVAL;
++    int error=ENOENT;o->lock(o->context);
++    for(unsigned i=0;i<RF_SBX_HANDLES;++i)if(r->handle[i].value==handle) {
++        if(r->handle[i].pid!=p->pid||r->handle[i].version!=p->version)error=EACCES;
++        else {drop(r,&r->handle[i]);error=0;}break;
++    }
++    o->unlock(o->context);return error;
++}
++void rf_sbx_exit(struct rf_sbx_registry *r,const struct rf_sbx_ops *o,const struct rf_sbx_actor *p)
++{
++    if(!r||!operations(o)||!actor(p))return;
++    o->lock(o->context);
++    for(unsigned i=0;i<RF_SBX_HANDLES;++i)if(r->handle[i].value&&r->handle[i].pid==p->pid&&r->handle[i].version==p->version)drop(r,&r->handle[i]);
++    o->unlock(o->context);
++}
+diff --git a/bsd/kern/redfin_sandbox_native.h b/bsd/kern/redfin_sandbox_native.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/redfin_sandbox_native.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_SANDBOX_NATIVE_H
++#define REDFIN_SANDBOX_NATIVE_H
++#include <sys/proc.h>
++#include <sys/types.h>
++int redfin_sandbox_extension_call(proc_t,int,user_addr_t);
++void redfin_sandbox_extension_exit(proc_t);
++#endif
+diff --git a/bsd/kern/redfin_sandbox_native.c b/bsd/kern/redfin_sandbox_native.c
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/redfin_sandbox_native.c
+@@ -0,0 +1,125 @@
++/* SPDX-License-Identifier: MIT
++ * Native20H392 libsystem_sandbox issue5/consume6/release7 ABI. Actual TCC makes
++ * the authorization decision. This adapter supplies its missing opaque,
++ * scoped extension transport; no TCC answer, grant, DB or entitlement is edited.
++ */
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/proc_internal.h>
++#include <sys/codesign.h>
++#include <sys/vnode.h>
++#include <sys/kauth.h>
++#include <sys/random.h>
++#include <kern/locks.h>
++#include <kern/kalloc.h>
++#include <corecrypto/cchmac.h>
++#include <corecrypto/ccsha2.h>
++#include "redfin_sandbox_capabilities.h"
++#include "redfin_sandbox_native.h"
++struct rf_native_issue {uint64_t class_name,kind,resource,flags,output;int64_t pid;uint64_t version;};
++struct rf_native_consume {uint64_t token,bytes,output;};
++struct rf_native_release {uint64_t handle,reserved[2];};
++_Static_assert(sizeof(struct rf_native_issue)==56,"native Sandbox issue ABI");
++_Static_assert(sizeof(struct rf_native_consume)==24,"native Sandbox consume ABI");
++_Static_assert(sizeof(struct rf_native_release)==24,"native Sandbox release ABI");
++static LCK_GRP_DECLARE(rf_sandbox_group,"redfin-sandbox-extension");
++static LCK_MTX_DECLARE(rf_sandbox_lock,&rf_sandbox_group);
++static struct rf_sbx_registry registry;
++static uint8_t boot_key[32];
++static bool key_ready;
++static unsigned trace_count;
++static unsigned manager_trace_count;
++static void lock_registry(void *p __unused){lck_mtx_lock(&rf_sandbox_lock);}
++static void unlock_registry(void *p __unused){lck_mtx_unlock(&rf_sandbox_lock);}
++static int entropy(void *p __unused,uint8_t *out,size_t bytes)
++{if(!out||(bytes!=8&&bytes!=32))return EINVAL;read_random(out,(u_int)bytes);return 0;}
++static int authenticate(void *p __unused,const uint8_t *data,size_t bytes,uint8_t out[32])
++{
++    if(!data||bytes>2048||!out)return EINVAL;
++    lck_mtx_lock(&rf_sandbox_lock);
++    if(!key_ready){read_random(boot_key,sizeof(boot_key));key_ready=true;}
++    cchmac(ccsha256_di(),sizeof(boot_key),boot_key,bytes,data,out);
++    lck_mtx_unlock(&rf_sandbox_lock);return 0;
++}
++static const struct rf_sbx_ops operations={NULL,entropy,authenticate,lock_registry,unlock_registry};
++static struct rf_sbx_actor current_actor(proc_t p)
++{
++    struct rf_sbx_actor a={(uint32_t)proc_pid(p),(uint32_t)proc_pidversion(p),0,0};
++    a.uid=kauth_cred_getuid(proc_ucred(p));return a;
++}
++static bool is_native_tcc_manager(proc_t p)
++{
++    const char *identity=csproc_get_identity(p);char path[MAXPATHLEN];int bytes=sizeof(path);
++    if(!identity||strcmp(identity,"com.apple.tccd")||!csproc_get_platform_binary(p)||
++        !(proc_getcsflags(p)&CS_VALID)||!p->p_textvp||vn_getpath(p->p_textvp,path,&bytes)||
++        bytes<=0||bytes>(int)sizeof(path)||path[bytes-1])return false;
++    return !strcmp(path,"/System/Library/PrivateFrameworks/TCC.framework/Support/tccd");
++}
++static void trace(proc_t p,unsigned operation,unsigned kind,unsigned flags,const char *name,int error)
++{
++    unsigned count=name?__atomic_fetch_add(&manager_trace_count,1,__ATOMIC_RELAXED):
++        __atomic_fetch_add(&trace_count,1,__ATOMIC_RELAXED);
++    if(count<48)
++        printf("REDFIN SANDBOX EXTENSION: pid=%d operation=%u kind=%u flags=%#x class=%.159s result=%d native-policy-preserved=1 token-not-logged=1\n",
++            proc_pid(p),operation,kind,flags,name?name:"(opaque)",error);
++}
++static int issue(proc_t p,user_addr_t address)
++{
++    struct rf_native_issue args;int error=copyin(address,&args,sizeof(args));if(error)return error;
++    struct rf_sbx_actor owner=current_actor(p);owner.issuer=is_native_tcc_manager(p);
++    if(!owner.issuer){trace(p,5,(unsigned)args.kind,(unsigned)args.flags,NULL,EACCES);return EACCES;}
++    if(args.kind>UINT32_MAX||args.flags>UINT32_MAX||args.pid<0||args.pid>INT32_MAX||args.version>UINT32_MAX||
++        !args.class_name||!args.output)return EINVAL;
++    struct rf_sbx_request *q=kalloc_type(struct rf_sbx_request,Z_WAITOK|Z_ZERO);if(!q)return ENOMEM;
++    q->kind=(uint32_t)args.kind;q->flags=(uint32_t)args.flags;q->target_pid=(uint32_t)args.pid;q->target_version=(uint32_t)args.version;
++    size_t copied=0;error=copyinstr(args.class_name,q->class_name,sizeof(q->class_name),&copied);
++    if(!error&&args.resource)error=copyinstr(args.resource,q->resource,sizeof(q->resource),&copied);
++    if(!error&&(q->flags&RF_SBX_TARGET_PID)) {
++        proc_t target=proc_find((int)q->target_pid);
++        if(target==PROC_NULL)error=ESRCH;
++        else {
++            uint32_t version=(uint32_t)proc_pidversion(target);
++            if((q->flags&RF_SBX_TARGET_VERSION)&&version!=q->target_version)error=ESRCH;
++            else {q->target_version=version;q->flags|=RF_SBX_TARGET_VERSION;}
++            proc_rele(target);
++        }
++    }
++    char token[RF_SBX_TOKEN_BYTES];
++    if(!error)error=rf_sbx_issue(&registry,&operations,&owner,q,token);
++    if(!error)error=copyout(token,args.output,strlen(token)+1);
++    trace(p,5,q->kind,q->flags,q->class_name,error);
++    memset(token,0,sizeof(token));kfree_type(struct rf_sbx_request,q);return error;
++}
++static int consume(proc_t p,user_addr_t address)
++{
++    struct rf_native_consume args;int error=copyin(address,&args,sizeof(args));if(error)return error;
++    if(!args.token||!args.output||!args.bytes||args.bytes>RF_SBX_TOKEN_BYTES)return EINVAL;
++    char token[RF_SBX_TOKEN_BYTES];size_t bytes=0;
++    error=copyinstr(args.token,token,(size_t)args.bytes,&bytes);if(error)return error;
++    if(bytes!=args.bytes)return EINVAL;
++    struct rf_sbx_actor owner=current_actor(p);uint64_t handle=0;
++    error=rf_sbx_consume(&registry,&operations,&owner,token,bytes,&handle);
++    if(!error) {
++        error=copyout(&handle,args.output,sizeof(handle));
++        if(error)(void)rf_sbx_release(&registry,&operations,&owner,handle);
++    }
++    trace(p,6,0,0,NULL,error);memset(token,0,sizeof(token));return error;
++}
++int redfin_sandbox_extension_call(proc_t p,int call,user_addr_t address)
++{
++    if(!p||p==kernproc||proc_is64bit(p)==0)return EINVAL;
++    if(call==5)return issue(p,address);
++    if(call==6)return consume(p,address);
++    if(call==7) {
++        struct rf_native_release args;int error=copyin(address,&args,sizeof(args));if(error)return error;
++        if(!args.handle||args.reserved[0]||args.reserved[1])return EINVAL;
++        struct rf_sbx_actor owner=current_actor(p);return rf_sbx_release(&registry,&operations,&owner,args.handle);
++    }
++    return ENOTSUP;
++}
++void redfin_sandbox_extension_exit(proc_t p)
++{
++    if(!p||p==kernproc)return;
++    struct rf_sbx_actor owner={(uint32_t)proc_pid(p),(uint32_t)proc_pidversion(p),0,0};
++    rf_sbx_exit(&registry,&operations,&owner);
++}
+diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -316,10 +316,11 @@
+  * data (container paths, extension tokens) fail with ENOENT. The first
+  * use of each operation number is logged.
+  */
++#include "redfin_sandbox_native.h"
+ static uint64_t sweet_sandbox_seen;
+ 
+ static int
+-sweet_sandbox_syscall(struct proc *p, int call, __unused user_addr_t arg)
++sweet_sandbox_syscall(struct proc *p, int call, user_addr_t arg)
+ {
+ 	if (call >= 0 && call < 64 && !(sweet_sandbox_seen & (1ULL << call))) {
+ 		sweet_sandbox_seen |= 1ULL << call;
+@@ -328,9 +329,11 @@
+ 		printf("SWEET Sandbox: %s op %d\n", name, call);
+ 	}
+ 	switch (call) {
++	case 5:         /* real native extension issue */
++	case 6:         /* consume: process-generation-bound handle */
++	case 7:         /* release: only this native holder */
++		return redfin_sandbox_extension_call(p,call,arg);
+ 	case 4:         /* container path (audit token / pid) */
+-	case 5:         /* extension issue */
+-	case 6:         /* extension consume */
+ 	case 0x43:      /* container expected */
+ 		return ENOENT;
+ 	default:
+@@ -383,6 +386,7 @@
+ 
+ static const struct mac_policy_ops sweet_sandbox_mac_ops = {
+ 	.mpo_policy_syscall = sweet_sandbox_syscall,
++	.mpo_proc_notify_exit = redfin_sandbox_extension_exit,
+ 	.mpo_priv_grant = sweet_sandbox_priv_grant,
+ };
+ 
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -677,3 +677,6 @@
+ 
+ bsd/dev/redfin_ssc_protocol.c		standard
+ bsd/dev/redfin_ssc_client.c		standard
++
++bsd/kern/redfin_sandbox_capabilities.c		standard
++bsd/kern/redfin_sandbox_native.c		standard

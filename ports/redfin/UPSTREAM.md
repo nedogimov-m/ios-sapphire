@@ -1,5 +1,30 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native Sandbox extension ABI and ADSP cold order — 2026-10-25
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab,
+xnu/files/bsd/dev/redwood_adsp.c step_header: an actually cold host2 does not
+receive PAS_SHUTDOWN; INIT gets metadata in a separately owned kernel page,
+then MEM_SETUP precedes destination memory access. Redfin retains its native
+PAS1/host2/0x89200000/40MiB reservation and the existing CPU0 WLAN RSC/AOP
+owner. A readonly cold witness, wired NC metadata with physical/readback
+checks, guarded phases and immediate SMC entry/return observations implement
+that order. Physical startup remains unproved until the combined capture.
+The paired userland pin906425b75e02b4f99eb5d7bb1ef7c9583472d772 is unchanged.
+
+Actual installed20H392 TCCD/library disassembly (libsystem_sandbox UUID
+bee5f480cdb834ddaa8ee4e6d4ace436) confirms native issue5/consume6/release7
+layouts56/24/24bytes and the authorized TCC-specific file resource "/".
+The inherited local0050 policy lacks issue/consume. Redfin now transports
+real opaque HMAC-SHA256 capabilities: actual native TCCD identity/platform/
+CS_VALID/executable gate; private random boot key and nonce; class/resource/
+UID/PID-generation scope; bounded active entries and balanced random handles,
+copyout rollback and process-exit cleanup. Ordinary read/write root-file
+capabilities remain rejected. Native TCC makes the permission decision; no
+TCC answer, grant, DB, entitlement or native exception is replaced. This does
+not implement the rest of Apple's Sandbox.63combined host cases PASS and the
+complete native kernel build passes; actual Photos behavior awaits hardware.
+
 ## Native asynchronous submission, completion lifetime and TCCD attribution — 2026-10-25
 
 Preferred graphics pins remain kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab

@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native Sandbox and cold ADSP block built; V13 ready — 2026-10-25
+
+Source base5fa54a6 plus this complete block. The actual native Photos reply
+failed to issue its Sandbox extension after authorizationValue2. Implement
+native issue5/consume6/release7 with opaque authenticated bounded capabilities,
+actual TCCD issuer checks and generation-bound handles. Preserve native TCC
+policy/DB/entitlements/exceptions. The TCC-specific resource "/" matches its
+observed ABI and is not accepted for ordinary app-sandbox read/write classes.
+
+Native ADSP now requires a readonly cold host2 witness, owned wired metadata,
+INIT/MEM_SETUP before DSP RAM, then full copy/readback/SMP2P/AUTH. Never issue
+PAS_SHUTDOWN against an inactive DSP. Same CPU0 WLAN worker owns all power
+operations; immediate SMC entry/return observations identify a possible stall.
+This is implementation/build evidence, not observed sensor or Photos success.
+
+63selected host checks PASS/no skips; ordered reverse overlays and full native
+kernel build PASS. Local20261025-121323/noCI, kernel
+639a8eaa8d3311db384534caabbd4dd13ade39e007e02064f1737d9b7e121f40,
+frozen as research/redfin-gpu/kernel-sandbox-cold-v1. V13 image
+c6d98dae573cfa4ad1bbce0ebb84f6c0aa54a61a41cb6b7f708c26bc6915e7d9,
+nonce4144e05c499bc114; real loader/payload/ADT/liveFDT/source-window/return proof PASS.
+Expanded Image130659264bytes fits128MiB. Kernel-only update: existing root
+already contains all required packages; no new offline root write/stage.
+Current root remains clean HFSX/not inconsistent/write_count861710; V16 is
+applied/stale and must never be reused. Next one integrated autonomous boot.
+Sustained60/90fps, actual Photos/ADSP/SSC/HID/CoreMotion, direct VD6281, real
+Wi-Fi credential/autojoin, cable/motion and Apple authorization remain pending.
+Exact V13 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinscreen=1 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x4144e05c499bc114 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN native journal replay clean; real GMEM dependency PASS; exact Photos Sandbox failure — 2026-10-25
 
 Source b6a9bec; ordinary temporary V12-recovery/c96d4fcc81b1acf8327c9ea4747f5abbe54089f523f578a6e2b3bc52b751ca92,

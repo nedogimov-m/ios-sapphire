@@ -185,7 +185,7 @@ class Smp2pTests(unittest.TestCase):
                         '-I', str(HERE), '-I', str(PORT), str(HERE / 'wifi_smp2p.c'), str(helper),
                         '-o', str(library)], check=True, capture_output=True)
         cls.library = C.CDLL(str(library))
-        for name in ('prepare', 'auth_begin', 'alive', 'ipa_respond'):
+        for name in ('cold','prepare', 'auth_begin', 'alive', 'ipa_respond'):
             getattr(cls.library, 'rf_wifi_smp2p_' + name).argtypes = [C.POINTER(Session), C.POINTER(Ops)]
         for name in ('wait_ready', 'stop'):
             getattr(cls.library, 'rf_wifi_smp2p_' + name).argtypes = [C.POINTER(Session), C.POINTER(Ops), C.c_uint32]
@@ -222,6 +222,27 @@ class Smp2pTests(unittest.TestCase):
     def test_adsp_cannot_allocate_from_the_modem_private_heap(self):
         model=Model();model.session.remote_pid=2
         self.assertNotEqual(self.call(model,'prepare'),0)
+        self.assertEqual(model.stores,0)
+
+    def test_cold_witness_is_readonly_and_does_not_claim_reset_or_authentication(self):
+        model=Model();model.session.remote_pid=2
+        model.put(TOC+44,2<<16);model.put(PART+4,2<<16)
+        before=bytes(model.memory)
+        self.assertEqual(self.call(model,'cold'),0)
+        self.assertEqual(bytes(model.memory),before)
+        self.assertEqual((model.session.attempted,model.stores,model.kicks),(0,0,0))
+        self.assertFalse(any(e[0] in ('reset','lock','kick') for e in model.events))
+        model.peer()
+        self.assertNotEqual(self.call(model,'cold'),0)
+        self.assertEqual(model.stores,0)
+
+    def test_cold_witness_refuses_previous_host_allocations_and_changed_owner(self):
+        for item in [428,435,478,479,480]:
+            model=Model();model.append(item,bytes(340) if item in (428,435) else bytes(32 if item==478 else 16384))
+            self.assertNotEqual(self.call(model,'cold'),0,item)
+            self.assertEqual(model.stores,0)
+        model=Model();model.cancel_at=1
+        self.assertNotEqual(self.call(model,'cold'),0)
         self.assertEqual(model.stores,0)
 
     def armed(self):

@@ -6,6 +6,8 @@
  */
 #include "sensor-assets.h"
 #include "ssc-client.h"
+#include <IOKit/IOBufferMemoryDescriptor.h>
+#include <kern/task.h>
 #include <sys/vnode.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
@@ -18,9 +20,12 @@ enum {SN_SOURCE=1,SN_POWER,SN_RESET,SN_METADATA,SN_INIT,SN_SETUP,SN_SMP,SN_COPY,
 struct sn_context {
     unsigned attempted,active,failed,phase,power,reset,initialized,setup,auth_attempted,authenticated;
     unsigned copies,stores,peer_seen,hello,announced,ssc_started,queue_head,queue_tail,queue_count;
+    unsigned cold_witness;
     uint64_t source_bytes,nonce,started,report_at,function;
     uint8_t source_sha[32];
     uint8_t *source_data;
+    IOBufferMemoryDescriptor *metadata;
+    uint64_t metadata_physical;
     fw_start_map destination;
     rf_sensor_assets assets;rf_sensor_image image;
     rf_wifi_smp2p_session smp;rf_wifi_smp2p_ops smp_ops;
@@ -62,6 +67,8 @@ static int sn_check(void *opaque)
     if(opaque!=&sn||!sn.active||sn.failed||!redfin_wifi_gui_ready()||
         current_thread()!=fw_probe.owner||sn.nonce!=fw_probe.nonce||fw_start_glink_check(&fw_start))return EPERM;
     if(sn.destination.map&&(sn.destination.map->getVirtualAddress()!=sn.destination.base||sn.destination.map->getLength()!=RF_SENSOR_MEMORY))return EPERM;
+    if(sn.metadata&&(sn.metadata->getLength()!=16384||!sn.metadata->getBytesNoCopy()||
+        sn.metadata->getPhysicalSegment(0,NULL,kIOMemoryMapperNone)!=sn.metadata_physical))return EPERM;
     return 0;
 }
 static bool sn_valid(void *p){return !sn_check(p);}
@@ -112,18 +119,20 @@ static int sn_invoke(void *p,rf_sq_regs *r)
 }
 static int sn_pas(unsigned command)
 {
+    IOLog("REDFIN SENSORS: PAS1 phase=%u command=%u preflight-entry cold-witness=%u destination-writes=%u\n",sn.phase,command,sn.cold_witness,sn.copies);
     if(sn_check(&sn)||!sn.power||!sn_contract(false)||redfin_wifi_power_audit()||
-       (command==6&&(sn.phase!=SN_RESET||sn.auth_attempted))||
-       (command==1&&(sn.phase!=SN_INIT||!sn.reset||sn.initialized))||
+       (command!=1&&command!=2&&command!=5)||
+       (command==1&&(sn.phase!=SN_INIT||!sn.cold_witness||!sn.metadata||!sn.metadata_physical||sn.initialized||sn.reset))||
        (command==2&&(sn.phase!=SN_SETUP||!sn.initialized||sn.setup))||
        (command==5&&(sn.phase!=SN_AUTH||!sn.setup||!sn.reset||!sn.auth_attempted||sn.authenticated||sn.smp.stage!=RF_WIFI_SMP2P_ARMED)))return EPERM;
     rf_sq_regs request={{0}},live;request.x[0]=UINT64_C(0x42000200)|command;
     request.x[1]=command==1?0x82:command==2?3:1;request.x[2]=1;
-    request.x[3]=command==1||command==2?RF_SENSOR_BASE:0;request.x[4]=command==2?RF_SENSOR_MEMORY:0;
+    request.x[3]=command==1?sn.metadata_physical:command==2?RF_SENSOR_BASE:0;request.x[4]=command==2?RF_SENSOR_MEMORY:0;
     live=request;sn.function=request.x[0];unsigned calls=0,busy=0,resumes=0;uint64_t first=sn_ns(NULL);
     int error=0;int64_t status=0;uint64_t value=0;
     do {
         if(sn_ns(NULL)-first>UINT64_C(10000000000)){error=ETIMEDOUT;break;}
+        if(!calls)IOLog("REDFIN SENSORS: SMC enter fn=%#llx phase=%u PAS=1 metadata-in-owned-wired-page=%u\n",live.x[0],sn.phase,command==1);
         error=sn_invoke(&sn,&live);++calls;if(error)break;
         status=(int64_t)live.x[0];value=live.x[1];
         if(status==1){if(++resumes>1024){error=ETIMEDOUT;break;}continue;}
@@ -134,11 +143,27 @@ static int sn_pas(unsigned command)
     IOLog("REDFIN SENSORS: PAS1 command=%u result=%d status=%lld value=%#llx calls=%u resumes=%u\n",command,error,status,value,calls,resumes);
     return error;
 }
+static int sn_metadata(void)
+{
+    if(sn_check(&sn)||sn.metadata||sn.phase!=SN_METADATA||!sn.cold_witness||sn.initialized||sn.reset)return EPERM;
+    sn.metadata=IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
+        kIOMemoryPhysicallyContiguous|kIODirectionInOut|kIOMapWriteCombineCache,16384,16384);
+    if(!sn.metadata)return ENOMEM;
+    IOByteCount contiguous=0;sn.metadata_physical=sn.metadata->getPhysicalSegment(0,&contiguous,kIOMemoryMapperNone);
+    if(!sn.metadata_physical||sn.metadata_physical%16384||contiguous<16384||
+        sn.metadata_physical<UINT64_C(0x180000000)||sn.metadata_physical>UINT64_C(0x200000000)-16384)return EPERM;
+    uint8_t *page=(uint8_t *)sn.metadata->getBytesNoCopy();if(!page||sn.image.metadata_bytes>16384)return EPERM;
+    memset(page,0,16384);memcpy(page,sn.image.metadata,sn.image.metadata_bytes);
+    __asm__ volatile("dsb sy":::"memory");
+    const volatile uint8_t *readback=page;
+    for(unsigned i=0;i<16384;++i)if(readback[i]!=(i<sn.image.metadata_bytes?sn.image.metadata[i]:0))return EIO;
+    return sn_check(&sn);
+}
 static int sn_copy(uint32_t offset,const uint8_t *data,uint32_t bytes)
 {
-    if(sn_check(&sn)||!sn.reset||sn.auth_attempted||!sn.destination.base||!bytes||bytes>65536||
+    if(sn_check(&sn)||!sn.reset||!sn.initialized||!sn.setup||sn.auth_attempted||!sn.destination.base||!bytes||bytes>65536||
         offset>RF_SENSOR_MEMORY||bytes>RF_SENSOR_MEMORY-offset||
-        (sn.phase!=SN_METADATA&&sn.phase!=SN_COPY))return EPERM;
+        sn.phase!=SN_COPY)return EPERM;
     uint8_t *destination=(uint8_t *)sn.destination.base+offset;
     if(data)memcpy(destination,data,bytes);else memset(destination,0,bytes);
     __asm__ volatile("dsb osh":::"memory");
@@ -299,15 +324,20 @@ static int sn_start(void)
     if(rf_sensor_assets_open(&sn.assets,data,(size_t)sn.source_bytes,sn.source_sha,redfin_mpss_kernel_sha256,NULL)||
         rf_sensor_image_open(&sn.image,&sn.assets))return EINVAL;
     IOLog("REDFIN SENSORS: source verified assets=%u segments=%u native-reservation=%#llx/%#x\n",sn.assets.count,sn.image.count,RF_SENSOR_BASE,RF_SENSOR_MEMORY);
-    sn.phase=SN_POWER;error=redfin_sensor_power_start(&sn,sn_check);if(error)return error;sn.power=1;
-    sn.phase=SN_RESET;error=sn_pas(6);if(error)return error;sn.reset=1;
-    error=sn_map(&sn.destination,RF_SENSOR_BASE,RF_SENSOR_MEMORY,true);if(error)return error;
-    sn.phase=SN_METADATA;error=sn_copy(0,sn.image.metadata,sn.image.metadata_bytes);if(error)return error;
-    sn.phase=SN_INIT;error=sn_pas(1);if(error)return error;sn.initialized=1;
-    sn.phase=SN_SETUP;error=sn_pas(2);if(error)return error;sn.setup=1;
     sn.smp.remote_pid=2;
     sn.smp_ops={(const volatile uint8_t *)fw_start.mapping[FW_START_SMEM].base,REDFIN_SMEM_BYTES,&sn,sn_check,
         sn_reset,sn_started,sn_lock,sn_unlock,sn_write,sn_barrier,sn_kick,sn_ms,sn_pause};
+    error=rf_wifi_smp2p_cold(&sn.smp,&sn.smp_ops);
+    IOLog("REDFIN SENSORS: native readonly cold-witness=%d; no inactive-DSP shutdown, no destination access\n",error);
+    if(error)return error;sn.cold_witness=1;
+    sn.phase=SN_POWER;error=redfin_sensor_power_start(&sn,sn_check);if(error)return error;sn.power=1;
+    sn.phase=SN_METADATA;error=sn_metadata();if(error)return error;
+    if(rf_wifi_smp2p_cold(&sn.smp,&sn.smp_ops))return EPERM;
+    sn.phase=SN_INIT;error=sn_pas(1);if(error)return error;sn.initialized=1;
+    sn.phase=SN_SETUP;error=sn_pas(2);if(error)return error;sn.setup=1;sn.reset=1;
+    /* Match native PIL: only accepted INIT/MEM_SETUP may grant DSP RAM.
+     * Metadata remains in our separately wired page, retained on uncertainty. */
+    error=sn_map(&sn.destination,RF_SENSOR_BASE,RF_SENSOR_MEMORY,true);if(error)return error;
     sn.phase=SN_SMP;error=rf_wifi_smp2p_prepare(&sn.smp,&sn.smp_ops);if(error)return error;
     sn.phase=SN_COPY;
     for(unsigned i=0;i<sn.image.count;++i) {
@@ -339,7 +369,7 @@ static void sn_poll(void)
     if(sn.failed)return;
     if(!sn.attempted) {
         if(!fw_start.interface_timed)return;
-        DTEntry node;if(SecureDTLookupEntry(NULL,"/redfin-sensors",&node)!=kSuccess)return;
+        DTEntry node;if(SecureDTLookupEntry(NULL,"/redfin-sensors",&node)!=kSuccess){sn.attempted=1;sn.failed=1;return;}
         sn.attempted=1;int error=sn_start();
         IOLog("REDFIN SENSORS: start result=%d phase=%u reset=%u auth=%u retained=1 same-worker=1\n",error,sn.phase,sn.reset,sn.authenticated);
         if(error){sn.failed=1;return;}

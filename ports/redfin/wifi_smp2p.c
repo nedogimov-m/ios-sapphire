@@ -208,6 +208,15 @@ static uint32_t text_word(const char *text, unsigned size, unsigned at)
     return value;
 }
 
+int rf_wifi_smp2p_cold(struct rf_wifi_smp2p_session *s,const struct rf_wifi_smp2p_ops *o)
+{
+    if(!s||!valid_ops(o))return RF_WIFI_SMP2P_ARGUMENT;
+    if(s->attempted||s->stage!=RF_WIFI_SMP2P_IDLE||s->poisoned)return RF_WIFI_SMP2P_STATE;
+    struct smp_heap h;int error=heap(s,o,&h);
+    if(error)return error;
+    return h.out||h.in||h.glink||h.free_c!=h.bytes?RF_WIFI_SMP2P_BUSY:gate(s,o);
+}
+
 int rf_wifi_smp2p_prepare(struct rf_wifi_smp2p_session *s, const struct rf_wifi_smp2p_ops *o)
 {
     if (!s || !valid_ops(o)) return RF_WIFI_SMP2P_ARGUMENT;

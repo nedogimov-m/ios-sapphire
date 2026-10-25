@@ -84,6 +84,10 @@ extern "C" {
  * append only a new bounded 428 in the validated APPS/MODEM private partition.
  * Both master-kernel and ipa outbound entries come from the pinned Lito DT.
  */
+/* Read-only cold-start witness before INIT/MEM_SETUP. This never claims reset
+ * ownership, allocates or changes a session. Only successful native setup can
+ * subsequently authorize destination RAM writes. */
+int rf_wifi_smp2p_cold(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *);
 int rf_wifi_smp2p_prepare(struct rf_wifi_smp2p_session *, const struct rf_wifi_smp2p_ops *);
 /* Called immediately before PAS AUTH, while pas_reset() remains provable. It
  * records inbound 435 absent again, so a later new ready object is fresh. */
