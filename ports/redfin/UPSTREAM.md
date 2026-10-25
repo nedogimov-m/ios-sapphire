@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Physical-counter system presentation observer — 2026-10-26
+
+Keep preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 adaptations and the now validated A620
+queue unchanged. Ordinary V45 has stable backboardd but still substantial
+encoding/completion latency; its startup command groups are not rendering FPS.
+Reuse the existing real completed-presentation counters, independently of heavy
+capture. Preserve legacy v1 and add a native counter-frequency v2 snapshot for
+physical elapsed time. The UI benchmark is opt-in for one exact nonce, uses an
+existing fullscreen system window with finite reversible subpixel animation,
+and reports native presentation/GPU counts separately from callback cadence.
+No Phone/Photos launch, test window or image capture is required.5host contracts,
+changed native kernel object and full actual20H392 UI ABI/signatures pass;
+CI delivery and actual system FPS measurements remain pending.
+
 ## Retained submission and separate native completion — 2026-10-26
 
 Review preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's msm bridge

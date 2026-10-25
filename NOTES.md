@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V45 ordinary queued runtime stable; native FPS observer implemented — 2026-10-26
+
+Source38fc90f (render codec246eea), ordinary graphics local20261026-031736/noCI,
+same compiler inputd44e2c6650b19d4e752676620d83fdf3f8fe5dccc2503c207ccb26ff8523adee
+and pairing6ca6878b11dcf71a84cc234750dc682634b22de5a5a12eb8ffe5c8c36e40dc4f
+as V44's complete native PASS. Kernel unchanged CI40236406228/run1/source ddda9d2,
+84fe1c5b05e3798f9f0cfe08172e77be641b1c0f6f105036e8f7396229634567. V50 applied
+ONCE:258048bytes/zero new/freed, all live preimages/readback/signatures/native
+readonly fsck PASS. V50 is now APPLIED/STALE, never reuse. V45 image
+26dce9ee3d0005c8ffe2ebcf5fec916769f1a44bdbeb1d91be7b688f818a5fb6,
+nonceb8ea7650b4bfbdc5. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xb8ea7650b4bfbdc5 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Fresh authenticated boot ID, userspace-alive, no panic, one backboardd61 through
+planned shutdown. Zero current nonce in both correctness logs: probes really
+off; heavy capture/app opens off. Clean unmounted HFSX/inconsistent=false/
+write_count1237163, verified Fastboot, no live device command. Next stageV51/
+imageV46. By pipeline32,36AIR/39ir3 disk hits with zero misses/compiles.
+
+Ordinary command samples are still NOT FPS or a paired workload comparison:
+command8has5draws/21334us encoding/16362us final/44us queue,37743us total;
+command16has5draws/14323encoding/19780final/11208queue,45316total;
+command32has14draws/51917encoding/5431final/68queue,57419total. Small commands
+encode341..588us but wait7..10ms. Stable60/90system rendering remains unfinished.
+
+Implement the next complete measurement block: nonce-bound readonly completed
+presentation statistics become available without redfinscreen/heavy capture;
+legacy40-byte selector remains supported. New48-byte v2 adds actual CNTFRQ_EL0
+frequency so FPS uses physical counter time and reports any Mach scale mismatch
+instead of assuming one. Kernel native object compiles. New UI observer is
+inactive without an exact root-owned one-boot request. Its bounded optional
+workload animates an existing visible fullscreen window's sublayers by2points,
+removes only its own finite animation, opens no apps/adds no test windows, and
+samples actual completed/GPU frames separately from CADisplayLink callbacks.
+Per-second queries never block the UI for retries. Request parser/generation/
+legacy+v2 native stats5host cases PASS. Full UI native/actual20H392 ABI/signatures/
+current source hashes PASS in research/redfin-ui-presentation-v2. CI kernel and
+actual animation/presentation measurements pending. No clock mismatch is yet
+observed; calibration is measurement, not a claimed fix. Broader goal active.
+
 ## REDFIN V44 complete actual A620 queued block PASS; ordinary V45 next — 2026-10-26
 
 Sourcec246eea; native graphics local20261026-030905/noCI/checks-on evidence

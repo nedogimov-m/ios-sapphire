@@ -82,6 +82,11 @@ def build(out,cache_path=None):
         refresh_methods=REFRESH_METHODS,abi=abi,refresh_requires_measured_panel=True,
         refresh_sha256=hashlib.sha256(refresh.read_bytes()).hexdigest(),
         sha256=hashlib.sha256(library.read_bytes()).hexdigest(),full_panel=True,physical_refresh_claimed=False)
+    report.update(probe_opt_in_only=True,probe_uses_native_completed_counts=True,probe_statistics_version=2,
+        probe_request_path='/redfin/display-probe-request',
+        source_sha256={name:hashlib.sha256((HERE/name).read_bytes()).hexdigest() for name in
+            ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m',
+             'display-refresh.m','display-benchmark.h','display-statistics.h','gui-profile.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')
     (out/'refresh-log-initial').write_bytes(b'REDFIN verified physical refresh adaptation; native periods are seconds.\n')
     (out/'build.json').write_text(json.dumps(report,indent=2)+'\n')
