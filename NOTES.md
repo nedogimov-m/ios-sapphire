@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN upstream GLES GUI/app Metal native build/V89 verified; combined V83 starts — 2026-10-27
+
+GLES/application policy source53ed249, exact Mesa input6e6e432c.. unchanged;
+new native pair5fcef77ec2f09cb4d234d4d18162b90e9ec52005ddce500a10d458fa9daf2c41,
+compiler/shader cache retained. Actual20H392 import/signature/native build PASS.
+Kernel unchanged Actions40372742634/run18/source0d3767d/kernel4fa88838..;
+complete image/loader/liveFDT/ADT/private source/ABI proof PASS.
+Fresh V89 clean1587957/empty journal applied ONCE; all preimages backed up,
+signatures/readonly fsck/full ranges and whole files read back, clean Fastboot.
+Cached/file startup checks agree ON and backboardd alone requests GLES.
+Global native Metal stays system mode for apps. V89 STALE/never reuse.
+Next fresh V90/imageV84, actual postboot epoch pending collection.
+
+V83 imagede53d00ccccb76ab3c49c0b11586671652b30b6f458809dd4af1a11c49f62295, fresh4078df9486a0bc61; corrected raw-object refusal, one full native Metal/GPU contract plus
+actual upstream GLES FD620 frames/shared surfaces/zero GL errors/no backboardd
+Metal work must establish coexisting paths, followed by animate-checked.
+Captures/automatic Phone/Photos opens OFF. No renderer/FPS success claim yet.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x4078df9486a0bc61 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal active/unfinished.
+
 ## REDFIN V82 app Metal PASS, GUI startup failure isolated/corrected;58host PASS — 2026-10-27
 
 V82 cycle89618 TERMINAL exit0, authenticated5851feac30b7cf00, no kernel panic,
