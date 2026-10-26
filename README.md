@@ -12,8 +12,11 @@ Metal scheduling now also passes all A620 pixel/error/callback/lifetime checks;
 V59 measures523completed GPU frames in10.000094physical seconds:52.300FPS,
 with startup diagnostics and captures OFF. That change preserves the ordinary
 performance level rather than demonstrating another FPS increase.
-The panel is independently verified at90Hz; display callbacks remain60Hz and
-sustained60/90render FPS is unfinished. Phone and Photos work according to the
+The panel and native CoreAnimation clock now independently run at90Hz. V60's
+unmodified period getters report1/90second and actual callbacks average89.201Hz;
+its user-confirmed interactive workload renders31.665FPS. That observation is
+not a matched quiet comparison to V59. Sustained60/90render FPS is unfinished.
+Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).
 

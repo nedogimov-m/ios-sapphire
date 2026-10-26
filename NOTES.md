@@ -1,5 +1,60 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V60 real native90Hz clock/callbacks PASS; interactive31.665FPS — 2026-10-26
+
+Code8d493ea, CI GitHub Actions40279964939/run6 SUCCESS,
+3d743f5357ff1de665691337de70401e4132d5cc452b32f8acac8f104e15f7fe.
+Native UIcadence-v1, unchanged graphics/Metal pairing2407206f.. and compiler
+cache496301fc.. . Fresh V66 applies ONCE:131072bytes,0new blocks; complete
+preimages/backups/file hashes/signatures/readonly fsck/readback PASS. V66 STALE,
+never reuse. Exact observed V60 args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x92ccad0dd67c6763 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no runtime GPU fault/stop or panic; one
+backboardd61. Kernel publishes real90Hz/19.2MHz, minimum47721859in32.32seconds
+and step213333Mach ticks. The actual window server accepts the complete kernel
+contract and installs native CA_HEARTBEAT_RATE90. Original unswizzled refresh,
+hardware and heartbeat getters ALL return0.011111111seconds; minimum interval1
+and CADisplayLink's original maximum period0.011111111. This establishes the
+real native timing path; no timestamp/getter substitution is used for proof.
+
+Full finite observation/zero window replacements/idle restored/no timeout:
+894callbacks/10.010961physical seconds =89.201callbackHz,891intervals under12ms,
+one98.055ms maximum stall.317completed GPU/317total frames =31.665292FPS;
+ten samples20.005..38.576FPS,0missed. Physical panel remains90Hz. User explicitly
+confirms using the phone during this run; actual touch records518batches,
+118contacts/118releases,0errors/overflows/recovery. The31.665FPS observation is
+valid for this interactive workload, not a matched quiet comparison with V59's
+52.300FPS. Do not attribute the difference solely to the cadence change. Native
+90Hz cadence is proved; smooth60/90render FPS remains unfinished. Startup
+correctness jobs/captures/automatic app launches remain OFF; no Phone/Photos
+checks. All49frontend/retirement partitions validate.
+
+Owner-phase diagnostic limitation: the new long kernel record exceeds the
+logger's line bound and loses its final total/scope fields. The strict analyzer
+correctly validates ZERO complete owner partitions. Keep that evidence intact;
+do not invent the missing total or claim full phase validation. Independently
+complete warm prefixes show47render and26present samples: median owner
+execution4.203ms(render)/6.317ms(present), admission queue1.016ms/5.332ms and
+hardware-lock wait0us. These are host scopes including native programming/GPU
+waits, sampled across the run; they do not isolate GPU core time or the10second
+animation interval. The prefixes identify a substantial output budget. Compact
+records below the kernel line limit before using full-partition comparisons.
+Warm frontend median snapshot2944bytes/72us, full fallbacks0; sampled draw
+groups vary6..95and beyond during user interaction. Avoid inventing another
+large constant-upload or direct-scheduled-wait cause without evidence.
+
+Clean consistent unmounted HFSX/write_count1380808, verified Fastboot. Cycle
+16855 TERMINAL exit0; no device/build/download process remains live. Private
+evidence: logs/redfin/gui-platform-v60/{presentation-summary,frontend-latency,
+owner-phases,owner-prefixes}.json and original setup/period records. Next fresh
+updaterV67/imageV61. Preserve the actual native90Hz path and current client/
+shader artifacts. Next complete graphics block: shorten diagnostic records,
+review GPU scale/pack/map/cache costs and the live Redfin DPU pitch/flush
+contract, then implement an output optimization with pixel/guard, memory,
+FIFO/fence/source-lifetime and CPU-fallback preservation before combined checks.
+Broader Wi-Fi/power/sensors/Apple-services requirements remain active.
+
 ## REDFIN native cadence kernel CI40279964939/run6 PASS; V60 prepared — 2026-10-26
 
 Code8d493ea. GitHub Actions40279964939/run6/source

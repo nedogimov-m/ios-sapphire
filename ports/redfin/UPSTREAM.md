@@ -1,5 +1,27 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual native CLCD90Hz and original-period proof PASS — 2026-10-26
+
+V60/source8d493ea, kernel Actions40279964939/run6 passes authenticated hardware
+startup, one backboardd, no runtime fault/panic and clean root/Fastboot. The
+window server accepts the measured panel/complete native dictionary/Mach-clock
+contract and configures the original CA_HEARTBEAT_RATE reader. Unmodified
+CADisplay refresh/hardware/heartbeat and CADisplayLink maximum periods all read
+1/90seconds, minimum interval1. Actual callbacks average89.201Hz with891intervals
+under12ms and one98ms stall. This proves native cadence beyond getter overrides.
+Keep preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+and the reviewed new-main decision below; compiler/client/cache remain exact.
+
+Actual GPU output is317frames/10.010961seconds =31.665292FPS while the user
+confirms interacting with the phone. It is not a matched quiet comparison to
+V59's52.300FPS; no isolated cadence-related speedup/regression is established.
+All49frontend/retirement partitions validate. Long owner records are truncated
+by the kernel logger and yield0valid complete owner partitions. Keep that
+limitation explicit. Their complete warm prefix fields show substantial
+6.317ms median presentation execution and a5.332ms admission queue; native host
+execution includes programming and fence wait. Compact the records and review
+the actual scaling/packing/import/cache path before the next output block.
+
 ## Complete native cadence build/source/ABI PASS — 2026-10-26
 
 Source8d493ea, kernel GitHub Actions40279964939/run6 SUCCESS. Actual artifact
