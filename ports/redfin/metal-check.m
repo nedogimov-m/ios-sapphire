@@ -216,7 +216,16 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL ba
     MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:width height:height mipmapped:NO];
     desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
     desc.storageMode=MTLStorageModeShared;
-    id<MTLTexture> texture=[(id)device newTextureWithDescriptor:desc iosurface:surface plane:0];
+    id<MTLBuffer> viewBuffer=nil;
+    id<MTLTexture> texture=nil;
+    if(short_storage) {
+        /* The drawable IOSurface entry point correctly requires exact
+         * dimensions. Exercise a smaller legal buffer-texture view over
+         * this owned parent's actual memory instead of bypassing that ABI. */
+        viewBuffer=[device newBufferWithBytesNoCopy:initial length:allocation
+            options:MTLResourceStorageModeShared deallocator:nil];
+        texture=viewBuffer?[viewBuffer newTextureWithDescriptor:desc offset:0 bytesPerRow:stride_bytes]:nil;
+    } else texture=[(id)device newTextureWithDescriptor:desc iosurface:surface plane:0];
     MTLRenderPipelineDescriptor *shape=[[MTLRenderPipelineDescriptor alloc] init];
     shape.vertexFunction=[library newFunctionWithName:@"redfin_vertex"];
     shape.fragmentFunction=[library newFunctionWithName:batch ? @"redfin_batch_fragment" : @"redfin_fragment"];
@@ -282,7 +291,7 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL ba
     }
     [queue release];[pipeline release];
     [shape.vertexFunction release];[shape.fragmentFunction release];
-    [shape release];[texture release];CFRelease(surface);free(wrapped);
+    [shape release];[texture release];[viewBuffer release];CFRelease(surface);free(wrapped);
     return valid;
 }
 

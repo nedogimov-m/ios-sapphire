@@ -162,8 +162,12 @@ jobs:
 
   redfin:
     if: ${{ inputs.board_profile == 'redfin' }}
-    runs-on: macos-14
+    # Sonoma runners are retiring. Keep an explicit Intel image/toolchain;
+    # patch0141 supplies the native Xcode16 IORPC.kernelContent contract.
+    runs-on: macos-15-intel
     timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native padding ABI/import build complete; supported CI image required — 2026-10-26
+
+Native inputb5de25fa../pairc6997ae2.. passes actual20H392 ABI/import/signature and
+compiled new kernel-owned padding client/native-check/route markers, preserving
+shader cache496301fc.. . The native smaller-view guard uses the existing legal
+buffer-texture API; preserve the drawable IOSurface path's exact-dimension
+refusal. Kernel source remains codeb0d4f94 pending an actual CI build.
+
+Run40296773995/run8 never obtains a runner and ends failure/cancelled; no kernel
+artifact exists. Use official supported macos-15-intel/Xcode16.0 for Redfin.
+The existing base0141patch supplies newer iig's native kernelContent member;
+no new upstream/source/ABI shortcut is needed. Actual toolchain execution and
+hardware remain pending. Preferred source pins and reviewed-main decision
+remain unchanged.
+
 ## Owned native16x4 IOSurface transfer storage — 2026-10-26
 
 Reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab Surface/GPU import

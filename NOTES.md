@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full native padding build PASS; retire unavailable macOS14 CI label — 2026-10-26
+
+Codeb0d4f94;53combined host contracts PASS. Complete native incremental build,
+actual20H392 imports/ABI/signatures/current padding+route+checker markers PASS.
+Current graphics inputb5de25fac88dbcf1e47164d3d44763b7fe715e1b79ac8a8f34b0cacce9f5b5a2,
+latest native pairingc6997ae2ac142ba392168b7807dd83efa99b8bca2d1105eeadde172cee5d8a60.
+Shader cache496301fc.. and prior V61 validated artifacts retained. Preflight
+source review caught the drawable entry point's intentional exact-dimension
+requirement: the smaller-image guard now uses a legal buffer-texture view over
+the owned parent's memory. Keep drawable geometry refusal intact. Corrected
+checker and complete native binary/ABI/signature build PASS; kernel source is
+unchanged by this checker correction. Native full/margin/restoration/guards
+and actual FPS remain untested on the phone.
+
+GitHub Actions40296773995/run8/sourceb0d4f94 TERMINAL failure: redfin job
+cancelled before runner assignment, runner_id0, no build step/artifact. It is
+not a kernel compile failure and must never be used as a kernel proof. Official
+runner-images issue13518 deprecates macOS14 (retirement2026-11-02) and warns of
+long queues/cancelled jobs. Current official image table supports macos-15-intel
+and /Applications/Xcode_16.app. Move only the Redfin job to that image and pin
+DEVELOPER_DIR to Xcode16.0. Existing0141-sapphire-iorpc-kernelcontent.patch already
+supports the newer iig and remains in the exact native source map. Do not change
+kernel/userland pins or declare a new toolchain runtime-proven before hardware.
+CI YAML parse and retained exact native build/source verifier configuration PASS.
+
+Fresh V68 readonly snapshot completed at clean1390436, empty journal and full
+existing target preimages; no filesystem write. Temporary rooted recovery idle.
+New V62 image is NOT built and V68 NOT applied. Native/UI artifacts and image/
+CI validators are ready. Next: one new CI dispatch on the supported image,
+terminal artifact/source/ABI verification, then one combined checked hardware
+cycle. No Phone/Photos auto launches or captures. Broad goal stays active.
+
 ## REDFIN owned IOSurface GMEM-padding block implemented;53host contracts PASS — 2026-10-26
 
 Base61fba75, current hardware V61/root1390436/Fastboot. Review actual Mesa25.0.7
