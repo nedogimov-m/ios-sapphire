@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V89 ordinary direct GLES7.192FPS regression; actual input recovery PASS — 2026-10-27
+
+Same V88 native input1a4ad42c../pair17d0f01f../UI/shader cache496301fc..,
+Actions40403226041/run20/source5b06349/kernel01be8081.., policy-only startup
+checks OFF. Source50a511e/start5eb8e38. Cycle36411 TERMINAL exit0,
+authenticated9df5de0f1d66a3d0, one backboardd61/no crash/panic/GL errors,
+clean unmounted HFSX1653419/verified Fastboot. V95 STALE/never reuse; next
+fresh V96/imageV90 at actual1653419. Complete V95 patch-map host preflight
+initially rejected the upstream patch directory before any apply report/write;
+corrected exact source lookup across xnu/patches and ports/redfin, then applied
+that fresh staged image ONCE. No read/stage replay or failed hardware test.
+
+Actual direct GLES2520frames/46direct shared samples/mirrored0/copied0/errors0,
+producer notifications/22kernel records,2400sampled publications/fallback0/
+GPU-wait0. No fresh startup GPU/Metal checks as intended; full native proof
+stays exact V88. Ordinary72GPU frames/10.011060s=7.192046FPS, callback88.702Hz,
+samples4..12.002FPS/max pause79.531ms, no timeout/missed samples/idle restored.
+77user contacts prevent a matched quiet comparison, but the severe direct-path
+regression persists without diagnostics. Source review: removal of seed-only
+CPU locks exposes up to16native queued jobs; late admission waits reach203ms.
+Implement bounded per-context real GL fences before encoding future frames,
+with original full Finish/CPU fallback and complete direct/native checks kept.
+No claim of sustained60/90render FPS.
+
+SEC831batches/77contacts/77releases/error0, overflows1/recovered1. See private
+current authenticated startup/runtime lines for the exact recovery phase; this
+is a real recovered event session, unlike V87's unexercised recovery branch.
+Captures and automatic Phone/Photos launches remain OFF.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x9df5de0f1d66a3d0 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad Wi-Fi/power/thermal/sensor/Apple-service goal remains unfinished.
+
 ## REDFIN V95 same-binary direct GLES policy OFF verified; ordinary V89 starts — 2026-10-27
 
 V88 full direct GLES/app Metal/fetch/seed/CPU-first/pixel/tail contract passes,
