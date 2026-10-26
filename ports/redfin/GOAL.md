@@ -35,13 +35,16 @@ latching uncertain output. GLES continues offscreen; no V97 FPS is valid.
 
 The complete startup fix publishes readiness after successful checks/mapping,
 allows 10 seconds only before readiness and keeps the ordinary 2-second limit.
-All 28 affected contracts and the complete native GPU TU pass. Next: CI24 and
-one combined physical-output/UI run, reusing native `035131`, all existing
-GPU/compiler artifacts and `research/redfin-ui-layout-v2`.
+All 28 affected contracts and the complete native GPU TU pass. Exact fix is
+`e90b110`; Actions `40422287650` / run24 is in progress. Host watcher session
+`56150` downloads/verifies that exact build and prepares only V99. Reuse
+native `035131`, all existing GPU/compiler artifacts and UI layout-v2.
 
-Last clean root generation is `1707842`, verified Fastboot; V101 is stale and
-must never be reused. Create fresh V102 against that actual root. Prepared
-V98 contains the old CI23 kernel and stays unused; corrected image is V99.
+Last clean root generation is `1707842`; fresh V102 readonly snapshot is now
+complete and the device is verified unmounted recovery idle. No V102 stage/
+apply/boot yet. V101 is stale and must never be reused. Prepared V98 contains
+the old CI23 kernel and stays unused; corrected image is V99. After actual
+CI24/V99 proof, stage/apply V102 once and run the complete integration.
 Exact builds, boot arguments and evidence are in [NOTES.md](../../NOTES.md).
 Phone/Photos automatic launches stay off. The clock hooks are installed on
 the real UIKit class; physical lock/rotation persistence remains unproved.

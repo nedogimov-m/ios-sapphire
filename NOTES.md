@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN cold-output fix e90b110 in live CI24; fresh V102 read complete — 2026-10-27
+
+Previous goal turn made progress by registering the complete revised scope
+and committing27a7170. This turn adds b6e1a1e clock-frame/dual-mode fixes,
+authenticates V96/V97 hardware evidence, and commits complete cold-output
+deadline fix e90b1108f3b27d247de5867964cd592278432ecb.28affected contracts
+and actual native GPU TU compile PASS; all original pixel/guard/fence and
+ordinary2000ms deadlines remain. No measured FPS gain is claimed.
+
+Pushed exact source to owned redfin-ci/redfin-bringup; GitHub Actions
+40422287650/run24 is authoritatively IN_PROGRESS at this checkpoint:
+https://github.com/nedogimov-m/ios-sapphire/actions/runs/40422287650 .
+Host watcher session56150 / research/redfin-output-startup-v1/watch-kernel-ci.py
+polls that exact run/source, then downloads/verifies the complete artifact
+and prepares only new V99 plus full preflight. Recheck its actual handle/run;
+do not restart a live watcher/cycle from an old state file. UI/GPU/userland/
+shader cache remain exact; no unnecessary new userland/kernel build dispatch.
+
+Fresh V102 read session70630 TERMINAL exit0: actual clean1707842, native
+empty journal and all current target preimages captured read-only. Device is
+verified rooted unmounted recovery idle; NO V102 stage/apply/boot. Await
+CI24/V99 actual proof, then stage/apply V102 ONCE and perform one combined
+physical output/dual-mode Metal/GLES/UI capture. Never reuse V101/V100; old
+prepared V98 remains unused. Full wider goal remains active and unfinished.
+Last actual iOS boot is V97/CI23/run23/a456fc9a.., with exact arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xde3b8477435b3aa7 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Next controls/brightness block has reviewed native hardware/source facts in
+UPSTREAM.md. Physical inset persistence, sustained FPS and every other open
+objective still need implementation/evidence as listed in GOAL.md.
+
 ## REDFIN V97 first physical reference passes; cold-output deadline fixed — 2026-10-27
 
 V97 TERMINAL exit0, authenticatedde3b8477435b3aa7, one backboardd62/no panic,
