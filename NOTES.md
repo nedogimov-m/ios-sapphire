@@ -1,13 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected native latency kernel run18/V86 verified; combined V80 starts — 2026-10-26
+
+Code0d3767d0e8d988c7d744307323d1fcb4e661397a, actual Actions40372742634/run18 TERMINAL SUCCESS;
+kernel4fa88838a6c24fc87017aca5e33b48ed27110b2bb4015876341b88e23a963922, imagedb39aa4414bf4e10fc3082fca5c9dc6b225559f7797f19e55ec5ad74616c6f86.
+Actual arm64/non-PAC/source/KDK/complete old+new patch map and retained/new ABI
+proof PASS. Fresh V86 at clean1558759/empty journal applied ONCE; all live
+preimages backed up, signatures/native readonly fsck/full range and whole-file
+readback PASS, clean root/verified Fastboot. Cached/file startup jobs agree ON.
+Native6e6e432c../pair1bf36b6d../UI/cache unchanged; no native/compiler rebuild.
+V86 STALE/never reuse. Next fresh V87/imageV81, postboot epoch pending collection.
+
+V80 fresh815a7467330b7c62: full previous native four-cache-mode/CPU-GPU/guard/Metal/
+physical FIFO/output checker plus exact deadline/actual GPU-clock/host-wait/
+cache-predecessor partitions, then animate-checked. Captures/automatic Phone/
+Photos opens OFF. No actual native timing or FPS success before terminal proof.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x815a7467330b7c62 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains active/unfinished.
+
 ## REDFIN run17 compile failure fixed; both complete native units compile — 2026-10-26
 
 Actions40370957731/run17 TERMINAL FAILURE, sourcea3a7759; actual build error
 is unused kern/spl.h, not exported to BSD. Remove that include. Both complete
 final translation units bsd/dev/redfin_gmu_probe.c and iokit/Kernel/arm/RedfinGPU.cpp
 now compile locally against real generated XNU export headers/configuration,
-with actual run17 CI flags (local Xcode27 compiler; CI uses Xcode16). All45
-transitive owned quote-source paths are reconstructed; unchanged foundation
+with actual run17 CI flags (local Xcode27 compiler; CI uses Xcode16). Transitive owned
+quote-source paths are reconstructed; unchanged foundation
 headers come from verified realtime native fixtures/local XNU tree. This is
 compile preflight, not native kernel link or hardware success. Four final
 latency/overlay/FIFO/cache contracts PASS; prior58combined contracts retained.
