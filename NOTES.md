@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V76 same-binary policy verified; ordinary V70 running — 2026-10-26
+
+Code844b125/results73e649e; exact native input6e6e432c../pair24dfc27b../
+UIpadding-contract-v1/cache496301fc../Actions40314982431/run10/kernel5f0d5f48..
+retained. Only startup diagnostic jobs change OFF; no native recompile.
+Frozen constant-ownership-v69-validated full inventory PASS before policy
+mutation. Fresh V76 snapshot clean1470450/empty journal, all live preimages,
+backups/signatures/native readonly fsck and whole device file readback PASS.
+Applied ONCE266240bytes,0new/freed blocks; clean root and verified Fastboot.
+V76 STALE/never reuse. Next fresh V77/imageV71; postboot epoch pending.
+
+V70 image29e4ca0c6294fb6ae76959064e5d7d2c36470f58ceccc03b7785b4bf62e02481
+passes full native preflight. Fresh0d554b82d1203445, request animate; exact args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0d554b82d1203445 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+One ordinary cycle RUNNING; checks/captures/app opens OFF. No other device
+commands until terminal collection. No ordinary FPS recovery claimed yet.
+The next physical-ring runtime/worker block is an uncompiled implementation
+draft only, excluded from all current artifacts; finish it before combined checks.
+
 ## REDFIN V69 producer-aware native contract PASS; ordinary V70 preparation — 2026-10-26
 
 Code844b125/docsb96c123, unchanged Actions40314982431/run10/kernel5f0d5f48..,
