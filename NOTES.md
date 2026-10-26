@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected cache policy run14/V83 verified; combined V77 starts — 2026-10-26
+
+Complete code32f777abdd8ec4edcf24968a70bf4ebb9f8aea7e, local tools/docs c87210e.
+Actual Actions40354200257/run14 TERMINAL SUCCESS; native arm64/non-PAC kernel
+18742424bytes, SHA256cda58cf5e60df65d73117ba2d68fadc64f066d0d8c60206ecee4a2363020685c.
+Complete builder/XNU/KDK/ordered patch map, all old/new native cache policy,
+allocation/CPU handoff/queue/output markers PASS. Build elapsed457.438s;
+build.sh426.282s, expanded-KDK reused after the separately observed107s cache
+restore. Compact-only future cache correction is local, not used in this run.
+
+Actual native20H392 build/pair45c09a81../input6e6e432c../cache496301fc../UI
+retained. Fresh V83 clean1532435/empty journal, complete staged native files/
+signatures/preimages/readonly fsck PASS. Apply ONCE200704bytes,0new/freed blocks;
+every live preimage backed up, transfers/ranges/whole files read back, root
+clean/verified Fastboot. Cached and standalone startup jobs agree ON. V83
+STALE/never reuse; next fresh V84/imageV78, postboot epoch pending collection.
+
+V77 image73f96a6645acfbd7395899c451ca05172f1b3c97e3a5a1b2d5599cd47356b885, full actual loader/liveFDT/ADT/private inputs/
+complete source/ABI preflight PASS. Freshea2a60c9f20c4016; one full combined native
+three-cache-mode CPU/GPU/guard proof and all prior Metal/output/physical queue
+cases, then animate-checked. Captures/automatic app opens OFF. Require actual
+system-output WC counters too; checker success alone cannot establish that.
+No corrected native route/speedup claim before terminal evidence. Exact args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xea2a60c9f20c4016 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal remains active/unfinished.
+
 ## REDFIN CI preparation: expanded-kit cache regression removed — 2026-10-26
 
 Actual run14/40354200257 restores the expanded KDK from15:56:55 until about
