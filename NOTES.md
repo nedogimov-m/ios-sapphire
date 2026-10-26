@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN GPU output kernel CI40286405146/run7 and V61 preflight PASS — 2026-10-26
+
+Codefd21adfa968bdb3f8b9b4ef47e693ac57c6b63ac; CI GitHub Actions40286405146/run7
+SUCCESS, actual native build/source-verifier steps PASS. Terminal downloaded
+artifact18726296bytes, SHA25658db3d942910b30100cd1e3ce7b242a43953f78ac3d2f928fdbc26881141e6d3.
+Complete patch map (including the final native-display-output overlay), exact
+builder/XNU/KDK pins, actual arm64/non-PAC binary, all retained native ABIs and
+new output/compact-owner markers match. Old truncated owner format is absent.
+Six parallel range connections validate exact Content-Range and ZIP CRCs;
+7.31MB artifact completes without the previous12minute single-stream delay.
+
+V61 image95d33598be99ba042bb1b89ee67c8171b68b35d72e4f51d44488457623697efa
+passes actual loader/payload/live-FDT/ADT/window/firmware/private identity,
+keychain/power/ADSP/thermal/DVFS/CI source and native ABI preflight. Reuse exact
+Metal pair2407206f.., compiler cache496301fc.. and UIcadence-v1. No compiler or
+userland rebuild. Ordinary animation request matches fresh boot nonce; captures,
+userspace startup correctness jobs and automatic Phone/Photos launches OFF.
+Planned exact V61 args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3b4f4caac46916ec redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Fresh V67 readonly snapshot at clean1380808/empty journal is complete. Full
+existing files/preimages/signatures/readonly fsck stage PASS:8192bytes,0new
+blocks. V67 applies ONCE with complete live preimages/backups and readback;
+clean root/Fastboot PASS. V67 is STALE, never reuse. V61 temporary hardware
+cycle is now running, session3642; no other device command until terminal
+collection. Actual full+margin GPU pixels/guards, real90Hz/callbacks/FPS and
+strict complete owner/output budgets remain pending. Next fresh V68/imageV62;
+actual next root generation is not known until collection. Broad goal active.
+
 ## REDFIN complete GPU output-clear/budget block;44host contracts PASS — 2026-10-26
 
 Base4e5bd70; final overlay native-display-output.patch is last in both kernel

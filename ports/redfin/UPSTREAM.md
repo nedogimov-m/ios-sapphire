@@ -1,5 +1,16 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native output-clear optimization CI40286405146/run7 PASS — 2026-10-26
+
+Sourcefd21adf, kernel58db3d942910b30100cd1e3ce7b242a43953f78ac3d2f928fdbc26881141e6d3.
+Actual CI native build, source replay, terminal artifact SHA256 and full current
+patch map pass; V61 complete loader/private input/firmware/native ABI preflight
+passes. Existing preferred pins, client/UI/compiler binaries and shader cache
+remain exact. The output clear change is built into the actual kernel; new
+native full/margin checks and complete bounded owner/output records are present,
+old truncated owner format absent. This still establishes no measured FPS gain;
+one combined native correctness/ordinary performance cycle is next.
+
 ## Redfin A620 output clears and complete native budgets — 2026-10-26
 
 Keep reviewed preferred pins kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/
