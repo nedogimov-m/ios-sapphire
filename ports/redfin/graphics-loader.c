@@ -15,6 +15,7 @@
 #include "gui-profile.h"
 #include "graphics-memory-report.h"
 #include "compositor-policy.h"
+#include "gles-memory-policy.h"
 
 static bool property(io_service_t service,const char *name,int expected)
 {
@@ -57,9 +58,10 @@ __attribute__((constructor)) static void redfin_graphics_load(void)
     redfin_graphics_memory_report("loader-before",0);
     /* These must precede dlopen: Mesa reads its driver choice on first use. */
     setenv("OSMESA_SOFTWARE","0",1);
-    /* Native A620 has512KiB GMEM. Let freedreno select its ordinary tiled
-     * path instead of forcing every system composition through DRAM. */
-    setenv("FD_MESA_DEBUG","",1);
+    const char *memory=redfin_gles_memory_debug(name,compositor,getenv(REDFIN_GLES_MEMORY_ENV));
+    setenv("FD_MESA_DEBUG",memory,1);
+    dprintf(2,"REDFIN EAGL MEMORY: boot=%016llx process=backboardd mode=%s hardware-GPU=1 app-Metal-policy=independent\n",
+        nonce,*memory?memory:"auto");
     setenv("MESA_DEBUG","context",1);
     void *apple=dlopen("/System/Library/Frameworks/OpenGLES.framework/OpenGLES",RTLD_NOW|RTLD_LOCAL);
     if(!apple){dprintf(2,"REDFIN EAGL LOADER: OpenGLES load failed: %s\n",dlerror());return;}

@@ -1,5 +1,17 @@
 # HackiOS upstream review — 2026-10-22
 
+## GLES sysmem policy joins the complete native output block — 2026-10-27
+
+Same preferred88513176../906425b7.. bridge and Mesa25.0.7 implementation.
+Use its supported FD_MESA_DEBUG=sysmem only in explicitly GLES backboardd;
+full direct/fetch/pixel/guard native GPU probes already exercise this path.
+Metal/apps retain original selection; GUI auto override is reversible and
+profile/A620/refusal gates remain. This is GPU rendering into ordinary owned
+memory, with real fences and retained FIFO output. Compiler/shader source and
+cache are unchanged;104common host/native20H392 build/import/signature checks
+PASS. Full combined sysmem GUI/precision2output/Metal performance proof is
+pending V94 with kernel CI22; requested policy alone is not actual activity.
+
 ## Native V92 filter quantization informs explicit scoped precision contract — 2026-10-27
 
 Same reviewed source pins/Mesa25.0.7 2D register model. ABI1native V92 admits

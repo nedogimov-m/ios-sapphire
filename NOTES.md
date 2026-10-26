@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete GLES sysmem/fused precision pipeline;104common/native build PASS — 2026-10-27
+
+Combine the connected rendering/output changes before the next hardware run.
+Current autonomous baseline V91 ordinary51.245FPS/V92 legacy51.742FPS; clean
+1679744, fresh V99 read complete/no apply. Kernel precision2 sourcedbd18cc/
+Actions40413610563/run22 builds; original fused ABI1failure remains recorded.
+
+Light GUI's ordinary tiled18-IB+WFI sample costs about12ms; the complete
+full-canvas direct/fetch/first-CPU-reader checker already uses GPU sysmem in
+V90/V92. Select that supported driver path only for explicitly GLES backboardd,
+keeping API/profile/A620 gates, native publication/bound2 and source shader
+code. Native Metal/app processes retain original selection; explicit
+REDFIN_GLES_MEMORY=auto reverses the GUI policy. Unknown choices keep automatic
+selection; never select a software renderer. The actual policy is boot-tagged;
+requested mode alone is not GPU activity or a performance claim.
+
+104combined host contracts PASS, including actual compiled process/API/mode
+admission matrix and every preserved renderer/output/Metal/touch contract.
+Native20H392 build build-20261027-034305.log/imports/signatures/full source
+pairing PASS. Mesa input1a4ad42c../Metal pair17d0f01f../shader cache496301fc../UI
+retained. GUI loader source changes; complete paired userland artifacts are
+verified again. V99 snapshot already contains all same target paths; root epoch
+and standalone/cached job policies remain exact. No new device cycle yet.
+Next V94 combines scoped GLES sysmem, precision2fused output, full existing
+Metal/GPU/direct/fetch/budget checks and finite system FPS. No new speedup
+claim before terminal actual output route/pixel/maxima/FPS evidence.
+Broad platform goal remains unfinished.
+
 ## REDFIN complete fused filter precision2/all-case contract;103common/native compile PASS — 2026-10-27
 
 V92's valid native rejection remains recorded: first1:1case passes the original
