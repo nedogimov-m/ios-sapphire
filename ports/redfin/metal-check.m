@@ -376,10 +376,10 @@ int main(void)
             BOOL raster=padded_bounds&&render_raster_passes(device,library);
             BOOL vertices=short_bounds&&render_vertex_streams(device,library);
             BOOL halfRaster=short_bounds&&half_raster_native(device,library,nonce);
-            BOOL pitch480=short_bounds&&render_byte_pitch(device,library,(uint32_t)nonce,120,32,480,512,16384,32768);
-            BOOL pitch4512=short_bounds&&render_byte_pitch(device,library,(uint32_t)(nonce>>32),1125,9,4512,4544,65536,65536);
-            BOOL resolve480=short_bounds&&render_byte_pitch(device,library,(uint32_t)nonce^0xabcdecadu,120,32,480,480,16384,16384);
-            BOOL resolve4512=short_bounds&&render_byte_pitch(device,library,(uint32_t)(nonce>>32)^0x815ca461u,1125,9,4512,4512,65536,65536);
+            BOOL pitch480=short_bounds&&render_byte_pitch(device,library,(uint32_t)nonce,120,32,480,512,16384,32768,paddingABI);
+            BOOL pitch4512=short_bounds&&render_byte_pitch(device,library,(uint32_t)(nonce>>32),1125,9,4512,4544,65536,65536,paddingABI);
+            BOOL resolve480=short_bounds&&render_byte_pitch(device,library,(uint32_t)nonce^0xabcdecadu,120,32,480,480,16384,16384,paddingABI);
+            BOOL resolve4512=short_bounds&&render_byte_pitch(device,library,(uint32_t)(nonce>>32)^0x815ca461u,1125,9,4512,4512,65536,65536,paddingABI);
             BOOL blits=short_bounds&&blit_native(device,nonce);
             BOOL buffers=short_bounds&&buffer_native(device,pipeline,nonce);
             BOOL bufferTextures=short_bounds&&buffer_texture_native(device,nonce);
@@ -400,7 +400,10 @@ int main(void)
                 (unsigned long long)nonce,raster,vertices,pitch480,pitch4512,resolve480,resolve4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
             int status=gmem&&short_bounds&&wrapped_bounds&&padded_bounds&&padded_restore&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&scheduling&&uboExtents&&resourceReferences ? 0 : 1;
-            redfin_graphics_memory_report("checker-after",status);
+            redfin_graphics_memory_report("checker-after",0);
+            /* task_info's status above describes memory accounting only. */
+            printf("REDFIN METAL CHECK EXIT: boot=%016llx result=%u full-contract=1\n",
+                (unsigned long long)nonce,(unsigned)status);
             return status;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);

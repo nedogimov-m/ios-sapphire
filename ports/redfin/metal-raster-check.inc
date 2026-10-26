@@ -124,8 +124,24 @@ static uint32_t raster_pattern(unsigned x,unsigned y,uint32_t nonce)
     return 0xff000000u|(((x*13+y*5+nonce)&255u)<<16)|
         (((x*3+y*19+(nonce>>8))&255u)<<8)|((x*17+y*7+(nonce>>16))&255u);
 }
+/* Only these probes' freshly allocated, full-image output surfaces have the
+ * owned padding contract. A sampled source remains read-only through its
+ * entire allocation, including those rows. This is an expected guard bound,
+ * never a substitute for the driver's retained-descriptor attestation. */
+static uint64_t raster_probe_tail_start(unsigned width,unsigned height,unsigned pitch,
+    unsigned allocation,BOOL output,unsigned paddingABI)
+{
+    uint64_t visible=(uint64_t)pitch*height;
+    struct rf_gp_image image={width,height,pitch,0,RF_GP_BGRA,0,4,1,1};
+    struct rf_gp_plan plan={0};
+    if(output && paddingABI==RF_GP_ABI &&
+       rf_gp_storage_plan(&image,allocation,&plan) && plan.allocation==allocation)
+        return plan.extent;
+    return visible;
+}
 static BOOL render_byte_pitch(id<MTLDevice> device,id<MTLLibrary> library,uint32_t nonce,
-    unsigned width,unsigned height,unsigned source_pitch,unsigned destination_pitch,unsigned source_bytes,unsigned destination_bytes)
+    unsigned width,unsigned height,unsigned source_pitch,unsigned destination_pitch,unsigned source_bytes,unsigned destination_bytes,
+    unsigned paddingABI)
 {
     IOSurfaceRef source=raster_surface(width,height,source_pitch,source_bytes);
     IOSurfaceRef destination=raster_surface(width,height,destination_pitch,destination_bytes);
@@ -183,16 +199,21 @@ static BOOL render_byte_pitch(id<MTLDevice> device,id<MTLLibrary> library,uint32
                             source_pitch,round,i,x,y,actual,expected);valid=NO;
                     }
                 }
-                /* Source padding must also stay unchanged. Destination row padding
-                 * is an implementation detail, but its allocation tail is guarded. */
+                /* Source padding must also stay unchanged. Exact owned outputs
+                 * may use their attested four-row footprint, with every byte
+                 * after that footprint still guarded. */
                 if(!i)for(unsigned y=0;valid&&y<height;++y)for(unsigned at=width*4;valid&&at<pitches[i];++at)
                     if(pixels[y*pitches[i]+at]!=0xa5) {
                         printf("REDFIN METAL PITCH PADDING: source-pitch=%u surface=%u round=%u offset=%u actual=%02x\n",
                             source_pitch,i,round,y*pitches[i]+at,pixels[y*pitches[i]+at]);valid=NO;
                     }
-                for(unsigned at=pitches[i]*height;valid&&at<allocations[i];++at)if(pixels[at]!=0xa5) {
-                    printf("REDFIN METAL PITCH GUARD: source-pitch=%u destination-pitch=%u surface=%u round=%u offset=%u actual=%02x\n",
-                        source_pitch,destination_pitch,i,round,at,pixels[at]);valid=NO;
+                uint64_t guard=raster_probe_tail_start(width,height,pitches[i],allocations[i],i!=0,paddingABI);
+                if(!round)printf("REDFIN METAL PITCH FOOTPRINT: width=%u height=%u surface=%u pitch=%u visible=%llu guard-start=%llu allocation=%u source-readonly=%u owned-padding=%u\n",
+                    width,height,i,pitches[i],(unsigned long long)((uint64_t)pitches[i]*height),
+                    (unsigned long long)guard,allocations[i],i==0,guard>(uint64_t)pitches[i]*height);
+                for(uint64_t at=guard;valid&&at<allocations[i];++at)if(pixels[at]!=0xa5) {
+                    printf("REDFIN METAL PITCH GUARD: source-pitch=%u destination-pitch=%u surface=%u round=%u offset=%llu actual=%02x\n",
+                        source_pitch,destination_pitch,i,round,(unsigned long long)at,pixels[at]);valid=NO;
                 }
                 if(IOSurfaceUnlock(surfaces[i],kIOSurfaceLockReadOnly,&seed)!=KERN_SUCCESS)valid=NO;
             }

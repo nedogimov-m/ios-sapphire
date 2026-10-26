@@ -78,15 +78,26 @@ unsigned ready(const char *m,size_t mb,const char *g,size_t gb,uint64_t n){
             lib=C.CDLL(str(root/'ready.so'))
             lib.ready.argtypes=[C.c_char_p,C.c_size_t,C.c_char_p,C.c_size_t,C.c_uint64]
             nonce=0x12345678abcdef01
-            metal=b'REDFIN GRAPHICS MEMORY: boot=12345678abcdef01 pid=67 phase=checker-after ordinal=0 status=0 words=86\\n'.replace(b'\\n',b'\n')
+            metal=b'REDFIN METAL CHECK EXIT: boot=12345678abcdef01 result=0 full-contract=1\n'
+            memory=b'REDFIN GRAPHICS MEMORY: boot=12345678abcdef01 pid=67 phase=checker-after ordinal=1 status=0 words=86\n'
             gpu=b'REDFIN GPU RENDER BOOT: 12345678abcdef01\nREDFIN GPU RENDER RESULT: result=0 hardware=1 draws=2\n'
             call=lambda m,g,n=nonce:lib.ready(m,len(m),g,len(g),n)
             self.assertEqual(call(metal,gpu),1)
             for m,g in ((b'',gpu),(metal,b''),(metal.replace(b'abcdef01',b'abcdef02'),gpu),
-                        (metal,gpu.replace(b'abcdef01',b'abcdef02')),(metal,gpu.split(b'REDFIN GPU RENDER RESULT:')[0])):
+                        (metal,gpu.replace(b'abcdef01',b'abcdef02')),(metal,gpu.split(b'REDFIN GPU RENDER RESULT:')[0]),
+                        (memory,gpu),(memory.replace(b'ordinal=1',b'ordinal=0'),gpu),
+                        (metal[:-1],gpu),(metal,gpu[:-1]),
+                        (metal,gpu+b'REDFIN GPU RENDER BOOT: 12345678abcdef02\n')):
                 self.assertEqual(call(m,g),0)
             self.assertEqual(call(metal,gpu,nonce+1),0)
-            for m,g in ((metal.replace(b'status=0',b'status=1'),gpu),
+            self.assertEqual(call(memory+metal,gpu),1)
+            # Another boot's result must never finish our pending GPU job.
+            self.assertEqual(call(metal,gpu.split(b'REDFIN GPU RENDER RESULT:')[0]+
+                b'REDFIN GPU RENDER BOOT: 12345678abcdef02\n'+gpu.split(b'\n',1)[1]),0)
+            for m,g in ((metal.replace(b'result=0',b'result=1'),gpu),
+                        (metal.replace(b'full-contract=1',b'full-contract=0'),gpu),
+                        (metal.replace(b'result=0',b'result=00'),gpu),
+                        (metal+metal.replace(b'result=0',b'result=1'),gpu),
                         (metal,gpu.replace(b'result=0',b'result=1')),
                         (metal,gpu.replace(b'draws=2',b'draws=20')),
                         (metal,gpu+b'REDFIN GPU RENDER FAIL: bad pixels\n')):

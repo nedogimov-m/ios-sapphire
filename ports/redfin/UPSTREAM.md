@@ -1,5 +1,25 @@
 # HackiOS upstream review — 2026-10-22
 
+## Owned-padding hardware result and complete-check exit contract — 2026-10-26
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+and reviewed-mainc84b4634277a70beac73921029b1fb6afc2530af remain unchanged.
+Actual run9/source5be3287/kernelc363bc80.. boots correctly under Xcode16.0.
+V62 proves full-image GMEM, smaller/wrapped sysmem and both CPU-rewrite/GMEM
+restore cases with correct visible pixels and true post-footprint guards.
+The complete checker nevertheless exits1: its prior byte-pitch probes guard
+the newly owned output's permitted padding rows as though they were unowned.
+Correct only those locally allocated full-image output expectations, retaining
+all source tails, ineligible layouts and bytes after actual transfer extents.
+The kernel attestation and Mesa bounds rules remain exact.
+
+Also separate actual checker success from task_info's memory-accounting status:
+publish a dedicated full-contract exit record and require that current-nonce
+record before checked measurement. Historical checker-after ordinal carries
+the old process exit; status0 alone never proves graphics success.9affected
+host contracts pass; complete corrected native hardware proof is still pending.
+V62's concurrent ungated34.964FPS observation establishes no ordinary speedup.
+
 ## Native padding ABI/import build complete; supported CI image required — 2026-10-26
 
 Native inputb5de25fa../pairc6997ae2.. passes actual20H392 ABI/import/signature and

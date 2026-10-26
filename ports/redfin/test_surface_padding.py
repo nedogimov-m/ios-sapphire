@@ -57,6 +57,27 @@ uint64_t extent(const struct rf_gp_import *o,const struct rf_gp_view *v,uint64_t
     def image(self,w=1065,h=282,pitch=4288):
         return Image(w,h,pitch,0,0x42475241,0,4,1,1)
 
+    def test_native_probe_guards_owned_output_footprints_and_every_readonly_source_byte(self):
+        helper=function((HERE/'metal-raster-check.inc').read_text(),
+                        'static uint64_t raster_probe_tail_start(')
+        source='#include "surface-padding.h"\ntypedef int BOOL;\n'+helper+'''
+uint64_t guard(unsigned w,unsigned h,unsigned p,unsigned n,int output,unsigned abi)
+{return raster_probe_tail_start(w,h,p,n,output,abi);}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            lib=compile_host(Path(directory),source);lib.guard.restype=C.c_uint64
+            lib.guard.argtypes=[C.c_uint]*4+[C.c_int,C.c_uint]
+            for width,height,pitch,allocation in ((1125,9,4544,65536),
+                    (1065,282,4288,1228800),(281,609,1152,720896),(64,64,256,32768)):
+                visible=pitch*height;extent=pitch*((height+3)&~3)
+                self.assertEqual(lib.guard(width,height,pitch,allocation,1,1),extent)
+                for output,abi in ((0,1),(0,0),(0,2),(1,0),(1,2)):
+                    self.assertEqual(lib.guard(width,height,pitch,allocation,output,abi),visible)
+            # Converted output backing and arbitrary allocation slack acquire
+            # no permission; the old logical tail remains protected.
+            for pitch,allocation in ((4512,65536),(480,16384),(4544,65535),(4544,32768)):
+                self.assertEqual(lib.guard(1125 if pitch>500 else 120,9,pitch,allocation,1,1),pitch*9)
+
     def test_actual_16_by_4_footprint_allocates_every_row_and_preserves_larger_owned_size(self):
         for width in (1,15,16,17,281,640,1065,1080,1125,16384):
             pitch=(width*4+63)&~63

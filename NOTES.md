@@ -1,5 +1,67 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected native checker/measurement gate built; V63 preflight PASS — 2026-10-26
+
+Complete related checker block: expected output guards use only the probe's
+fresh owned full-image padding, all source tails remain readonly, every real
+post-footprint tail remains poisoned. Add explicit whole-checker EXIT result;
+the display observer accepts only its exact successful current-nonce record
+and complete GPU job result. Memory task_info status no longer grants success.
+Partial records, stale/foreign boot results, changed contracts and failed
+exits cannot authorize a measurement.9affected host contracts PASS, including
+the actual extracted native guard function and actual C observer parser.
+
+Full native incremental build/actual20H392 imports/signatures/current markers
+PASS. Inputb5de25fa.. and shader cache496301fc.. retained; new native pairing
+4447fa9d5ea4003d5c610c09f0bfa9efbc4bcfd72f162ff0982997fe597c5e69.
+Only paired AIR/plugin contract markers and checker change; Mesa/OSMesa,
+shader libraries and all compiler inputs stay exact. Prior V62 full native
+work preserved in research/redfin-metal-padding-v62-checked. New UI work
+research/redfin-ui-padding-contract-v1 passes actual ABI/signatures/source
+proof and advertises explicit checker-exit gate version1.
+
+Reuse actual Actions40300639111/run9/source5be3287/kernelc363bc80..; no kernel
+rebuild required. New V63 imagee3a577e201df54a309608d6b3e700fdf25557808e6f05631dcf8167a48b8dc7d
+passes full real loader/liveFDT/ADT/firmware/private inputs/native ABI/source
+preflight. Args identical to V62 below except redfinbootid=0x8a230a34954764e8.
+Fresh one-boot request is animate-checked. Complete startup correctness ON,
+captures and Phone/Photos automatic launches OFF. Hardware result pending.
+Next fresh V69 binds actual clean1399190, uses the corrected host logical
+extent writer and cannot reuse V68. Broad goal stays active/unfinished.
+
+## REDFIN V62 collected: owned GMEM/restoration PASS; complete checker fails stale pitch-tail expectations — 2026-10-26
+
+Cycle73474 TERMINAL exit0, authenticated fresh nonceae187d4155a1cb83, same
+run9/source5be3287/kernelc363bc80.. and exact V62 boot args immediately below.
+One backboardd62, no runtime GPU fault/panic, clean unmounted HFSX1399190 and
+verified Fastboot. V68 remains STALE, never reuse; next fresh V69/imageV63.
+
+Both owned odd-height full images actually select GMEM; smaller buffer-view
+and wrapped-storage cases remain sysmem. Both1065x282/4288 and281x609/1152
+CPU-rewrite/LoadActionLoad/scissored restoration cases complete2rounds with
+0pixel mismatches/0post-footprint guard errors. All prior half/blit/buffer/
+resource/cache/binding/order/scheduling/lifetime cases pass. However, the
+complete checker exits1: pitch4512 and resolve4512 tests guard freshly owned
+pitch4544/height9 render outputs at40896, inside their now-permitted54528byte
+four-row footprint. Source and unaligned destinations do not gain permission.
+Do not disable these cases or claim the whole native checker passed.
+
+Also diagnose observer confusion: GRAPHICS MEMORY checker-after ordinal carries
+the historical checker exit (1here); its status0 is only successful task_info.
+Add an explicit full-contract checker exit record and require that exact
+current-nonce result before a checked measurement. Update the probe's expected
+tail only for its own newly allocated full-image outputs under owned ABI1;
+every source byte past visible rows and every byte after each actual output
+footprint stays protected. Existing kernel attestation/driver bounds unchanged.
+
+V62 observed350GPU frames/10.010367s with90Hz callbacks, but native checks ran
+concurrently and native-checks-completed=0. This is NOT a valid ordinary or
+checks-gated performance result and demonstrates no FPS gain.18frontend and
+28owner/9output samples validate; route deltas are batch counts, not FPS.
+Private full evidence remains logs/redfin/gui-platform-v62. Next complete the
+related checker/gate block, reuse exact kernel/cache and run one combined check;
+no ordinary performance run until every native correctness case passes.
+
 ## REDFIN padding kernel run9/image/update verified; V62 combined native cycle running — 2026-10-26
 
 Source5be3287832a0b1f91628ab3ef5b2840880b99766; GitHub Actions40300639111/run9

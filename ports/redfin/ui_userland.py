@@ -96,6 +96,7 @@ def build(out,cache_path=None):
         refresh_sha256=hashlib.sha256(refresh.read_bytes()).hexdigest(),
         sha256=hashlib.sha256(library.read_bytes()).hexdigest(),full_panel=True,physical_refresh_claimed=False)
     report.update(probe_opt_in_only=True,probe_uses_native_completed_counts=True,probe_statistics_version=2,
+        probe_checks_exit_version=1,
         native_cadence_abi=cadence,native_display_period_getters_preserved=True,
         high_refresh_main_bundle_opt_in=True,foundation_uuid=foundation_uuid,
         probe_request_path='/redfin/display-probe-request',

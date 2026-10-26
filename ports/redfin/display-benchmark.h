@@ -80,29 +80,40 @@ static inline unsigned redfin_display_probe_checks(const char *metal,size_t meta
     const char *gpu,size_t gpu_bytes,uint64_t nonce)
 {
     if(!nonce)return 0;
-    char boot[32],gpu_boot[64];
+    char boot[32],metal_success[128],gpu_boot[64];
     snprintf(boot,sizeof(boot),"boot=%016llx ",(unsigned long long)nonce);
-    snprintf(gpu_boot,sizeof(gpu_boot),"REDFIN GPU RENDER BOOT: %016llx\n",(unsigned long long)nonce);
+    snprintf(metal_success,sizeof(metal_success),"REDFIN METAL CHECK EXIT: boot=%016llx result=0 full-contract=1",(unsigned long long)nonce);
+    snprintf(gpu_boot,sizeof(gpu_boot),"REDFIN GPU RENDER BOOT: %016llx",(unsigned long long)nonce);
     bool metal_done=false;
     for(size_t at=0;metal&&at<metal_bytes;) {
         const char *line=metal+at,*end=memchr(line,'\n',metal_bytes-at);
         size_t bytes=end?(size_t)(end-line):metal_bytes-at;
+        if(!end)break; /* a concurrent writer has not finished this record */
         if(redfin_display_probe_find(line,bytes,boot)&&
-           redfin_display_probe_find(line,bytes,"REDFIN GRAPHICS MEMORY:")&&
-           redfin_display_probe_find(line,bytes,"phase=checker-after ") ) {
-            if(!redfin_display_probe_find(line,bytes,"status=0 "))return 2;
+           redfin_display_probe_find(line,bytes,"REDFIN METAL CHECK EXIT:")) {
+            if(bytes!=strlen(metal_success)||memcmp(line,metal_success,bytes))return 2;
             metal_done=true;
         }
         at+=bytes+(end?1:0);
     }
-    const char *begin=redfin_display_probe_find(gpu,gpu_bytes,gpu_boot);
-    if(!begin)return 0;
-    size_t remaining=gpu_bytes-(size_t)(begin-gpu);
-    if(redfin_display_probe_find(begin,remaining,"REDFIN GPU RENDER FAIL:"))return 2;
-    const char *result=redfin_display_probe_find(begin,remaining,"REDFIN GPU RENDER RESULT:");
-    if(!result)return 0;
-    size_t tail=gpu_bytes-(size_t)(result-gpu);
-    if(!redfin_display_probe_find(result,tail,"REDFIN GPU RENDER RESULT: result=0 hardware=1 draws=2\n"))return 2;
-    return metal_done?1:0;
+    bool gpu_current=false,gpu_done=false;
+    static const char gpu_success[]="REDFIN GPU RENDER RESULT: result=0 hardware=1 draws=2";
+    for(size_t at=0;gpu&&at<gpu_bytes;) {
+        const char *line=gpu+at,*end=memchr(line,'\n',gpu_bytes-at);
+        size_t bytes=end?(size_t)(end-line):gpu_bytes-at;
+        if(!end)break;
+        if(redfin_display_probe_find(line,bytes,"REDFIN GPU RENDER BOOT:")) {
+            gpu_current=bytes==strlen(gpu_boot)&&!memcmp(line,gpu_boot,bytes);
+            gpu_done=false;
+        } else if(gpu_current) {
+            if(redfin_display_probe_find(line,bytes,"REDFIN GPU RENDER FAIL:"))return 2;
+            if(redfin_display_probe_find(line,bytes,"REDFIN GPU RENDER RESULT:")) {
+                if(bytes!=sizeof(gpu_success)-1||memcmp(line,gpu_success,bytes))return 2;
+                gpu_done=true;
+            }
+        }
+        at+=bytes+1;
+    }
+    return metal_done&&gpu_done?1:0;
 }
 #endif
