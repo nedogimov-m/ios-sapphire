@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V94 private fused pixels pass; obsolete physical-stage oracle disables output — 2026-10-27
+
+Kernel Actions40413610563/run22/sourcedbd18cc/99d6baf1..; GUI source289a8ee/
+start262d783, native034305, Mesa1a4ad42c../Metal17d0f01f../cache496301fc../UI.
+Cycle20949 TERMINAL exit0, authenticated7489964ed159f42f, one backboardd62,
+no panic/GL error, clean unmounted HFSX1689000/verified Fastboot. V99 STALE/
+never reuse; next fresh V100/imageV96. Prepared V95 CI22 unused; retain it.
+
+Private output ABI2full4cases/10108800pixels pass.1:1max0/alpha exact;
+scaled maxima2/over-one291,236,147, zero input/output guards/intermediate
+writes. This proves the explicit fractional precision bound on these cases.
+Existing full app Metal CHECK EXIT0/GPU result0/direct/fetch/first CPU/pixels/
+tails/frame-budget/native4cache/actual2pending pass. Actual GLES1500direct
+frames/no errors, scoped sysmem requested, no backboardd crash. Touch driver
+error0/batches1/no contacts; no manual input proof.
+
+Actual paneldirect1 then64/64sample mismatch. Code proves the runtime
+physical oracle still reads gd.stage, which the fused program intentionally
+leaves unchanged. It disables GPU output and falls back; finite animation
+observes0completed physical presents and is INVALID. Do not report an FPS or
+actual sustained fused output success. Fix runtime panel verification using
+an actual private fused GPU reference, retaining native full legacy golden
+checks and real fences/guards; never just remove the physical check.
+
+Correction: GPU-render job explicitly forces GMEM. Earlier claims that its
+native full-image checks covered sysmem were wrong. GUI sysmem pixel correctness
+is unproved here despite actual GLES activity. Full independent GMEM+sysmem
+native checker now implemented/106host/native20H392 build035131 PASS; two
+processes, both full direct/budget/pixel/tail checks, one final gated result,
+no Phone/Photos launches. Hardware proof remains pending. Source/compiler/
+Metal pairing unchanged; no extra kernel needed for this checker.
+Exact V94 boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7489964ed159f42f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal remains unfinished; restore verified output and then full sysmem
+integration while the physical-oracle kernel correction builds.
+
 ## REDFIN precision2 output kernel CI22/V99 verified; combined V94 starts — 2026-10-27
 
 Complete precision contract sourcedbd18cc;104combined host/current native TU
