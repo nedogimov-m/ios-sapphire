@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V72 policy-only update verified; V66 ordinary cycle starting — 2026-10-26
+
+Code1f0c0e8/results8023ff3. V65 complete native A620 correctness remains PASS.
+Only startup-job policy changes OFF; every compiled native binary, pair096836ce..
+/input0de23d41../UIpadding-contract-v1/cache496301fc../run10kernel5f0d5f48..
+stays exact. Full native work preserved as frontend-prepare-v65-validated.
+Fresh V72 snapshot clean1436299/empty journal; complete preimages, signatures,
+readonly native fsck and complete device file readback PASS. Applied ONCE
+266240bytes,0new/freed blocks; clean root/Fastboot. V72 STALE, never reuse.
+Next fresh V73/imageV67; next epoch unknown until collection.
+
+V66 image44c894208166b1cbe160793e05051cc187616bffa2d092a0b73eaf1d94227a01
+full native loader/liveFDT/ADT/firmware/private inputs/current CI/ABI preflight
+PASS. Request animate under freshe358b6688e8d0dd9; exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xe358b6688e8d0dd9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Captures and Phone/Photos auto launches OFF. One ordinary temporary cycle
+follows; no other device commands until terminal collection. No ordinary FPS
+or broad goal completion is claimed yet.
+
 ## REDFIN V65 full native preparation/BO policy PASS; valid34.361FPS after checks — 2026-10-26
 
 Code1f0c0e8/docs3d485a9, actual Actions40314982431/run10/kernel5f0d5f48..,
