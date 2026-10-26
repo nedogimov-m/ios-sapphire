@@ -1,5 +1,42 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V72 actual2pending observed; oversized probe failed, corrected probe built — 2026-10-26
+
+Code8ef1316/tools25c45da; same Actions40334564897/run12/kernel8ea7b3b6.. .
+Cycle10147 TERMINAL exit0: authenticated fresh01d075273298a388, one backboardd62,
+no kernel panic,0contacts/releases, clean unmounted HFSX1497738 and verified
+Fastboot. V78 STALE/never reuse; next fresh V79/imageV73 at clean1497738.
+Exact observed args are in V72's prepared entry below. No captures/app opens.
+
+Warm64thread/16iteration pair passes values/guards. First1048576thread/4096
+iteration pair fails; native post-doorbellpf475 observes473 completed,2actual
+physical submissions pending. This proves that publication condition, NOT
+successful completion of the whole new window contract. Runtime subsequently
+stops in physical-poll ownership/deadline handling; actual GPU fault/IRQ words
+are0, RPTR=WPTR0xe9c and status0xe41005. SMMU0x400/FAR/syndrome match their
+existing startup values, so they do not establish a new translation fault.
+The generic stop record does not name its exact error. Excess probe duration
+is a working hypothesis, not a measured elapsed time. Keep the native timeout.
+
+The checker continues creating a new native pipe after this failure and then
+SIGSEGVs at0xb8; full CHECK EXIT is absent. The UI correctly refuses checked
+animation, so there is NO valid V72 FPS/full native pass. All DMA backing stays
+held until reset and the root shuts down cleanly. Private physical-ring-evidence
+reports actual-two-pending=true, complete-native-and-physical-proof=false.
+
+Correct the complete probe/error path: reduce to262144threads/256iterations
+per long command (64x less total work), retain both commits before waits and
+every source/output value/guard, print command status/error on failure. Move
+this busy probe after all other GPU checkers; a retired context must not start
+new pipes. Publish an explicit CHECK EXIT1/full-contract0 on ObjC exceptions.
+Full native actual20H392 ABI/source/signature/current-marker build PASS;
+input6e6e432c.. unchanged, pair1d031356fdb2a07c3bffebf8859dc3e59db216829308eb8eca326dd1c5f3b8f4.
+Same run12 kernel/cache/UI. V73 image2ddf19648c490499b0171e92bbf4b1eb2a5c8bf6683717ae22cb0de9668aebe4
+passes complete preflight; fresh V79 readonly snapshot is RUNNING. Next one
+full native combined cycle; captures/app opens OFF. Exact prepared args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa6afa6bce627d59b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal remains active and unfinished.
+
 ## REDFIN future CI preparation reuse/timings added during V72 — 2026-10-26
 
 Cache the already expanded KDK alongside the original verified22G74 DMG,

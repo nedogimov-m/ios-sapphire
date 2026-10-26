@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Physical2pending observed under long compute; full completion still required — 2026-10-26
+
+V72/run12 observes actual post-doorbellpf475/completed473/pending2, then fails
+the first oversized1048576thread/4096iteration pair. Runtime stops; GPU fault/
+IRQ words are zero and old SMMU syndrome values match startup. The generic poll
+stop does not establish a measured timeout. Full CHECK EXIT is absent after a
+later checker tries a new pipe on the retired device and crashes. Root closes
+cleanly; no kernel panic, valid FPS or full overlap-completion proof is claimed.
+
+Reduce only probe work64x to262144threads/256iterations, preserve all values/
+guards/deadlines, move the probe last and publish explicit exception failure.
+Actual20H392 native pair1d031356.. builds with the same compiler input/cache/
+UI/kernel. Corrected native proof is pending; preferred pins/Angelpro review
+stay unchanged. Actual2pending alone must not be called successful async DMA.
+
 ## A620 FIFO correctness passes; actual2pending observation still required — 2026-10-26
 
 V71/run12/kernel8ea7b3b6.. passes the explicit complete native Metal/output

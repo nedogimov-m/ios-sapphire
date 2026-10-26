@@ -410,10 +410,12 @@ int main(void)
             BOOL queued=short_bounds&&queued_native(device,library,nonce);
             BOOL scheduling=short_bounds&&scheduling_native(device,nonce);
             BOOL uboExtents=short_bounds&&ubo_extents_native(device,library,nonce);
-            BOOL physicalPending=short_bounds&&physicalABI==1&&physical_pending_native(device,library,nonce);
             BOOL resourceReferences=short_bounds&&redfin_metal_resource_check("/redfin/lib/redfin-resource-check.bc",nonce);
             BOOL retainedMemory=retained_memory_native(device,nonce);
             uint64_t routes[2]={0};BOOL gmem=dependencies&&native_gmem_statistics(device,routes);
+            /* Run the bounded busy probe last. An actual GPU failure retires
+             * the context; no later checker may create/use new native pipes. */
+            BOOL physicalPending=short_bounds&&physicalABI==1&&physical_pending_native(device,library,nonce);
             printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u batch-pixels-and-guards=%u dependency-pixels-and-guards=%u short-surface-pixels-guards-and-sysmem=%u actual-gmem=%u gmem-batches=%llu sysmem-batches=%llu\n",
                 (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels,(unsigned)masks,(unsigned)batches,(unsigned)dependencies,(unsigned)short_bounds,(unsigned)gmem,
                 (unsigned long long)routes[0],(unsigned long long)routes[1]);
@@ -428,6 +430,7 @@ int main(void)
             return status;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
+            printf("REDFIN METAL CHECK EXIT: boot=%016llx result=1 full-contract=0 exception=1\n",(unsigned long long)nonce);
             return 1;
         }
     }

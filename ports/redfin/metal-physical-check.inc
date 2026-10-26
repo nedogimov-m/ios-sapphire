@@ -5,7 +5,7 @@
  */
 static BOOL physical_pending_native(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce)
 {
-    enum {words=1<<20,first=16,total=words+32,rounds=4};
+    enum {words=1<<18,first=16,total=words+32,rounds=4};
     id<MTLFunction> function=[library newFunctionWithName:@"redfin_physical_pending"];NSError *error=nil;
     id<MTLComputePipelineState> pipeline=function?[device newComputePipelineStateWithFunction:function error:&error]:nil;
     id<MTLCommandQueue> queue=[device newCommandQueue];
@@ -18,7 +18,7 @@ static BOOL physical_pending_native(id<MTLDevice> device,id<MTLLibrary> library,
         valid=valid&&output[i]&&parameters[i]&&maps[i]&&uniforms[i];
     }
     for(unsigned round=0;valid&&round<rounds;++round) {
-        unsigned count=round?words:64,iterations=round?4096:16;
+        unsigned count=round?words:64,iterations=round?256:16;
         uint32_t seeds[2]={(uint32_t)nonce^(round*0x1f123bb5u),(uint32_t)(nonce>>32)^(round*0x9e3779b9u)^0x6a09e667u};
         id<MTLCommandBuffer> commands[2]={nil};
         for(unsigned i=0;valid&&i<2;++i) {
@@ -34,6 +34,9 @@ static BOOL physical_pending_native(id<MTLDevice> device,id<MTLLibrary> library,
             [commands[1] waitUntilCompleted];[commands[0] waitUntilCompleted];
             valid=commands[0].status==MTLCommandBufferStatusCompleted&&!commands[0].error&&
                 commands[1].status==MTLCommandBufferStatusCompleted&&!commands[1].error;
+            if(!valid)printf("REDFIN METAL PHYSICAL ERROR: round=%u status=%lu/%lu code=%ld/%ld\n",round,
+                (unsigned long)commands[0].status,(unsigned long)commands[1].status,
+                (long)commands[0].error.code,(long)commands[1].error.code);
         }
         /* Affine composition gives an independent O(1) expectation per word,
          * avoiding billions of CPU iterations during the actual GPU probe. */
