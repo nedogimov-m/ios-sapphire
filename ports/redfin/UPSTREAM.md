@@ -1,5 +1,16 @@
 # HackiOS upstream review — 2026-10-22
 
+## Ordinary typed runtime evidence before updated main review — 2026-10-26
+
+V53 uses the exact V52 binaries/cache with probes OFF and completes196GPU
+frames/10.000188physical seconds =19.599632FPS, effectively unchanged from20FPS.
+No panic/GPU stop, one window server and a clean root persist. Preparation waits
+are negligible in these sampled counters; frontend/final-fence outliers remain.
+Cached pipeline32 has36AIR/38IR3hits and no misses/variant compiles. The resource
+and cache-compatibility block is validated for correctness; it does not establish
+smooth60/90FPS. User explicitly requests reviewing the updated preferred kernel
+main next. Preserve pinned8e611870/userland906425b7 while fetching/reviewing deltas.
+
 ## Actual typed access/cache reuse and poor checked workload — 2026-10-26
 
 V52 passes BOTH complete current A620 correctness jobs with the typed resource

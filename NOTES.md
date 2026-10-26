@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V53 ordinary typed runtime:19.6FPS; updated upstream review requested — 2026-10-26
+
+Sourcedccfee3/access codec0d129b, unchanged complete kernel GitHub Actions
+40256228186/run5 SUCCESS,739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Identical V52 native graphics/UI/input741e17a268907fe4a1263bd0c4397e07429487a708771782a8449fc0d1a84db2,
+full pairing5f5aa2615ca9ab5b16016595b5a3ad8f39413e6d87f3d51c23b875afda6b7358,
+preserved shader cache496301fc.. . New --policy-only changes startup checks OFF
+with verified unchanged native bytes/identity and saved original evidence; no
+compiler/dependency/kernel/UI preparation. Fresh V59/root1300000 applies ONCE
+with full files/preimages/backups/readback/readonly fsck PASS. V59 STALE, never
+reuse. V53 image7b33c2d1a5573d3ffa5871e1bc1f3a188639e3e4539f0860bda5f69895e9fcf5. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7c6255f4219e3a0f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no panic or GPU stop/fault, one backboardd61,
+clean unmounted consistent HFSX/write_count1308410; verified Fastboot. Both
+startup graphics jobs and app opens/captures truly OFF. Full ordinary animation
+stats-valid1/timed-out0/finish-reason complete/idle-restored1:196actual GPU frames
+in10.000188physical seconds =19.599632FPS, ten samples17.000..21.999, none missed.
+Callbacks601/60FPS/max16.667ms, panel90Hz, physical counter19.2MHz/Mach ratio1.0.
+This is effectively the previous20FPS level, not a demonstrated FPS improvement.
+V52's heavy/cold4.7FPS result must not be substituted for this ordinary result.
+
+At512jobs the new counters record only1CPU preparation with0waits and6surface
+barriers/3us waiting,12fine pages and no coarse fallbacks. Cached pipeline32
+has AIR36/IR338hits,0misses/variant compiles.37..38draw command groups still
+show10..13ms encoding with77..83ms outliers,15..83ms frontend queueing and
+33..96ms final waits. These overlap, and the new CPU-prep counters exclude
+Metal final-fence/encoder drains. Remaining frontend preparation/final waits
+are the next investigation, not further assumed page-wait tuning.
+
+Readonly source review confirms unaligned constants already clamp snapshots
+when r->size is known; argument-buffer members carry size0 and otherwise copy
+the remaining tail. GPU-written unaligned uniforms still take a frontend drain.
+This is a candidate for measured frontend/GPU-copy work, not a proved cause.
+Also re-checks generic GPUClientTransaction: only clientLock, with GetParam/
+GemInfo already outside the hardware transaction; do not repeat that old fix.
+The user now explicitly requests studying UPDATED preferred kernel main.
+Next: fetch/review its commits/diffs against8e611870 and current Redfin before
+selecting the next implementation block. Keep the pinned checkout/artifacts.
+Next fresh root stageV60/epoch1308410, imageV54. Full goal stays active.
+
 ## REDFIN V52 typed access and cross-build shader cache PASS;4.7FPS workload — 2026-10-26
 
 Source6d05fa1/kernel codec0d129b, CI40256228186/run5 SUCCESS; kernel
