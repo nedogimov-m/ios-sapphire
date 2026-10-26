@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Preferred asynchronous GLES display contract adapted without early completion — 2026-10-27
+
+Same reviewed kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3/userland906425b7..
+GLES implementation: frame_end/display_waits transfers waiting to the display
+presenter. Redfin's tested scoped ABI1 already includes retained FIFO output
+and CPU fallback barriers; require its actual ABI versions and display ABI2.
+No hardware registers, unsupported driver promise or old Apple address copied.
+
+Mesa25.0.7's GL fence_finish may return from a zero-time wait while Gallium's
+CPU worker still owns the unsubmitted frame. Adapt the publication step to
+flush that CPU worker and reuse the existing native Metal kernel-admission
+check, without waiting for GPU completion. Explicit glFinish and unsupported/
+failed paths keep synchronous completion. Keep full source/ABI/cache pairing,
+actual publication evidence, shared-surface ownership and real kernel fences.
+62combined host/native build/actual20H392 ABI checks PASS; combined V85 hardware
+correctness and throughput are next. Proven V84 ordinary GLES43.151FPS stays
+the current observation until that terminal result; smooth60/90 unfinished.
+
 ## Preferred GLES GUI and retained app Metal pass together — 2026-10-27
 
 V83/source53ed249/kernel Actions40372742634/run18/4fa88838.., native input6e6e432c../

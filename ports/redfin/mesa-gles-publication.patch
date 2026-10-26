@@ -1,0 +1,11 @@
+--- a/src/gallium/frontends/osmesa/osmesa.c
++++ b/src/gallium/frontends/osmesa/osmesa.c
+@@ -851,6 +851,8 @@
+    return st ? (OSMesaContext) st->frontend_context : NULL;
+ }
+ 
++#include "redfin_gles_publication.inc"
++
+ 
+ 
+ GLAPI void GLAPIENTRY

@@ -15,6 +15,8 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
 #include "gui-profile.h"
 #include "eagl-guard.h"
 #include "eagl-abi.h"
@@ -27,8 +29,58 @@ extern const unsigned char *glGetString(unsigned);
 extern void glGetIntegerv(unsigned,int *);
 static uint64_t boot_nonce;
 static unsigned installed_methods;
+static unsigned published_frames,publication_fallbacks;
 static void (*original_uniform)(void *,unsigned,size_t,size_t,const float *);
 extern void redwood_gl_function_values(void *,unsigned,unsigned,size_t,size_t,const float *);
+#if REDFIN_GLES_PUBLICATION
+extern int redfin_gl_frame_publish(void);
+#endif
+
+static bool display_number(io_service_t service,const char *name,int expected)
+{
+    CFStringRef key=CFStringCreateWithCString(NULL,name,kCFStringEncodingUTF8);
+    CFTypeRef value=key?IORegistryEntryCreateCFProperty(service,key,NULL,0):NULL;
+    int actual=0;
+    bool valid=value && CFGetTypeID(value)==CFNumberGetTypeID() &&
+        CFNumberGetValue(value,kCFNumberIntType,&actual) && actual==expected;
+    if(value)CFRelease(value);
+    if(key)CFRelease(key);
+    return valid;
+}
+
+int redfin_eagl_display_waits(unsigned display)
+{
+    /* Scoped-wait ABI1 includes retained FIFO kernel presents and a full
+     * queue barrier before CPU fallback. Require the actual Redfin display
+     * and queue versions; older/foreign drivers keep upstream's glFinish. */
+    if(!REDFIN_GLES_PUBLICATION || !boot_nonce || !display ||
+       !display_number(display,"RedfinPresentationStatisticsABI",2))return 0;
+    io_service_t gpu=IOServiceGetMatchingService(0,IOServiceMatching("RedwoodGPU"));
+    bool valid=gpu && display_number(gpu,"chip-id",0x06020001) &&
+        display_number(gpu,"RedfinRuntimeABI",1) &&
+        display_number(gpu,"RedfinQueuedSubmissionABI",1) &&
+        display_number(gpu,"RedfinScopedWaitABI",1);
+    if(gpu)IOObjectRelease(gpu);
+    dprintf(2,"REDFIN EAGL PRESENT: boot=%016llx driver-waits=%u required-FIFO-ABI=1 publication-before-handoff=1\n",
+        boot_nonce,valid);
+    return valid;
+}
+
+int redfin_eagl_publish_frame(void)
+{
+    /* The current Mesa context flushes its CPU worker and materializes a
+     * native kernel fence. This does not wait for that GPU fence to retire.
+     * On failure the caller uses a real glFinish before any handoff. */
+    int result=-1;
+#if REDFIN_GLES_PUBLICATION
+    result=redfin_gl_frame_publish();
+#endif
+    if(!result)++published_frames;else ++publication_fallbacks;
+    if(published_frames<=4 || !(published_frames%120) || result)
+        dprintf(2,"REDFIN EAGL PUBLISH: boot=%016llx pid=%d published=%u fallbacks=%u result=%d GPU-wait=0\n",
+            boot_nonce,getpid(),published_frames,publication_fallbacks,result);
+    return result==0;
+}
 
 static void observe_uniform(void *context,unsigned index,size_t components,size_t count,const float *values)
 {

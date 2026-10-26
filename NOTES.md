@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete upstream GLES asynchronous handoff block;62host/native ABI PASS — 2026-10-27
+
+Following proven GLES GUI/app Metal V83 and ordinary43.151FPS V84, implement
+one related handoff block before any next device test. Pinned preferred bridge
+already moves GPU waiting to a display thread when its driver promises it.
+Adapt that promise to actual Redfin display-statistics ABI2/A620 runtime1/
+queued1/scoped1: retained FIFO kernel output and CPU-fallback barrier are part
+of scoped ABI1. Older/foreign drivers retain upstream glFinish fallback.
+
+Review actual Mesa25.0.7 OSMesa/GL sync/Freedreno/TC flush sources: a zero-time
+client fence wait may leave the CPU driver thread unflushed. New own OSMesa
+helper flushes that CPU thread with flags0 and reuses Metal's exact native
+kernel-fence-publication check. It releases its local fence after real kernel
+admission; retained render/output ownership and real GPU completion stay in
+kernel FIFO. No synthetic completion or GPU wait is used for publication.
+Failures fall back to glFinish. Explicit glFinish/CPU-copy semantics preserved;
+non-Metal builds cannot select the new capability and retain the old route.
+Offscreen test now checks CPU IOSurfaceLock/readback after asynchronous handoff
+before any GL readback, plus the original synchronous pass. Backend evidence
+separately reports actual current-boot publications/fallbacks, never policy alone.
+
+62combined host contracts PASS, including actual OSMesa/current bridge/guard
+branches and old Metal scheduling/cache/output/lifetime suites. Complete native
+build build-20261027-010403.log/actual20H392 imports/signatures PASS. Mesa input
+323bf7ed8385e6afd50daeb402feaf28d5f7b38bb6523a8490e89db52aa9e319, native pair7e0f4a5c1364ab5181944557a42f9a956e37aa850a61b15efde09a3df62a5107. Exact prior
+V84 source/binary/build archive verified at research/redfin-gles-compositor-v84-validated.
+Runtime-only incremental build preserves compiler/shader cache496301fc... Kernel
+unchanged Actions40372742634/run18/source0d3767d/kernel4fa88838... No new actual
+handoff/FPS claim until combined V85. Fresh V91/read1604867; imageV85 with
+startup correctness ON, captures/Phone/Photos automatic opens OFF. Exact args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xd8230355f59d0f35 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal stays active; smooth60/90render FPS and other platform items unfinished.
+
 ## REDFIN V84 ordinary upstream GLES terminal43.151FPS; safe asynchronous path next — 2026-10-27
 
 Exact source53ed249/native input6e6e432c../pair5fcef77e../unchanged kernel

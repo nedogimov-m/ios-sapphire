@@ -133,6 +133,7 @@ def main():
             if a.metal:
                 inputs += [ROOT/'ports/redfin/mesa-surface-padding.patch',ROOT/'ports/redfin/surface-padding.h']
                 inputs += [ROOT/'ports/redfin/mesa-retained-memory.patch',ROOT/'ports/redfin/retained-memory.h']
+                inputs += [ROOT/'ports/redfin/mesa-gles-publication.patch',ROOT/'ports/redfin/gles-publication.inc']
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -246,6 +247,9 @@ def main():
                     for directory in ('src/freedreno/drm','src/compiler/air'):
                         shutil.copy2(ROOT/'ports/redfin/retained-memory.h',source/directory/'redfin_retained_memory.h')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-retained-memory.patch'],source)
+                    shutil.copy2(ROOT/'ports/redfin/gles-publication.inc',
+                                 source/'src/gallium/frontends/osmesa/redfin_gles_publication.inc')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-gles-publication.patch'],source)
                     for suffix in ('h','inc'):
                         shutil.copy2(ROOT/'ports/redfin'/('metal-constant-snapshot.'+suffix),
                                      source/'src/compiler/air'/('redfin_metal_constant_snapshot.'+suffix))
@@ -256,6 +260,7 @@ def main():
                 raise ValueError('native shader-cache identity changed; reuse its prior compiler proof or use a fresh work directory')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
+            publication_flag='-DREDFIN_GLES_PUBLICATION='+str(int(a.metal))
             cxx=[clangxx,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
             cross.write_text('[binaries]\nc = '+repr(c)+'\ncpp = '+repr(cxx)+'\nobjc = '+repr(c)+
                 '\nar = '+repr(ar)+'\nranlib = '+repr(ranlib)+"\npkg-config = 'false'\n"+
@@ -292,7 +297,7 @@ def main():
                 run(['codesign','--force','--sign','-',target])
             (bundle/'bin').mkdir(exist_ok=True)
             executable=bundle/'bin/gpu-render'
-            run([*c,'-O2','-Wno-deprecated-declarations',ROOT/'ports/redfin/gpu-render.c',
+            run([*c,publication_flag,'-O2','-Wno-deprecated-declarations',ROOT/'ports/redfin/gpu-render.c',
                 '-L'+str(bundle/'lib'),'-lOSMesa.8','-framework','CoreFoundation','-framework','IOKit',
                 '-framework','IOSurface','-Wl,-rpath,/redfin/lib','-o',executable])
             dependencies=run(['otool','-L',executable],capture=True)
@@ -310,7 +315,7 @@ def main():
                 'macro_bias':abi['abi']['macro_bias'],'tls_offset':abi['abi']['tls_offset']}
             bridge=bundle/'lib/libredfin-eagl.dylib'
             loader=bundle/'lib/libredfin-graphics.dylib'
-            run([*c,'-dynamiclib','-O2','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
+            run([*c,publication_flag,'-dynamiclib','-O2','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
                 '-I'+str(eagl),'-I'+str(ROOT/'ports/redfin'),
                 eagl/'eagl.c',eagl/'gl_osmesa.c',ROOT/'ports/redfin/eagl-guard.c',
                 '-L'+str(bundle/'lib'),'-lOSMesa.8','-framework','CoreFoundation','-framework','IOKit',
@@ -463,7 +468,8 @@ def main():
                 compiler_cache=cache_proof,
                 gui_profile_sha256=hashlib.sha256((ROOT/'ports/redfin/gui-profile.h').read_bytes()).hexdigest(),
                 gui_sources_sha256={name:hashlib.sha256((ROOT/'ports/redfin'/name).read_bytes()).hexdigest()
-                    for name in ('graphics-loader.c','graphics-memory-report.h','eagl-guard.c','eagl_userland.py')},
+                    for name in ('graphics-loader.c','graphics-memory-report.h','eagl-guard.c',
+                                 'eagl-guard.h','eagl_userland.py','gles-publication.inc')},
                 artifacts={str(x.relative_to(bundle)):hashlib.sha256(x.read_bytes()).hexdigest()
                            for x in sorted(bundle.rglob('*')) if x.is_file()})
             (work/'compiler-inputs.json').write_text(json.dumps(cache_proof,indent=2)+'\n')

@@ -13,12 +13,18 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
+#ifndef REDFIN_GLES_PUBLICATION
+#define REDFIN_GLES_PUBLICATION 0
+#endif
 
 typedef void *OSMesaContext;
 extern OSMesaContext OSMesaCreateContextAttribs(const int *,OSMesaContext);
 extern unsigned char OSMesaMakeCurrent(OSMesaContext,void *,unsigned,int,int);
 extern void OSMesaDestroyContext(OSMesaContext);
 extern void (*OSMesaGetProcAddress(const char *))(void);
+#if REDFIN_GLES_PUBLICATION
+extern int redfin_gl_frame_publish(void);
+#endif
 enum {W=256,H=256,ROW=W*4};
 static uint64_t boot_nonce;
 static void number(CFMutableDictionaryRef d,CFStringRef key,int32_t value)
@@ -108,14 +114,15 @@ static int render(void)
             {16,128+((boot_nonce>>8)&63),64,255}},clear[4]={10,20,41,255};
         glClearColor(10/255.0f,20/255.0f,41/255.0f,1);glClear(GL_COLOR_BUFFER_BIT);
         glUniform4f(color,expected[pass][0]/255.0f,expected[pass][1]/255.0f,expected[pass][2]/255.0f,1);
-        glDrawArrays(GL_TRIANGLES,0,3);glFinish();
-        unsigned char center[4]={0},corner[4]={0};
-        glReadPixels(W/2,H/2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,center);
-        glReadPixels(4,4,1,1,GL_RGBA,GL_UNSIGNED_BYTE,corner);error=glGetError();
-        if(error || !close_color(center,expected[pass]) || !close_color(corner,clear) ||
-            (pass && !memcmp(previous,center,4))) {
-            printf("REDFIN GPU RENDER FAIL: pass=%u GL=%#x center=%u/%u/%u/%u corner=%u/%u/%u/%u\n",
-                pass,error,center[0],center[1],center[2],center[3],corner[0],corner[1],corner[2],corner[3]);return 13;
+        glDrawArrays(GL_TRIANGLES,0,3);
+        if(!pass || !REDFIN_GLES_PUBLICATION)glFinish();
+        else {
+#if REDFIN_GLES_PUBLICATION
+            glFlush();
+            if(redfin_gl_frame_publish()) {
+                puts("REDFIN GPU RENDER FAIL: real frame publication");return 18;
+            }
+#endif
         }
         if(IOSurfaceLock(surface,kIOSurfaceLockReadOnly,NULL)){puts("REDFIN GPU RENDER FAIL: CPU lock");return 14;}
         const unsigned char *pixels=IOSurfaceGetBaseAddress(surface);
@@ -127,6 +134,16 @@ static int render(void)
         if(!close_color(cpu,expected[pass])) {
             printf("REDFIN GPU RENDER FAIL: IOSurface readback pass=%u RGBA=%u/%u/%u/%u\n",pass,cpu[0],cpu[1],cpu[2],cpu[3]);return 15;
         }
+        unsigned char center[4]={0},corner[4]={0};
+        glReadPixels(W/2,H/2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,center);
+        glReadPixels(4,4,1,1,GL_RGBA,GL_UNSIGNED_BYTE,corner);error=glGetError();
+        if(error || !close_color(center,expected[pass]) || !close_color(corner,clear) ||
+            (pass && !memcmp(previous,center,4))) {
+            printf("REDFIN GPU RENDER FAIL: pass=%u GL=%#x center=%u/%u/%u/%u corner=%u/%u/%u/%u\n",
+                pass,error,center[0],center[1],center[2],center[3],corner[0],corner[1],corner[2],corner[3]);return 13;
+        }
+        if(pass && REDFIN_GLES_PUBLICATION)printf("REDFIN GPU RENDER PUBLICATION: boot=%016llx pass=%u materialized=1 CPU-lock-after-publication=1\n",
+            (unsigned long long)boot_nonce,pass);
         memcpy(previous,center,4);
         printf("REDFIN GPU RENDER PASS: pass=%u IOSurface=%u %ux%u center=%u/%u/%u/%u checksum=%08x\n",
             pass,IOSurfaceGetID(surface),W,H,cpu[0],cpu[1],cpu[2],cpu[3],checksum);

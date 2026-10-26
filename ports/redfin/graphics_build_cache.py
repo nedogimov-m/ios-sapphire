@@ -11,7 +11,7 @@ VERSION=1
 # AIR/NIR, Adreno programs or shader options. Every other input stays strict.
 TRANSPORT_INPUTS=frozenset('ports/redfin/'+name for name in (
     'surface-padding.h','mesa-surface-padding.patch',
-    'retained-memory.h','mesa-retained-memory.patch',
+    'retained-memory.h','mesa-retained-memory.patch','mesa-gles-publication.patch','gles-publication.inc',
     'drm-profile.h','metal-scoped-submission.patch','include/redfin_gpu_scope.h',
     'mesa-scoped-submit.inc','mesa-submit-merge.patch','mesa-submit-merge.h',
     'mesa-submit-merge.inc','include/redfin_gpu_access.h',
@@ -28,6 +28,10 @@ TRANSPORT_PATCH_TARGETS=frozenset((
     'src/gallium/drivers/freedreno/freedreno_resource.h',
     'src/gallium/drivers/freedreno/freedreno_batch.c'))
 RUNTIME_PATCH_TARGETS={
+    # CPU-worker/kernel publication only. No GL/AIR/NIR shader generation,
+    # compiler options, serialized metadata or cache representation changes.
+    'ports/redfin/mesa-gles-publication.patch':frozenset((
+        'src/gallium/frontends/osmesa/osmesa.c',)),
     # Append-only runtime constant storage/copies reuse the existing row-copy
     # shader unchanged; AIR/NIR translation and serialized programs stay exact.
     'ports/redfin/metal-constant-snapshot.patch':frozenset(('src/compiler/air/air_metal.c',)),

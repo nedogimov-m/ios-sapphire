@@ -5,7 +5,7 @@ import re
 def analyze(lines,boot):
     if not re.fullmatch('[0-9a-f]{16}',boot):
         raise ValueError('exact actual boot identity required')
-    frames=[];hardware=[];requested=[];declined=[];metal=[]
+    frames=[];hardware=[];requested=[];declined=[];metal=[];publications=[];driver_waits=[]
     for line in lines:
         if 'boot='+boot not in line:continue
         if 'REDFIN COMPOSITOR:' in line and 'process=backboardd' in line:
@@ -17,6 +17,11 @@ def analyze(lines,boot):
             try:row={k:int(fields[k]) for k in ('pid','frame','draws','triangles','shared','copied','errors')}
             except (KeyError,ValueError):continue
             frames.append(row)
+        if 'REDFIN EAGL PRESENT:' in line and 'driver-waits=1' in line:driver_waits.append(line)
+        if 'REDFIN EAGL PUBLISH:' in line:
+            fields=dict(re.findall(r'([a-zA-Z][a-zA-Z-]*)=([^\s]+)',line))
+            try:publications.append({k:int(fields[k]) for k in ('pid','published','fallbacks','result','GPU-wait')})
+            except (KeyError,ValueError):pass
         if re.search(r'redwoodmetal\[backboardd \d+\]: REDFIN METAL FENCE:',line):metal.append(line)
     native=bool(hardware and all('620' in line and not any(x in line.lower() for x in
         ('softpipe','llvmpipe','software')) for line in hardware))
@@ -27,6 +32,12 @@ def analyze(lines,boot):
         CPU_copy_frame_records=sum(r['copied']>0 for r in frames),
         GLES_errors=max((r['errors'] for r in frames),default=None),
         actual_backboardd_Metal_records=len(metal),
+        driver_waits_for_GPU=bool(driver_waits),publication_records=len(publications),
+        kernel_published_GLES_frames=max((r['published'] for r in publications),default=0),
+        publication_fallbacks=max((r['fallbacks'] for r in publications),default=0),
+        asynchronous_GLES_handoff=bool(driver_waits and publications and
+            max(r['published'] for r in publications)>=60 and
+            not any(r['fallbacks'] or r['result'] or r['GPU-wait'] for r in publications)),
         actual_GLES_composition=bool(requested and native and frames and
             max(r['frame'] for r in frames)>=60 and any(r['shared'] for r in frames) and
             not any(r['errors'] for r in frames) and not metal),

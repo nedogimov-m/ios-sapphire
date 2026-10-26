@@ -61,6 +61,21 @@ def adapt_source(text, abi):
     text = replace_once(text, '#include <stdarg.h>', '#include <stdarg.h>\n#include <stddef.h>')
     text = replace_once(text, '\t\tcurrent = e;\n',
                         '\t\tcurrent = e;\n\t\tredfin_eagl_set_tls(e->native_prefix);\n')
+    text = replace_once(text, '\tIOObjectRelease(display);\n\treturn waits;',
+        '\tif (!waits) waits = redfin_eagl_display_waits(display);\n'
+        '\tIOObjectRelease(display);\n\treturn waits;')
+    # Upstream's zero-time GL client wait can leave the Gallium CPU worker
+    # pending. Flush that worker and publish the real kernel fence first;
+    # the retained display FIFO alone waits for GPU completion. Explicit
+    # glFinish and the upstream synchronous/copy paths retain their semantics.
+    publication = '''\t\tGLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+
+\t\tif (sync != NULL) {
+\t\t\t(void)glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+\t\t\tglDeleteSync(sync);
+\t\t}'''
+    text = replace_once(text, publication,
+        '\t\tif (!redfin_eagl_publish_frame()) glFinish();')
     text = replace_once(text, '\te->frames++;\n',
         '\te->frames++;\n\tredfin_eagl_frame(e->frames,e->draws,e->triangles,in_place,copied,e->errors);\n')
     text = replace_once(text, '\tcurrent = e;\n\te->object = self;',
