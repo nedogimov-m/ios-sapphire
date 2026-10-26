@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual merged A620 retirement and measurement limit — 2026-10-26
+
+V50/source798c7f0 now passes BOTH complete current A620 correctness jobs after
+native shared merging. Kernel logs prove real backboardd2..23IB and SpringBoard
+4IB job retirements with actual-finish1/result0; one window server/no GPU stop
+or panic and a clean root remain. The animation reports timed-out1 and a3.3second
+callback gap; the exact guard/watchdog reason is not logged;214GPU frames/8.935973seconds is incomplete and cannot substantiate
+sustained FPS. Repeat the exact same compiled pairing with persisted caches and
+startup checks OFF, without rebuilding the kernel or graphics.
+
+Actual20H392 readonly cadence review finds CADisplay.overrideDisplayTimings:
+contains only RET. The CAWindowServerDisplay base refresh setters log rather
+than apply their inputs; its getters return defaults. Do not substitute these
+stubs for native rate-policy state. Existing preferred pins remain unchanged.
+
 ## Bounded native shared-surface batch publication — 2026-10-26
 
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland

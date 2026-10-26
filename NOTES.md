@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V50 actual multi-IB A620 correctness PASS; FPS sample times out — 2026-10-26
+
+Source798c7f0; kernel unchanged CI40249668400/run4/sourceeb4d1dc,
+08dab9cd4d50c2223a68ea2d6ffc5080bafd9f583fde1429b553a16436507fb0.
+Native graphics local20261026-060006 input496301fc681ceacc1d1f230aa7f516999caf801f1d4109fd983ac5aa3cae411c,
+pairinge576384272f1ece1915e4d1525c4fac3db1a355781aa5a6c8aabd53116da2ed9.
+V56 applied ONCE:24444928bytes, zero new/freed blocks,195live preimages/backups/
+readback ranges, complete files/signatures/readonly fsck PASS. V56 APPLIED/STALE,
+never reuse. V50 image700f04c39d953cb790a6e3fdfbeda46b6a2d342c0684f1d4eb44dff799a87f7d. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x25f6198e40bc79da redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no panic or GPU stop/fault; one backboardd62,
+clean unmounted consistent HFSX/write_count1280740; verified Fastboot. BOTH
+current native correctness jobs PASS:192compute commands/two queues,70cache
+variants, complete pixels/guards/ordering/CPU conversions/binding/persistence/
+queued-error/epoch/lifetime suite, and two256x256 IOSurface GPU draws. Real
+kernel retirement logs now prove multi-IB jobs: backboardd7,2,3,2,23,18IBs and
+SpringBoard4IBs complete with result0 and actual-finish1. No app auto-opens or
+heavy captures. The native shared merge is exercised, not merely configured.
+
+The checked animation starts after both jobs, but reports timed-out1 and stops
+before a complete10second sample: timed-out1,8.935973physical seconds,214actual
+GPU frames, six valid samples3.432..50.003, maximum callback interval3304.375ms.
+The exact abort reason is not logged; both the fullscreen-window guard and
+wall-clock watchdog use this flag. Its reported23.948FPS is an INCOMPLETE
+observation, not a valid sustained-FPS improvement. No smooth60/90 claim. Whole presenter samples at120/240frames
+average13.8/13.0ms versus V48's29.6ms; process timings overlap/different workloads
+and cannot establish sustained FPS. Warm commands now often encode in3..14ms,
+with one actual submit, but real completion and occasional large stalls remain.
+
+Next: exact same kernel/graphics/UI/compiler identities and persisted caches,
+startup correctness OFF/plain animate, fresh V57/root1280740 and imageV51. No
+native rebuild or dependency preparation. Preserve original checks-on evidence.
+An independent readonly20H392 review also proves CADisplay.overrideDisplayTimings:
+is a bare RET and CAWindowServerDisplay base refresh setters only log; their
+base getters return defaults. Do not use these stubs as a90callback solution;
+review actual native population/subclass first. Private cadence evidence under
+research/redfin-gpu/cadence-abi; no cadence source/device change in this review.
+Full goal remains active.
+
 ## REDFIN bounded native shared-batch merge implemented; native build PASS — 2026-10-26
 
 Source base9f7723f plus this block; preferred kernel8e611870/userland906425b7
