@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete fused filter precision2/all-case contract;103common/native compile PASS — 2026-10-27
+
+V92's valid native rejection remains recorded: first1:1case passes the original
+1LSB check;1125x2436 has291failures, first4observed green differences2, guards/
+intermediate clean. It stopped before remaining cases, so no full measured
+maximum is inferred. Actual fused output remains disabled; legacy51.742FPS.
+Current clean1679744/Fastboot, fresh V99/imageV94 next; unused CI21 V93 retained.
+
+Complete precision contract revision bumps private output evidence to ABI2:
+require bit-exact1:1RGB and alpha; for genuinely scaled RGB only allow at most
+2/255, appropriate to the changed8fraction-bit hardware interpolation grid.
+Keep exact alpha and all original full image/source/BO/tail/intermediate/real
+fence checks. Source coordinate program is unchanged, already closest rounded
+8fraction-bit half-step; no forced fast-path enable. Whether all four actual
+geometries satisfy that bound remains to measure. This is an explicit scoped
+filter-precision tradeoff, not proof that every V92 mismatch was only2.
+
+Native check now reports all four bounded sizes even after a colour mismatch,
+with each maximum/over-one/mismatch/guard/stage result; unsafe memory/transport
+failures still stop and never retry. Require every case plus aggregate exact-
+case pixel count/alpha/max agreement and actual ABI2route counters for proof.
+No old ABI1 result can pass this revised evidence. Ordinary supported crops/
+multilayers and failed admission still use the proved staged GPU output.
+103combined host cases PASS, including actual per-channel0/1/2/3boundaries/
+exact alpha/identity and contradictory/missing/unsafe per-case transcripts.
+Whole current native GPU TU with CI flags compiles PASS. Userland/Mesa1a4ad42c../
+Metal17d0f01f../cache496301fc../UI unchanged; no userland rebuild. Fresh kernel
+CI22 and one combined native/Metal/GLES/output V94 remain; broad goal unfinished.
+
 ## REDFIN V92 strict fused filter check rejects291pixels; legacy51.742FPS preserved — 2026-10-27
 
 Sourceee02c23/startb800516; Actions40410544328/run21 SUCCESS, kernel

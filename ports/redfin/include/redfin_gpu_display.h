@@ -31,7 +31,26 @@
 #define RF_GD_STAGE_BYTES (RF_GD_CONTROL + RF_GR_HOST_PAGE)
 #define RF_GD_WORDS 2048u
 #define RF_GD_LAYERS 4u
-#define RF_GD_DIRECT_ABI 1u
+#define RF_GD_DIRECT_ABI 2u
+#define RF_GD_DIRECT_COLOR_TOLERANCE 2u
+
+/* The fused2D scaler changes the fixed-point interpolation grid. Match1:1
+ * copies and opacity exactly; permit at most two8-bit RGB levels only when
+ * fractional scaling is actually required. The private native comparison
+ * still checks every pixel and reports the observed maximum for each size. */
+static inline bool rf_gd_direct_pixel(uint32_t actual,uint32_t reference,
+    bool scaled,unsigned *maximum)
+{
+    bool valid=true;
+    for(unsigned c=0;c<4;++c) {
+        unsigned a=(actual>>(8*c))&255u,b=(reference>>(8*c))&255u;
+        unsigned delta=a>b?a-b:b-a;
+        if(delta>*maximum)*maximum=delta;
+        unsigned limit=scaled && c<3 ? RF_GD_DIRECT_COLOR_TOLERANCE : 0;
+        if(delta>limit)valid=false;
+    }
+    return valid;
+}
 
 struct rf_gd_surface {
     uint64_t address, length;

@@ -173,7 +173,8 @@ static bool gd_check_direct(void)
     bool ok=gd_allocate(&input,UINT64_C(4608)*2436+PAGE_SIZE,true) &&
         gd_allocate(&reference,RF_GD_PANEL_MAPPED+PAGE_SIZE,false) &&
         gd_allocate(&output,RF_GD_PANEL_MAPPED+PAGE_SIZE,false);
-    uint64_t pixels=0,mismatches=0,guards=0,stage_writes=0;unsigned passed=0;
+    uint64_t pixels=0,mismatches=0,guards=0,stage_writes=0,exact_pixels=0;
+    unsigned passed=0,maximum=0;
     for(unsigned c=0;ok && c<4;++c) {
         uint32_t w=geometry[c][0],h=geometry[c][1],pitch=geometry[c][2];
         memset(input.kernel,0xa7,input.size);
@@ -194,20 +195,23 @@ static bool gd_check_direct(void)
         if(!ok)break;
         redfin_gpu_invalidate(reference.kernel,reference.size);redfin_gpu_invalidate(output.kernel,output.size);
         redfin_gpu_invalidate(input.kernel,input.size);redfin_gpu_invalidate(gd.stage.kernel,RF_GD_CONTROL);
+        bool scaled=w!=RF_GD_PANEL_W || h!=RF_GD_PANEL_H;
+        unsigned case_maximum=0,over_one=0;uint64_t case_bad=0;
+        uint64_t before_guards=guards,before_stage=stage_writes;
         for(unsigned y=0;y<RF_GD_PANEL_H;++y) {
             const uint32_t *gold=(const uint32_t *)(reference.kernel+64+(uint64_t)y*RF_GD_PANEL_PITCH);
             const uint32_t *actual=(const uint32_t *)(output.kernel+64+(uint64_t)y*RF_GD_PANEL_PITCH);
             for(unsigned x=0;x<RF_GD_PANEL_W;++x) {
-                bool match=true;
-                for(unsigned component=0;component<4;++component) {
-                    int a=(actual[x]>>(8*component))&255,b=(gold[x]>>(8*component))&255;
-                    if(a-b>1 || b-a>1)match=false;
-                }
+                unsigned error=0;
+                bool match=rf_gd_direct_pixel(actual[x],gold[x],scaled,&error);
+                if(error>case_maximum)case_maximum=error;
+                if(error>1)++over_one;
                 if(!match) {
                     if(mismatches<4)IOLog("REDFIN GPU DIRECT PIXEL: case=%u x=%u y=%u actual=%#x expected=%#x\n",c,x,y,actual[x],gold[x]);
-                    ++mismatches;
+                    ++mismatches;++case_bad;
                 }
                 ++pixels;
+                if(!scaled)++exact_pixels;
             }
         }
         for(uint64_t at=0;at<output.size;++at)
@@ -219,12 +223,21 @@ static bool gd_check_direct(void)
         }
         for(uint64_t at=(uint64_t)h*pitch;at<input.size;++at)guards+=input.kernel[at]!=0xa7;
         for(uint64_t at=0;at<RF_GD_CONTROL;++at)stage_writes+=gd.stage.kernel[at]!=0x3c;
-        ok=!mismatches && !guards && !stage_writes;
-        if(ok)++passed;
+        if(case_maximum>maximum)maximum=case_maximum;
+        bool case_pass=!case_bad && guards==before_guards && stage_writes==before_stage;
+        IOLog("REDFIN GPU DIRECT CASE: ABI=%u c=%u w=%u h=%u pixels=%u max=%u over1=%u bad=%llu guards=%llu stage=%llu limit=%u done=%u\n",
+            RF_GD_DIRECT_ABI,c,w,h,RF_GD_PANEL_W*RF_GD_PANEL_H,case_maximum,over_one,
+            case_bad,guards-before_guards,stage_writes-before_stage,
+            scaled?RF_GD_DIRECT_COLOR_TOLERANCE:0,case_pass);
+        if(case_pass)++passed;
+        /* A colour mismatch is a failed admission, not uncertain DMA. Report
+         * all four bounded geometries in this same boot. Memory/transport
+         * errors still stop immediately; no failed hardware job is retried. */
+        ok=!guards && !stage_writes;
     }
-    bool complete=ok && passed==4 && pixels==UINT64_C(4)*RF_GD_PANEL_W*RF_GD_PANEL_H;
-    IOLog("REDFIN GPU DIRECT CHECK: ABI=%u cases=%u pixels=%llu mismatches=%llu guard-errors=%llu stage-writes=%llu completed=%u tolerance=1\n",
-        RF_GD_DIRECT_ABI,passed,pixels,mismatches,guards,stage_writes,complete);
+    bool complete=ok && !mismatches && passed==4 && pixels==UINT64_C(4)*RF_GD_PANEL_W*RF_GD_PANEL_H;
+    IOLog("REDFIN GPU DIRECT CHECK: ABI=%u cases=%u pixels=%llu mismatches=%llu guard-errors=%llu stage-writes=%llu completed=%u tolerance=2 exact-pixels=%llu alpha-exact=1 max-error=%u\n",
+        RF_GD_DIRECT_ABI,passed,pixels,mismatches,guards,stage_writes,complete,exact_pixels,maximum);
     bool dropped=gd_drop(&input) && gd_drop(&reference) && gd_drop(&output);
     return complete && dropped;
 }

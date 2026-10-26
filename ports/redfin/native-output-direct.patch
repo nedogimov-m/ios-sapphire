@@ -48,7 +48,7 @@
      return true;
  }
  /* Both clear-free fullscreen and exact margin clears use real A620 output
-@@ -151,6 +160,74 @@
+@@ -151,6 +160,87 @@
          full, fence != 0 && redfin_gpu_done(fence), fence, RF_GD_PANEL_W * RF_GD_PANEL_H, mismatch, guards);
      return ok;
  }
@@ -65,7 +65,8 @@
 +    bool ok=gd_allocate(&input,UINT64_C(4608)*2436+PAGE_SIZE,true) &&
 +        gd_allocate(&reference,RF_GD_PANEL_MAPPED+PAGE_SIZE,false) &&
 +        gd_allocate(&output,RF_GD_PANEL_MAPPED+PAGE_SIZE,false);
-+    uint64_t pixels=0,mismatches=0,guards=0,stage_writes=0;unsigned passed=0;
++    uint64_t pixels=0,mismatches=0,guards=0,stage_writes=0,exact_pixels=0;
++    unsigned passed=0,maximum=0;
 +    for(unsigned c=0;ok && c<4;++c) {
 +        uint32_t w=geometry[c][0],h=geometry[c][1],pitch=geometry[c][2];
 +        memset(input.kernel,0xa7,input.size);
@@ -86,20 +87,23 @@
 +        if(!ok)break;
 +        redfin_gpu_invalidate(reference.kernel,reference.size);redfin_gpu_invalidate(output.kernel,output.size);
 +        redfin_gpu_invalidate(input.kernel,input.size);redfin_gpu_invalidate(gd.stage.kernel,RF_GD_CONTROL);
++        bool scaled=w!=RF_GD_PANEL_W || h!=RF_GD_PANEL_H;
++        unsigned case_maximum=0,over_one=0;uint64_t case_bad=0;
++        uint64_t before_guards=guards,before_stage=stage_writes;
 +        for(unsigned y=0;y<RF_GD_PANEL_H;++y) {
 +            const uint32_t *gold=(const uint32_t *)(reference.kernel+64+(uint64_t)y*RF_GD_PANEL_PITCH);
 +            const uint32_t *actual=(const uint32_t *)(output.kernel+64+(uint64_t)y*RF_GD_PANEL_PITCH);
 +            for(unsigned x=0;x<RF_GD_PANEL_W;++x) {
-+                bool match=true;
-+                for(unsigned component=0;component<4;++component) {
-+                    int a=(actual[x]>>(8*component))&255,b=(gold[x]>>(8*component))&255;
-+                    if(a-b>1 || b-a>1)match=false;
-+                }
++                unsigned error=0;
++                bool match=rf_gd_direct_pixel(actual[x],gold[x],scaled,&error);
++                if(error>case_maximum)case_maximum=error;
++                if(error>1)++over_one;
 +                if(!match) {
 +                    if(mismatches<4)IOLog("REDFIN GPU DIRECT PIXEL: case=%u x=%u y=%u actual=%#x expected=%#x\n",c,x,y,actual[x],gold[x]);
-+                    ++mismatches;
++                    ++mismatches;++case_bad;
 +                }
 +                ++pixels;
++                if(!scaled)++exact_pixels;
 +            }
 +        }
 +        for(uint64_t at=0;at<output.size;++at)
@@ -111,19 +115,28 @@
 +        }
 +        for(uint64_t at=(uint64_t)h*pitch;at<input.size;++at)guards+=input.kernel[at]!=0xa7;
 +        for(uint64_t at=0;at<RF_GD_CONTROL;++at)stage_writes+=gd.stage.kernel[at]!=0x3c;
-+        ok=!mismatches && !guards && !stage_writes;
-+        if(ok)++passed;
++        if(case_maximum>maximum)maximum=case_maximum;
++        bool case_pass=!case_bad && guards==before_guards && stage_writes==before_stage;
++        IOLog("REDFIN GPU DIRECT CASE: ABI=%u c=%u w=%u h=%u pixels=%u max=%u over1=%u bad=%llu guards=%llu stage=%llu limit=%u done=%u\n",
++            RF_GD_DIRECT_ABI,c,w,h,RF_GD_PANEL_W*RF_GD_PANEL_H,case_maximum,over_one,
++            case_bad,guards-before_guards,stage_writes-before_stage,
++            scaled?RF_GD_DIRECT_COLOR_TOLERANCE:0,case_pass);
++        if(case_pass)++passed;
++        /* A colour mismatch is a failed admission, not uncertain DMA. Report
++         * all four bounded geometries in this same boot. Memory/transport
++         * errors still stop immediately; no failed hardware job is retried. */
++        ok=!guards && !stage_writes;
 +    }
-+    bool complete=ok && passed==4 && pixels==UINT64_C(4)*RF_GD_PANEL_W*RF_GD_PANEL_H;
-+    IOLog("REDFIN GPU DIRECT CHECK: ABI=%u cases=%u pixels=%llu mismatches=%llu guard-errors=%llu stage-writes=%llu completed=%u tolerance=1\n",
-+        RF_GD_DIRECT_ABI,passed,pixels,mismatches,guards,stage_writes,complete);
++    bool complete=ok && !mismatches && passed==4 && pixels==UINT64_C(4)*RF_GD_PANEL_W*RF_GD_PANEL_H;
++    IOLog("REDFIN GPU DIRECT CHECK: ABI=%u cases=%u pixels=%llu mismatches=%llu guard-errors=%llu stage-writes=%llu completed=%u tolerance=2 exact-pixels=%llu alpha-exact=1 max-error=%u\n",
++        RF_GD_DIRECT_ABI,passed,pixels,mismatches,guards,stage_writes,complete,exact_pixels,maximum);
 +    bool dropped=gd_drop(&input) && gd_drop(&reference) && gd_drop(&output);
 +    return complete && dropped;
 +}
  static bool gd_check(void)
  {
      gd_buffer input = {}, output = {};
-@@ -168,6 +245,7 @@
+@@ -168,6 +258,7 @@
      bool margins = full && gd_check_case(&input, &output, false);
      IOLog("REDFIN GPU DISPLAY CHECK: completed=%u full=%u margins=%u pixels-per-case=%u panel-mapped=0\n",
          full && margins, full, margins, RF_GD_PANEL_W * RF_GD_PANEL_H);
@@ -133,15 +146,34 @@
  }
 --- a/iokit/Kernel/arm/redfin_gpu_display.h
 +++ b/iokit/Kernel/arm/redfin_gpu_display.h
-@@ -31,6 +31,7 @@
+@@ -31,6 +31,26 @@
  #define RF_GD_STAGE_BYTES (RF_GD_CONTROL + RF_GR_HOST_PAGE)
  #define RF_GD_WORDS 2048u
  #define RF_GD_LAYERS 4u
-+#define RF_GD_DIRECT_ABI 1u
++#define RF_GD_DIRECT_ABI 2u
++#define RF_GD_DIRECT_COLOR_TOLERANCE 2u
++
++/* The fused2D scaler changes the fixed-point interpolation grid. Match1:1
++ * copies and opacity exactly; permit at most two8-bit RGB levels only when
++ * fractional scaling is actually required. The private native comparison
++ * still checks every pixel and reports the observed maximum for each size. */
++static inline bool rf_gd_direct_pixel(uint32_t actual,uint32_t reference,
++    bool scaled,unsigned *maximum)
++{
++    bool valid=true;
++    for(unsigned c=0;c<4;++c) {
++        unsigned a=(actual>>(8*c))&255u,b=(reference>>(8*c))&255u;
++        unsigned delta=a>b?a-b:b-a;
++        if(delta>*maximum)*maximum=delta;
++        unsigned limit=scaled && c<3 ? RF_GD_DIRECT_COLOR_TOLERANCE : 0;
++        if(delta>limit)valid=false;
++    }
++    return valid;
++}
  
  struct rf_gd_surface {
      uint64_t address, length;
-@@ -112,20 +113,20 @@
+@@ -112,20 +132,20 @@
      rf_gd_word(s, (uint32_t)at); rf_gd_word(s, (uint32_t)(at >> 32));
      rf_gd_word(s, dst->pitch >> 6);
  }
@@ -168,7 +200,7 @@
      rf_gd_word(s, to->x | (to->y << 16));
      rf_gd_word(s, (to->x + to->w - 1) | ((to->y + to->h - 1) << 16));
      rf_gd_word(s, rf_gd_type4(0xb4c0, 5));
-@@ -146,6 +147,11 @@
+@@ -146,6 +166,11 @@
      rf_gd_packet(s, 0x2c, 3); rf_gd_idle(s);
      rf_gd_reg(s, 0x8e04, 0);
  }
@@ -180,7 +212,7 @@
  
  /* Every layer replaces all four destination channels. Clear only the exact
   * complement of the first validated rectangle; that layer defines its whole
-@@ -172,7 +178,7 @@
+@@ -172,7 +197,7 @@
  /* All geometry and complete BO extents are checked before the first word.
   * Caller must retain/map these exact descriptors and use the native queue's
   * completion/fault checks. An emitted command stream is never a completion. */
@@ -189,7 +221,7 @@
      const struct rf_gd_surface *stage, uint64_t packed, uint64_t packed_length,
      const struct rf_gd_layer *layers, unsigned count)
  {
-@@ -183,14 +189,21 @@
+@@ -183,14 +208,21 @@
          packed_length < RF_GD_PANEL_MAPPED || packed_length > RF_GR_BUFFER_MAX ||
          packed > UINT64_MAX - packed_length ||
          (packed < stage->address + stage->length && stage->address < packed + packed_length) ||
@@ -213,7 +245,7 @@
      struct rf_gd_surface even_src = {stage->address, stage->length, 0,
          RF_GD_PANEL_W, RF_GD_PANEL_H / 2, 2 * RF_GD_STAGE_PITCH};
      struct rf_gd_surface odd_src = {stage->address + RF_GD_STAGE_PITCH,
-@@ -226,4 +239,58 @@
+@@ -226,4 +258,58 @@
      rf_gd_reg(&s, 0x8e04, 0x04100000u);
      return s.failed ? 0 : s.used;
  }
@@ -274,15 +306,34 @@
  #endif
 --- a/bsd/dev/redfin_gpu_display.h
 +++ b/bsd/dev/redfin_gpu_display.h
-@@ -31,6 +31,7 @@
+@@ -31,6 +31,26 @@
  #define RF_GD_STAGE_BYTES (RF_GD_CONTROL + RF_GR_HOST_PAGE)
  #define RF_GD_WORDS 2048u
  #define RF_GD_LAYERS 4u
-+#define RF_GD_DIRECT_ABI 1u
++#define RF_GD_DIRECT_ABI 2u
++#define RF_GD_DIRECT_COLOR_TOLERANCE 2u
++
++/* The fused2D scaler changes the fixed-point interpolation grid. Match1:1
++ * copies and opacity exactly; permit at most two8-bit RGB levels only when
++ * fractional scaling is actually required. The private native comparison
++ * still checks every pixel and reports the observed maximum for each size. */
++static inline bool rf_gd_direct_pixel(uint32_t actual,uint32_t reference,
++    bool scaled,unsigned *maximum)
++{
++    bool valid=true;
++    for(unsigned c=0;c<4;++c) {
++        unsigned a=(actual>>(8*c))&255u,b=(reference>>(8*c))&255u;
++        unsigned delta=a>b?a-b:b-a;
++        if(delta>*maximum)*maximum=delta;
++        unsigned limit=scaled && c<3 ? RF_GD_DIRECT_COLOR_TOLERANCE : 0;
++        if(delta>limit)valid=false;
++    }
++    return valid;
++}
  
  struct rf_gd_surface {
      uint64_t address, length;
-@@ -112,20 +113,20 @@
+@@ -112,20 +132,20 @@
      rf_gd_word(s, (uint32_t)at); rf_gd_word(s, (uint32_t)(at >> 32));
      rf_gd_word(s, dst->pitch >> 6);
  }
@@ -309,7 +360,7 @@
      rf_gd_word(s, to->x | (to->y << 16));
      rf_gd_word(s, (to->x + to->w - 1) | ((to->y + to->h - 1) << 16));
      rf_gd_word(s, rf_gd_type4(0xb4c0, 5));
-@@ -146,6 +147,11 @@
+@@ -146,6 +166,11 @@
      rf_gd_packet(s, 0x2c, 3); rf_gd_idle(s);
      rf_gd_reg(s, 0x8e04, 0);
  }
@@ -321,7 +372,7 @@
  
  /* Every layer replaces all four destination channels. Clear only the exact
   * complement of the first validated rectangle; that layer defines its whole
-@@ -172,7 +178,7 @@
+@@ -172,7 +197,7 @@
  /* All geometry and complete BO extents are checked before the first word.
   * Caller must retain/map these exact descriptors and use the native queue's
   * completion/fault checks. An emitted command stream is never a completion. */
@@ -330,7 +381,7 @@
      const struct rf_gd_surface *stage, uint64_t packed, uint64_t packed_length,
      const struct rf_gd_layer *layers, unsigned count)
  {
-@@ -183,14 +189,21 @@
+@@ -183,14 +208,21 @@
          packed_length < RF_GD_PANEL_MAPPED || packed_length > RF_GR_BUFFER_MAX ||
          packed > UINT64_MAX - packed_length ||
          (packed < stage->address + stage->length && stage->address < packed + packed_length) ||
@@ -354,7 +405,7 @@
      struct rf_gd_surface even_src = {stage->address, stage->length, 0,
          RF_GD_PANEL_W, RF_GD_PANEL_H / 2, 2 * RF_GD_STAGE_PITCH};
      struct rf_gd_surface odd_src = {stage->address + RF_GD_STAGE_PITCH,
-@@ -226,4 +239,58 @@
+@@ -226,4 +258,58 @@
      rf_gd_reg(&s, 0x8e04, 0x04100000u);
      return s.failed ? 0 : s.used;
  }

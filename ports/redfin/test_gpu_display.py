@@ -69,6 +69,7 @@ class GPUDisplayTests(unittest.TestCase):
             'const struct rf_gd_layer *l,unsigned c){return rf_gd_program(o,n,s,p,z,l,c);}\n'
             'unsigned program_direct(uint32_t *o,unsigned n,const struct rf_gd_surface *s,uint64_t p,uint64_t z,'
             'const struct rf_gd_layer *l,unsigned c){return rf_gd_program_direct(o,n,s,p,z,l,c);}\n'
+            'int pixel(uint32_t a,uint32_t b,int scaled,unsigned *m){return rf_gd_direct_pixel(a,b,scaled,m);}\n'
             'int panel_page(uint64_t p){return rf_gd_panel_page(p);}\n')
         subprocess.run(['cc', '-O2', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
             '-I', HERE/'include', root/'display.c', '-o', root/'display.so'], check=True, capture_output=True)
@@ -77,6 +78,7 @@ class GPUDisplayTests(unittest.TestCase):
             C.c_uint64, C.c_uint64, C.POINTER(Layer), C.c_uint]
         cls.lib.panel_page.argtypes = [C.c_uint64]
         cls.lib.program_direct.argtypes=cls.lib.program.argtypes
+        cls.lib.pixel.argtypes=[C.c_uint32,C.c_uint32,C.c_int,C.POINTER(C.c_uint)]
 
     def scene(self, count=1):
         stage = Surface(0x18000000, STAGE_SIZE, 0, W, H, STAGE_PITCH)
@@ -163,6 +165,18 @@ class GPUDisplayTests(unittest.TestCase):
             self.assertFalse(words);self.assertEqual(raw[0],0xdeadbeef)
             if mode in ('margin','crop','small-source','extra-layer'):
                 self.assertTrue(self.emit(stage,layers)[0])
+
+    def test_native_pixel_comparison_is_exact_for_one_to_one_and_alpha_and_bounds_scaled_RGB(self):
+        reference=0x80604020
+        for component in range(4):
+            for delta in (-3,-2,-1,0,1,2,3):
+                actual=reference+delta*(1<<(component*8))
+                for scaled in (False,True):
+                    maximum=C.c_uint(0)
+                    ok=self.lib.pixel(actual,reference,scaled,C.byref(maximum))
+                    limit=2 if scaled and component<3 else 0
+                    self.assertEqual(bool(ok),abs(delta)<=limit)
+                    self.assertEqual(maximum.value,abs(delta))
 
     def test_final_owned_display_sources_match_the_actual_ordered_kernel_overlay(self):
         from test_smp_gui import patched_source

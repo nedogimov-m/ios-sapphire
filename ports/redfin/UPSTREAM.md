@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native V92 filter quantization informs explicit scoped precision contract — 2026-10-27
+
+Same reviewed source pins/Mesa25.0.7 2D register model. ABI1native V92 admits
+its1:1case but rejects291pixels at1125x2436 outside1LSB, first4differ by2in green;
+no source/output guard/intermediate writes. Later cases were not run. The gate
+correctly retains legacy output/full app Metal/GLES at51.742FPS.
+
+Private evidence ABI2 requires exact identity/opacity and bounds only scaled
+RGB by2/255 for the different8fraction-bit interpolation grid. Keep closest
+source coordinate rounding, all full-image/BO/fence/guard checks and fallback;
+no unconditional GPU fast-path enable. Report each complete native geometry's
+maximum/error distribution before any new hardware success claim.103common
+host/current whole native TU compile PASS; full actual four-case bound still
+requires CI22/V94. Same20H392 userland pair/compiler cache retained.
+
 ## Fullscreen native A620 scale/packed-row fusion ready for hardware — 2026-10-27
 
 Preferred source pins unchanged. Reviewed Mesa25.0.7 fd6_blitter.cc
