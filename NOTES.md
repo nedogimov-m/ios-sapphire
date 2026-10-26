@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN upstream GLES GUI/app Metal native build/V88 verified; combined V82 starts — 2026-10-27
+
+GLES/application policy sourcee19c19e, exact Mesa input6e6e432c.. unchanged;
+new native pair2579e38bf000c174193e7c5efd156b1dbdc33ab9dd2158cfe8931bd2420d3259,
+compiler/shader cache retained. Actual20H392 import/signature/native build PASS.
+Kernel unchanged Actions40372742634/run18/source0d3767d/kernel4fa88838..;
+complete image/loader/liveFDT/ADT/private source/ABI proof PASS.
+Fresh V88 clean1576745/empty journal applied ONCE; all preimages backed up,
+signatures/readonly fsck/full ranges and whole files read back, clean Fastboot.
+Cached/file startup checks agree ON and backboardd alone requests GLES.
+Global native Metal stays system mode for apps. V88 STALE/never reuse.
+Next fresh V89/imageV83, actual postboot epoch pending collection.
+
+V82 image58837ffe055d6c22257ba0bd05e0edc8d5337272ad6c07470cbc3653d8165528, fresh5851feac30b7cf00; one full native Metal/GPU contract plus
+actual upstream GLES FD620 frames/shared surfaces/zero GL errors/no backboardd
+Metal work must establish coexisting paths, followed by animate-checked.
+Captures/automatic Phone/Photos opens OFF. No renderer/FPS success claim yet.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x5851feac30b7cf00 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal active/unfinished.
+
 ## REDFIN requested upstream GLES GUI/app Metal split implemented;57host PASS — 2026-10-27
 
 User explicitly requests the ready preferred-upstream GLES GUI implementation,
