@@ -89,14 +89,22 @@ def main(argv=None):
     environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + environment.get("PATH", "")
     result = {"builder_commit": DXB_SHA, "xnu_commit": XNU_SHA,
               "log": str(log_path), "success": False}
+    build_began = time.monotonic()
     with log_path.open("w") as log:
         def run(command, cwd=work, capture=False):
             command = [str(part) for part in command]
             log.write("\n$ " + shlex.join(command) + "\n")
             log.flush()
-            completed = subprocess.run(command, cwd=cwd, env=environment,
-                                       stdout=subprocess.PIPE if capture else log,
-                                       stderr=log, text=capture, check=True)
+            began = time.monotonic()
+            try:
+                completed = subprocess.run(command, cwd=cwd, env=environment,
+                                           stdout=subprocess.PIPE if capture else log,
+                                           stderr=log, text=capture, check=True)
+            finally:
+                result.setdefault("command_timings", []).append({
+                    "step": " ".join(command[:2]),
+                    "seconds": round(time.monotonic() - began, 3),
+                })
             if capture:
                 log.write(completed.stdout)
                 log.flush()
@@ -139,6 +147,7 @@ def main(argv=None):
                 raise ValueError("KDK SHA256 mismatch")
             expanded = work / "kdk-expanded"
             kdk = find_kdk(expanded)
+            result["reused_expanded_kdk"] = kdk is not None
             if kdk is None:
                 if expanded.exists():
                     raise ValueError("incomplete KDK extraction; choose another --work-dir")
@@ -334,6 +343,7 @@ def main(argv=None):
             result["error"] = str(error)
             result["exit_code"] = getattr(error, "returncode", 1)
             log.write("\nBUILD FAILED: " + str(error) + "\n")
+    result["elapsed_seconds"] = round(time.monotonic() - build_began, 3)
     (work / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print(("built" if result["success"] else "build failed") + ": " + str(log_path))
     return 0 if result["success"] else 1

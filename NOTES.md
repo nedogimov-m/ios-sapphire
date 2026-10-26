@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN future CI preparation reuse/timings added during V72 — 2026-10-26
+
+Cache the already expanded KDK alongside the original verified22G74 DMG,
+using a versioned29866842.. key and the previous download-only restore prefix.
+The builder's existing package identity/kernel-directory lookup accepts a
+complete restored expansion and still refuses an incomplete one. Original
+DMG size/SHA256 validation stays mandatory. Record per-command monotonic
+elapsed time, complete build elapsed time and actual expanded-KDK reuse in
+private kernel-build.json, including failed commands. Kernel flags, ordered
+patches, compiler options and current actual run12 kernel do not change.
+
+Python AST, actual existing private expanded KDK lookup and workflow YAML/cache
+paths PASS, using the already installed graphics-build venv. No new environment
+or dependency install, kernel CI dispatch or phone cycle is needed for this
+preparation change. Future Actions builds will measure its effect; no measured
+preparation-time reduction is claimed yet. Current V72/session10147 continues
+unchanged under run12/8ea7b3b6../pair8989ba6a..; no device commands until collection.
+
 ## REDFIN V78 bounded physical-compute probe update verified; V72 running — 2026-10-26
 
 Code8ef1316; unchanged actual Actions40334564897/run12/source df38a25/kernel8ea7b3b6..

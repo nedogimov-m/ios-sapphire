@@ -185,8 +185,12 @@ jobs:
       - name: Restore private build-kit download
         uses: actions/cache@v4
         with:
-          path: research/redfin-build/Kernel_Debug_Kit_13.5_build_22G74.dmg
-          key: redfin-kdk-22G74-29866842eef03981
+          path: |
+            research/redfin-build/Kernel_Debug_Kit_13.5_build_22G74.dmg
+            research/redfin-build/kdk-expanded
+          key: redfin-kdk-22G74-29866842eef03981-expanded-v1
+          restore-keys: |
+            redfin-kdk-22G74-29866842eef03981
       - name: Build exact Redfin sources
         run: python3 ports/redfin/build-xnu.py --no-install-deps
       - name: Collect Redfin kernel and source identity
