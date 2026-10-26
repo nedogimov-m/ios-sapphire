@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Warm ordinary merged performance is now measured — 2026-10-26
+
+V51 reuses V50's exact native kernel/graphics/UI/compiler identities and saved
+caches with startup correctness OFF. The authenticated plain existing-window
+animation now completes200actual GPU frames in10.000127physical seconds,
+19.999746FPS versus V49's17.299664FPS. One window server/no panic or GPU stop,
+clean root and genuine90Hz panel remain. CADisplayLink still runs60FPS; smooth
+60/90render remains unfinished. Comparable37-draw groups publish one native
+job rather than7, but CPU and real-retirement outliers remain. Preferred
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain pinned.
+
+Both AIR persisted templates and Adreno programs currently use the complete
+build fingerprint. Any future preserved cache across transport-only changes
+must prove unchanged compiler/serialization/shader inputs; keep full native
+binary pairing strict. Current V51 uses identical sources, with no such
+cross-source reuse. The source/component review stays private.
+
 ## Actual merged A620 retirement and measurement limit — 2026-10-26
 
 V50/source798c7f0 now passes BOTH complete current A620 correctness jobs after

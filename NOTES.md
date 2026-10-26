@@ -1,5 +1,56 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V51 valid warm merged system result:20 GPU FPS — 2026-10-26
+
+Source14f47ac/merge implementation798c7f0. Kernel unchanged GitHub Actions
+40249668400/run4/sourceeb4d1dc,
+08dab9cd4d50c2223a68ea2d6ffc5080bafd9f583fde1429b553a16436507fb0.
+Native graphics local20261026-060006, exact same binaries/input
+496301fc681ceacc1d1f230aa7f516999caf801f1d4109fd983ac5aa3cae411c and
+pairinge576384272f1ece1915e4d1525c4fac3db1a355781aa5a6c8aabd53116da2ed9
+as V50's complete actual hardware correctness PASS. UIthroughput-v2 unchanged.
+Preserve checks-on result/ABI/job evidence; policy-only update disables both
+native startup jobs and updates manifest hashes, without any native compilation,
+dependency setup or download. V57/root1280740 applies ONCE:266240bytes,
+zero new/freed blocks, all full files/signatures/readonly fsck/preimages/backups/
+readback PASS. V57 now APPLIED/STALE; never reuse. V51 image2eca3bf4c6fb8ce33fd27df17d6d511779a9874dd40839343811abab3013c943.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xdb562c9f612417ff redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no panic or GPU stop/fault; one backboardd61;
+clean unmounted consistent HFSX/write_count1288851, verified Fastboot. All
+captures/startup graphics jobs/Phone and Photos opens OFF. Plain nonce-bound
+existing-system-window animation completes: stats-valid1/timed-out0,200actual
+completed GPU frames in10.000127physical seconds =19.999746FPS; ten samples
+16.000..24.002, none missed. Callback601/60FPS/max16.667ms, physical panel90Hz,
+counter19200000Hz/Mach ratio1.0. This is 15.6% higher than V49's same
+ordinary benchmark17.299664FPS; it remains one bounded animation, not sustained
+manual scrolling or smooth60/90FPS proof.
+
+The comparable37-draw groups now publish one native submission rather than7.
+Warm encoding samples are9.9..12.6ms, with some81..84ms outliers; final waits
+17.7..95.6ms remain. Presenter averages23.1/22.0ms at120/240frames; own GPU
+output averages about6ms. These process/kernel samples overlap and are not
+additive frame-cost measurements. Native batching gives a measured modest
+improvement; remaining CPU/dependency/retirement stalls and60callback policy
+still prevent the requested smooth60/90FPS.
+
+Preparation is now artifact/policy reuse for ordinary comparisons. Readonly
+source review also re-proves the complete current compiler/input fingerprint
+and privately records each component in compiler-cache-input-review.json.
+Both AIR NIR templates and Adreno program cache use the full build digest,
+so pure transport changes currently invalidate shader caches unnecessarily.
+A future cache-compatibility block must prove unchanged compiler, serialization
+and shader semantics while retaining strict full plugin/compiler pairing;
+no cross-source cache reuse has been enabled or assumed here.
+
+Next complete throughput block: inspect remaining actual wait/CPU outliers,
+including4KiB physical false sharing and read/read dependencies; native cadence
+still needs real state rather than the verified no-op base setters. Improve
+observer abort reasons/finite idle handling with the next related block to
+avoid unnecessary warm-repeat cycles. No device boots between mini changes.
+Next fresh V58/root1288851, imageV52. Full GPU/Wi-Fi/power/thermal/sensor/Apple
+service goal remains active; this milestone does not complete it.
+
 ## REDFIN V50 actual multi-IB A620 correctness PASS; FPS sample times out — 2026-10-26
 
 Source798c7f0; kernel unchanged CI40249668400/run4/sourceeb4d1dc,
