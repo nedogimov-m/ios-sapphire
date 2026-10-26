@@ -1,5 +1,27 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V79 corrected bounded probe verified; combined V73 running — 2026-10-26
+
+Codee946682; unchanged actual Actions40334564897/run12/source df38a25/kernel8ea7b3b6..
+and input6e6e432c../cache496301fc../UIpadding-contract-v1. Corrected checker/
+paired marker1d031356.. pass full actual20H392 ABI/source/signature proof.
+Fresh V79 snapshot clean1497738/empty journal, complete staged/preimage/
+signature/native readonly fsck proof PASS. Apply ONCE176128bytes,0new/freed
+blocks; full live preimages/backups/transfers/whole files read back, root clean,
+verified Fastboot. V79 STALE/never reuse. Next fresh V80/imageV74; postboot epoch
+pending collection. No new kernel CI or compiler/cache rebuild for this probe.
+
+V73 image2ddf19648c490499b0171e92bbf4b1eb2a5c8bf6683717ae22cb0de9668aebe4
+full native preflight PASS. Fresha6afa6bce627d59b; exact args in prepared entry
+below. One full native cycle RUNNING: every prior contract plus warmup and3
+corrected262144thread/256iteration raw compute pairs, full values/source/output
+guards and actual post-doorbell2pending evidence. Busy probe runs last; failure
+must publish an explicit exit and start no later native checker. Native GPU
+deadlines remain unchanged. animate-checked gate/captures OFF/app opens OFF as
+before (only animation is requested after all successful native checks).
+No other device commands until terminal collection; no new completion/FPS
+claim yet. Broad platform goal stays active and unfinished.
+
 ## REDFIN V72 actual2pending observed; oversized probe failed, corrected probe built — 2026-10-26
 
 Code8ef1316/tools25c45da; same Actions40334564897/run12/kernel8ea7b3b6.. .
