@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V80 ordinary policy update verified; V74 starts — 2026-10-26
+
+Code/docs6a191c0; unchanged exact Actions40334564897/run12/kernel8ea7b3b6..,
+native6e6e432c../pair1d031356../UIpadding-contract-v1/cache496301fc.. . Frozen
+V73 native inventory verified before policy mutation. Startup checks OFF via
+policy-only; native compiler/kernel/UI binaries are reused. Full ordinary V74
+loader/liveFDT/ADT/private inputs/ordered CI source/ABI preflight PASS.
+
+Fresh V80 readonly snapshot actual clean1506552/empty journal; complete native
+signatures/staged files/preimages/readonly fsck PASS. Apply ONCE24576bytes,
+0new/freed blocks; all live preimages backed up, transfers/ranges/whole files
+read back, root clean and verified Fastboot. V80 STALE/never reuse. Next fresh
+V81/imageV75; actual postboot epoch pending collection.
+
+V74 imagecb1bddbc70cdaa5f842dbc4cb83c03f0d1a3d2922489a868919909e14397142a; fresha8da32cd3833c72e, ordinary animate request,
+startup correctness/captures/automatic app opens OFF. One ordinary system
+measurement begins; V73 remains the complete native/physical correctness proof.
+No new ordinary FPS claim before terminal authenticated collection. Exact args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa8da32cd3833c72e redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains active and unfinished.
+
 ## REDFIN V73 full native and actual two-pending completion PASS — 2026-10-26
 
 Codee946682/docs25ffae3; unchanged Actions40334564897/run12/source df38a25,
