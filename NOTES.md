@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V66 ordinary GPU measurement complete:35.561FPS — 2026-10-26
+
+Code1f0c0e8/docs6599d4c; exact Actions40314982431/run10/kernel5f0d5f48..,
+native pair096836ce../input0de23d41../UIpadding-contract-v1/cache496301fc..
+unchanged from full V65 PASS. Cycle66413 TERMINAL exit0: authenticated fresh
+e358b6688e8d0dd9, one backboardd61, no runtime GPU fault/panic, zero contacts/
+releases, clean unmounted HFSX1444923 and verified Fastboot. Startup correctness
+has zero current-nonce records; captures and automatic app launches are OFF.
+V72 stays STALE/never reuse. Next fresh V73/imageV67 at actual clean1444923.
+
+Finite ordinary system animation completes356GPU/356total frames in
+10.010942physical seconds =35.561089FPS.902native callbacks/90Hz, maximum
+11.111ms interval, no missed samples/timeouts/window changes and idle restored.
+This establishes actual ordinary GPU output with these binaries; it does not
+establish smooth60/90FPS or an isolated improvement over another workload.
+18frontend and24owner/9output sample partitions validate with zero invalid.
+Warm groups still snapshot518130bytes, with up to7527us in the uploader/copy
+scope. Output median5997us includes728us source sync and5107us native submit/
+audit/wait. Complete scopes include CPU work and waits; they are not isolated
+GPU execution or memcpy durations. Hardware queue/render cost remains material.
+
+Exact observed boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xe358b6688e8d0dd9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Private evidence logs/redfin/gui-platform-v66/{presentation-summary,frontend-
+latency,gpu-output-budget,scheduling-summary}.json. Next implement the complete
+GPU-ordered large immutable-constant snapshot block, retaining conservative
+full read bounds, exact byte/tail guards, CPU argument/index validation,
+resource/binding ownership and real final fences/errors. Combined host/native
+checks follow the whole block. All broader platform requirements stay active.
+
 ## REDFIN V72 policy-only update verified; V66 ordinary cycle starting — 2026-10-26
 
 Code1f0c0e8/results8023ff3. V65 complete native A620 correctness remains PASS.

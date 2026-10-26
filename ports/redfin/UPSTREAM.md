@@ -1,5 +1,17 @@
 # HackiOS upstream review — 2026-10-22
 
+## Same-binary ordinary Redfin measurement complete — 2026-10-26
+
+V66/source1f0c0e8/run10 uses the exact full-V65-validated native pair and
+compiler cache with startup checks OFF. Authenticated ordinary animation:
+356GPU frames/10.010942physical seconds =35.561089FPS,90Hz callbacks,
+zero contacts/window replacements/runtime faults and clean root/Fastboot.
+This does not establish an isolated speedup or smooth60/90rendering. Large
+unaligned constant snapshots and physical render/output queue costs remain.
+Review/adapt the next complete GPU-ordered snapshot block with actual native
+queue/barrier/lifetime semantics; preserve full unknown reads and preferred
+pins. The user-supplied Angelpro344a8af review below remains current.
+
 ## Adapted retained-memory and dynamic-bound paths PASS on real A620 — 2026-10-26
 
 V65/source1f0c0e8/run10/kernel5f0d5f48.. passes the complete native contract.
