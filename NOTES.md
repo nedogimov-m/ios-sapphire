@@ -1,6 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## REDFIN V85 ordinary policy verified; V79 starts — 2026-10-26
+## REDFIN complete native GPU deadline/clock block;58host contracts PASS — 2026-10-26
+
+Replace only existing100us GPU polls and1ms pending-admission sleeps with
+native SYS_CRITICAL deadlines. Preserve the native platform/preemption/IRQ
+spin branches, zero intervals, actual hardware polls/fences,500ms failure
+deadline, retained ownership, FIFO retirement and idle queue event waits.
+Publish RedfinPreciseWaitABI1; no shader/native userland/UI rebuild needed.
+Existing19.2MHz GPU start/end markers now report IB+WFI span; final cache-flush
+fence is after the end marker. Separate host pause accounting and cache
+predecessor quiescence from actual CPU cache calls. No GPU packets added.
+
+58combined actual allocator/queue/runtime/Metal access/output/ownership/host
+contracts PASS after updating the scoped receiver for the new internal call.
+Final overlay applies to exact run15 preimages and equals the complete ordered
+canonical sources. Native clock unit conversion/critical urgency/spin/IRQ/
+preemption/already-awake/zero cases and delayed FIFO admission/cache completion
+receivers pass. Actual XNU compilation and A620 timing/performance are pending.
+Success artifacts also retain build logs to locate the remaining CI build cost.
+Last hardware remains V79,33.463FPS/clean1558759/Fastboot; no new boot args.
+Next matching CI, fresh V86/imageV80, one combined native cycle. Broad goal active.
+
+## REDFIN V79 ordinary terminal33.463FPS; latency block next — 2026-10-26
+
+Cycle97717 TERMINAL exit0: fresh authenticatedd9751151bbfd2764,335completed
+GPU frames/10.011182physical seconds =33.462582FPS,902callbacks/90Hz.
+Startup diagnostic current-nonce records0, one backboardd61, no GPU runtime
+stop/panic, clean unmounted HFSX1558759 and verified Fastboot. Ordinary V79 is
+below V75's39.056347FPS; no throughput gain. V78's complete four-mode/native
+WC/system-output proof remains valid. V85 STALE/never reuse; next fresh V86/
+imageV80 at actual1558759. Short native timer deadlines and actual GPU clock/
+host-wait/cache partitions are the next complete block; effect still unknown.
+
+Exact V79 boot args are retained in its starting record immediately below.
+Broad goal remains active/unfinished.
+
+## REDFIN V85 ordinary policy verified; V79 starts (historical) — 2026-10-26
 
 Same exact validated Actions40359286479/run15/kernel8cd59aca../native1bf36b6d../
 input6e6e432c../cache496301fc../UI. Full V78 native inventory frozen and verified

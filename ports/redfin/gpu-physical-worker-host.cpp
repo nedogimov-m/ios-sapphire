@@ -56,7 +56,7 @@ struct gpu_queued_job {
     IOReturn publication_status=0;gpu_queued_bo bos[1]={};char process[20]={};int pid=1;
 };
 static struct {mutex *lock=&queue_lock;gpu_queued_job *head=nullptr,*tail=nullptr;bool stopping=false;unsigned budget=0,retired=0;} gGPUQueue;
-static struct {uint64_t cleaning=0,submitting=0,invalidating=0;unsigned skipped=0,submissions=0;} gTiming;
+static struct {uint64_t cleaning=0,submitting=0,invalidating=0;uint64_t cache_waiting=0,cache_cpu=0;unsigned skipped=0,submissions=0;} gTiming;
 static void enqueue(gpu_queued_job *job)
 {if(gGPUQueue.tail)gGPUQueue.tail->next=job;else gGPUQueue.head=job;gGPUQueue.tail=job;}
 static void advance_time(uint64_t until)
@@ -70,6 +70,15 @@ static int IOLockSleepDeadline(mutex *m,void *,uint64_t until,int)
     if(inject_late){inject_late=false;REQUIRE(late_job);enqueue(late_job);late_job=nullptr;}
     if(cancel_on_sleep){cancel_on_sleep=false;gGPUQueue.stopping=true;}
     return 0;
+}
+static void redfin_gpu_precise_pause(unsigned microseconds)
+{
+    REQUIRE(microseconds==1000&&!hardware&&!queue_lock.locked);
+    advance_time(ticks+(uint64_t)microseconds*1000);
+    IOLockLock(&queue_lock);
+    if(inject_late){inject_late=false;REQUIRE(late_job);enqueue(late_job);late_job=nullptr;}
+    if(cancel_on_sleep){cancel_on_sleep=false;gGPUQueue.stopping=true;}
+    IOLockUnlock(&queue_lock);
 }
 static int redfin_gpu_quiesce()
 {REQUIRE(hardware);++quiesces;advance_time((uint64_t)issued*5*NSEC_PER_MSEC);REQUIRE(done==issued);return 0;}

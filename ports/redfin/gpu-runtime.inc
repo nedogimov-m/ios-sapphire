@@ -16,6 +16,7 @@ static struct {
     uint64_t *l2,*leaves;
     uint64_t *dirty_first,*dirty_end;
     uint64_t audit_ns,wait_ns,publish_ns,gpu_ticks,polls;
+    uint64_t pause_ns,pause_max_ns,pause_calls;
     struct rf_gr_payload_cache payload_cache;
     uint32_t state,fence,completed;
     struct rf_gi_publication physical[RF_GI_SLOTS];
@@ -277,8 +278,17 @@ static int gr_wait_sample(void *argument,bool *complete)
     if(!error&&s->idle)*complete=*complete&&s->rptr==gx.wptr&&!(s->status&~1u);
     return error;
 }
+#include "redfin_gpu_precise_pause.inc"
 static void gr_wait_pause(void *argument,unsigned microseconds)
-{(void)argument;delay(microseconds);}
+{
+    (void)argument;uint64_t before=gm_time_ns(gx.context);
+    redfin_gpu_precise_pause(microseconds);
+    uint64_t after=gm_time_ns(gx.context);
+    if(after>=before) {
+        uint64_t elapsed=after-before;gr.pause_ns+=elapsed;++gr.pause_calls;
+        if(elapsed>gr.pause_max_ns)gr.pause_max_ns=elapsed;
+    }
+}
 /* The native HFI queue shares the existing serialized GPU owner. Only that
  * owner changes a native DCVS index; no PMIC, PLL or RSC register is written
  * by a thermal observer or a second independent power driver. */

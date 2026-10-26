@@ -55,7 +55,11 @@ Apple realtime cache0x700; that request is now adapted to Redfin's proven
 WC mappings. V78 passes all four native CPU/GPU cache-mode contracts and
 actual system output selects WC600/cached0. Source synchronization falls to
 1us median; its checked animation is34.262FPS, so a whole-frame speedup is
-not established. The same binaries now await an ordinary measurement.
+not established. Ordinary V79 with the same binaries and startup checks OFF
+measures335GPU frames/10.011182s:33.463FPS at90Hz callbacks, below V75's39.056FPS.
+The next complete block replaces coalescible short GPU waits with explicit
+critical native deadlines and separates hardware timestamps from host waits.
+Its effect on the device remains unmeasured.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).

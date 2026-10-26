@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native short GPU waits and ordinary realtime-cache result — 2026-10-26
+
+V79/Actions40359286479/run15 with exact V78 binaries and diagnostic jobs OFF
+completes335GPU frames/10.011182physical seconds =33.462582FPS at90Hz callbacks.
+One backboardd61, no runtime stop/panic, clean1558759/Fastboot. This is below
+V75's39.056347FPS. The complete native WC correctness proof remains V78;
+neither cache-route correctness nor panel90Hz establishes smooth rendering.
+
+Reviewed actual XNU8796 commit1b191cb58250d0705d8a51287127505aa4bc0789:
+osfmk/kern/clock.c, sched_prim.c and timer_call.c plus arm64/machine_routines.c.
+Native delay may block when platform idle latency is unknown; ordinary timer
+slop is permitted. Explicit SYS_CRITICAL urgency suppresses intentional
+coalescing, unlike a small leeway argument alone. Preserve native platform/
+preemption/IRQ spin rules and real fence/audit/deadline semantics. Apply only
+to the existing100us GPU polls and1ms pending admission pause; idle queue
+waits remain event driven. Hardware CPU idle latency and FPS effect are not
+yet measured. Preferred upstream pins and Angelpro344a8af remain unchanged.
+
+Existing CP_REG_TO_MEM markers bracket real IBs plus WFI on19.2MHz; the end
+marker precedes the final CACHE_FLUSH_TS fence. Report that hardware span
+with this limit, and separate host pauses and cache predecessor waits from
+CPU cache work. Do not describe it as isolated shader time or full completion.
+
 ## Native realtime cache and actual system WC route PASS — 2026-10-26
 
 V78/Actions40359286479/run15/source d723d7a/kernel8cd59aca.., native pair1bf36b6d..

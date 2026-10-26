@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-from ports.redfin.test_usb_owned_route import added_file
+from test_smp_gui import patched_source
 
 HERE=Path(__file__).resolve().parent
 
@@ -84,7 +84,7 @@ int main(void){
             ('include/redfin_gpu_physical.h','bsd/dev/redfin_gpu_physical.h'),
             ('gpu-physical-runtime.inc','bsd/dev/redfin_gpu_physical.inc'),
             ('gpu-physical-worker.inc','iokit/Kernel/arm/RedfinGPUPhysicalWorker.inc')):
-            self.assertEqual((HERE/owned).read_text(),added_file(patch,native))
+            self.assertEqual((HERE/owned).read_text(),patched_source(native))
         base=HERE.parents[1]/'research/redfin-gpu/physical-ring-base-v1'
         if not base.is_dir():self.skipTest('verified current kernel preimages unavailable')
         with tempfile.TemporaryDirectory() as directory:

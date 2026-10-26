@@ -197,6 +197,7 @@ jobs:
         run: |
           mkdir -p out
           cp research/redfin-build/result.json out/kernel-build.json
+          cp research/redfin-build/build-*.log out/
           cp research/redfin-build/dxb/fakeroot/System/Library/Kernels/kernel.* out/ 2>/dev/null || true
           cp research/redfin-build/dxb/xnu/.redfin-patches.json out/source-inputs.json 2>/dev/null || true
           (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true

@@ -13,6 +13,7 @@ static struct {
    struct rf_gr_arena arena;uint32_t fence,completed;
    struct rf_gi_publication physical[RF_GI_SLOTS];
    uint64_t physical_overlap,audit_ns,wait_ns,publish_ns,gpu_ticks,polls;
+   uint64_t pause_ns,pause_max_ns,pause_calls;
    uint32_t physical_max_pending;
 } gr;
 static uint32_t ring[RF_A6_RING_BYTES/4],scratch[0x1000/4];

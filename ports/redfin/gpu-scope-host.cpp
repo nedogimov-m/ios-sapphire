@@ -55,6 +55,7 @@ static std::atomic<bool> runtime_ready{true};
 static bool redfin_gpu_ready(){return runtime_ready.load();}
 static int redfin_gpu_dvfs_idle(){return 0;}
 static int redfin_gpu_poll(uint32_t){return 0;}
+static void redfin_gpu_precise_pause(unsigned){assert(false&&"scoped fixture has no pending physical fence");}
 static void redfin_gpu_poison(const char *){runtime_ready=false;}
 static IOReturn gpuError(int error){
  switch(error){case 0:return 0;case EINVAL:case ERANGE:return 1;case EBUSY:return 2;

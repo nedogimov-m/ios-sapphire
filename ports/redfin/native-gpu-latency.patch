@@ -1,0 +1,203 @@
+diff --git a/bsd/dev/redfin_gpu_physical.inc b/bsd/dev/redfin_gpu_physical.inc
+--- a/bsd/dev/redfin_gpu_physical.inc
++++ b/bsd/dev/redfin_gpu_physical.inc
+@@ -16,7 +16,17 @@
+         uint64_t end=(uint64_t)gm_scalar_read(gx.scratch+offset+12)<<32|
+             gm_scalar_read(gx.scratch+offset+8);
+         if(end<start)return EPROTO;
+-        gr.gpu_ticks+=end-start;slot->fence=0;gr.completed=fence;
++        uint64_t ticks=end-start;
++        gr.gpu_ticks+=ticks;
++        if(fence<=8||!(fence%127)) {
++            /* Existing owned CP_REG_TO_MEM markers bracket the IBs plus
++             * WFI on the actual19.2MHz GPU clock. This excludes CPU/queue
++             * preparation and the final CACHE_FLUSH_TS after the end marker. */
++            uint64_t us=(ticks/19200000u)*1000000u+(ticks%19200000u)*1000000u/19200000u;
++            printf("REDFIN GPU CLOCK: fence=%u IBs=%u ticks=%llu us=%llu Hz=19200000 end-before-final-fence=1 audited=1\n",
++                fence,slot->ibs,(unsigned long long)ticks,(unsigned long long)us);
++        }
++        slot->fence=0;gr.completed=fence;
+     }
+     return 0;
+ }
+@@ -24,11 +34,19 @@
+ {
+     if(fence>gr.fence)return EINVAL;
+     if(!idle&&fence<=gr.completed)return gr_live();
+-    uint64_t first=gm_time_ns(gx.context);
++    uint64_t first=gm_time_ns(gx.context),pause_before=gr.pause_ns,pauses_before=gr.pause_calls;
++    gr.pause_max_ns=0; /* Hardware lease serializes this per-wait maximum. */
+     struct gr_wait_sample observed={fence,0,0,0,idle};unsigned polls=0;
+     const struct rf_gr_wait_ops ops={&observed,gr_wait_sample,gm_time_ns,gr_wait_pause};
+     int error=rf_gr_wait(&ops,RF_A6_WAIT_NS,&polls);gr.polls+=polls;
+-    gr.wait_ns+=gm_time_ns(gx.context)-first;
++    uint64_t elapsed=gm_time_ns(gx.context)-first;
++    gr.wait_ns+=elapsed;
++    if(fence<=8||!(fence%127)||error)
++        printf("REDFIN GPU WAIT PARTS: fence=%u idle=%u elapsed-us=%llu polls=%u pauses=%llu pause-us=%llu pause-max-us=%llu critical-timer=1\n",
++            fence,idle,(unsigned long long)(elapsed/1000),polls,
++            (unsigned long long)(gr.pause_calls-pauses_before),
++            (unsigned long long)((gr.pause_ns-pause_before)/1000),
++            (unsigned long long)(gr.pause_max_ns/1000));
+     if(!error) {
+         uint64_t audit_at=gm_time_ns(gx.context);error=gr_audit(false);
+         gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
+diff --git a/bsd/dev/redfin_gpu_precise_pause.inc b/bsd/dev/redfin_gpu_precise_pause.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gpu_precise_pause.inc
+@@ -0,0 +1,25 @@
++/* SPDX-License-Identifier: MIT */
++/* Native short device waits. SYS_CRITICAL suppresses intentional timer
++ * coalescing; it does not change thread priority or fabricate completion.
++ * Keep XNU's early-boot/IRQ/preemption/platform spin decisions unchanged.
++ * Internal callers request100us polls or1000us late-admission intervals. */
++#include <kern/clock.h>
++#include <kern/sched_prim.h>
++#include <kern/spl.h>
++#include <kern/thread.h>
++#include <machine/machine_routines.h>
++#include <arm/cpu_data.h>
++
++void redfin_gpu_precise_pause(unsigned microseconds)
++{
++    uint64_t interval=0;
++    clock_interval_to_absolutetime_interval(microseconds,NSEC_PER_USEC,&interval);
++    if(!interval)return;
++    uint64_t deadline=mach_absolute_time()+interval;
++    if(ml_delay_should_spin(interval)||get_preemption_level()!=0||!ml_get_interrupts_enabled()) {
++        machine_delay_until(interval,deadline);return;
++    }
++    wait_result_t result=assert_wait_deadline_with_leeway(
++        (event_t)&redfin_gpu_precise_pause,THREAD_UNINT,TIMEOUT_URGENCY_SYS_CRITICAL,deadline,0);
++    if(result==THREAD_WAITING)thread_block(THREAD_CONTINUE_NULL);
++}
+diff --git a/bsd/dev/redfin_gpu_runtime.inc b/bsd/dev/redfin_gpu_runtime.inc
+--- a/bsd/dev/redfin_gpu_runtime.inc
++++ b/bsd/dev/redfin_gpu_runtime.inc
+@@ -16,6 +16,7 @@
+     uint64_t *l2,*leaves;
+     uint64_t *dirty_first,*dirty_end;
+     uint64_t audit_ns,wait_ns,publish_ns,gpu_ticks,polls;
++    uint64_t pause_ns,pause_max_ns,pause_calls;
+     struct rf_gr_payload_cache payload_cache;
+     uint32_t state,fence,completed;
+     struct rf_gi_publication physical[RF_GI_SLOTS];
+@@ -277,8 +278,17 @@
+     if(!error&&s->idle)*complete=*complete&&s->rptr==gx.wptr&&!(s->status&~1u);
+     return error;
+ }
++#include "redfin_gpu_precise_pause.inc"
+ static void gr_wait_pause(void *argument,unsigned microseconds)
+-{(void)argument;delay(microseconds);}
++{
++    (void)argument;uint64_t before=gm_time_ns(gx.context);
++    redfin_gpu_precise_pause(microseconds);
++    uint64_t after=gm_time_ns(gx.context);
++    if(after>=before) {
++        uint64_t elapsed=after-before;gr.pause_ns+=elapsed;++gr.pause_calls;
++        if(elapsed>gr.pause_max_ns)gr.pause_max_ns=elapsed;
++    }
++}
+ /* The native HFI queue shares the existing serialized GPU owner. Only that
+  * owner changes a native DCVS index; no PMIC, PLL or RSC register is written
+  * by a thermal observer or a second independent power driver. */
+diff --git a/bsd/dev/redfin_gpu_service.h b/bsd/dev/redfin_gpu_service.h
+--- a/bsd/dev/redfin_gpu_service.h
++++ b/bsd/dev/redfin_gpu_service.h
+@@ -32,6 +32,7 @@
+ bool redfin_gpu_done(uint32_t fence);
+ uint32_t redfin_gpu_last(void);
+ void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);
++void redfin_gpu_precise_pause(unsigned microseconds);
+ void redfin_gpu_invalidate(void *address,uint64_t size);
+ void redfin_gpu_poison(const char *reason);
+ void redfin_gpu_stop(void);
+diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -156,6 +156,7 @@
+     setProperty("RedfinSurfacePaddingABI",RF_GP_ABI,32);
+     setProperty("RedfinSurfaceCacheABI",RF_GS_ABI,32);
+     setProperty("RedfinSurfaceCachePolicy",RF_GS_POLICY,32);
++    setProperty("RedfinPreciseWaitABI",1,32);
+     setProperty("RedfinRetainedMemoryABI",RF_GM_ABI,32);
+     if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
+     registerService();return true;
+@@ -206,6 +207,7 @@
+ static struct {
+     uint64_t since,allocating,cleaning,submitting,invalidating,cleaned,invalidated;
+     uint64_t wc_clean,wc_invalidate,wc_clean_bytes,wc_invalidate_bytes;
++    uint64_t cache_waiting,cache_cpu;
+     uint32_t allocations,submissions,skipped;
+ } gTiming;
+ static uint64_t gpuNow(void)
+@@ -224,6 +226,8 @@
+     IOLog("REDFIN GPU SURFACE CACHE: WC-clean=%llu WC-invalidate=%llu WC-BO-KiB=%llu,%llu cached-KiB=%llu,%llu actual-owned=1\n",
+         gTiming.wc_clean,gTiming.wc_invalidate,gTiming.wc_clean_bytes/1024,
+         gTiming.wc_invalidate_bytes/1024,gTiming.cleaned/1024,gTiming.invalidated/1024);
++    IOLog("REDFIN GPU CACHE PARTS: jobs=%u predecessor-us=%llu CPU-cache-us=%llu host-scopes=1\n",
++        gTiming.submissions,gTiming.cache_waiting/1000/n,gTiming.cache_cpu/1000/n);
+     gTiming={};gTiming.since=now;
+ }
+ class RedwoodGPUUserClient:public IOUserClient {
+diff --git a/iokit/Kernel/arm/RedfinGPUPhysicalWorker.inc b/iokit/Kernel/arm/RedfinGPUPhysicalWorker.inc
+--- a/iokit/Kernel/arm/RedfinGPUPhysicalWorker.inc
++++ b/iokit/Kernel/arm/RedfinGPUPhysicalWorker.inc
+@@ -47,17 +47,18 @@
+             if(first->publication_status==kIOReturnSuccess&&redfin_gpu_ready()) {
+                 GPUTransaction hardware;observation=redfin_gpu_poll(first->physical_fence);
+             }
+-            /* While one render is on the GPU, give newly admitted work a
+-             * chance to fill the second slot. This is a bounded1ms condition
+-             * sleep, never a client completion or a hardware-busy success. */
++            /* While one render is on the GPU, allow late admissions. The
++             * short pause has an explicit critical native timer deadline;
++             * default kernel timer coalescing must not turn1ms into a frame.
++             * No queue/hardware lock is held, and every wake rechecks state.
++             * Idle100ms waits below remain event driven and power friendly. */
+             if(observation==EAGAIN&&count<REDFIN_GPU_PUBLISH_DEPTH&&!kernel_next&&
+                !stopped&&!failed_publication) {
+                 IOLockLock(gGPUQueue.lock);
+-                if(!gGPUQueue.head&&!gGPUQueue.stopping&&redfin_gpu_ready()) {
+-                    uint64_t wake=0;clock_interval_to_deadline(1,NSEC_PER_MSEC,&wake);
+-                    (void)IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.head,wake,THREAD_UNINT);
+-                }
+-                IOLockUnlock(gGPUQueue.lock);continue;
++                bool pause=!gGPUQueue.head&&!gGPUQueue.stopping&&redfin_gpu_ready();
++                IOLockUnlock(gGPUQueue.lock);
++                if(pause)redfin_gpu_precise_pause(1000);
++                continue;
+             }
+             job=first;first=job->next;if(!first)last=NULL;--count;
+             IOReturn result=job->publication_status;job->wait_began=gpuNow();
+diff --git a/iokit/Kernel/arm/RedfinGPUQueue.inc b/iokit/Kernel/arm/RedfinGPUQueue.inc
+--- a/iokit/Kernel/arm/RedfinGPUQueue.inc
++++ b/iokit/Kernel/arm/RedfinGPUQueue.inc
+@@ -270,8 +270,13 @@
+         }
+         uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
+         if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
+-            int drained=redfin_gpu_quiesce();if(drained)return gpuError(drained);
+-            if(!gpuQueuedSurfaceCache(job,i,false))return kIOReturnIOError;
++            uint64_t cache_at=gpuNow();
++            int drained=redfin_gpu_quiesce();
++            uint64_t cache_ready=gpuNow();gTiming.cache_waiting+=cache_ready-cache_at;
++            if(drained)return gpuError(drained);
++            bool cached=gpuQueuedSurfaceCache(job,i,false);
++            gTiming.cache_cpu+=gpuNow()-cache_ready;
++            if(!cached)return kIOReturnIOError;
+         } else ++gTiming.skipped;
+     }
+     redfin_gpu_sync(NULL,0,false);gTiming.cleaning+=gpuNow()-began;began=gpuNow();
+diff --git a/iokit/Kernel/arm/RedfinGPUService.h b/iokit/Kernel/arm/RedfinGPUService.h
+--- a/iokit/Kernel/arm/RedfinGPUService.h
++++ b/iokit/Kernel/arm/RedfinGPUService.h
+@@ -32,6 +32,7 @@
+ bool redfin_gpu_done(uint32_t fence);
+ uint32_t redfin_gpu_last(void);
+ void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);
++void redfin_gpu_precise_pause(unsigned microseconds);
+ void redfin_gpu_invalidate(void *address,uint64_t size);
+ void redfin_gpu_poison(const char *reason);
+ void redfin_gpu_stop(void);

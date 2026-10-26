@@ -270,8 +270,13 @@ IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job)
         }
         uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
         if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
-            int drained=redfin_gpu_quiesce();if(drained)return gpuError(drained);
-            if(!gpuQueuedSurfaceCache(job,i,false))return kIOReturnIOError;
+            uint64_t cache_at=gpuNow();
+            int drained=redfin_gpu_quiesce();
+            uint64_t cache_ready=gpuNow();gTiming.cache_waiting+=cache_ready-cache_at;
+            if(drained)return gpuError(drained);
+            bool cached=gpuQueuedSurfaceCache(job,i,false);
+            gTiming.cache_cpu+=gpuNow()-cache_ready;
+            if(!cached)return kIOReturnIOError;
         } else ++gTiming.skipped;
     }
     redfin_gpu_sync(NULL,0,false);gTiming.cleaning+=gpuNow()-began;began=gpuNow();

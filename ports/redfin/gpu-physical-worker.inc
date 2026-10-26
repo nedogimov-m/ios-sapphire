@@ -47,17 +47,18 @@ static void redfinGpuQueueWorker(void *,wait_result_t)
             if(first->publication_status==kIOReturnSuccess&&redfin_gpu_ready()) {
                 GPUTransaction hardware;observation=redfin_gpu_poll(first->physical_fence);
             }
-            /* While one render is on the GPU, give newly admitted work a
-             * chance to fill the second slot. This is a bounded1ms condition
-             * sleep, never a client completion or a hardware-busy success. */
+            /* While one render is on the GPU, allow late admissions. The
+             * short pause has an explicit critical native timer deadline;
+             * default kernel timer coalescing must not turn1ms into a frame.
+             * No queue/hardware lock is held, and every wake rechecks state.
+             * Idle100ms waits below remain event driven and power friendly. */
             if(observation==EAGAIN&&count<REDFIN_GPU_PUBLISH_DEPTH&&!kernel_next&&
                !stopped&&!failed_publication) {
                 IOLockLock(gGPUQueue.lock);
-                if(!gGPUQueue.head&&!gGPUQueue.stopping&&redfin_gpu_ready()) {
-                    uint64_t wake=0;clock_interval_to_deadline(1,NSEC_PER_MSEC,&wake);
-                    (void)IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.head,wake,THREAD_UNINT);
-                }
-                IOLockUnlock(gGPUQueue.lock);continue;
+                bool pause=!gGPUQueue.head&&!gGPUQueue.stopping&&redfin_gpu_ready();
+                IOLockUnlock(gGPUQueue.lock);
+                if(pause)redfin_gpu_precise_pause(1000);
+                continue;
             }
             job=first;first=job->next;if(!first)last=NULL;--count;
             IOReturn result=job->publication_status;job->wait_began=gpuNow();

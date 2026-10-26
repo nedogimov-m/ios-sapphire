@@ -16,7 +16,17 @@ static int gr_physical_collect(uint32_t observed)
         uint64_t end=(uint64_t)gm_scalar_read(gx.scratch+offset+12)<<32|
             gm_scalar_read(gx.scratch+offset+8);
         if(end<start)return EPROTO;
-        gr.gpu_ticks+=end-start;slot->fence=0;gr.completed=fence;
+        uint64_t ticks=end-start;
+        gr.gpu_ticks+=ticks;
+        if(fence<=8||!(fence%127)) {
+            /* Existing owned CP_REG_TO_MEM markers bracket the IBs plus
+             * WFI on the actual19.2MHz GPU clock. This excludes CPU/queue
+             * preparation and the final CACHE_FLUSH_TS after the end marker. */
+            uint64_t us=(ticks/19200000u)*1000000u+(ticks%19200000u)*1000000u/19200000u;
+            printf("REDFIN GPU CLOCK: fence=%u IBs=%u ticks=%llu us=%llu Hz=19200000 end-before-final-fence=1 audited=1\n",
+                fence,slot->ibs,(unsigned long long)ticks,(unsigned long long)us);
+        }
+        slot->fence=0;gr.completed=fence;
     }
     return 0;
 }
@@ -24,11 +34,19 @@ static int gr_physical_wait(uint32_t fence,bool idle)
 {
     if(fence>gr.fence)return EINVAL;
     if(!idle&&fence<=gr.completed)return gr_live();
-    uint64_t first=gm_time_ns(gx.context);
+    uint64_t first=gm_time_ns(gx.context),pause_before=gr.pause_ns,pauses_before=gr.pause_calls;
+    gr.pause_max_ns=0; /* Hardware lease serializes this per-wait maximum. */
     struct gr_wait_sample observed={fence,0,0,0,idle};unsigned polls=0;
     const struct rf_gr_wait_ops ops={&observed,gr_wait_sample,gm_time_ns,gr_wait_pause};
     int error=rf_gr_wait(&ops,RF_A6_WAIT_NS,&polls);gr.polls+=polls;
-    gr.wait_ns+=gm_time_ns(gx.context)-first;
+    uint64_t elapsed=gm_time_ns(gx.context)-first;
+    gr.wait_ns+=elapsed;
+    if(fence<=8||!(fence%127)||error)
+        printf("REDFIN GPU WAIT PARTS: fence=%u idle=%u elapsed-us=%llu polls=%u pauses=%llu pause-us=%llu pause-max-us=%llu critical-timer=1\n",
+            fence,idle,(unsigned long long)(elapsed/1000),polls,
+            (unsigned long long)(gr.pause_calls-pauses_before),
+            (unsigned long long)((gr.pause_ns-pause_before)/1000),
+            (unsigned long long)(gr.pause_max_ns/1000));
     if(!error) {
         uint64_t audit_at=gm_time_ns(gx.context);error=gr_audit(false);
         gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
