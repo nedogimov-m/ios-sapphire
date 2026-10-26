@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native cadence kernel CI40279964939/run6 PASS; V60 prepared — 2026-10-26
+
+Code8d493ea. GitHub Actions40279964939/run6/source
+8d493eae5df487c855ebde56cb2ad29c1c64a64c SUCCESS, actual native build and
+complete source-verifier steps pass. Downloaded artifact/checksum/current full
+patch map/new cadence/owner-phase markers and all retained queue/access/
+presentation ABI markers verified. Kernel18742360bytes, SHA256
+3d743f5357ff1de665691337de70401e4132d5cc452b32f8acac8f104e15f7fe,
+private research/redfin-gpu/kernel-native-cadence-ci-v1. Full V60 loader/ADT/
+live-FDT/firmware/private-source/actual-CI provenance and native ABI preflight
+PASS. Full UIcadence-v1 current sources/imports/signatures/native heartbeat
+reader audit PASS; exact original graphics/Metal pairing2407206f.. and shader
+cache496301fc.. retained, startup diagnostics OFF. No GPU/compiler rebuild.
+
+Exact planned V60 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x92ccad0dd67c6763 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Fresh V66 readonly snapshot completed at actual clean1370334 with empty journal;
+no filesystem write. New one-boot ordinary request matches V60. V66 full file/
+signature/readonly fsck staging is running, not applied. App opens/captures OFF.
+Next: verified apply/readback, one ordinary temporary cycle, native setup/
+original-period/callback/physical-GPU checks and owner-queue budgets. Actual
+90callbacks/FPS change remain pending. Broad goal active; full native graphics
+correctness V58 and latest ordinary52.300FPS V59 remain the validated baseline.
+
 ## REDFIN complete native cadence/owner-budget block implemented; CI next — 2026-10-26
 
 Base7c8a1b7. Read-only actual20H392 QuartzCore audit identifies the real

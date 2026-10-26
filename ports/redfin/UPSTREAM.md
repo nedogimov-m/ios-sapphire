@@ -1,5 +1,18 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete native cadence build/source/ABI PASS — 2026-10-26
+
+Source8d493ea, kernel GitHub Actions40279964939/run6 SUCCESS. Actual artifact
+3d743f5357ff1de665691337de70401e4132d5cc452b32f8acac8f104e15f7fe
+matches the complete current native patch map and retains queue/access/
+presentation ABIs. Native UI and original-period/heartbeat-reader audit also
+pass. Preferred source pins and all exact Metal/compiler/cache binaries stay
+unchanged. The implementation configures the original CLCD heartbeat with the
+measured panel/native dictionary contract and adds honest owner timing scopes.
+Hardware callback cadence and any FPS gain are still pending on V60; build
+success alone is not runtime proof. Preserve the V58 full graphics and V59
+ordinary performance evidence while performing the combined native test.
+
 ## Native20H392 CLCD cadence contract and owned execution budgets — 2026-10-26
 
 Keep preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland906425b75e02b4f99eb5d7bb1ef7c9583472d772;
