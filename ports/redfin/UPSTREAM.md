@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual A620 two-pending publication and full completion PASS — 2026-10-26
+
+V73 with unchanged actual Actions40334564897/run12/kernel8ea7b3b6.. and native
+pair1d031356.. passes all four physical cases, complete values/source/output
+guards and explicit full CHECK EXIT0. Same-run post-doorbell fences542/544/546
+observe two actual pending publications.18PUB/15DONE/20PIPE records validate;
+one server, no runtime stop/panic, clean1506552/Fastboot. This completes the
+hardware proof of the bounded Redfin adaptation of reviewed Angelpro344a8af's
+async-ring idea; no separate-engine parallel execution is inferred.
+
+Checked375GPU frames/10.011272s =37.457778FPS at90Hz callbacks. Ordinary
+startup-checks-OFF performance remains to measure; smooth60/90render FPS is
+unfinished. Preferred kernel8e611870../userland906425b7.. pins, shader cache,
+native audits and deadlines stay unchanged. No new upstream import or CI build.
+
 ## Physical2pending observed under long compute; full completion still required — 2026-10-26
 
 V72/run12 observes actual post-doorbellpf475/completed473/pending2, then fails

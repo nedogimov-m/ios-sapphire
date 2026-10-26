@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V73 full native and actual two-pending completion PASS — 2026-10-26
+
+Codee946682/docs25ffae3; unchanged Actions40334564897/run12/source df38a25,
+kernel8ea7b3b6.., input6e6e432c../pair1d031356../cache496301fc../UIpadding-contract-v1.
+Cycle7062 TERMINAL exit0: authenticated fresha6afa6bce627d59b, one backboardd62,
+no GPU runtime stop or kernel panic, clean unmounted HFSX1506552 and verified
+Fastboot. V79 STALE/never reuse; next fresh V80/imageV74 at actual1506552.
+
+All four physical cases PASS:64threads/16iterations warmup and three pairs of
+262144threads/256iterations. Every output, source parameter and prefix/tail
+guard passes. Same-run post-doorbell fences542/544/546 observe two actual
+pending publications, and explicit CHECK EXIT0/full-contract1 follows. The
+complete prior Metal/output contract remains PASS. This establishes both
+publication and successful completion together; V72's failed oversized case
+is not used as completion evidence.18PUB/15DONE/20PIPE records validate,
+zero invalid. No claim of parallel execution on separate GPU engines.
+
+Checked animation375GPU frames/10.011272physical seconds =37.457778FPS;
+902callbacks/90Hz, no timeout/missed sample/window replacement, idle restored.
+17frontend/28owner/9output partitions validate; owner execution is an overlapping
+wall span, not isolated GPU time. Median output6.077ms. Ordinary performance
+with startup checks OFF is next; sustained60/90render FPS remains unfinished.
+No captures or automatic Phone/Photos opens. Exact observed boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa6afa6bce627d59b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broader platform requirements remain active and unfinished.
+
 ## REDFIN V79 corrected bounded probe verified; combined V73 running — 2026-10-26
 
 Codee946682; unchanged actual Actions40334564897/run12/source df38a25/kernel8ea7b3b6..
@@ -17,7 +43,7 @@ below. One full native cycle RUNNING: every prior contract plus warmup and3
 corrected262144thread/256iteration raw compute pairs, full values/source/output
 guards and actual post-doorbell2pending evidence. Busy probe runs last; failure
 must publish an explicit exit and start no later native checker. Native GPU
-deadlines remain unchanged. animate-checked gate/captures OFF/app opens OFF as
+deadlines remain unchanged. animate-checked gate ON; captures/app opens OFF as
 before (only animation is requested after all successful native checks).
 No other device commands until terminal collection; no new completion/FPS
 claim yet. Broad platform goal stays active and unfinished.

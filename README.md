@@ -40,7 +40,10 @@ actual compositor groups preserve CPU uploads. Its checked animation measures
 physical render/output queue costs remain; smooth60/90FPS is unfinished.
 V71's physical-publication/FIFO-retirement kernel passes the full native Metal
 and output contract. Its checked animation measures37.558FPS at90Hz callbacks;
-ordinary performance and actual two-pending publication still need proof.
+V73 also proves actual two-pending publication and successful completion of
+three bounded compute pairs, with every value/guard and the full native
+contract passing in the same boot. Its checked animation measures37.458FPS;
+ordinary performance of this kernel still needs measurement.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).
