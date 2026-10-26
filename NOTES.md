@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN supported-runner kernel build40300639111/run9 is actually compiling — 2026-10-26
+
+Source5be3287832a0b1f91628ab3ef5b2840880b99766. The previous macOS14 run8 is
+terminal failure/cancelled before runner assignment. New run9 on official
+macos-15-intel with pinned Xcode16.0 obtained a runner and is IN_PROGRESS in
+Build exact Redfin sources; no compile failure or artifact is observed yet.
+Do not dispatch another build merely because a status poll yields. Private
+artifact/image validators now require run9/source5be3287 and the complete
+native-surface-padding overlay. Old failed-run8 status is archived separately.
+
+All53host/native ABI/source/signature checks and corrected legal buffer-view
+checker remain valid: inputb5de25fa.., pairc6997ae2.., shader cache496301fc..
+retained, old V61 artifacts preserved. V68 snapshot remains clean1390436 with
+empty journal, no write/apply; phone is in idle temporary rooted recovery.
+V62 image and hardware test remain pending. Next: terminal CI result, exact
+artifact/source/ABI verification, fresh image/stage/apply and the combined
+A620 pixels/GMEM/view/wrap/CPU-restoration/guard checks. Keep the broad goal
+active; smooth60/90FPS and other unfinished requirements are unproved.
+
 ## REDFIN full native padding build PASS; retire unavailable macOS14 CI label — 2026-10-26
 
 Codeb0d4f94;53combined host contracts PASS. Complete native incremental build,
