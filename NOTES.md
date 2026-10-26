@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN realtime-cache policy2 run15/V84 verified; combined V78 starts — 2026-10-26
+
+Complete coded723d7a7a36b0569288ebc7a24883600b06e19e2/docsb8ec652. Actual
+Actions40359286479/run15 TERMINAL SUCCESS; native arm64/non-PAC18726040byte
+kernel, SHA2568cd59aca19714cd42b7c95fc9a38b56c3cf36754613acd7961b29aad45ddd250.
+Full builder/XNU/KDK/ordered map, all retained ABIs and actual realtime policy2
+marker PASS. Build elapsed499.284s/build.sh428.700s. Fresh verified download
+7.891s/expansion37.909s; expanded archive restore avoided. Actual ccache raw
+counters collected:1413direct+2preprocessed hits,2misses/1link. Compiler-cache
+hits alone do not remove the remaining build.sh cost; no compiler speedup claim.
+
+Actual native20H392 pair1bf36b6d../input6e6e432c../cache496301fc../UI retained.
+Fresh V84 actual clean1541397/empty journal, complete native staged files/
+signatures/preimages/readonly fsck PASS. Apply ONCE180224bytes,0new/freed blocks;
+all live preimages backed up, transfers/ranges/whole files read back; clean
+root/verified Fastboot. Cached/file startup jobs agree ON. V84 STALE/never
+reuse; next fresh V85/imageV79, postboot epoch pending collection.
+
+V78 image98d9372e23f2bbb870f710e9fbaca9a229f912625b23077d7fa38afe4a0c89eb, full actual loader/liveFDT/ADT/private inputs/
+complete source/old+new ABI preflight PASS. Fresh08d45babaf50e634; one full native
+4mode/policy2 CPU/GPU/guard contract and all previous Metal/physical/output
+cases, plus actual system WC counters then animate-checked. Captures/app opens
+OFF. No new hardware/system-route/FPS claim before terminal evidence. Exact args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x08d45babaf50e634 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains active/unfinished.
+
 ## REDFIN realtime-cache kernel run15 compiling; fresh V84 snapshot complete — 2026-10-26
 
 Complete coded723d7a7a36b0569288ebc7a24883600b06e19e2 pushed only to owned
