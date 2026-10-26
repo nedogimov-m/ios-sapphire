@@ -1,5 +1,27 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native touch startup CI19/V93 verified; complete GUI V87 starts — 2026-10-27
+
+Sourcec7d69581aa08de8e2adf01f8a145777e6c4ce8f4, Actions40394810408/run19 terminal
+SUCCESS; exact full prior patch map plus native-touch-startup.patch verified,
+arm64/non-PAC/KDK/source/complete old GPU+new touch ABI markers PASS. Actual
+kernelc98c4cbb46932c80821cc1bdc4f81a046ec556e1959ed5f4516e92cc490cb34a, image13aece34ffe76466a20753be2423da31c2a59ece407b095ae02bde777884207e. Native/Mesa input323bf7ed../
+pair7e0f4a5c../UI/compiler cache unchanged; exact V85 full app Metal and V86
+ordinary54.738FPS artifacts retained. Only initial touch discard now uses its
+existing owned/bounded queue recovery; no native GPU source change/rebuild.
+58combined touch/SMP/GPU-latency contracts/actual native TU compile PASS.
+
+Fresh V93 actual1622688/empty journal applied ONCE; all live preimages/backups,
+signatures/native readonly fsck/ranges/whole files read back, clean Fastboot.
+Cached/file diagnostic jobs agree OFF; backboardd GLES, global app Metal system,
+captures/Phone/Photos automatic opens OFF. V93 STALE/never reuse. Next fresh
+V94/imageV88, actual postboot epoch pending collection. V87 checks actual startup
+queue recovery/continued input worker, same real GLES publication/output/no
+crashes and finite ordinary system FPS. No restored touch/FPS success claim
+before fresh terminal evidence. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xcc1acb80eaa5dd62 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal active; smooth60/90render FPS and other platform items unfinished.
+
 ## REDFIN V86 ordinary54.738FPS; user confirms startup touch failure, CI19 recovery builds — 2026-10-27
 
 Exact V85 native input323bf7ed../pair7e0f4a5c../kernel Actions40372742634/run18/
