@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full dual native GPU modes/V100 verified; staged-output V96 starts — 2026-10-27
+
+Native source5fedeae/107selected contracts, new20H392 build035131/Mesa1a4ad42c../
+app Metal17d0f01f../compiler cache496301fc../UI. Complete independent GMEM and
+exec sysmem direct/fetch/pixel/seed/first CPU/tail/budget checks ready, one final
+result only after both complete. Current V94 does not prove sysmem native pixels;
+its physical oracle error is separately fixed/building in CI23.
+
+Use exact hardware-proved staged-output kernel Actions40403226041/run20/
+source5b06349/kernel01be8081.., retaining complete old GPU/publication/touch/
+cache/physical FIFO ABI. No experimental fused-output oracle in this kernel.
+GUI selects scoped GPU sysmem; app Metal independent. Fresh V100 at actual
+clean1689000/empty journal applied ONCE; full preimages/backups/signatures/
+readonly fsck/ranges/full file readback/clean Fastboot PASS. Cached/file native
+startup jobs agree ON; captures/automatic Phone/Photos opens OFF. V100 STALE/
+never reuse. Next fresh V101/imageV97 at actual postboot epoch pending collection.
+
+V96 image7427f103f8447785a6ded35d6b054469a504e9f50d02a8a12b011307fbdd0a2f, fresh0553cfc7c755322b: full dual GMEM/sysmem native checks/app Metal,
+actual GLES/frame bound/physical output health and finite animate-checked.
+No new sysmem correctness/performance claim before terminal evidence.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0553cfc7c755322b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains unfinished.
+
 ## REDFIN complete physical-panel reference/dual GPU-mode block ready — 2026-10-27
 
 V94 source-proved physical oracle error is fixed as a complete block. Retain one
