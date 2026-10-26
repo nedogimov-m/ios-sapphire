@@ -1,5 +1,19 @@
 # HackiOS upstream review — 2026-10-22
 
+## Scoped native throughput hardware outcome — 2026-10-26
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain pinned. V48 now passes the
+complete actual A620 scoped-dependency/FIFO/queued-Metal correctness block,
+including aliases, lifetime, native pixels/guards and fresh-context caches.
+The subsequent nonce-bound animation measures176actual GPU presentations in
+10.000040physical seconds,17.599930FPS; callbacks stay60, panel90Hz. No public
+bundle refresh-policy read is observed, so its native consumption remains
+unproved. Cold CoreAnimation pipelines still compile after the new compiler
+identity. Reuse this exact native pairing for an ordinary warm measurement,
+with startup checks/captures/app launches disabled, before attributing any
+remaining delay to shader compilation or adding another throughput block.
+
 ## Physical-counter system presentation observer — 2026-10-26
 
 Keep preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland

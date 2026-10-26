@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V48 complete native throughput correctness PASS;17.6 GPU FPS — 2026-10-26
+
+Source004d17a; kernel sourceeb4d1dc, GitHub Actions40249668400/run4 SUCCESS,
+kernel08dab9cd4d50c2223a68ea2d6ffc5080bafd9f583fde1429b553a16436507fb0.
+Paired native graphics input8bd468b86d75b0e095908dd6d9029588c6f27c6a508c6efaabf42f4a5ca2caa8,
+pairingf4e437ea7f24005f8bc4a4e2f531d935e2b260504655f4b7f3591794c271047f;
+UIthroughput-v2 unchanged. V54 applied ONCE with full preimages/readback/native
+staged fsck PASS; APPLIED/STALE, never reuse. V48 image
+d7dc7e35708e1c9cc211c424b2571d2a961497c0c3cffe87f0027f03ada4c85e.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x648a3338b2e655be redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Authenticated fresh boot/userspace-alive/no panic or GPU stop/fault, one
+backboardd62, clean unmounted consistent HFSX/write_count1262147 and verified
+Fastboot. Both current native correctness jobs finish successfully:192compute
+commands/two queues,70cache variants, native half/MRT/varying/sampler/blit/
+pitch/guard/CPU-conversion/binding/persistence/queued-lifetime contracts, and
+both256x256 IOSurface hardware draws PASS. No Phone/Photos launch or capture.
+
+Checked observer starts only after BOTH jobs:176completed GPU presentations
+in10.000040physical seconds =17.599930FPS; ten valid samples4.999..22.013,
+zero missed. CADisplayLink601callbacks/60FPS, panel90Hz, counter19200000Hz,
+Mach/physical ratio1.0. No refresh-policy-read lines appear. Physical90Hz and
+actual GPU output are proved;90callbacks and smooth60/90render remain unfinished.
+V47 warm17.399615FPS is not materially improved. V48 changes compiler identity
+and still compiles cold CoreAnimation pipelines327..926ms; its FPS cannot
+isolate warm throughput. Native hardware audit averages about1.46ms/job and
+immutable-firmware comparison reuse is observed. These overlapping timing
+samples are not additive frame costs.
+
+Next: reuse identical complete kernel/graphics/UI artifacts and the persisted
+cache, disable startup correctness jobs, plain nonce-bound animate request,
+fresh V55/root1262147 and V49 ordinary combined measurement. No repeated setup,
+downloads, native compilation or app tests are needed for that policy change.
+Broader goal stays active. Private evidence: logs/redfin/gui-platform-v48.
+
 ## REDFIN complete throughput CI delivered; V54 staged/V48 ready — 2026-10-26
 
 Kernel sourceeb4d1dc, GitHub Actions40249668400/run4 SUCCESS, ccache enabled,
