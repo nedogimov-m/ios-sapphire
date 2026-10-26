@@ -12,6 +12,9 @@
 #include <hfs/hfslib.h>
 
 char endianness;
+/* Refuse linking an older host library whose overflow writer is incompatible
+ * with native HFS. prepare_hfs_extent_writer installs the reviewed adapter. */
+extern int redfin_hfs_extent_writer_abi(void);
 struct target {const char *path;unsigned uid,mode;};
 static const struct target targets[]={
     {"/redfin/display-probe-request",0,0644},
@@ -56,9 +59,9 @@ static const struct target targets[]={
     {"/private/var/mobile/Library/Logs/redfin-native-assetsd.log",501,0600},
 };
 
-/* This host HFS library writes overflow keys using physical block numbers;
- * native HFS expects logical fork offsets. New small programs must therefore
- * get one complete free run, never the allocator's fragmented first-fit path.
+/* Prefer one complete free run for new data to limit metadata growth. Existing
+ * fragmented files retain all their blocks and use the verified logical-key,
+ * native-endian overflow writer when another extent is necessary.
  * This changes only the ordinary allocation hint. The native allocator still
  * allocates/zeros every block and maintains its bitmap/counters; the caller
  * subsequently verifies complete extents and native readonly fsck. */
@@ -109,6 +112,7 @@ static int metal_directory(Volume *volume,int resources)
 int main(int argc,char **argv)
 {
     if (argc<4 || (argc-2)%2) return 2;
+    if (redfin_hfs_extent_writer_abi()!=1) return 20;
     struct stat image;
     if (lstat(argv[1],&image) || !S_ISREG(image.st_mode) || image.st_size!=16LL*1024*1024*1024) return 3;
     uint16_t one=1;endianness=*(unsigned char *)&one ? IS_LITTLE_ENDIAN : IS_BIG_ENDIAN;

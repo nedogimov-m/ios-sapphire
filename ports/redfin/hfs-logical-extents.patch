@@ -1,0 +1,114 @@
+--- a/hfs/rawfile.c
++++ b/hfs/rawfile.c
+@@ -146,7 +146,7 @@
+ 		} while(extent != NULL);
+ 	}
+ 
+-	writeExtents(rawFile);
++	if (!writeExtents(rawFile)) return FALSE;
+ 
+ 	forkData->logicalSize = size;
+ 	forkData->totalBlocks = blocksNeeded;
+@@ -350,57 +350,52 @@
+ 	return TRUE;
+ }
+ 
++/* ABI1: logical overflow keys, native endian payloads and cleared groups. */
++int redfin_hfs_extent_writer_abi(void) { return 1; }
++
+ int writeExtents(RawFile* rawFile) {
+-	Extent* extent;
+-	int currentExtent;
+-	HFSPlusExtentKey extentKey;
+-	HFSPlusExtentDescriptor descriptor[8];
+-	HFSPlusForkData* forkData;
+-
+-	removeExtents(rawFile);
+-
+-	forkData = rawFile->forkData;
+-	currentExtent = 0;
+-	extent = rawFile->extents;
+-
+-	memset(forkData->extents, 0, sizeof(HFSPlusExtentRecord));
+-	while(extent != NULL && currentExtent < 8) {
+-		((HFSPlusExtentDescriptor*)forkData->extents)[currentExtent].startBlock = extent->startBlock;
+-		((HFSPlusExtentDescriptor*)forkData->extents)[currentExtent].blockCount = extent->blockCount;
+-		extent = extent->next;
+-		currentExtent++;
+-	}
+-
+-	if(extent != NULL) {
+-		extentKey.keyLength = sizeof(HFSPlusExtentKey) - sizeof(extentKey.keyLength);
+-		extentKey.forkType = 0;
+-		extentKey.fileID = rawFile->id;
+-
+-		currentExtent = 0;
+-
+-		while(extent != NULL) {
+-			if(currentExtent == 0) {
+-				memset(descriptor, 0, sizeof(HFSPlusExtentRecord));
+-			}
+-
+-			if(currentExtent == 8) {
+-				extentKey.startBlock = descriptor[0].startBlock;
+-				addToBTree(rawFile->volume->extentsTree, (BTKey*)(&extentKey), sizeof(HFSPlusExtentRecord), (unsigned char *)(&(descriptor[0])));
+-				currentExtent = 0;
+-			}
+-
+-			descriptor[currentExtent].startBlock = extent->startBlock;
+-			descriptor[currentExtent].blockCount = extent->blockCount;
+-
+-			currentExtent++;
+-			extent = extent->next;
+-		}
+-
+-		extentKey.startBlock = descriptor[0].startBlock;
+-		addToBTree(rawFile->volume->extentsTree, (BTKey*)(&extentKey), sizeof(HFSPlusExtentRecord), (unsigned char *)(&(descriptor[0])));
+-	}
+-
+-	return TRUE;
++    Extent* extent;
++    HFSPlusForkData* forkData;
++    HFSPlusExtentKey key;
++    HFSPlusExtentRecord record;
++    uint32_t logical = 0;
++    unsigned count;
++
++    /* Overflow keys are LOGICAL fork offsets, not physical disk blocks.
++     * The B-tree copies content bytes verbatim, so descriptor payloads must
++     * already have native HFS big-endian order. Clear every partial group. */
++    if (!rawFile || !rawFile->forkData || !rawFile->volume) return FALSE;
++    extent = rawFile->extents;
++    for (count = 0; extent && count < 8; ++count) extent = extent->next;
++    if (extent && !rawFile->volume->extentsTree) return FALSE;
++    if (!removeExtents(rawFile)) return FALSE;
++    forkData = rawFile->forkData;
++    extent = rawFile->extents;
++    memset(forkData->extents, 0, sizeof(forkData->extents));
++    for (count = 0; extent && count < 8; ++count) {
++        forkData->extents[count].startBlock = extent->startBlock;
++        forkData->extents[count].blockCount = extent->blockCount;
++        logical += extent->blockCount;
++        extent = extent->next;
++    }
++    memset(&key, 0, sizeof(key));
++    key.keyLength = sizeof(key) - sizeof(key.keyLength);
++    key.forkType = 0;
++    key.fileID = rawFile->id;
++    while (extent) {
++        key.startBlock = logical;
++        memset(record, 0, sizeof(record));
++        for (count = 0; extent && count < 8; ++count) {
++            record[count].startBlock = extent->startBlock;
++            record[count].blockCount = extent->blockCount;
++            logical += extent->blockCount;
++            extent = extent->next;
++        }
++        flipExtentRecord(&record);
++        if (!addToBTree(rawFile->volume->extentsTree, (BTKey*)&key,
++                       sizeof(record), (unsigned char*)record)) return FALSE;
++    }
++    return TRUE;
+ }
+ 
+ int readExtents(RawFile* rawFile) {

@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN padding kernel run9/image/update verified; V62 combined native cycle running — 2026-10-26
+
+Source5be3287832a0b1f91628ab3ef5b2840880b99766; GitHub Actions40300639111/run9
+SUCCESS on macos-15-intel/Xcode16.0. Native source verifier and build pass.
+Terminal actual artifact18709024bytes, SHA256
+c363bc801c180de57df9d51c11f51cc4d5bcbc0fee61dbe3165daf0455a1899c.
+Complete builder/XNU/KDK/current patch map, arm64/non-PAC binary, all retained
+ABIs and new RedfinSurfacePaddingABI/native creation markers verified. Prior
+truncated owner format absent. Kernel runtime under the new toolchain is not
+claimed proven before this first actual phone run.
+
+Native client inputb5de25fa../pairc6997ae2.., exact cache496301fc.. and unchanged
+UIcadence-v1 pass full actual20H392 ABI/signatures/current compiled markers.
+V62 image79ab1ebe036cd98ec56813341b63f5660e6d9c37aa254ad05d000aa9708e40d4,
+130591968decompressed bytes, passes actual loader/liveFDT/ADT/firmware/private
+inputs/power/thermal/ADSP/native cadence/queue/access/output/new padding ABI
+preflight. Exact planned V62 args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xae187d4155a1cb83 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Userspace correctness jobs ON for the complete new block; heavy captures and
+Phone/Photos auto launches OFF. Probe request matches the fresh boot nonce.
+
+Host staging exposed an existing HFS library bug when metal-check grows from
+41to46blocks after filling all8inline extents. Failed private clone was never
+applied and remains archived. Correct the actual host writer: overflow keys
+use logical fork offsets, descriptor payloads use native big endian, every
+partial group is zeroed, failures propagate. Add build/runtime ABI1 to refuse
+an unpatched library.7affected host contracts PASS through39extents (8/16/24
+boundaries), payload decoding, tail zeroing/failures and retained block planning.
+Fixed staging preserves all prior CNIDs/UIDs/modes/extent prefixes and allocated
+blocks. Whole file/readback/signature checks and native readonly fsck PASS.
+Patch ports/redfin/hfs-logical-extents.patch, host build helper in offline_files;
+no change to the on-device HFS driver or journal clean-bit policy.
+
+Fresh V68 snapshot is actual clean1390436 with an empty journal. V68 applies
+ONCE25395200bytes,5new blocks,0freed blocks; complete live preimages/backups/
+transfer/full-file readback/clean root/Fastboot PASS. V68 STALE, never reuse.
+V62 temporary combined hardware cycle is now running, session73474; no other
+device command until terminal collection. No actual new padding correctness,
+GPU performance gain or broad goal completion is claimed yet. Next fresh
+updaterV69/imageV63, next root epoch must come from real collection. Preserve
+all current exact native artifacts and the shader cache; broad goal active.
+
 ## REDFIN supported-runner kernel build40300639111/run9 is actually compiling — 2026-10-26
 
 Source5be3287832a0b1f91628ab3ef5b2840880b99766. The previous macOS14 run8 is

@@ -11,6 +11,24 @@ BLOCK_BYTES = 4096
 ROOT_BLOCKS = 4194304
 
 
+def prepare_hfs_extent_writer(root):
+    """Build the reviewed host-only logical-offset/native-endian writer."""
+    import hashlib
+    import subprocess
+    root=Path(root).resolve()
+    package=root/'research/hfsplus'
+    source=package/'hfs/rawfile.c'
+    patch=root/'ports/redfin/hfs-logical-extents.patch'
+    installed=b'int redfin_hfs_extent_writer_abi(void) { return 1; }' in source.read_bytes()
+    direction=['--reverse','--dry-run'] if installed else ['--forward']
+    subprocess.run(['patch','--batch',*direction,'-p1','-i',str(patch)],
+                   cwd=package,check=True,capture_output=True)
+    subprocess.run(['cmake','--build',str(package/'build'),'--target','hfs'],
+                   check=True,capture_output=True)
+    return {'abi':1,'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),
+            'patch_sha256':hashlib.sha256(patch.read_bytes()).hexdigest()}
+
+
 def extent_ranges(record):
     if (record.get('block_bytes') != BLOCK_BYTES or type(record.get('bytes')) is not int
             or not 0 < record['bytes'] <= 128 * 1024**2):
