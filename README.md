@@ -82,7 +82,10 @@ Smooth60/90render FPS remains unfinished; precise timer correctness is proved,
 but a material whole-frame gain is not.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
-work are recorded at the top of [NOTES.md](NOTES.md).
+work are recorded at the top of [NOTES.md](NOTES.md). V88 also passes the full
+direct-to-IOSurface GLES, framebuffer-fetch/pixel/tail and app Metal contract,
+but its checked animation regresses to5.294FPS. Direct-path backpressure is
+under investigation; it is not a performance milestone.
 
 Pixel 5 boots XNU 8796 and Apple's iOS 16.7.16 launchd, backboardd and
 SpringBoard from a journaled HFSX root in the approved first 16 GiB of

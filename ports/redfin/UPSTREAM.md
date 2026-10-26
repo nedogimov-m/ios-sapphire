@@ -1,5 +1,18 @@
 # HackiOS upstream review — 2026-10-22
 
+## Direct GLES native V88 correctness passes; throughput regresses — 2026-10-27
+
+Preferred pins88513176../906425b7.. unchanged; own direct/producer adaptation
+source5b06349/native fixes5e2b954, Actions40403226041/run20/kernel01be8081..
+passes the full native app Metal/GPU contract and new full-canvas odd-height
+framebuffer-fetch/seed/first CPU-reader/tail check. Actual GUI direct1380frames,
+mirrored0/copied0/errors0, real producer/publication records and no server
+crash, clean1643532/Fastboot. SEC worker error0, no manual input in this run.
+Checked53GPU frames/10.011059s=5.294FPS at90Hz callbacks is a severe regression,
+not an upstream/direct speedup. Preserve complete correctness evidence and
+compare ordinary identical binaries before correcting queue backpressure.
+
+
 ## Whole direct-target native build and kernel CI20 pass — 2026-10-27
 
 Preferred source pins unchanged. Source5b06349/Actions40403226041/run20 kernel

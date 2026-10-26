@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V88 direct GLES/native app Metal correctness PASS;5.294FPS regression — 2026-10-27
+
+Source5b06349/native fixes5e2b954/startf85a796; Actions40403226041/run20,
+kernel01be808171f67582d9dc07213ef11bf31b3f127f68ddda3a1301262941944159,
+actual20H392 input1a4ad42c../pair17d0f01f../shader cache496301fc../UI unchanged.
+Cycle75895 TERMINAL exit0, authenticated7480e63319f7a3e0, one backboardd62,
+no crash/panic/GPU faults, clean unmounted HFSX1643532/verified Fastboot.
+V94 STALE/never reuse. Next fresh V95/imageV89 at actual1643532.
+
+Actual direct GLES1380maximum frames/27shared direct records/mirrored0/
+producer-notified1/copied0/errors0;15kernel producer records and1320sampled
+real publications/fallback0/GPU-wait0. Full app Metal CHECK EXIT0/offscreen
+GPU result0, all4native cache modes/actual2pending/complete output contracts
+PASS. New1125x2435/pitch4608/4round/10957500pixel framebuffer-fetch/seed/
+CPU-lock-first/57344tail-guard check result0. Direct correctness is proved.
+SEC worker exits error0/batches1/contacts0/releases0; no fresh manual input
+or hardware overflow recovery exercised. V87 user input proof stays valid.
+Captures/automatic Phone/Photos launches OFF.
+
+Checked animation53GPU frames/10.011059physical seconds =5.294145FPS,
+90Hz callbacks, samples4.987..6.026FPS, no timeout/missed samples. This is a
+severe regression from ordinary V86's54.738FPS, not an improvement. Late
+sampled render admission waits reach168.222ms, while17-IB+WFI execution
+median12.269ms excludes final fence. Independent samples are not an additive
+frame budget. Verify ordinary same-binary diagnostics-OFF once, then correct
+backpressure/consumer publication as indicated; no smooth60/90FPS claim.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7480e63319f7a3e0 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains unfinished, including Wi-Fi/power/thermals/sensors.
+
 ## REDFIN direct GLES/producer native kernel20/V94 verified; combined V88 starts — 2026-10-27
 
 Source5b063499a756c6503627184438c3f2dd1a2536ff/Actions40403226041/run20/kernel
