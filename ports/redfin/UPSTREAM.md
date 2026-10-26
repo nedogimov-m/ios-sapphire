@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Adapted retained-memory and dynamic-bound paths PASS on real A620 — 2026-10-26
+
+V65/source1f0c0e8/run10/kernel5f0d5f48.. passes the complete native contract.
+All10UBO cases pass; four bounded dynamic direct/argument CPU/GPU cases use
+260/196/260/196byte actual snapshots, while3unknown accesses remain full.
+Native RFM ABI1/query1/730fast/0fallback and actual backboardd sequence840's
+16324fast hints/1query/0fallback demonstrate the adapted reuse path. All prior
+pixel/guard/fence/alias/lifetime/error and owned-padding cases remain PASS.
+
+Actual post-check animation is344GPU frames/10.011247s =34.361354FPS at90Hz
+callbacks,0contacts, one server, no runtime fault/panic and clean root/Fastboot.
+This is not ordinary OFF performance or an isolated speedup claim. The same
+GUI workload still has two unknown large constant reads,518130snapshot bytes
+and422..7381us in the uploader/copy scope with0allocation/map/variant compiles
+in sampled warm groups. Preserve full bounds; review GPU-ordered snapshots
+and actual batching/state/CPU-consumer contracts next. Preferred upstream pins
+and the reviewed Angelpro344a8af comparison remain unchanged.
+
 ## Guarded preparation block native kernel CI/run10 PASS — 2026-10-26
 
 Actual Actions40314982431/run10/source1f0c0e873f59668621efdf1d203079beaf51f4ff

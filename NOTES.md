@@ -1,5 +1,53 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V65 full native preparation/BO policy PASS; valid34.361FPS after checks — 2026-10-26
+
+Code1f0c0e8/docs3d485a9, actual Actions40314982431/run10/kernel5f0d5f48..,
+native pair096836ce../input0de23d41.., UIpadding-contract-v1/cache496301fc..
+exact. Cycle76094 TERMINAL exit0: authenticated freshbf50fe856de3e2ec, one
+backboardd62, no runtime GPU fault/panic; clean unmounted HFSX1436299 and
+verified Fastboot. Exact observed V65 boot args are in the starting entry below.
+V71 remains STALE, never reuse. Next fresh V72/imageV66, actual epoch1436299.
+
+Actual full CHECK EXIT0/full-contract1. All10UBO cases pass actual GPU values
+and source/output guards. Four bounded dynamic64thread cases actually copy
+260/196/260/196bytes, one proof each, including direct/argument and CPU/GPU
+writers. Unbounded accesses still take3conservative full-size snapshots.
+Native RFM memory policy ABI1/query1/730fast/0fallback passes. Actual backboardd
+also uses it: sampled sequence840 has16324fast residency hints,1query and
+0fallbacks. These are real skipped hint ioctls, not fences or GPU durations.
+Every prior192compute/half/MRT/blit/buffer/cache/resource/binding/ordering/
+schedule/lifetime/error case and owned-GMEM/view/wrap/CPU-restoration/byte-pitch
+guard case passes. Kernel full+margin output checks pass5,054,400pixels/guards.
+
+The actual checks-gated system animation completes344GPU/344total frames in
+10.011247physical seconds =34.361354FPS.902native callbacks/90Hz, maximum
+11.111ms interval; no missed sample, timeout or window replacement, idle
+restored.0contacts/releases logged. This is a valid post-check observation;
+ordinary diagnostics-OFF performance remains unproved and no isolated FPS
+gain over another workload is claimed. Smooth60/90rendering is unfinished.
+18frontend/scheduling and28owner/9output partitions validate with0invalid.
+Private evidence logs/redfin/gui-platform-v65/{native-preparation-evidence,
+presentation-summary,frontend-latency,gpu-output-budget,scheduling-summary}.json.
+
+Important limit: the new bounded cases do not reduce this run's two unknown
+large GUI reads. Warm37draw groups still snapshot518130bytes; the measured
+uploader/copy scope varies422..7381us despite0allocation/map/variant-compiles
+in those samples. Do not guess that growing the already1MiB uploader solves
+this, or call the whole scope isolated memcpy time. Output median5805us,
+including647us source sync and5039us native submit/audit/wait, also remains.
+Next review complete GPU-ordered immutable snapshots for large unaligned
+constant reads, preserving their full bounds, CPU-required argument/index
+reads, binding state, aliases, pending work, actual fences/errors and lifetimes.
+Existing native GPU row-copy infrastructure is relevant; no such new path is
+implemented yet. Actual shader/batch work and physical queue latency remain.
+
+Prepare ordinary V66 by changing only startup job policy OFF, preserving every
+compiled binary/kernel/UI and the shader cache. Preserve full current native
+work privately as frontend-prepare-v65-validated. Fresh V72 readonly snapshot
+and V66 image preparation are running; no new ordinary boot has occurred.
+No Phone/Photos auto launches or captures. Broad platform goal stays active.
+
 ## REDFIN CPU-preparation CI/run10 and V71 apply PASS; V65 combined hardware cycle starting — 2026-10-26
 
 Code1f0c0e873f59668621efdf1d203079beaf51f4ff; GitHub Actions40314982431/run10

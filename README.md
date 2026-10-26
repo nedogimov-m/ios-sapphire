@@ -23,8 +23,10 @@ validate; output costs5.699ms median. Its observed300GPU frames/10.011191s are
 comparison or a measured FPS gain; render execution and queue latency remain.
 Owned odd-height IOSurfaces now provide the actual GMEM transfer footprint.
 V63 passes the complete native Metal pixel, source/tail guard, alias and
-CPU-rewrite restoration checks. Its checks-gated animation measures33.162FPS;
-ordinary performance with the same binaries is pending.
+CPU-rewrite restoration checks. V65 also passes bounded dynamic constant
+uploads and explicitly supported buffer residency reuse on the real GPU.
+Its checks-gated animation measures34.361FPS; ordinary performance with the
+same binaries is pending.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).
