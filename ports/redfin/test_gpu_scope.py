@@ -109,8 +109,8 @@ int run(void) {
 
     def test_actual_kernel_fifo_presentation_scoped_cpu_waits_and_source_lifetime(self):
         queue=(HERE/'gpu-throughput-queue.inc').read_text()
-        prefix=queue[:queue.index('static void redfinGpuQueueWorker(')]
-        worker=function(queue,'static void redfinGpuQueueWorker(')
+        prefix=queue[:queue.index('static void gpuPhysicalRetire(')]
+        worker=function(queue,'static void gpuPhysicalRetire(')+'\n'+(HERE/'gpu-physical-worker.inc').read_text()
         methods=''.join(function(queue,s) for s in (
             'IOReturn RedwoodGPUUserClient::submit(',
             'void RedwoodGPUUserClient::retireQueued(',

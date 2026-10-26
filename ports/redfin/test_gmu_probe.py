@@ -118,6 +118,8 @@ class RedfinGMUContractTests(unittest.TestCase):
                            cwd=root,check=True,capture_output=True)
             subprocess.run(['git','apply','--include=bsd/dev/*',str(HERE/'native-throughput.patch')],
                            cwd=root,check=True,capture_output=True)
+            subprocess.run(['git','apply','--include=bsd/dev/*',str(HERE/'native-physical-submission.patch')],
+                           cwd=root,check=True,capture_output=True)
             wanted = {
                 'bsd/dev/redfin_gmu_probe.c': HERE/'gmu-probe.c',
                 'bsd/dev/redfin_gmu_probe.h': HERE/'gmu-probe.h',
@@ -138,6 +140,8 @@ class RedfinGMUContractTests(unittest.TestCase):
                 'bsd/dev/redfin_gpu_service.h': HERE/'gpu-service.h',
                 'bsd/dev/redfin_gpu_runtime.inc': HERE/'gpu-runtime.inc',
                 'bsd/dev/redfin_gpu_dvfs.h': HERE/'include/redfin_gpu_dvfs.h',
+                'bsd/dev/redfin_gpu_physical.h': HERE/'include/redfin_gpu_physical.h',
+                'bsd/dev/redfin_gpu_physical.inc': HERE/'gpu-physical-runtime.inc',
             }
             actual = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
             self.assertEqual(actual, set(wanted))

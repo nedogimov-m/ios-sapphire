@@ -23,6 +23,12 @@ int redfin_gpu_map_display(uint64_t address,uint64_t physical);
 int redfin_gpu_mapped(void);
 int redfin_gpu_release(uint64_t address,uint64_t size);
 int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence);
+/* Internal physical publication; no client or CPU-visible completion. */
+enum { REDFIN_GPU_PUBLISH_DEPTH = 2 };
+int redfin_gpu_publish(const uint64_t *,const uint32_t *,unsigned,uint32_t *);
+int redfin_gpu_wait(uint32_t);
+int redfin_gpu_poll(uint32_t);
+int redfin_gpu_quiesce(void);
 bool redfin_gpu_done(uint32_t fence);
 uint32_t redfin_gpu_last(void);
 void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);

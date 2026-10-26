@@ -138,6 +138,15 @@ class DVFSTests(unittest.TestCase):
         self.lib.fault(0,0,1,0);self.assertEqual(self.lib.run(1),0)
         self.assertEqual((self.lib.metric(0),self.lib.metric(3)),(1,0))
 
+    def test_active_ring_with_unchanged_vote_keeps_thermal_sampling_without_new_hfi(self):
+        self.assertEqual(self.lib.run(1),0)
+        self.lib.fault(0,0,0,1)
+        self.assertEqual(self.lib.run(1),0)
+        self.assertEqual(self.lib.metric(3),1)
+        self.lib.set_thermal(75000,32000,1)
+        self.assertEqual(self.lib.run(1),errno.EBUSY)
+        self.assertEqual(self.lib.metric(3),1)
+
     def test_actual_captured_native_fdt_binds_all_bins_and_rejects_mutated_fuse_or_opp(self):
         path=HERE.parent.parent/'research/redfin-root/device.dtb'
         if not path.exists():self.skipTest('optional private native Redfin DTB')

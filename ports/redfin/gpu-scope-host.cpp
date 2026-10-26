@@ -20,7 +20,7 @@
 
 using IOReturn=int;using IOByteCount=uint64_t;using SInt64=long long;using wait_result_t=int;
 enum {kIOReturnSuccess=0,kIOReturnBadArgument=1,kIOReturnBusy=2,kIOReturnTimeout=3,
- kIOReturnNotReady=4,kIOReturnIOError=5,kIOReturnAborted=6,kIOReturnNoMemory=7,kIOReturnVMError=8};
+ kIOReturnNotReady=4,kIOReturnIOError=5,kIOReturnAborted=6,kIOReturnNoMemory=7,kIOReturnVMError=8,REDFIN_GPU_PUBLISH_DEPTH=2};
 enum {THREAD_ABORTSAFE=0,THREAD_UNINT=1,THREAD_AWAKENED=0,THREAD_TIMED_OUT=1};
 #define NSEC_PER_MSEC 1000000ull
 #define RF_GD_LAYERS 4
@@ -54,6 +54,7 @@ static void thread_terminate(void *){}
 static std::atomic<bool> runtime_ready{true};
 static bool redfin_gpu_ready(){return runtime_ready.load();}
 static int redfin_gpu_dvfs_idle(){return 0;}
+static int redfin_gpu_poll(uint32_t){return 0;}
 static void redfin_gpu_poison(const char *){runtime_ready=false;}
 static IOReturn gpuError(int error){
  switch(error){case 0:return 0;case EINVAL:case ERANGE:return 1;case EBUSY:return 2;
@@ -104,6 +105,7 @@ public:
  void retain(){__atomic_add_fetch(&references,1,__ATOMIC_ACQ_REL);}
  void release(){assert(!hardware_held);assert(__atomic_sub_fetch(&references,1,__ATOMIC_ACQ_REL)>=1);}
  IOReturn executeQueued(gpu_queued_job *);
+ IOReturn finishQueued(gpu_queued_job *);
  IOReturn submit(msm_submit *,const rf_gw_submit_extension *scope=nullptr,bool typed=false);
  void retireQueued(gpu_queued_job *,IOReturn);
  IOReturn prepareRange(rf_gw_cpu_range *,bool whole=false);
@@ -118,6 +120,7 @@ static std::condition_variable gate_changed;
 static bool first_allowed=false,future_allowed=false;
 static std::atomic<unsigned> active_user{0};
 static std::vector<unsigned> order;
+IOReturn RedwoodGPUUserClient::finishQueued(gpu_queued_job *){return kIOReturnSuccess;}
 IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job){
  assert(hardware_held);
  {std::lock_guard<std::mutex> held(order_lock);order.push_back(job->count);}

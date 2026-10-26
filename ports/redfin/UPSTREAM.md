@@ -1,5 +1,24 @@
 # HackiOS upstream review — 2026-10-22
 
+## Redfin physical publication/retirement adaptation built as one source block — 2026-10-26
+
+Adapt the reviewed Angelpro344a8af async-ring idea to preferred kernel8e611870..
+and Redfin's current validated native owner, with actual A620 registers/memory.
+Keep owned wired RAM, original packet/fence validation, complete audits, typed
+range/CPU waits and retained descriptor lifetime. Add two physical render slots,
+actual monotonic cache-flush fence retirement and generation-owned timestamps
+inside the owned scratch page. Preserve quiescence for CPU cache handoffs,
+table/TLB/unmap, changed native HFI votes and mutable kernel output storage.
+No Sapphire A610 offsets, unowned WC pool, clock/voltage experiment or early
+CPU-visible completion is imported. Kernel output stays serialized initially.
+
+103affected host contracts pass actual runtime/worker/ref/error/cache/thermal/
+source/boot/log-bound code. Matching CI and the complete actual A620 contract
+remain pending; no hardware overlap or throughput gain is inferred. Native
+userland6e6e432c../pair24dfc27b../UI/cache stay unchanged. Exact current kernel
+source preimages and source/patch order are recorded privately, retaining the
+same preferred pins and previous source review.
+
 ## Corrected ordinary baseline and physical FIFO draft — 2026-10-26
 
 V70 exact V69-native diagnostics-OFF run completes329GPU/10.011390s:

@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete physical FIFO publication/retirement block;103host contracts PASS — 2026-10-26
+
+Base3a9c399; reconstruct exact7current kernel files from14ordered overlays of
+actual Actions40314982431/run10/source1f0c0e8. Add native-physical-submission
+after the retained-memory overlay in both official build/prepare recipes;
+update canonical runtime/service/queue files and final-source fixtures together.
+No userland/compiler/ABI/cache or hardware register/voltage policy change.
+
+One owner may publish2retained render jobs before their actual GPU completion.
+The CP program preserves original IB validation/cache-flush fences, with4
+generation-owned timestamp slots inside the actually owned4KiB scratch page.
+Bounded ring room and monotonic real fence observations exclude overwrite,
+wrap/forward/rollback and false completion. Complete original SMMU/foreign/
+power/firmware audits remain before publication and after actual completion.
+Late-admission polling uses a bounded1ms condition sleep so work may reach the
+second slot while the first executes; it does not retire clients. Client,
+physical-history and descriptor retirement remains FIFO outside hardware locks.
+
+CPU cache handoffs, actual table/TLB/unmap, changed real HFI votes and mutable
+kernel output storage quiesce actual physical predecessors. Unchanged DCVS votes
+still sample thermal input without a spurious idle requirement. Native output
+stays synchronous on the same retained FIFO; shutdown drains physical work.
+Every fault/deadline keeps real failure/retained DMA ownership. Compact PHYSICAL/
+PIPE records fit255bytes; OWNER execution is a per-job adjacent wall span that
+may overlap another publication, never isolated GPU execution/lock occupancy.
+
+103affected host contracts PASS: actual native packet equality except bounded
+timestamps; exhaustive small ring wrap/room; actual runtime publication/counter/
+timestamp/wait/quiescence/failure; actual FIFO worker and split source methods
+with late admission,2pending jobs, native output, cache ownership, error and
+stop receivers; original typed aliases/CPU waits/retained refs/padding/output/
+clock/fuse/thermal/source audit/boot flags. These are host receivers; no new A620
+pixels, physical overlap or FPS improvement are claimed. Full native kernel CI
+is next; the current actual kernel remains run10/5f0d5f48.. .
+
+Reuse exact V69-native6e6e432c../pair24dfc27b../UIpadding-contract-v1/cache496301fc..
+for the next complete A620 correctness run after matching CI. Last clean root
+1478906/Fastboot; next fresh V77/imageV71. No device cycle is running and no
+root files changed since V70. Full native checks will be enabled as a single
+related block, captures and automatic Phone/Photos opens OFF. Broad goal active.
+
 ## REDFIN V70 ordinary32.863FPS; physical FIFO block authored, unverified — 2026-10-26
 
 Code844b125/docs2fcea44. Exact run10/kernel5f0d5f48../native6e6e432c../

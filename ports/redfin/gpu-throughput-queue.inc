@@ -17,6 +17,8 @@ struct gpu_queued_job {
     rf_gw_submit_range *ranges;uint32_t nr_ranges;bool typed;
     uint64_t addresses[RF_GR_COMMANDS],sequence,charge,accepted;
     uint32_t words[RF_GR_COMMANDS],count,nr_bos,fence,physical_fence;
+    uint64_t dequeued,locked,ran,released,published,wait_began;
+    IOReturn publication_status;
     char process[20];int pid;
 };
 static struct {
@@ -62,28 +64,8 @@ static IOReturn redfinGpuQueueBarrier(const msm_timespec *timeout,bool nonblocki
     IOReturn result=gpuQueueWaitTargetLocked(gGPUQueue.issued,timeout,nonblocking);
     IOLockUnlock(gGPUQueue.lock);return result;
 }
-static void redfinGpuQueueWorker(void *,wait_result_t)
+static void gpuPhysicalRetire(gpu_queued_job *job,IOReturn result)
 {
-    for(;;) {
-        IOLockLock(gGPUQueue.lock);
-        if(!gGPUQueue.head) {
-            if(gGPUQueue.stopping||!redfin_gpu_ready()){IOLockUnlock(gGPUQueue.lock);break;}
-            uint64_t wake=0;clock_interval_to_deadline(100,NSEC_PER_MSEC,&wake);
-            (void)IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.head,wake,THREAD_UNINT);
-        }
-        gpu_queued_job *job=gGPUQueue.head;bool cancelled=gGPUQueue.stopping;
-        if(job){gGPUQueue.head=job->next;if(!gGPUQueue.head)gGPUQueue.tail=NULL;}
-        IOLockUnlock(gGPUQueue.lock);
-        if(!job) {if(redfin_gpu_ready()){GPUTransaction hardware;(void)redfin_gpu_dvfs_idle();}continue;}
-        uint64_t dequeued=gpuNow(),locked=0,ran=0;
-        IOReturn result=kIOReturnNotReady;
-        {
-            GPUTransaction hardware;locked=gpuNow();
-            if(!cancelled&&redfin_gpu_ready())
-                result=job->kernel_execute?job->kernel_execute(job->kernel_argument):job->owner->executeQueued(job);
-            ran=gpuNow();
-        }
-        uint64_t released=gpuNow();
         /* Hardware is unlocked before any client waiter or object release. */
         if(job->owner)job->owner->retireQueued(job,result);
         uint64_t client_retired=gpuNow();
@@ -106,8 +88,8 @@ static void redfinGpuQueueWorker(void *,wait_result_t)
              * retire, total. These are host scopes, not isolated GPU cycles. */
             IOLog("REDFIN GPU OWNER: s=%llu k=%c r=%x us=%llu,%llu,%llu,%llu,%llu,%llu,%llu host=1\n",
                 job->sequence,job->owner?'R':'P',result,
-                (dequeued-job->accepted)/1000,(locked-dequeued)/1000,
-                (ran-locked)/1000,(released-ran)/1000,(client_retired-released)/1000,
+                (job->dequeued-job->accepted)/1000,(job->locked-job->dequeued)/1000,
+                (job->ran-job->locked)/1000,(job->released-job->ran)/1000,(client_retired-job->released)/1000,
                 (queue_retired-client_retired)/1000,(queue_retired-job->accepted)/1000);
             IOLog("REDFIN GPU OWNER ID: s=%llu name=%s pid=%d cf=%u pf=%u\n",
                 job->sequence,job->owner?job->process:"kernel",job->owner?job->pid:0,
@@ -118,11 +100,9 @@ static void redfinGpuQueueWorker(void *,wait_result_t)
         if(job->ranges)IODelete(job->ranges,rf_gw_submit_range,job->nr_ranges);
         if(job->bos)IODelete(job->bos,gpu_queued_bo,job->nr_bos);IODelete(job,gpu_queued_job,1);
         gpuQueueUnreserve(charge);if(owner)owner->release();
-    }
-    IOLockLock(gGPUQueue.lock);gGPUQueue.stopping=true;
-    IOLockWakeup(gGPUQueue.lock,&gGPUQueue.budget,false);IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);
-    IOLockUnlock(gGPUQueue.lock);thread_terminate(current_thread());
 }
+
+#include "RedfinGPUPhysicalWorker.inc"
 static bool redfinGpuQueueStart(void)
 {
     gGPUQueue.lock=IOLockAlloc();if(!gGPUQueue.lock)return false;
@@ -285,13 +265,28 @@ IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job)
         gpu_buffer *b=job->bos[i].buffer;if(!b->surface)continue;
         uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
         if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
+            int drained=redfin_gpu_quiesce();if(drained)return gpuError(drained);
             if(!gpuQueuedSurfaceCache(job,i,false))return kIOReturnIOError;
         } else ++gTiming.skipped;
     }
     redfin_gpu_sync(NULL,0,false);gTiming.cleaning+=gpuNow()-began;began=gpuNow();
-    IOReturn result=gpuError(redfin_gpu_submit(job->addresses,job->words,job->count,&job->physical_fence));
+    IOReturn result=gpuError(redfin_gpu_publish(job->addresses,job->words,job->count,&job->physical_fence));
     if(result!=kIOReturnSuccess)gpuQueueFault(job);
-    gTiming.submitting+=gpuNow()-began;began=gpuNow();++gTiming.submissions;
+    gTiming.submitting+=gpuNow()-began;++gTiming.submissions;
+    return result;
+}
+IOReturn RedwoodGPUUserClient::finishQueued(gpu_queued_job *job)
+{
+    uint64_t began=gpuNow();
+    IOReturn result=gpuError(redfin_gpu_wait(job->physical_fence));
+    if(result!=kIOReturnSuccess)gpuQueueFault(job);
+    gTiming.submitting+=gpuNow()-began;began=gpuNow();
+    /* A later writer may still be active. Imported CPU-cache ownership is
+     * handed back only at actual idle; WC-only native BOs need no such drain. */
+    if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i)
+        if(job->bos[i].buffer->surface&&(job->bos[i].access&RF_GA_WRITE)) {
+            result=gpuError(redfin_gpu_quiesce());break;
+        }
     if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i) {
         gpu_buffer *b=job->bos[i].buffer;
         if(b->surface&&(job->bos[i].access&RF_GA_WRITE)&&!gpuQueuedSurfaceCache(job,i,true))result=kIOReturnIOError;

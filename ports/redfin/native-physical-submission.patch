@@ -1,0 +1,607 @@
+diff --git a/bsd/dev/redfin_gpu_runtime.inc b/bsd/dev/redfin_gpu_runtime.inc
+--- a/bsd/dev/redfin_gpu_runtime.inc
++++ b/bsd/dev/redfin_gpu_runtime.inc
+@@ -7,6 +7,7 @@
+ #include "redfin_gpu_runtime.h"
+ #include "redfin_gpu_service.h"
+ #include "redfin_gpu_display.h"
++#include "redfin_gpu_physical.h"
+ extern int redfin_gui_runtime_cpu(void);
+ static struct {
+     thread_t caller;
+@@ -17,6 +18,8 @@
+     uint64_t audit_ns,wait_ns,publish_ns,gpu_ticks,polls;
+     struct rf_gr_payload_cache payload_cache;
+     uint32_t state,fence,completed;
++    struct rf_gi_publication physical[RF_GI_SLOTS];
++    uint64_t physical_overlap;uint32_t physical_max_pending;
+     uint32_t fault_fsr,fault_syndrome;
+     uint64_t fault_address;
+     bool fault_captured;
+@@ -196,6 +199,7 @@
+ }
+ static int gr_tlb(void)
+ {
++    if(gr.fence&&redfin_gpu_quiesce())return EIO;
+     /* A page-table publication is a real ownership transition, unlike a
+      * repeated submit of already-mapped buffers: force its source proof. */
+     int audit=redfin_gpu_audit();if(audit)return audit;
+@@ -216,7 +220,7 @@
+ int redfin_gpu_mapped(void)
+ {return gr.dirty?gr_tlb():gr_live();}
+ uint64_t redfin_gpu_address(uint64_t size)
+-{return gr_live() || (size&0xfffu)?0:rf_gr_allocate(&gr.arena,size);}
++{return gr_live() || (size&0xfffu) || (gr.fence&&redfin_gpu_quiesce())?0:rf_gr_allocate(&gr.arena,size);}
+ static uint64_t *gr_leaf(uint64_t address)
+ {return gr.leaves+((address-RF_GR_BASE)>>12);}
+ int redfin_gpu_map(uint64_t address,uint64_t physical,bool read_only)
+@@ -245,6 +249,7 @@
+ }
+ int redfin_gpu_release(uint64_t address,uint64_t size)
+ {
++    if(redfin_gpu_quiesce())return EBUSY;
+     const struct rf_gr_object *object=rf_gr_find(&gr.arena,address,size);
+     if(gr_live() || !object || object->address!=address || object->size!=size ||
+         gr.completed!=gr.fence)return EBUSY;
+@@ -258,6 +263,7 @@
+ uint32_t redfin_gpu_last(void){return gr.fence;}
+ struct gr_wait_sample {
+     uint32_t wanted,done,rptr,status;
++    bool idle;
+ };
+ static int gr_wait_sample(void *argument,bool *complete)
+ {
+@@ -267,7 +273,9 @@
+     if(fault || (irq&0xf7u))return EIO;
+     s->done=gm_scalar_read(gx.scratch+RF_GR_FENCE_AT);
+     s->rptr=gm_scalar_read(gx.gpu+4*0x806);s->status=gm_scalar_read(gx.gpu+4*0x210);
+-    *complete=s->done==s->wanted && s->rptr==gx.wptr && !(s->status&~1u);return 0;
++    error=rf_gi_counter(gr.fence,gr.completed,s->done,s->wanted,complete);
++    if(!error&&s->idle)*complete=*complete&&s->rptr==gx.wptr&&!(s->status&~1u);
++    return error;
+ }
+ static void gr_wait_pause(void *argument,unsigned microseconds)
+ {(void)argument;delay(microseconds);}
+@@ -278,7 +286,6 @@
+ {
+     if(!gx.dvfs_profile)return 0;
+     int error=gr_live();if(error)return error;
+-    if(gm_scalar_read(gx.gpu+4*0x806)!=gx.wptr)return EBUSY;
+     uint64_t now=gm_time_ns(gx.context);
+     if(activity)gx.dvfs_activity=now;
+     bool busy=gx.dvfs_activity&&now>=gx.dvfs_activity&&now-gx.dvfs_activity<=RF_DVFS_IDLE_NS;
+@@ -288,6 +295,7 @@
+     if(!wanted||wanted>=gx.performance.gpu_levels)return EINVAL;
+     unsigned bandwidth=gx.dvfs_profile->level[wanted].bw;
+     if(wanted==gx.dvfs_index&&bandwidth==gx.dvfs_bandwidth)return 0;
++    if(gm_scalar_read(gx.gpu+4*0x806)!=gx.wptr)return EBUSY;
+     uint32_t vote[]={0,1,wanted,bandwidth};
+     error=redfin_gpu_audit();if(!error)error=gx_hfi(gx.context,30,vote,4);
+     if(!error)error=redfin_gpu_audit();
+@@ -302,59 +310,7 @@
+ {return redfin_gpu_ready()?gr_dvfs(false):ENXIO;}
+ uint64_t redfin_gpu_max_frequency(void)
+ {return gx.dvfs_profile?(uint64_t)gx.dvfs_profile->level[gx.dvfs_profile->count-1].khz*1000:UINT64_C(275000000);}
+-int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence)
+-{
+-    if(!fence || gr.fence==UINT32_MAX)return EINVAL;
+-    uint64_t audit_at=gm_time_ns(gx.context);
+-    int error=gr_audit(false);if(error)return error;
+-    gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
+-    error=redfin_gpu_mapped();if(error)return error;
+-    uint32_t packets[RF_GR_PACKET_WORDS],next=gr.fence+1;
+-    unsigned n=rf_gr_submit_words(&gr.arena,addresses,words,count,next,packets,RF_GR_PACKET_WORDS);
+-    if(!n)return EINVAL;
+-    uint32_t rptr=gm_scalar_read(gx.gpu+4*0x806),ring_words=RF_A6_RING_BYTES/4;
+-    if(rptr!=gx.wptr || n>=ring_words){redfin_gpu_poison("ring was not idle");return EBUSY;}
+-    error=gr_dvfs(true);if(error)return error;
+-    uint64_t publish_at=gm_time_ns(gx.context);
+-    uint32_t *ring=gx.data[0].host;
+-    for(unsigned i=0;i<n;i++)ring[(gx.wptr+i)%ring_words]=packets[i];
+-    unsigned first_words=n<ring_words-gx.wptr?n:ring_words-gx.wptr;
+-    redfin_gpu_sync(ring+gx.wptr,4*first_words,false);
+-    if(first_words<n)redfin_gpu_sync(ring,4*(n-first_words),false);
+-    if(gr_live())return ECANCELED;
+-    gr.fence=next;gx.wptr=(gx.wptr+n)%ring_words;
+-    gm_memory_store(gx.gpu+4*0x807,gx.wptr);
+-    gr.publish_ns+=gm_time_ns(gx.context)-publish_at;
+-    uint64_t first=gm_time_ns(gx.context);
+-    struct gr_wait_sample observed={next,0,0,0};unsigned polls=0;
+-    const struct rf_gr_wait_ops ops={&observed,gr_wait_sample,gm_time_ns,gr_wait_pause};
+-    error=rf_gr_wait(&ops,RF_A6_WAIT_NS,&polls);gr.polls+=polls;
+-    gr.wait_ns+=gm_time_ns(gx.context)-first;
+-    if(!error) {
+-        audit_at=gm_time_ns(gx.context);error=gr_audit(false);
+-        gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
+-        if(!error) {
+-            uint64_t start=(uint64_t)gm_scalar_read(gx.scratch+RF_GR_TIME_AT+4)<<32 |
+-                gm_scalar_read(gx.scratch+RF_GR_TIME_AT);
+-            uint64_t end=(uint64_t)gm_scalar_read(gx.scratch+RF_GR_TIME_AT+12)<<32 |
+-                gm_scalar_read(gx.scratch+RF_GR_TIME_AT+8);
+-            if(end>=start)gr.gpu_ticks+=end-start;
+-            gr.completed=next;*fence=next;
+-            if(next<=8 || !(next%256)) {
+-                printf("REDFIN GPU RUNTIME SUBMIT: fence=%u IBs=%u done=%u rptr=%u\n",next,count,observed.done,gx.wptr);
+-                printf("REDFIN GPU RUNTIME TIMING: submits=%u audit-us=%llu publish-us=%llu wait-us=%llu gpu-us=%llu polls=%llu cpu=%u payload-checks=%llu payload-reuses=%llu\n",
+-                    next,gr.audit_ns/1000/next,gr.publish_ns/1000/next,gr.wait_ns/1000/next,
+-                    gr.gpu_ticks*5/96/next,gr.polls,(unsigned)cpu_number(),gr.payload_cache.checks,gr.payload_cache.hits);
+-            }
+-            return 0;
+-        }
+-    }
+-    printf("REDFIN GPU WAIT FAILED: wanted=%u observed=%u prior=%u rptr=%#x wptr=%#x status=%#x error=%d polls=%u elapsed-us=%llu\n",
+-        next,observed.done,gr.completed,observed.rptr,gx.wptr,observed.status,error,polls,
+-        (unsigned long long)((gm_time_ns(gx.context)-first)/1000));
+-    gx_diagnostic(gx.context);redfin_gpu_poison("submission did not complete");
+-    return error?error:ETIMEDOUT;
+-}
++#include "redfin_gpu_physical.inc"
+ static int gr_adopt(struct gm_context *c)
+ {
+     if(c->smmu_mode!=6 || gr.state || gx.stage!=6 || gx.submissions!=4 ||
+diff --git a/bsd/dev/redfin_gpu_service.h b/bsd/dev/redfin_gpu_service.h
+--- a/bsd/dev/redfin_gpu_service.h
++++ b/bsd/dev/redfin_gpu_service.h
+@@ -23,6 +23,12 @@
+ int redfin_gpu_mapped(void);
+ int redfin_gpu_release(uint64_t address,uint64_t size);
+ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence);
++/* Internal physical publication; no client or CPU-visible completion. */
++enum { REDFIN_GPU_PUBLISH_DEPTH = 2 };
++int redfin_gpu_publish(const uint64_t *,const uint32_t *,unsigned,uint32_t *);
++int redfin_gpu_wait(uint32_t);
++int redfin_gpu_poll(uint32_t);
++int redfin_gpu_quiesce(void);
+ bool redfin_gpu_done(uint32_t fence);
+ uint32_t redfin_gpu_last(void);
+ void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);
+diff --git a/iokit/Kernel/arm/RedfinGPUService.h b/iokit/Kernel/arm/RedfinGPUService.h
+--- a/iokit/Kernel/arm/RedfinGPUService.h
++++ b/iokit/Kernel/arm/RedfinGPUService.h
+@@ -23,6 +23,12 @@
+ int redfin_gpu_mapped(void);
+ int redfin_gpu_release(uint64_t address,uint64_t size);
+ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence);
++/* Internal physical publication; no client or CPU-visible completion. */
++enum { REDFIN_GPU_PUBLISH_DEPTH = 2 };
++int redfin_gpu_publish(const uint64_t *,const uint32_t *,unsigned,uint32_t *);
++int redfin_gpu_wait(uint32_t);
++int redfin_gpu_poll(uint32_t);
++int redfin_gpu_quiesce(void);
+ bool redfin_gpu_done(uint32_t fence);
+ uint32_t redfin_gpu_last(void);
+ void redfin_gpu_sync(void *address,uint64_t size,bool invalidate);
+diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -149,6 +149,7 @@
+     setName("RedwoodGPU");setProperty(kIOUserClientClassKey,"RedwoodGPUUserClient");
+     setProperty("chip-id",0x06020001,32);setProperty("RedfinRuntimeABI",1,32);
+     setProperty("RedfinQueuedSubmissionABI",RF_GQ_ABI,32);
++    setProperty("RedfinPhysicalSubmissionABI",1,32);
+     setProperty("RedfinScopedWaitABI",RF_GW_ABI,32);
+     setProperty("RedfinResourceAccessABI",RF_GA_ABI,32);
+     setProperty("RedfinSurfacePaddingABI",RF_GP_ABI,32);
+@@ -184,7 +185,9 @@
+ {
+     if(!gLock)return;
+     redfinGpuQueueStop();
+-    GPUTransaction transaction;redfin_gpu_stop();
++    GPUTransaction transaction;
++    if(redfin_gpu_ready())(void)redfin_gpu_quiesce();
++    redfin_gpu_stop();
+ }
+ struct gpu_buffer {
+     IOMemoryDescriptor *memory;
+@@ -234,6 +237,7 @@
+     IOReturn mapDescriptor(IOMemoryDescriptor *,uint8_t *,SweetSurface *,uint64_t,uint32_t,uint32_t *);
+ public:
+     IOReturn executeQueued(gpu_queued_job *);
++    IOReturn finishQueued(gpu_queued_job *);
+     void retireQueued(gpu_queued_job *,IOReturn);
+     IOReturn waitQueued(msm_wait *);
+     IOReturn prepareQueued(msm_cpu_prep *);
+diff --git a/iokit/Kernel/arm/RedfinGPUQueue.inc b/iokit/Kernel/arm/RedfinGPUQueue.inc
+--- a/iokit/Kernel/arm/RedfinGPUQueue.inc
++++ b/iokit/Kernel/arm/RedfinGPUQueue.inc
+@@ -17,6 +17,8 @@
+     rf_gw_submit_range *ranges;uint32_t nr_ranges;bool typed;
+     uint64_t addresses[RF_GR_COMMANDS],sequence,charge,accepted;
+     uint32_t words[RF_GR_COMMANDS],count,nr_bos,fence,physical_fence;
++    uint64_t dequeued,locked,ran,released,published,wait_began;
++    IOReturn publication_status;
+     char process[20];int pid;
+ };
+ static struct {
+@@ -62,28 +64,8 @@
+     IOReturn result=gpuQueueWaitTargetLocked(gGPUQueue.issued,timeout,nonblocking);
+     IOLockUnlock(gGPUQueue.lock);return result;
+ }
+-static void redfinGpuQueueWorker(void *,wait_result_t)
+-{
+-    for(;;) {
+-        IOLockLock(gGPUQueue.lock);
+-        if(!gGPUQueue.head) {
+-            if(gGPUQueue.stopping||!redfin_gpu_ready()){IOLockUnlock(gGPUQueue.lock);break;}
+-            uint64_t wake=0;clock_interval_to_deadline(100,NSEC_PER_MSEC,&wake);
+-            (void)IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.head,wake,THREAD_UNINT);
+-        }
+-        gpu_queued_job *job=gGPUQueue.head;bool cancelled=gGPUQueue.stopping;
+-        if(job){gGPUQueue.head=job->next;if(!gGPUQueue.head)gGPUQueue.tail=NULL;}
+-        IOLockUnlock(gGPUQueue.lock);
+-        if(!job) {if(redfin_gpu_ready()){GPUTransaction hardware;(void)redfin_gpu_dvfs_idle();}continue;}
+-        uint64_t dequeued=gpuNow(),locked=0,ran=0;
+-        IOReturn result=kIOReturnNotReady;
+-        {
+-            GPUTransaction hardware;locked=gpuNow();
+-            if(!cancelled&&redfin_gpu_ready())
+-                result=job->kernel_execute?job->kernel_execute(job->kernel_argument):job->owner->executeQueued(job);
+-            ran=gpuNow();
+-        }
+-        uint64_t released=gpuNow();
++static void gpuPhysicalRetire(gpu_queued_job *job,IOReturn result)
++{
+         /* Hardware is unlocked before any client waiter or object release. */
+         if(job->owner)job->owner->retireQueued(job,result);
+         uint64_t client_retired=gpuNow();
+@@ -106,8 +88,8 @@
+              * retire, total. These are host scopes, not isolated GPU cycles. */
+             IOLog("REDFIN GPU OWNER: s=%llu k=%c r=%x us=%llu,%llu,%llu,%llu,%llu,%llu,%llu host=1\n",
+                 job->sequence,job->owner?'R':'P',result,
+-                (dequeued-job->accepted)/1000,(locked-dequeued)/1000,
+-                (ran-locked)/1000,(released-ran)/1000,(client_retired-released)/1000,
++                (job->dequeued-job->accepted)/1000,(job->locked-job->dequeued)/1000,
++                (job->ran-job->locked)/1000,(job->released-job->ran)/1000,(client_retired-job->released)/1000,
+                 (queue_retired-client_retired)/1000,(queue_retired-job->accepted)/1000);
+             IOLog("REDFIN GPU OWNER ID: s=%llu name=%s pid=%d cf=%u pf=%u\n",
+                 job->sequence,job->owner?job->process:"kernel",job->owner?job->pid:0,
+@@ -118,11 +100,9 @@
+         if(job->ranges)IODelete(job->ranges,rf_gw_submit_range,job->nr_ranges);
+         if(job->bos)IODelete(job->bos,gpu_queued_bo,job->nr_bos);IODelete(job,gpu_queued_job,1);
+         gpuQueueUnreserve(charge);if(owner)owner->release();
+-    }
+-    IOLockLock(gGPUQueue.lock);gGPUQueue.stopping=true;
+-    IOLockWakeup(gGPUQueue.lock,&gGPUQueue.budget,false);IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);
+-    IOLockUnlock(gGPUQueue.lock);thread_terminate(current_thread());
+-}
++}
++
++#include "RedfinGPUPhysicalWorker.inc"
+ static bool redfinGpuQueueStart(void)
+ {
+     gGPUQueue.lock=IOLockAlloc();if(!gGPUQueue.lock)return false;
+@@ -285,13 +265,28 @@
+         gpu_buffer *b=job->bos[i].buffer;if(!b->surface)continue;
+         uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
+         if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
++            int drained=redfin_gpu_quiesce();if(drained)return gpuError(drained);
+             if(!gpuQueuedSurfaceCache(job,i,false))return kIOReturnIOError;
+         } else ++gTiming.skipped;
+     }
+     redfin_gpu_sync(NULL,0,false);gTiming.cleaning+=gpuNow()-began;began=gpuNow();
+-    IOReturn result=gpuError(redfin_gpu_submit(job->addresses,job->words,job->count,&job->physical_fence));
++    IOReturn result=gpuError(redfin_gpu_publish(job->addresses,job->words,job->count,&job->physical_fence));
+     if(result!=kIOReturnSuccess)gpuQueueFault(job);
+-    gTiming.submitting+=gpuNow()-began;began=gpuNow();++gTiming.submissions;
++    gTiming.submitting+=gpuNow()-began;++gTiming.submissions;
++    return result;
++}
++IOReturn RedwoodGPUUserClient::finishQueued(gpu_queued_job *job)
++{
++    uint64_t began=gpuNow();
++    IOReturn result=gpuError(redfin_gpu_wait(job->physical_fence));
++    if(result!=kIOReturnSuccess)gpuQueueFault(job);
++    gTiming.submitting+=gpuNow()-began;began=gpuNow();
++    /* A later writer may still be active. Imported CPU-cache ownership is
++     * handed back only at actual idle; WC-only native BOs need no such drain. */
++    if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i)
++        if(job->bos[i].buffer->surface&&(job->bos[i].access&RF_GA_WRITE)) {
++            result=gpuError(redfin_gpu_quiesce());break;
++        }
+     if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i) {
+         gpu_buffer *b=job->bos[i].buffer;
+         if(b->surface&&(job->bos[i].access&RF_GA_WRITE)&&!gpuQueuedSurfaceCache(job,i,true))result=kIOReturnIOError;
+diff --git a/bsd/dev/redfin_gpu_physical.h b/bsd/dev/redfin_gpu_physical.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gpu_physical.h
+@@ -0,0 +1,53 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_GPU_PHYSICAL_H
++#define REDFIN_GPU_PHYSICAL_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <sys/errno.h>
++#include "redfin_gpu_runtime.h"
++
++/* Two retained publications, four generation-owned timestamp slots. All
++ * slots are within the actual owned4KiB native scratch page, after startup
++ * proof words and the existing common cache-flush fence/timestamp fields. */
++#define RF_GI_DEPTH 2u
++#define RF_GI_SLOTS 4u
++#define RF_GI_TIME_BASE 0x300u
++#define RF_GI_TIME_STEP 32u
++#define RF_GI_SCRATCH_BYTES 0x1000u
++
++struct rf_gi_publication {uint32_t fence,ibs;uint64_t published_ns;};
++
++static inline uint32_t rf_gi_time_offset(uint32_t fence)
++{return RF_GI_TIME_BASE+(fence%RF_GI_SLOTS)*RF_GI_TIME_STEP;}
++
++static inline bool rf_gi_ring_room(uint32_t read,uint32_t write,uint32_t capacity,uint32_t need)
++{
++    if(capacity<2||capacity>UINT32_MAX/2||read>=capacity||write>=capacity||!need||need>=capacity)return false;
++    return (read+capacity-write-1)%capacity>=need;
++}
++static inline int rf_gi_counter(uint32_t issued,uint32_t completed,uint32_t observed,
++    uint32_t target,bool *done)
++{
++    if(!done||completed>issued||target>issued||observed>issued||observed<completed)return EPROTO;
++    *done=observed>=target;return 0;
++}
++static inline bool rf_gi_can_publish(uint32_t issued,uint32_t completed)
++{return issued>=completed&&issued!=UINT32_MAX&&issued-completed<RF_GI_DEPTH;}
++
++/* Reuse the exact validated native packet builder, changing only the two
++ * private timestamp destinations. The common CACHE_FLUSH_TS fence stays
++ * unchanged. Generation ownership prevents a later publication overwriting
++ * a timestamp pair that has not actually been read after its GPU fence. */
++static inline unsigned rf_gi_submit_words(const struct rf_gr_arena *arena,
++    const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t fence,
++    uint32_t *out,unsigned room)
++{
++    unsigned n=rf_gr_submit_words(arena,addresses,words,count,fence,out,room);
++    if(!n||n!=4*count+18||out[2]!=0x01200000u+RF_GR_TIME_AT||
++       out[n-7]!=0x01200000u+RF_GR_TIME_AT+8)return 0;
++    uint32_t offset=rf_gi_time_offset(fence);
++    if(offset<RF_GR_TIME_AT+16||offset>RF_GI_SCRATCH_BYTES-16)return 0;
++    out[2]=0x01200000u+offset;out[n-7]=0x01200000u+offset+8;
++    return n;
++}
++#endif
+diff --git a/bsd/dev/redfin_gpu_physical.inc b/bsd/dev/redfin_gpu_physical.inc
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/redfin_gpu_physical.inc
+@@ -0,0 +1,142 @@
++/* SPDX-License-Identifier: MIT
++ * The hardware mutex and current-thread lease cover every call. Publication
++ * does not retire a client or release memory. All CPU-visible success still
++ * requires the actual ordered cache-flush fence and complete native audit.
++ */
++static int gr_physical_collect(uint32_t observed)
++{
++    if(observed<gr.completed||observed>gr.fence)return EPROTO;
++    for(uint32_t fence=gr.completed;fence<observed;) {
++        ++fence;
++        struct rf_gi_publication *slot=&gr.physical[fence%RF_GI_SLOTS];
++        if(slot->fence!=fence)return EPROTO;
++        unsigned offset=rf_gi_time_offset(fence);
++        uint64_t start=(uint64_t)gm_scalar_read(gx.scratch+offset+4)<<32|
++            gm_scalar_read(gx.scratch+offset);
++        uint64_t end=(uint64_t)gm_scalar_read(gx.scratch+offset+12)<<32|
++            gm_scalar_read(gx.scratch+offset+8);
++        if(end<start)return EPROTO;
++        gr.gpu_ticks+=end-start;slot->fence=0;gr.completed=fence;
++    }
++    return 0;
++}
++static int gr_physical_wait(uint32_t fence,bool idle)
++{
++    if(fence>gr.fence)return EINVAL;
++    if(!idle&&fence<=gr.completed)return gr_live();
++    uint64_t first=gm_time_ns(gx.context);
++    struct gr_wait_sample observed={fence,0,0,0,idle};unsigned polls=0;
++    const struct rf_gr_wait_ops ops={&observed,gr_wait_sample,gm_time_ns,gr_wait_pause};
++    int error=rf_gr_wait(&ops,RF_A6_WAIT_NS,&polls);gr.polls+=polls;
++    gr.wait_ns+=gm_time_ns(gx.context)-first;
++    if(!error) {
++        uint64_t audit_at=gm_time_ns(gx.context);error=gr_audit(false);
++        gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
++        if(!error)error=gr_physical_collect(observed.done);
++    }
++    if(!error) {
++        if(fence&&gr.completed&&(fence<=8||!(fence%256)))
++            printf("REDFIN GPU PHYSICAL DONE: fence=%u observed=%u issued=%u idle=%u polls=%u real-audit=1\n",
++                fence,observed.done,gr.fence,idle,polls);
++        return 0;
++    }
++    printf("REDFIN GPU WAIT FAILED: wanted=%u observed=%u prior=%u rptr=%#x wptr=%#x status=%#x error=%d polls=%u elapsed-us=%llu\n",
++        fence,observed.done,gr.completed,observed.rptr,gx.wptr,observed.status,error,polls,
++        (unsigned long long)((gm_time_ns(gx.context)-first)/1000));
++    gx_diagnostic(gx.context);redfin_gpu_poison("physical FIFO did not complete");
++    return error;
++}
++int redfin_gpu_wait(uint32_t fence)
++{return gr_physical_wait(fence,false);}
++/* Nonblocking hardware observation only. It never grants client completion;
++ * finish/wait must still perform the complete native audit and timestamps. */
++int redfin_gpu_poll(uint32_t fence)
++{
++    if(!fence||fence>gr.fence)return EINVAL;
++    if(fence<=gr.completed)return gr_live();
++    struct gr_wait_sample observed={fence,0,0,0,false};bool done=false;
++    int error=gr_wait_sample(&observed,&done);
++    if(!error&&done)return 0;
++    struct rf_gi_publication *slot=&gr.physical[fence%RF_GI_SLOTS];
++    uint64_t now=gm_time_ns(gx.context);
++    if(!error&&(slot->fence!=fence||now<slot->published_ns))error=EPROTO;
++    if(!error&&now-slot->published_ns>=RF_A6_WAIT_NS)error=ETIMEDOUT;
++    if(!error)return EAGAIN;
++    gx_diagnostic(gx.context);redfin_gpu_poison("physical poll lost fence/ownership/deadline");
++    return error;
++}
++int redfin_gpu_quiesce(void)
++{
++    int error=gr_live();if(error)return error;
++    /* Once all published fences have been audited and no new publication
++     * exists, a guarded actual idle observation needs no duplicate audit. */
++    uint32_t rptr=gm_scalar_read(gx.gpu+4*0x806),status=gm_scalar_read(gx.gpu+4*0x210);
++    if(gm_scalar_read(gx.gpu+4*0x821)||(gm_scalar_read(gx.gpu+4*0x823)&0xf7u)) {
++        redfin_gpu_poison("physical idle observation has an actual GPU fault");return EIO;
++    }
++    if(gr.completed==gr.fence&&rptr==gx.wptr&&!(status&~1u))return gr_live();
++    return gr_physical_wait(gr.fence,true);
++}
++int redfin_gpu_publish(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence)
++{
++    if(!fence||gr.fence==UINT32_MAX)return EINVAL;
++    *fence=0;
++    int error=gr_live();if(error)return error;
++    if(!rf_gi_can_publish(gr.fence,gr.completed)) {
++        error=redfin_gpu_wait(gr.completed+1);if(error)return error;
++    }
++    uint32_t next=gr.fence+1,packets[RF_GR_PACKET_WORDS];
++    struct rf_gi_publication *slot=&gr.physical[next%RF_GI_SLOTS];
++    if(slot->fence){redfin_gpu_poison("physical timestamp slot still owned");return EBUSY;}
++    unsigned n=rf_gi_submit_words(&gr.arena,addresses,words,count,next,packets,RF_GR_PACKET_WORDS);
++    if(!n)return EINVAL;
++    uint64_t audit_at=gm_time_ns(gx.context);
++    error=gr_audit(false);if(error)return error;
++    gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
++    error=redfin_gpu_mapped();if(error)return error;
++    error=gr_dvfs(true);
++    if(error==EBUSY) {
++        error=redfin_gpu_quiesce();if(!error)error=gr_dvfs(true);
++    }
++    if(error)return error;
++    uint32_t ring_words=RF_A6_RING_BYTES/4;
++    uint32_t rptr=gm_scalar_read(gx.gpu+4*0x806);
++    if(!rf_gi_ring_room(rptr,gx.wptr,ring_words,n)) {
++        error=redfin_gpu_quiesce();if(error)return error;
++        rptr=gm_scalar_read(gx.gpu+4*0x806);
++        if(!rf_gi_ring_room(rptr,gx.wptr,ring_words,n)) {
++            redfin_gpu_poison("physical ring room unavailable after real idle");return EBUSY;
++        }
++    }
++    uint32_t actual_before=gm_scalar_read(gx.scratch+RF_GR_FENCE_AT);bool ignored=false;
++    error=rf_gi_counter(gr.fence,gr.completed,actual_before,gr.completed,&ignored);
++    if(error){redfin_gpu_poison("physical fence counter changed");return error;}
++    uint64_t publish_at=gm_time_ns(gx.context);uint32_t *ring=gx.data[0].host;
++    for(unsigned i=0;i<n;++i)ring[(gx.wptr+i)%ring_words]=packets[i];
++    unsigned first_words=n<ring_words-gx.wptr?n:ring_words-gx.wptr;
++    redfin_gpu_sync(ring+gx.wptr,4*first_words,false);
++    if(first_words<n)redfin_gpu_sync(ring,4*(n-first_words),false);
++    if(gr_live())return ECANCELED;
++    *slot=(struct rf_gi_publication){next,count,publish_at};
++    gr.fence=next;gx.wptr=(gx.wptr+n)%ring_words;
++    gm_memory_store(gx.gpu+4*0x807,gx.wptr);*fence=next;
++    gr.publish_ns+=gm_time_ns(gx.context)-publish_at;
++    bool overlap=actual_before+1<next;
++    if(overlap)++gr.physical_overlap;
++    unsigned pending=next-actual_before;
++    if(pending>gr.physical_max_pending)gr.physical_max_pending=pending;
++    if(next<=8||!(next%256)||(overlap&&gr.physical_overlap<=4))
++        printf("REDFIN GPU PHYSICAL PUB: fence=%u IBs=%u prior-done=%u pending=%u overlap=%llu max-pending=%u ring=%u/%u owned-slots=1\n",
++            next,count,actual_before,pending,gr.physical_overlap,gr.physical_max_pending,rptr,gx.wptr);
++    return 0;
++}
++/* Kernel display commands/stage storage remain synchronous and may be reused
++ * only after the exact prior/current hardware work has really become idle. */
++int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned count,uint32_t *fence)
++{
++    if(!fence)return EINVAL;
++    int error=redfin_gpu_quiesce();if(error)return error;
++    uint32_t published=0;error=redfin_gpu_publish(addresses,words,count,&published);
++    if(!error)error=redfin_gpu_quiesce();
++    if(!error)*fence=published;return error;
++}
+diff --git a/iokit/Kernel/arm/RedfinGPUPhysicalWorker.inc b/iokit/Kernel/arm/RedfinGPUPhysicalWorker.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPUPhysicalWorker.inc
+@@ -0,0 +1,94 @@
++/* SPDX-License-Identifier: MIT
++ * One FIFO owner, at most two physical render publications. Native output
++ * remains serialized. Client/CPU consumers wake only after the real fence,
++ * cache handoff and original FIFO retirement, with hardware already unlocked.
++ */
++static gpu_queued_job *gpuPhysicalPopLocked(void)
++{
++    gpu_queued_job *job=gGPUQueue.head;
++    if(job){gGPUQueue.head=job->next;if(!gGPUQueue.head)gGPUQueue.tail=NULL;job->next=NULL;}
++    return job;
++}
++static void redfinGpuQueueWorker(void *,wait_result_t)
++{
++    gpu_queued_job *first=NULL,*last=NULL;unsigned count=0;bool failed_publication=false;
++    for(;;) {
++        IOLockLock(gGPUQueue.lock);
++        bool stopped=gGPUQueue.stopping||!redfin_gpu_ready();
++        gpu_queued_job *head=gGPUQueue.head,*job=NULL;
++        bool kernel_next=head&&!head->owner;
++        if(head&&(!count||(!stopped&&!failed_publication&&head->owner&&count<REDFIN_GPU_PUBLISH_DEPTH)))
++            job=gpuPhysicalPopLocked();
++        IOLockUnlock(gGPUQueue.lock);
++        if(job) {
++            job->dequeued=gpuNow();
++            if(!job->owner||stopped) {
++                /* Kernel output owns one mutable command/stage set. It can
++                 * execute only after every earlier retained render retired. */
++                IOReturn result=kIOReturnNotReady;
++                {
++                    GPUTransaction hardware;job->locked=gpuNow();
++                    if(!stopped&&redfin_gpu_ready())result=job->kernel_execute(job->kernel_argument);
++                    job->ran=gpuNow();
++                }
++                job->released=gpuNow();gpuPhysicalRetire(job,result);continue;
++            }
++            {
++                GPUTransaction hardware;job->locked=gpuNow();
++                job->publication_status=redfin_gpu_ready()?job->owner->executeQueued(job):kIOReturnNotReady;
++            }
++            job->published=gpuNow();
++            if(last)last->next=job;else first=job;last=job;++count;
++            failed_publication|=job->publication_status!=kIOReturnSuccess;
++            continue;
++        }
++        if(first) {
++            int observation=0;
++            if(first->publication_status==kIOReturnSuccess&&redfin_gpu_ready()) {
++                GPUTransaction hardware;observation=redfin_gpu_poll(first->physical_fence);
++            }
++            /* While one render is on the GPU, give newly admitted work a
++             * chance to fill the second slot. This is a bounded1ms condition
++             * sleep, never a client completion or a hardware-busy success. */
++            if(observation==EAGAIN&&count<REDFIN_GPU_PUBLISH_DEPTH&&!kernel_next&&
++               !stopped&&!failed_publication) {
++                IOLockLock(gGPUQueue.lock);
++                if(!gGPUQueue.head&&!gGPUQueue.stopping&&redfin_gpu_ready()) {
++                    uint64_t wake=0;clock_interval_to_deadline(1,NSEC_PER_MSEC,&wake);
++                    (void)IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.head,wake,THREAD_UNINT);
++                }
++                IOLockUnlock(gGPUQueue.lock);continue;
++            }
++            job=first;first=job->next;if(!first)last=NULL;--count;
++            IOReturn result=job->publication_status;job->wait_began=gpuNow();
++            {
++                GPUTransaction hardware;
++                if(result==kIOReturnSuccess)
++                    result=redfin_gpu_ready()?job->owner->finishQueued(job):kIOReturnNotReady;
++                job->ran=gpuNow();
++            }
++            job->released=gpuNow();
++            if(!count)failed_publication=false;
++            if(job->sequence<=4||!(job->sequence&(job->sequence-1))||!(job->sequence%120))
++                IOLog("REDFIN GPU PIPE: s=%llu pf=%u pub=%x pub-us=%llu before-wait-us=%llu wait-us=%llu FIFO=1 depth=2\n",
++                    job->sequence,job->physical_fence,job->publication_status,
++                    (job->published-job->locked)/1000,(job->wait_began-job->published)/1000,
++                    (job->ran-job->wait_began)/1000);
++            gpuPhysicalRetire(job,result);continue;
++        }
++        IOLockLock(gGPUQueue.lock);
++        if(!gGPUQueue.head&&(gGPUQueue.stopping||!redfin_gpu_ready())) {
++            IOLockUnlock(gGPUQueue.lock);break;
++        }
++        if(!gGPUQueue.head) {
++            uint64_t wake=0;clock_interval_to_deadline(100,NSEC_PER_MSEC,&wake);
++            (void)IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.head,wake,THREAD_UNINT);
++        }
++        bool idle=!gGPUQueue.head&&!gGPUQueue.stopping;
++        IOLockUnlock(gGPUQueue.lock);
++        if(idle&&redfin_gpu_ready()){GPUTransaction hardware;(void)redfin_gpu_dvfs_idle();}
++    }
++    IOLockLock(gGPUQueue.lock);gGPUQueue.stopping=true;
++    IOLockWakeup(gGPUQueue.lock,&gGPUQueue.budget,false);IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);
++    IOLockUnlock(gGPUQueue.lock);thread_terminate(current_thread());
++}
