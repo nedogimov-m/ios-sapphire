@@ -8,7 +8,15 @@
 #include <kern/spl.h>
 #include <kern/thread.h>
 #include <machine/machine_routines.h>
+#if defined(MACH_KERNEL_PRIVATE)
 #include <arm/cpu_data.h>
+#else
+/* The BSD GMU translation unit does not enable Mach's private headers.
+ * These exact XNU8796 declarations keep its native compile scope intact. */
+extern int get_preemption_level(void);
+extern boolean_t ml_delay_should_spin(uint64_t interval);
+extern void machine_delay_until(uint64_t interval,uint64_t deadline);
+#endif
 
 void redfin_gpu_precise_pause(unsigned microseconds)
 {

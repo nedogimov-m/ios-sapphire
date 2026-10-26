@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN native BSD compile scope corrected; fresh V86 snapshot complete — 2026-10-26
+
+Source96b96ec entered Actions40370182934/run16. Before hardware, actual XNU
+BSD Makefile confirms MACH_KERNEL_PRIVATE is absent: three native delay/spin/
+preemption declarations are hidden. Keep BSD's compile scope and provide those
+exact XNU8796 prototypes conditionally; do not enable Mach-private structure
+definitions in the GMU translation unit. Final ordered-source/precise-wait/
+FIFO/cache4targeted contracts PASS after the correction; prior58combined PASS.
+Cancellation requested for superseded run16; corrected native CI is next.
+No device test or performance claim from that superseded build.
+
+Fresh V86 readonly snapshot completes at actual1558759, clean HFSX/empty
+journal/full existing native targets. Device remains idle in verified recovery;
+no root writes. Native input6e6e432c../pair1bf36b6d../UI/cache retained,
+startup policy-only ON with no compiler/native rebuild. V80 loader/ABI recipe
+ready; stage/apply wait for the actual corrected kernel. No new boot args.
+Broad platform goal active/unfinished.
+
 ## REDFIN complete native GPU deadline/clock block;58host contracts PASS — 2026-10-26
 
 Replace only existing100us GPU polls and1ms pending-admission sleeps with
