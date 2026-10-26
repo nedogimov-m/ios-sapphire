@@ -350,6 +350,7 @@ def main():
                 metal_sources += [ROOT/'ports/redfin/metal-ubo-extents-check.inc']
                 metal_sources += [ROOT/'ports/redfin/metal-physical-check.inc']
                 metal_sources += [ROOT/'ports/redfin/metal-surface-cache-check.inc']
+                metal_sources += [ROOT/'ports/redfin/compositor-policy.h',ROOT/'ports/redfin/gui-profile.h']
                 metal_sources += [ROOT/'ports/redfin/surface-padding.h',ROOT/'ports/redfin/surface-padding-check.inc']
                 metal_sources += [ROOT/'ports/redfin/retained-memory.h']
                 metal_sources += [ROOT/'ports/redfin'/name for name in

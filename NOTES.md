@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN requested upstream GLES GUI/app Metal split implemented;57host PASS — 2026-10-27
+
+User explicitly requests the ready preferred-upstream GLES GUI implementation,
+with Metal retained for applications. Compare all5actual source files from
+tested userland906425b7.. against preferred kernel88513176..: eagl.c,
+gl_osmesa.c, redwood_gl.h/hakios.gl.h, mkeagl.py and eagl_slots.txt are identical
+after namespace/header-file-name adaptation. Keep that complete bridge and
+the existing actual20H392 wrapper/TLS/uniform-field derivation; no A610 register
+or20F66 address is imported. Private exact source-hash/equivalence proof is
+research/redfin-gles-compositor-v1/upstream-source-equivalence.json.
+
+Backboardd's launchd job now explicitly requests GLES. The own Metal driver
+declines device construction only in that process for this request; app and
+native checker discovery, global Metal service properties, real GPU ownership,
+fences and completion remain unchanged. Existing roots with no choice preserve
+their Metal admission. Loader reports the choice with its actual boot nonce.
+Add independently nonce-bound GLES frame/hardware/error/Metal-activity evidence;
+installation alone cannot pass, and app Metal needs its full native checker.
+
+57combined compositor-policy/actual hardware-entry/launchd/Metal queue/scheduling/
+graphics-cache/native surface/output host contracts PASS. Complete native build,
+actual system renderer selection and performance remain pending. No new phone
+boot or throughput claim. Reuse verified Actions40372742634/run18/kernel4fa88838..
+and unchanged Mesa/compiler inputs; build only paired userland artifacts.
+Next fresh V88/imageV82 at actual clean1576745/Fastboot. Captures/automatic
+Phone/Photos opens remain OFF. Broad goal stays active/unfinished.
+
 ## REDFIN V81 ordinary terminal34.462FPS; precise waits work, smooth FPS unfinished — 2026-10-26
 
 Exact Actions40372742634/run18/kernel4fa88838../native6e6e432c../pair1bf36b6d../

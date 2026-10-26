@@ -1,5 +1,22 @@
 # HackiOS upstream review — 2026-10-22
 
+## Ready preferred GLES bridge retained; GUI selection separated from app Metal — 2026-10-27
+
+User explicitly requests upstream GLES composition. Exact5-file comparison of
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and preferred kernel
+88513176b1e96ecf0b764cd62c6f4e6ac71345e3 proves eagl.c/gl_osmesa.c/GL header/
+mkeagl.py/eagl_slots.txt unchanged after the redwood->hakios namespace and
+header filename rename. The existing Redfin bridge already contains this
+implementation, with actual20H392 context prefix32/TLS240/457wrappers and
+independently derived QuartzCore uniform/state fields. Preserve it whole.
+
+Select GLES only for backboardd using an explicit scoped job policy. Our Metal
+driver declines its own device there; other processes keep ordinary Metal
+discovery and the full validated A620 backend. No accelerator properties are
+removed globally and no Apple code/shared cache is patched for this choice.
+57combined host contracts PASS. Real GUI GLES frames and native app Metal in
+one authenticated device cycle remain required before success/performance claims.
+
 ## Current preferred heads and native ordinary result — 2026-10-26
 
 Reviewed kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3 README and GPU/surface/

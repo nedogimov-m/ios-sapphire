@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include "gui-profile.h"
 #include "graphics-memory-report.h"
+#include "compositor-policy.h"
 
 static bool property(io_service_t service,const char *name,int expected)
 {
@@ -37,6 +38,13 @@ __attribute__((constructor)) static void redfin_graphics_load(void)
         dprintf(2,"REDFIN EAGL LOADER: profile refused bytes=%zu current-profile-rates=10/30/60/90 full-panel=1\n",size);
         return;
     }
+    const char *compositor=getenv(REDFIN_COMPOSITOR_ENV);
+    if(!redfin_compositor_setting_valid(compositor)) {
+        dprintf(2,"REDFIN COMPOSITOR: boot=%016llx invalid per-process API setting\n",nonce);
+        return;
+    }
+    dprintf(2,"REDFIN COMPOSITOR: boot=%016llx process=backboardd requested=%s app-Metal-policy=independent\n",
+        nonce,compositor?compositor:"metal");
     /* Separate actual-ABI library: QuartzCore periods need the measured panel
      * mode in the event server as well as app/UIScreen processes. */
     (void)dlopen("/redfin/lib/libredfin-refresh.dylib",RTLD_NOW|RTLD_LOCAL);

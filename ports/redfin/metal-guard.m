@@ -8,8 +8,13 @@
 #include <mach-o/loader.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/sysctl.h>
 #include "metal-abi.h"
+#include "compositor-policy.h"
+#include "gui-profile.h"
 
 static pthread_once_t checked=PTHREAD_ONCE_INIT;
 static int compatible;
@@ -79,6 +84,18 @@ static int number(io_service_t service,CFStringRef key,int wanted)
 
 int redfin_metal_hardware_ready(void)
 {
+    if(!redfin_compositor_metal_allowed(getprogname(),getenv(REDFIN_COMPOSITOR_ENV))) {
+        static unsigned reports;
+        if(__atomic_fetch_add(&reports,1,__ATOMIC_RELAXED)<4) {
+            char args[608]={0};size_t size=sizeof(args);uint64_t nonce=0;
+            if(!sysctlbyname("kern.bootargs",args,&size,NULL,0)&&size<=sizeof(args)&&
+               redfin_gpu_gui_profile(args,(unsigned)size,&nonce))
+                dprintf(2,"REDFIN COMPOSITOR: boot=%016llx process=backboardd requested=%s Metal-device-declined=1\n",
+                    (unsigned long long)nonce,
+                    redfin_compositor_setting_valid(getenv(REDFIN_COMPOSITOR_ENV))?"gles":"invalid");
+        }
+        return 0;
+    }
     io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("RedwoodGPU"));
     int valid=service && number(service,CFSTR("chip-id"),0x06020001) &&
         number(service,CFSTR("RedfinRuntimeABI"),1) &&

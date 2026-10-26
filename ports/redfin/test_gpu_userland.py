@@ -52,7 +52,9 @@ class GPUUserlandTests(unittest.TestCase):
         self.assertNotIn(gpu_userland.OLD_JOB_PATH,after['LaunchDaemons'])
         self.assertEqual(after['LaunchDaemons'].pop(gpu_userland.JOB_PATH),job)
         backboard=after['LaunchDaemons'].pop(gpu_userland.BACKBOARD_PATH)
-        self.assertEqual(backboard['EnvironmentVariables'],{'EXISTING_OPTION':'retained'})
+        self.assertEqual(backboard['EnvironmentVariables'],
+            {'EXISTING_OPTION':'retained','REDFIN_COMPOSITOR_API':'gles'})
+        backboard['EnvironmentVariables'].pop('REDFIN_COMPOSITOR_API')
         for key in ('StandardOutPath','StandardErrorPath'):self.assertEqual(backboard.pop(key),gpu_userland.EAGL_LOG)
         self.assertEqual(backboard.pop('JetsamProperties'),{'ActiveHardMemoryLimit':512,'InactiveHardMemoryLimit':512})
         self.assertEqual(backboard,self.backboard())
@@ -113,6 +115,24 @@ class GPUUserlandTests(unittest.TestCase):
         bad['ProgramArguments']=['/another/program'];value['LaunchDaemons'][gpu_userland.JOB_PATH]=bad
         with self.assertRaises(ValueError):
             gpu_userland.patch_launchd_cache(wifi_userland._encode_same_size(value,len(self.original()))[0],startup_checks=False)
+
+    def test_compositor_choice_is_reversible_and_scoped_to_the_event_server(self):
+        before=plistlib.loads(self.original())
+        before['LaunchDaemons'][gpu_userland.BACKBOARD_PATH]=self.backboard()
+        raw=wifi_userland._encode_same_size(before,len(self.original()))[0]
+        gles,report=gpu_userland.patch_launchd_cache(raw,system_eagl=True)
+        self.assertEqual(report['compositor_api'],'gles')
+        metal,report=gpu_userland.patch_launchd_cache(gles,system_eagl=True,compositor_api='metal')
+        self.assertEqual(report['compositor_api'],'metal')
+        a,b=plistlib.loads(gles),plistlib.loads(metal)
+        event=a['LaunchDaemons'][gpu_userland.BACKBOARD_PATH]
+        self.assertEqual(event['EnvironmentVariables']['REDFIN_COMPOSITOR_API'],'gles')
+        event['EnvironmentVariables']['REDFIN_COMPOSITOR_API']='metal'
+        self.assertEqual(a,b)
+        self.assertEqual(gpu_userland.patch_launchd_cache(metal,system_eagl=True)[0],gles)
+        for value in ('',None,'software','GLES'):
+            with self.assertRaises(ValueError):
+                gpu_userland.patch_launchd_cache(raw,system_eagl=True,compositor_api=value)
 
 
 if __name__=='__main__':unittest.main()
