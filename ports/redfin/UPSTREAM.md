@@ -1,5 +1,19 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual typed access/cache reuse and poor checked workload — 2026-10-26
+
+V52 passes BOTH complete current A620 correctness jobs with the typed resource
+ABI and64-byte physical dependency history. Native counters prove59fine pages,
+210queries and no coarse fallback, with few CPU/surface preparation waits.
+The full new binary pairing uses the actual old shader cache: pipeline64 has
+AIR62/IR366hits and zero misses/variant compiles, proving cache compatibility
+across the reviewed transport changes. The finite observer logs completion
+and restored idle state. The measured workload is nevertheless4.7actual GPU FPS,
+with97..123draw groups and newly compiled variants; this is a poor result and
+cannot support a smoothness claim. Repeat exact native binaries with probes OFF
+and the plain ordinary workload, then investigate actual remaining waits/CPU
+work or a runtime regression. Existing preferred source pins stay unchanged.
+
 ## Complete resource-access native delivery — 2026-10-26
 
 CI40256228186/run5/sourcec0d129b completes the full native kernel with all four

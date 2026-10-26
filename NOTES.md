@@ -1,5 +1,48 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V52 typed access and cross-build shader cache PASS;4.7FPS workload — 2026-10-26
+
+Source6d05fa1/kernel codec0d129b, CI40256228186/run5 SUCCESS; kernel
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Graphics input741e17a268907fe4a1263bd0c4397e07429487a708771782a8449fc0d1a84db2,
+full pairing5f5aa2615ca9ab5b16016595b5a3ad8f39413e6d87f3d51c23b875afda6b7358,
+shader cache ID remains the actually verified old496301fc..; UIaccess-v1.
+V58 applied ONCE:25673728bytes,4new/zero freed blocks,135full live ranges/
+preimages/backups/readback/full files/signatures/readonly fsck PASS. V58 STALE,
+never reuse. V52 imageaf8aaaf2d6c0c3dbd37cd8c2804e80f53f76e7046d61d94a2b70e85c9380bf89. Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x62717b4007d6c52d redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no panic or GPU stop/fault; one backboardd62,
+clean unmounted consistent HFSX/write_count1300000; verified Fastboot. BOTH
+current native jobs PASS, including192compute commands/two queues,70cache
+variants, half/MRT/varyings/sampler/blit/pitch/guard/binding/CPU-conversion/
+persistence/queued lifetime/error/epoch cases and both256x256 IOSurface draws.
+Typed ABI is actually exercised. At1280jobs:59fine pages,1846partial marks,
+210fine queries, zero coarse fallbacks;117CPU preparations/13waits/105reads,
+23709us summed preparation waits. Surface barriers total190calls/2waits,
+5053us resolution and20540us waiting. These do not include Metal's final-fence
+or frontend queue waits; do not reinterpret them as whole-frame latency.
+
+Cross-build cache preservation is proved on A620: at pipeline64 AIR62hits/0misses,
+IR366hits/0misses and zero variant compiles. Later new variants do appear,
+including0.38..0.96second pipeline preparations and10new disk entries. No broad
+cache invalidation occurred. The finite observer completes/restores its idle
+request: stats-valid1/timed-out0/finish-reason complete/idle-restored1. However,
+the actual animation is only47GPU frames/10.000028physical seconds =4.699987FPS,
+ten samples3.000..11.999, callbacks59.3FPS/max112.2ms, physical90Hz/counter19.2MHz/
+Mach ratio1.0. This is a POOR performance result, not a smoothness success.
+Sampled commands include97..123draws versus V51's37, along with cold new variants,
+259..338ms frontend queueing and some257ms encoding. The workload differs, so
+it cannot by itself isolate an access-history regression or its absence.
+
+Next: exact same native kernel/graphics/UI/compiler IDs and saved caches,
+startup jobs OFF/plain animation. The new --policy-only path already performs
+that host policy change without toolchain setup or native rebuild, preserving
+original checks-on evidence. Fresh V59/root1300000 and imageV53; no app opens.
+If ordinary performance remains worse, investigate/compare with the proven
+legacy backend using the preserved ABIs rather than declaring this validated
+correctness block a performance success. Full60/90render and broader goal remain
+unfinished. Private evidence: logs/redfin/gui-platform-v52.
+
 ## REDFIN complete resource-access CI delivered; V58 staged/V52 ready — 2026-10-26
 
 Sourcec0d129b876f6ec396fc142ef18371919a8bd5b7e, GitHub Actions40256228186/run5
