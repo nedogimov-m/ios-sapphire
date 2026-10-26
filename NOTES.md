@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete physical-output/clock block V101 applied; V97 starts — 2026-10-27
+
+Source b6e1a1e; completed kernel Actions40417409066/run23/source5fedeae,
+kernel a456fc9af8d208aa26bffe06c47bf52ca07258d4ac9d4805fe0575090c2dc69c. Native GPU/Mesa/app Metal/compiler/cache unchanged;
+new actual20H392 UI e155cb49.. . Full V97 payload/liveFDT/ADT/source/firmware/
+private inputs/retained ABI/paired native checker preflight PASS. V101 fresh
+at actual clean1698420 applies ONCE: full live preimages/backups/signatures,
+readonly native fsck, 30changed/4new/zero freed blocks, complete range and
+file readback, clean Fastboot PASS. V101 is STALE; never reuse. Cached/file
+startup jobs agree ON; captures/automatic Phone/Photos opens remain OFF.
+
+V97 image 1097b183488484b900b8a941576586443b87fc4b29cbaf9896d70d962a77566b,
+fresh de3b8477435b3aa7: one integrated full independent GMEM/sysmem/app Metal,
+private filter/physical direct-reference/output health, late-clock frame
+ownership and corrected finite animate-checked capture. Actual direct output,
+FPS gain and physical inset persistence remain unproved before terminal data.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xde3b8477435b3aa7 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Next fresh V102/imageV98 must bind the actual postboot root epoch. Broad
+goal remains active; no controls/brightness/cellular/camera completion claimed.
+
 ## REDFIN V96 both native GPU modes pass; complete late-clock/gate fix built — 2026-10-27
 
 V96 TERMINAL: authenticated0553cfc7c755322b, userspace alive, one backboardd62,
