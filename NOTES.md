@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V59 ordinary scheduling runtime:52.300GPU FPS, no material speedup — 2026-10-26
+
+Code2325d8e, documentationcbb8b90; exact V58 native binaries/pairing2407206f..
+and shader cache496301fc.. . Policy-only OFF archives checks-on evidence and
+preserves all native bytes; no new compiler/kernel/UI preparation. Kernel
+GitHub Actions40256228186/run5/sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Fresh V65 applies ONCE at1360424:266240bytes,0new blocks; full file hashes/
+signatures/preimages/backups/readonly fsck/readback PASS. V65 STALE, never reuse.
+Exact observed V59 args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7480050e0c6010e6 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no runtime GPU fault/stop or panic, one
+backboardd61. Both correctness jobs truly OFF/current-nonce lines0; no app opens
+or captures. Stable window with zero replacements,8second warmup, complete
+10.000094physical seconds:523GPU/523total frames =52.299508FPS. Ten samples
+49.970..54.028FPS,0missed, stats-valid1/timed-out0/idle-restored1. Panel90Hz,
+callbacks601/60FPS/max16.667ms, physical19.2MHz/Mach ratio1.0. This is effectively
+V57's52.699FPS, NOT a demonstrated FPS increase or stable60/90rendering. The
+V58 checks-gated27.399FPS must not replace this ordinary result or be attributed
+to one cause. Its full native A620 correctness applies to these exact binaries.
+
+All32frontend/retirement partitions and32scheduling samples validate. At last
+sampled sequence2280:3scheduled API waits/6238us total,3early returns;3completed
+waits/43095us;989scheduled and2347completed handler deliveries. The successful
+phase separation is exercised, but direct API waits are too infrequent here
+to explain per-frame lag. This does not isolate callback costs or GPU execution.
+Median snapshot3314bytes/100us; median draw3127us, native wait22165.5us and
+retirement gate0us. Preserve these measured remaining budgets. No new fake
+completion or CPU-pixel path was introduced. Native pixel/error/epoch/lifetime
+and reentrant callback contracts already pass in V58.
+
+Clean consistent unmounted HFSX/write_count1370334, verified Fastboot. Cycle
+44440 TERMINAL exit0; no live device/build operation remains. Private evidence:
+logs/redfin/gui-platform-v59/{presentation-summary,frontend-latency,scheduling-summary}.json.
+Next fresh updaterV66/imageV60. Next graphics block: actual20H392 display-state
+creation/update and remaining native frame/output budget. Read-only review
+confirms CADisplayLink maximum/interval getters access internal display state
+directly; existing CADisplay/UIScreen getter overrides do not prove90callbacks.
+Follow the real initialization/update path before changing cadence, preserve
+real timestamps and distinguish panel/callback/render rates. Reuse current
+artifacts and cache. Broader Wi-Fi/power/sensors/Apple-service requirements
+remain active; no Phone/Photos auto launches or human checks requested here.
+
 ## REDFIN V58 native scheduling and all previous GPU contracts PASS — 2026-10-26
 
 Source2325d8e; native pairing2407206f.., compiler input7548b9b0.. and retained

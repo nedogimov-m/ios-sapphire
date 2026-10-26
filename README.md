@@ -7,8 +7,11 @@ Primary stable upstream sources, selected by the user:
 Current Redfin GUI composition and panel scaling/packing run on Adreno620.
 `redfinfb=1` publishes the framebuffer interface used by that GPU display path.
 After bounding immutable Metal constant uploads by their actual shader reads,
-V57 measures527completed GPU frames in10.000267physical seconds:52.699FPS in
-a finite ordinary system animation, with startup diagnostics and captures OFF.
+V57 measured52.699FPS in a finite ordinary system animation. Correct native
+Metal scheduling now also passes all A620 pixel/error/callback/lifetime checks;
+V59 measures523completed GPU frames in10.000094physical seconds:52.300FPS,
+with startup diagnostics and captures OFF. That change preserves the ordinary
+performance level rather than demonstrating another FPS increase.
 The panel is independently verified at90Hz; display callbacks remain60Hz and
 sustained60/90render FPS is unfinished. Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next

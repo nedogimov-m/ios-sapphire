@@ -1,5 +1,25 @@
 # HackiOS upstream review — 2026-10-22
 
+## Ordinary scheduling-phase comparison:52.300FPS, correctness retained — 2026-10-26
+
+V59 reuses V58/source2325d8e native binaries, kernel, UI and compiler cache with
+startup correctness jobs OFF. Actual ordinary observation validates523GPU
+frames/10.000094physical seconds (52.299508FPS), one window server, no runtime
+fault/panic, restored idle and a clean root/Fastboot. This is effectively the
+old ordinary52.699FPS, not a measured speedup; keep the correct Metal contract
+and all actual V58 native pixel/error/lifetime evidence. The checked27.399FPS
+run does not establish ordinary performance for these same native binaries.
+
+At sampled sequence2280, actual counters show3scheduled waits/6238us and3early
+returns;989scheduled callbacks and2347completed callbacks. Direct scheduled
+waits alone do not explain persistent frame latency. Native waits retain a
+22.2ms median; output and callback cadence still need work. Reviewed pins stay
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland906425b75e02b4f99eb5d7bb1ef7c9583472d772.
+Actual20H392 CADisplayLink maximum/interval getters read internal state rather
+than forwarding through the existing public-display getter adapters. Review
+that state's real creation/update path and measured native timing contract;
+90Hz panel/getter values remain distinct from actual60Hz callbacks.
+
 ## Actual A620 scheduled/completed contract PASS; ordinary speed pending — 2026-10-26
 
 V58/source2325d8e passes actual native publication,4early scheduled returns,
@@ -14,7 +34,7 @@ The complete checks-gated animation observes27.399FPS, not an improvement over
 the previous ordinary52.699FPS. One system-window replacement is recovered
 before fresh warmup. Do not attribute the difference to one cause without
 the ordinary same-binary OFF run. New process samples show only5direct scheduled
-waits by3840completed sampled commands, versus9428scheduled handler deliveries;
+waits by sampled sequence3840, versus9428scheduled handler deliveries;
 the callback phase is heavily used. No native correctness rollback is warranted
 by these counters alone; actual ordinary performance remains to be measured.
 
