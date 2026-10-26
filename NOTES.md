@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN precision2 output kernel CI22/V99 verified; combined V94 starts — 2026-10-27
+
+Complete precision contract sourcedbd18cc;104combined host/current native TU
+compile PASS. Actions40413610563/run22 TERMINAL SUCCESS, exact old+current
+native-output-direct.patch map/arm64 non-PAC/XNU/KDK/kernel/source identity
+verified. Actual kernel99d6baf1a61e44be09b3ab66d8c90b8047e229eb09f81cfcb132b3acb501b2c2. Native20H392 build034305 adds scoped GLES sysmem selection; Mesa1a4ad42c../
+app Metal17d0f01f../shader cache496301fc../UI and kernel patch map are retained. Fresh V99 at actual clean1679744/empty journal applied ONCE; all live
+preimages/backups/signatures/readonly fsck/ranges and complete files read back,
+clean Fastboot PASS. Cached/file startup jobs agree ON; GLES/direct/sysmem/bound2/app
+Metal system, captures/automatic Phone/Photos launches OFF. V99 STALE/never
+reuse; next fresh V100/imageV95 at actual postboot epoch pending collection.
+
+V94 image48b01c70d82dbbf5ad66c55053af74731d83b7afe8522b80adc251c88b053383, fresh7489964ed159f42f: exact1:1/alpha, explicitly bounded fractional
+RGB2/255, every native case/max/guard/intermediate-untouched result; actual
+ABI2 output route; full retained app Metal/GPU/GLES/fetch/budget proof and
+animate-checked. V92's ABI1 strict rejection/legacy51.742FPS remains recorded.
+All four revised native cases must pass before fast output is selected; no
+new native/FPS success inferred before terminal evidence. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7489964ed159f42f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains unfinished.
+
 ## REDFIN complete GLES sysmem/fused precision pipeline;104common/native build PASS — 2026-10-27
 
 Combine the connected rendering/output changes before the next hardware run.
