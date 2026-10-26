@@ -182,14 +182,8 @@ jobs:
           key: redfin-ccache-${{ env.MACHINE_CONFIG }}-${{ env.KERNEL_CONFIG }}-${{ hashFiles('ports/redfin/*.patch', 'ports/redfin/include/**', 'xnu/patches/**', 'ports/redfin/build-xnu.py') }}
           restore-keys: |
             redfin-ccache-${{ env.MACHINE_CONFIG }}-${{ env.KERNEL_CONFIG }}-
-      - name: Restore verified build-kit download
-        uses: actions/cache@v4
-        with:
-          # Run14 took about107s to restore the expanded kit; a fresh verified
-          # expansion in run13 took36s. Keep the compact original download.
-          # A separate key avoids restoring the larger previous archives.
-          path: research/redfin-build/Kernel_Debug_Kit_13.5_build_22G74.dmg
-          key: redfin-kdk-dmg-22G74-29866842eef03981-v1
+      # Native verified downloads took6..8s; remote compact-kit restores in
+      # runs16/17 took30..35s. Keep the builder's hash checks and local reuse.
       - name: Build exact Redfin sources
         run: python3 ports/redfin/build-xnu.py --no-install-deps
       - name: Collect Redfin kernel and source identity

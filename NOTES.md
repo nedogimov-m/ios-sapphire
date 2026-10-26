@@ -1,5 +1,18 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected run17 compiling; avoid slow remote kit restore next time — 2026-10-26
+
+Corrected sourcea3a7759da752889ff31eae0726005af423d8a1bb in actual
+Actions40370957731/run17. Superseded40370182934/run16 is TERMINAL CANCELLED;
+no hardware image/test from it. V86 remains fresh/clean1558759 in idle recovery.
+Actual compiler-cache restore15s and compact KDK restore30s in run17; run16
+compact restore35s. Earlier verified fresh downloads take6.207s(run13) and
+7.891s(run15). Remove remote kit restore from FUTURE workflows, preserving
+native SHA256/size checks and local complete-expansion reuse. This source edit
+does not affect the already running run17; future wall-time savings unmeasured.
+Native compilation, exact artifact verification and one combined V80 still
+pending. No new boot args or FPS claim. Broad goal active/unfinished.
+
 ## REDFIN native BSD compile scope corrected; fresh V86 snapshot complete — 2026-10-26
 
 Source96b96ec entered Actions40370182934/run16. Before hardware, actual XNU
