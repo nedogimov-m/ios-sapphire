@@ -22,7 +22,7 @@ static struct {
 } gx={.context=(void *)1,.gpu=0x100000,.scratch=0x200000,.data={{ring}}};
 static uint32_t gpu_rptr,status,hw_done,hw_issued[32],hw_count;
 static uint64_t clock_ns;static unsigned audits,mapped,diagnostics,poisons,dvfs;
-static bool ready=true,advance=true,need_vote,dirty_map;
+static bool ready=true,advance=true,need_vote,dirty_map,finish_before_kick;
 static int fail_audit;
 static uint64_t gm_time_ns(void *p){(void)p;return ++clock_ns;}
 static int gr_live(void){return ready?0:ENXIO;}
@@ -35,8 +35,13 @@ static uint32_t gm_scalar_read(uintptr_t address)
    if(address==gx.gpu+4*0x821||address==gx.gpu+4*0x823)return 0;
    REQUIRE(false);return 0;
 }
+static void complete_one(void);
 static void gm_memory_store(uintptr_t address,uint32_t value)
-{REQUIRE(address==gx.gpu+4*0x807&&value==gx.wptr);REQUIRE(hw_count<32);hw_issued[hw_count++]=gr.fence;status=2;}
+{
+   REQUIRE(address==gx.gpu+4*0x807&&value==gx.wptr);
+   if(finish_before_kick){finish_before_kick=false;complete_one();}
+   REQUIRE(hw_count<32);hw_issued[hw_count++]=gr.fence;status=2;
+}
 static void redfin_gpu_sync(void *p,uint64_t bytes,bool invalidate)
 {(void)p;(void)bytes;REQUIRE(!invalidate);}
 static void redfin_gpu_poison(const char *reason){(void)reason;ready=false;++poisons;}
@@ -69,7 +74,7 @@ static void reset(void)
 {
    memset(&gr,0,sizeof(gr));memset(ring,0,sizeof(ring));memset(scratch,0,sizeof(scratch));
    gx.wptr=gpu_rptr=status=hw_done=hw_count=0;clock_ns=0;audits=mapped=diagnostics=poisons=dvfs=0;
-   ready=advance=true;need_vote=dirty_map=false;fail_audit=0;
+   ready=advance=true;need_vote=dirty_map=finish_before_kick=false;fail_audit=0;
 }
 int main(void)
 {
@@ -102,5 +107,11 @@ int main(void)
    scratch[RF_GR_FENCE_AT/4]=a+1;REQUIRE(redfin_gpu_wait(a)==EPROTO&&!ready&&!gr.completed);
    reset();address=rf_gr_allocate(&gr.arena,0x4000);REQUIRE(!redfin_gpu_publish(&address,&words,1,&a));
    complete_one();fail_audit=1;REQUIRE(redfin_gpu_wait(a)==EIO&&!ready&&!gr.completed);
+   /* A stale counter from before the doorbell must not claim overlap when
+    * the predecessor finishes while the CPU publishes the new ring words. */
+   reset();address=rf_gr_allocate(&gr.arena,0x4000);REQUIRE(!redfin_gpu_publish(&address,&words,1,&a));
+   finish_before_kick=true;REQUIRE(!redfin_gpu_publish(&address,&words,1,&b));
+   REQUIRE(a==1&&b==2&&hw_done==1&&!gr.physical_overlap&&gr.physical_max_pending==1);
+   REQUIRE(!redfin_gpu_quiesce()&&gr.completed==2);
    puts("actual physical runtime publication/counter/timestamp/wrap/quiescence/failure PASS");return 0;
 }

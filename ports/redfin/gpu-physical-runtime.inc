@@ -121,13 +121,20 @@ int redfin_gpu_publish(const uint64_t *addresses,const uint32_t *words,unsigned 
     gr.fence=next;gx.wptr=(gx.wptr+n)%ring_words;
     gm_memory_store(gx.gpu+4*0x807,gx.wptr);*fence=next;
     gr.publish_ns+=gm_time_ns(gx.context)-publish_at;
-    bool overlap=actual_before+1<next;
+    /* Observe AFTER the doorbell. A pre-publication sample alone cannot
+     * prove overlap: the predecessor could finish while the CPU copies the
+     * ring words. This counter never substitutes for audited retirement. */
+    uint32_t actual_after=gm_scalar_read(gx.scratch+RF_GR_FENCE_AT);
+    error=actual_after<actual_before?EPROTO:
+        rf_gi_counter(gr.fence,gr.completed,actual_after,gr.completed,&ignored);
+    if(error){redfin_gpu_poison("post-publication physical counter changed");return error;}
+    bool overlap=actual_after+1<next;
     if(overlap)++gr.physical_overlap;
-    unsigned pending=next-actual_before;
+    unsigned pending=next-actual_after;
     if(pending>gr.physical_max_pending)gr.physical_max_pending=pending;
     if(next<=8||!(next%256)||(overlap&&gr.physical_overlap<=4))
-        printf("REDFIN GPU PHYSICAL PUB: fence=%u IBs=%u prior-done=%u pending=%u overlap=%llu max-pending=%u ring=%u/%u owned-slots=1\n",
-            next,count,actual_before,pending,gr.physical_overlap,gr.physical_max_pending,rptr,gx.wptr);
+        printf("REDFIN GPU PHYSICAL PUB: fence=%u IBs=%u prior-done=%u post-done=%u pending=%u overlap=%llu max-pending=%u ring=%u/%u owned-slots=1\n",
+            next,count,actual_before,actual_after,pending,gr.physical_overlap,gr.physical_max_pending,rptr,gx.wptr);
     return 0;
 }
 /* Kernel display commands/stage storage remain synchronous and may be reused

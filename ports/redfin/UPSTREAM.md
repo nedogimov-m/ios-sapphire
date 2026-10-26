@@ -1,5 +1,16 @@
 # HackiOS upstream review — 2026-10-22
 
+## Require actual fence observation after physical publication — 2026-10-26
+
+Strengthen the reviewed async-ring adaptation's evidence: a guarded native
+fence sample after the doorbell determines actual pending/overlap counts.
+Pre-publication values may become stale while ring words are written. The
+actual runtime receiver exercises completion in that interval and requires
+zero overlap; counter rollback fails.5affected contracts PASS. Complete
+native audits/real retirement remain mandatory. Run11/source3961c81 compiles
+the earlier observation and is superseded for hardware; matching final CI
+and real A620 proof remain pending. Preferred upstream pins stay unchanged.
+
 ## Redfin physical publication/retirement adaptation built as one source block — 2026-10-26
 
 Adapt the reviewed Angelpro344a8af async-ring idea to preferred kernel8e611870..

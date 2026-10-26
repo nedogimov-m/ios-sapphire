@@ -1,5 +1,30 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN physical FIFO CI/run11 compiling; strengthen post-doorbell evidence — 2026-10-26
+
+Code3961c81d385ab6c7bf376b9ffbdb4a34c1c56ece pushed only to owned redfin-ci.
+Actions40332791296/run11 is compiling the complete native kernel. No new
+kernel artifact or physical A620 success exists yet. Fresh V77 readonly
+snapshot complete: actual clean1478906, empty journal, complete native target
+preimages; no root filesystem writes. Device remains verified recovery idle.
+Stage/apply must await the actual final matching kernel/image proof.
+
+Review correction after103host contracts: observe the common native fence
+again after the ring doorbell. A prior counter sample may become stale while
+the CPU writes/publishes commands; it cannot alone establish2actual pending
+physical submissions. Compact PUB records now include prior-done/post-done,
+and overlap/max-pending derive from the guarded post-doorbell counter. A
+counter rollback across publication fails. Extend the actual runtime receiver
+with a predecessor completing during the doorbell interval: this must report
+no overlap. All5affected physical packet/runtime/worker/source/log contracts
+PASS. No client completion/audit/fence semantics are weakened.
+
+Run11 uses the earlier counter observation and is superseded for hardware.
+Let it reach terminal compile/cache completion, then dispatch matching CI for
+the corrected source. Never use a run11 image as proof of current code. Native
+6e6e432c../pair24dfc27b../UI/cache remain exact; startup correctness ON, captures/
+app opens OFF. Next fresh V77/imageV71; broad goal remains active/unfinished.
+
 ## REDFIN complete physical FIFO publication/retirement block;103host contracts PASS — 2026-10-26
 
 Base3a9c399; reconstruct exact7current kernel files from14ordered overlays of
