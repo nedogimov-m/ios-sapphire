@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CI preparation: expanded-kit cache regression removed — 2026-10-26
+
+Actual run14/40354200257 restores the expanded KDK from15:56:55 until about
+15:58:42UTC(~107s) before compilation. Run13 measured only35.634s for the
+verified package expansion and6.207s for its source download. Retaining the
+expanded tree in Actions is slower in this observation, so revert the remote
+cache to the compact original verified DMG only. Use a new compact-only key
+without the old expanded restore prefix. Keep local complete-expansion reuse
+and original DMG hash/size checks. No new CI run or phone cycle for this fix.
+
+Record optional raw ccache counters before/after future native builds, including
+failed builds; unavailable counters cannot fail the actual kernel build. This
+will distinguish compiler-cache work from other preparation. Host ccache is
+absent, so only builder AST and YAML/compact-cache policy are checked locally;
+actual CI counter collection and future elapsed improvement remain unmeasured.
+Current run14 stays exact source32f777a and is already compiling; its kernel
+flags/patches/native checker/UI/cache remain unchanged. Broad goal active.
+
 ## REDFIN corrected surface-cache run14 compiling; fresh V83 snapshot complete — 2026-10-26
 
 Complete code32f777abdd8ec4edcf24968a70bf4ebb9f8aea7e pushed only to owned

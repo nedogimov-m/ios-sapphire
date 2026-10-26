@@ -333,7 +333,27 @@ def main(argv=None):
             (dxb / "build.sh").write_text(source + "\n")
             environment.update(KDKROOT=str(kdk), MACOS_VERSION="13.5",
                                KERNEL_CONFIG="DEVELOPMENT", MACHINE_CONFIG="SWEET", ARCH_CONFIG="ARM64")
-            run([bash, "build.sh"], cwd=dxb)
+            def cache_statistics(phase):
+                if not ccache:
+                    return
+                try:
+                    output = run([ccache, "--print-stats"], capture=True)
+                    counters = {}
+                    for line in output.splitlines():
+                        parts = line.split()
+                        if len(parts) == 2 and parts[1].lstrip("-").isdigit():
+                            counters[parts[0]] = int(parts[1])
+                    result.setdefault("ccache_statistics", {})[phase] = counters
+                except (OSError, subprocess.CalledProcessError) as error:
+                    # Optional observation cannot change kernel build success.
+                    result.setdefault("ccache_statistics", {})[phase] = {
+                        "unavailable": type(error).__name__}
+
+            cache_statistics("before")
+            try:
+                run([bash, "build.sh"], cwd=dxb)
+            finally:
+                cache_statistics("after")
             kernels = list((dxb / "fakeroot").rglob("kernel.development.sweet"))
             result["kernels"] = {str(path): digest(path) for path in kernels if path.is_file()}
             result["success"] = bool(result["kernels"])
