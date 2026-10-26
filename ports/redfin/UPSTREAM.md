@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Exact-binary ordinary GLES54.738FPS; native input recovery CI19 next — 2026-10-27
+
+V86 ordinary diagnostics OFF with exact V85 sourcea7ddbe1/native323bf7ed../
+pair7e0f4a5c../run18kernel4fa88838.. completes548GPU frames/10.011360physical
+seconds =54.7378178FPS at90Hz callbacks. Actual FD620 GLES1140frames/shared/
+copy0/errors0,1080sampled publications/fallback0; one window server, no crash/
+panic, clean1622688/Fastboot. Full same-binary native app Metal proof stays V85.
+No smooth60/90FPS claim. Preferred sources/compiler/shader cache remain exact.
+
+User-confirmed dead touch reproduces the same initial queue-full exit with
+batches0/overflows1/recovered0. Its existing bounded native resynchronizer is
+now applied to startup in own sourcec559395. Actions40394810408/run19 builds
+that change from c7d69581aa08de8e2adf01f8a145777e6c4ce8f4; actual device recovery
+is pending. Kernel GPU source and paired GLES/application Metal stay unchanged.
+
 ## Redfin GLES publication proves54.639FPS; startup input recovery completes existing contract — 2026-10-27
 
 V85/sourcea7ddbe1/kernel Actions40372742634/run18/4fa88838.. proves actual FD620

@@ -6,14 +6,15 @@ Primary stable upstream sources, selected by the user:
 
 Current Redfin GUI composition and panel scaling/packing run on Adreno620.
 `redfinfb=1` publishes the framebuffer interface used by that GPU display path.
-The latest V83 run uses the complete preferred upstream GLES bridge for GUI
-composition while keeping native Metal for applications. Real FD620 GLES
-frames/shared surfaces, zero GL errors/copy-back records and the complete
-native Metal contract pass in the same boot. The checked animation measures
-42.353FPS. Exact-binary ordinary V84 measures432completed GPU frames in
-10.011347physical seconds:43.151FPS at90Hz callbacks, one window server,
-zero contacts/crashes/GL errors. This is above ordinary Metal V81's34.462FPS;
-smooth60/90render FPS remains unfinished.
+The preferred upstream GLES bridge now composes the GUI while native Metal
+remains available to applications. V85 proves both paths in one boot, including
+native Metal/IOSurface pixels and actual kernel publication without a GPU wait
+in the window server. Exact-binary ordinary V86 measures548completed GPU frames
+in10.011360physical seconds:54.738FPS at90Hz callbacks, one server and zero GL
+errors/copy-back records. This is above ordinary V84's43.151FPS and Metal V81's
+34.462FPS. Smooth60/90render FPS remains unfinished. A separate startup touch
+queue overflow is reproduced and fixed in source; native CI19/device proof
+is pending. Phone/Photos automatic launches remain disabled.
 After bounding immutable Metal constant uploads by their actual shader reads,
 V57 measured52.699FPS in a finite ordinary system animation. Correct native
 Metal scheduling now also passes all A620 pixel/error/callback/lifetime checks;

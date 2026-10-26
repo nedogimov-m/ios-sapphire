@@ -1,5 +1,27 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V86 ordinary54.738FPS; user confirms startup touch failure, CI19 recovery builds — 2026-10-27
+
+Exact V85 native input323bf7ed../pair7e0f4a5c../kernel Actions40372742634/run18/
+source0d3767d/kernel4fa88838../UI/compiler cache, policy-only diagnostics OFF.
+Cycle32322 TERMINAL exit0; authenticatede4b2ce634db6801e, one backboardd61,
+no crash/panic, clean unmounted HFSX1622688/verified Fastboot. Ordinary548GPU
+frames/10.011360physical seconds =54.7378178FPS,902callbacks/90Hz, complete
+stable interval/no missed samples/timeout, idle restored. Current-nonce
+native startup checks0 as intended; full native app Metal/GPU proof stays V85.
+Actual FD620 GLES1140maximum frames/23shared samples/copy0/errors0,13real
+publication samples reach1080/fallbacks0/GPU-wait0. Asynchronous path PASS.
+Smooth60/90render FPS remains unfinished. V92 STALE/never reuse; next fresh
+V93/imageV87 at actual1622688. Exact V86 boot args in its starting entry below.
+
+User reports dead touch in this old-kernel run. Journal confirms the exact V85
+startup failure again: error84/batches0/contacts0/overflows1/recovered0. The
+known initial discard branch is still old run18 here. Complete startup recovery
+sourcec559395 plus docs c7d69581aa08de8e2adf01f8a145777e6c4ce8f4 builds in
+Actions40394810408/run19;58host/actual native TU PASS. Next image uses that
+actual verified artifact. GPU native source/paired app Metal/Mesa/UI stay exact.
+Broad goal active; no restored touch claim before fresh device evidence.
+
 ## REDFIN V92 ordinary GLES policy verified; V86 starts — 2026-10-27
 
 Exact full-coexistence-validated V85 sourcea7ddbe1/native input323bf7ed../
