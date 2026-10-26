@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V87 native CI19 touch works157contacts; GLES4800frames/interactive76.290FPS — 2026-10-27
+
+Implementationc559395/CI sourcec7d69581aa08de8e2adf01f8a145777e6c4ce8f4,
+Actions40394810408/run19 SUCCESS, kernelc98c4cbb46932c80821cc1bdc4f81a046ec556e1959ed5f4516e92cc490cb34a
+(18742472bytes, arm64/non-PAC). Complete exact prior patch map plus
+native-touch-startup.patch/KDK/XNU/native markers verified. Source58host
+contracts and actual full native touch TU PASS. Paired userland/Mesa input
+323bf7ed../pair7e0f4a5c../compiler cache496301fc../UI unchanged. Native GPU
+source unchanged; whole kernel rebuilt in CI, no userland/compiler rebuild.
+
+Cycle96151 TERMINAL exit0; image13aece34ffe76466a20753be2423da31c2a59ece407b095ae02bde777884207e,
+authenticatedcc1acb80eaa5dd62, one backboardd61/no crash/panic, clean unmounted
+HFSX1634464/verified Fastboot. V93 STALE/never reuse; next fresh V94/imageV88
+at actual1634464. Exact boot args in V87 starting entry below.
+
+User confirms new GUI swipe/tap input works. Actual SEC consumer ready,
+2004batches/157contacts/157releases, final error0/overflows0/recovered0.
+Startup overflow did not occur in this boot, so its hardware recovery branch
+was not exercised. The added initial queue-full/corrupt-reply branch is
+covered by forced host cases/native compilation; do not label it an observed
+hardware queue clear. GUI input and sustained driver health are observed.
+
+Actual FD620 GLES4800maximum frames/84shared samples, copied0/errors0,
+43publication samples reach4680/fallbacks0/GPU-wait0; no backboardd Metal
+records or crash. Complete genuine asynchronous publication/output preserved.
+Startup correctness/captures/Phone/Photos automatic opens OFF; full native
+app Metal/GPU/pixel/cache4mode/guard contract retained in V85. No fresh native
+Metal CHECK in V87 by design; no claim that it ran in this ordinary boot.
+
+Finite system animation763GPU frames/10.001321physical seconds =76.2899221FPS.
+Panel90Hz,813callbacks/81.188Hz, sample rates54.382..85.922FPS; callback maximum
+pause160.575ms, no timeout/missed samples, idle restored.157user contacts make
+this an interactive observation, not a matched quiet improvement over V86's
+54.737818FPS/90Hz/no input. Do not claim stable60/90render FPS or add separate
+kernel hardware/output samples into one frame budget. Full fresh activity and
+input evidence: logs/redfin/gui-platform-v87/touch-runtime-evidence.json.
+
+Requested ready GLES GUI/native app Metal split and restored input milestone
+complete. Broad goal active: smooth60/90render, Wi-Fi autojoin/readiness,
+complete power/charging/thermals/sensors and Apple service conditions remain.
+Next GPU review: existing mirror-to-IOSurface blit cost and actual padded import/
+framebuffer-fetch correctness before any direct-target optimization. Whole
+related block then common checks; no automatic Phone/Photos launches.
+
 ## REDFIN native touch startup CI19/V93 verified; complete GUI V87 starts — 2026-10-27
 
 Sourcec7d69581aa08de8e2adf01f8a145777e6c4ce8f4, Actions40394810408/run19 terminal
@@ -8,7 +52,8 @@ arm64/non-PAC/KDK/source/complete old GPU+new touch ABI markers PASS. Actual
 kernelc98c4cbb46932c80821cc1bdc4f81a046ec556e1959ed5f4516e92cc490cb34a, image13aece34ffe76466a20753be2423da31c2a59ece407b095ae02bde777884207e. Native/Mesa input323bf7ed../
 pair7e0f4a5c../UI/compiler cache unchanged; exact V85 full app Metal and V86
 ordinary54.738FPS artifacts retained. Only initial touch discard now uses its
-existing owned/bounded queue recovery; no native GPU source change/rebuild.
+existing owned/bounded queue recovery; native GPU source unchanged and no
+userland/compiler rebuild.
 58combined touch/SMP/GPU-latency contracts/actual native TU compile PASS.
 
 Fresh V93 actual1622688/empty journal applied ONCE; all live preimages/backups,

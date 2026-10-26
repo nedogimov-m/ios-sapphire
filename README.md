@@ -12,9 +12,13 @@ native Metal/IOSurface pixels and actual kernel publication without a GPU wait
 in the window server. Exact-binary ordinary V86 measures548completed GPU frames
 in10.011360physical seconds:54.738FPS at90Hz callbacks, one server and zero GL
 errors/copy-back records. This is above ordinary V84's43.151FPS and Metal V81's
-34.462FPS. Smooth60/90render FPS remains unfinished. A separate startup touch
-queue overflow is reproduced and fixed in source; native CI19/device proof
-is pending. Phone/Photos automatic launches remain disabled.
+34.462FPS. The touch startup recovery kernel (Actions40394810408/run19) now
+passes V87 with157real contacts/releases, zero driver errors and user-confirmed
+working input. Its interactive system animation measures76.290FPS, varying
+54.382..85.922FPS with a160.575ms maximum callback pause; this is not a matched
+quiet comparison or stable60/90render FPS. GLES4800frames/shared surfaces/
+copy0/errors0 and one window server are observed. Phone/Photos automatic
+launches remain disabled.
 After bounding immutable Metal constant uploads by their actual shader reads,
 V57 measured52.699FPS in a finite ordinary system animation. Correct native
 Metal scheduling now also passes all A620 pixel/error/callback/lifetime checks;

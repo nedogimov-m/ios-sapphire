@@ -1,5 +1,24 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native input/GLES V87 integration passes with user-confirmed touch — 2026-10-27
+
+Own startup-recovery sourcec559395, Actions40394810408/run19/sourcec7d69581..
+verified kernelc98c4cbb.. retains the entire exact previous GPU source/ABI patch
+map plus native-touch-startup.patch. Actual userland/Mesa323bf7ed../pair7e0f4a5c../
+UI/compiler cache unchanged. V87 authenticated clean1634464/Fastboot, one server,
+SEC2004batches/157contacts/releases, error0. User confirms working GUI input.
+No startup overflow occurs in this boot: the hardware recovery branch is not
+claimed as exercised. Forced startup faults/ownership/reset/limits and native
+TU are covered by58common host/native compile contracts.
+
+FD620 GLES4800frames/shared/copy0/errors0,4680sampled real publications/fallback0/
+GPU-wait0 and no server crash. Full app Metal native correctness remains V85;
+V87 diagnostics are OFF. Interactive system observation763GPU frames/10.001321s
+=76.290FPS, sample54.382..85.922FPS, callback81.188Hz/max pause160.575ms with
+panel90Hz.157contacts prevent calling this a matched quiet gain over V86's
+54.738FPS. Stable60/90render remains unfinished. Preferred source selection
+88513176../906425b7.. and complete existing GLES bridge are preserved.
+
 ## Exact-binary ordinary GLES54.738FPS; native input recovery CI19 next — 2026-10-27
 
 V86 ordinary diagnostics OFF with exact V85 sourcea7ddbe1/native323bf7ed../
