@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V81 coherent ordinary policy read back; V75 starts — 2026-10-26
+
+Code/docs7bd4c8a; unchanged actual Actions40334564897/run12/kernel8ea7b3b6..,
+native6e6e432c../pair1d031356../UIpadding-contract-v1/cache496301fc.. . Corrected
+stage now requires exact cached/standalone diagnostic job equality. Both actual
+cached jobs and files verify Disabled=true/RunAtLoad=false before publication.
+No native rebuild. Full actual loader/ADT/private/source/ABI preflight PASS.
+
+Fresh V81 readonly snapshot actual clean1515534/empty journal; full staged
+signatures/files/preimages/readonly fsck PASS. Apply ONCE249856bytes,0new/freed
+blocks; every live preimage backed up, ranges and whole files read back, clean
+root/verified Fastboot. V81 STALE/never reuse. Next fresh V82/imageV76; postboot
+epoch pending collection. V75 image7ba958b5e333fb5bd1b3f01c83a81c57e18d85fdca9d448a3fbf36d42b59f020, fresh29f55a74a1196e81; ordinary
+animate, startup correctness/captures/automatic app opens OFF. One ordinary
+cycle starts; no FPS claim before actual terminal evidence. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x29f55a74a1196e81 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Continue the complete surface-cache ownership block independently; no device
+commands until collection. Broad goal stays active/unfinished.
+
 ## REDFIN V74 clean/full native PASS, ordinary policy mismatch — 2026-10-26
 
 Code/docs1aebd4d; exact unchanged run12/kernel8ea7b3b6../native1d031356../cache/UI.
