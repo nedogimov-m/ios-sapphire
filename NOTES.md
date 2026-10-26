@@ -1,5 +1,21 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected surface-cache run14 compiling; fresh V83 snapshot complete — 2026-10-26
+
+Complete code32f777abdd8ec4edcf24968a70bf4ebb9f8aea7e pushed only to owned
+redfin-ci. Actions40354200257/run14 compiles the matching corrected native
+kernel.54combined host contracts and native actual20H392 ABI/signature build
+PASS; pair45c09a81../input6e6e432c../cache496301fc../UI retained. No corrected
+system-WC or throughput success is claimed before its actual native capture.
+
+Fresh V83 readonly snapshot completes at actual clean1532435 with empty
+journal and complete target preimages. No root filesystem writes; device
+verified recovery idle. Stage/apply waits for actual matching kernel/V77
+image preflight. Cached/file startup-job equality remains mandatory. Next
+one full combined native cache-mode/CPU rewrite/GPU pixel/alias/guard/output
+cycle, animate-checked ON, captures/app opens OFF. No new boot args have been
+used; last actual V76 profile is recorded below. Broad goal stays active.
+
 ## REDFIN complete cache selection correction;54host/native checker build PASS — 2026-10-26
 
 Preserve exact run12 preimages and the validated run13 native source privately.
