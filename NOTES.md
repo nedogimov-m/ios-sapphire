@@ -1,5 +1,34 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CPU-preparation CI/run10 and V71 apply PASS; V65 combined hardware cycle starting — 2026-10-26
+
+Code1f0c0e873f59668621efdf1d203079beaf51f4ff; GitHub Actions40314982431/run10
+SUCCESS. Actual terminal artifact18709024bytes,
+SHA2565f0d5f483a72039dfe3ccdcb8d7073fbd323ccc3f90b6c265a91e745fdb95249.
+Full builder/XNU/KDK/source/patch map, arm64/non-PAC binary, retained ABIs and
+new RedfinRetainedMemoryABI marker verified; native-retained-memory overlay
+is the only addition to run9's complete kernel patch set. Current native pair
+096836ce../input0de23d41.. and unchanged UIpadding-contract-v1/cache496301fc..
+pass actual20H392/source/export/signature proof. No new hardware success yet.
+
+V65 image8963faceaaabc22355ed82460730fd068d527b50256a380060e9a2328c3297e0,
+130591968decompressed bytes, passes full actual loader/liveFDT/ADT/firmware/
+private identity/keychain/power/ADSP/DVFS/native ABI/source preflight. All
+native correctness ON, one-boot request animate-checked; captures and automatic
+Phone/Photos opens OFF. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xbf50fe856de3e2ec redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Fresh V71 snapshot actual clean1427210/empty journal; native logical-extent
+writer, complete old target preimages/CNIDs/extent prefixes/owners, signatures,
+whole staged files and readonly native fsck PASS. Apply ONCE25427968bytes,
+4new blocks,0freed; all live preimages/backups/transfers/full device files
+read back and verified; clean root/Fastboot PASS. V71 STALE, never reuse.
+Next fresh V72/imageV66; next root epoch unknown until actual collection.
+One complete native A620 test follows:10UBO cases including4bounded dynamic
+CPU/GPU/argument paths, actual retained BO policy/query/fast/fallback counts
+and every prior compute/pixel/guard/fence/lifetime/error case. Do not infer
+FPS or correctness from API availability. Broad platform goal stays active.
+
 ## REDFIN complete CPU-preparation block built;29host contracts PASS; new kernel CI next — 2026-10-26
 
 Base67dcddb; whole related block implemented before combined host checks.

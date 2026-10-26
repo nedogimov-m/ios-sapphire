@@ -1,5 +1,15 @@
 # HackiOS upstream review — 2026-10-22
 
+## Guarded preparation block native kernel CI/run10 PASS — 2026-10-26
+
+Actual Actions40314982431/run10/source1f0c0e873f59668621efdf1d203079beaf51f4ff
+SUCCESS, kernel5f0d5f483a72039dfe3ccdcb8d7073fbd323ccc3f90b6c265a91e745fdb95249.
+Complete native source/patch/input map and all prior/new ABI markers verified.
+Native pair096836ce../input0de23d41.., actual20H392 exports/signatures, existing
+UI and compiler cache496301fc.. remain verified. Fresh V71 full-file update,
+readonly fsck and device readback pass. V65 combined hardware proof is next;
+no actual new native case or FPS gain is claimed from CI success alone.
+
 ## Guarded retained-BO reuse adaptation and bounded dynamic uploads — 2026-10-26
 
 From reviewed Angelpro sapphire344a8af2a9d5baf3597933a2e4601499ea0f623b,
