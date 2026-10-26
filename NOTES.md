@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V95 same-binary direct GLES policy OFF verified; ordinary V89 starts — 2026-10-27
+
+V88 full direct GLES/app Metal/fetch/seed/CPU-first/pixel/tail contract passes,
+but checked5.294FPS severely regresses. Preserve full ON native/source/build
+inventory at research/redfin-gles-direct-v88-validated, verified before policy-
+only OFF. Exact input1a4ad42c../pair17d0f01f../shader cache496301fc../UI/kernel
+Actions40403226041/run20/source5b06349/kernel01be8081.. retained; no native/
+compiler/kernel rebuild. Actual current complete kernel patch map verified.
+Fresh V95 at clean1643532/empty journal applied ONCE; all live preimages/backups,
+signatures/readonly fsck/ranges and whole files read back, clean Fastboot PASS.
+Cached/file native diagnostic jobs agree OFF; backboardd GLES/direct, global
+app Metal system; captures/automatic Phone/Photos opens OFF. V95 STALE/never
+reuse; next fresh V96/imageV90 at actual postboot generation pending collection.
+
+V89 image64fe910afb838c35ac83caf915fb507797a82b894bbb48722c304aaad3c98eb1, fresh9df5de0f1d66a3d0, ordinary animate. This separates full native
+startup diagnostic effects from suspected unbounded producer/output pressure.
+No performance or sustained60/90FPS claim before terminal evidence.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x9df5de0f1d66a3d0 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains unfinished.
+
 ## REDFIN V88 direct GLES/native app Metal correctness PASS;5.294FPS regression — 2026-10-27
 
 Source5b06349/native fixes5e2b954/startf85a796; Actions40403226041/run20,
