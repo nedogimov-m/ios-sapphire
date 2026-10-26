@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN remaining objective rewritten and registered — 2026-10-27
+
+User cleared the old goal and explicitly requested a rewritten `/goal` with
+completed work removed. New active goal is registered and mirrored exactly
+in ports/redfin/GOAL.md; the stale V12/Photos-failure checkpoint is replaced.
+GUI/touch, Phone/Photos, Wi-Fi/internet, hardware GLES/Metal, full panel,
+physical90Hz and permanent serial stay as the preserved working baseline.
+Smooth rendering, actual credential/autojoin, complete charging/thermal/sensor
+integration and real Apple account login remain open; partial evidence is
+not promoted to completion. Phone/Photos automatic launch checks stay off.
+
+New required scope: physical power/volume buttons and their combinations,
+sleep/wake, hardware/automatic brightness, recurring status-bar clock-inset
+reset, consistent original iPhone X model/Apple model-number format, actual
+SIM/calls/audio/SMS/mobile data, eSIM where feasible, and full rear-wide/
+rear-ultrawide/front camera photo/video/media integration. Formatting a model
+row alone does not prove App Store/Apple ID authorization or activation.
+
+Documentation/goal-only update; no new kernel build, boot, root write or boot
+argument change. Previous source17a190d/5fedeae, V96/CI20 output kernel
+Actions40403226041/run20 and exact boot arguments remain recorded below;
+terminal V96 dual-mode/CI23 results are not inferred by this scope update.
+Existing untracked FastRPC implementation files are outside this edit.
+
 ## REDFIN full dual native GPU modes/V100 verified; staged-output V96 starts — 2026-10-27
 
 Native source5fedeae/107selected contracts, new20H392 build035131/Mesa1a4ad42c../
