@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V97 first physical reference passes; cold-output deadline fixed — 2026-10-27
+
+V97 TERMINAL exit0, authenticatedde3b8477435b3aa7, one backboardd62/no panic,
+clean consistent unmounted HFSX1707842 and verified Fastboot. CI23 kernel
+Actions40417409066/run23/a456fc9a..; exact source/build/boot args in V97 entry
+below. Full native GMEM/sysmem/app Metal/direct/fetch/budget contracts PASS.
+All four private fused cases/10108800pixels pass (identity/alpha exact,
+scaled maximum2, zero guards/stage writes). The first actual physical frame
+also passes all64samples exactly: fence12/reference13, obsolete-stage0.
+
+Output then stops: outer presentation returns at2000694us while the complete
+initial output validation/mapping job lasts2654148us. Source proves its fixed
+2000ms queued wait latches gd.uncertain before the successful job finishes.
+Remaining GLES1560frames/no GL errors still render offscreen, not onto the
+panel. The corrected observer now gates both real jobs correctly but counts
+zero physical frames; no valid FPS/sustained output claim. Touch error0/
+contacts0. New UI actually installs all four hooks on _UIStatusBarStringView;
+no visible time-frame/lock/rotate proof is present, so inset completion is open.
+
+Complete fix publishes startup readiness only after all native validation
+and actual panel mapping succeed, with release/acquire. Cold wait10000ms;
+normal wait remains2000ms, physical GPU/fence budgets unchanged. Timeout or
+interruption still retains live sources/metadata; spurious wakes keep the
+same deadline and late success never clears a true uncertain result.
+28affected contracts PASS, including actual initializer/wait/callback2.654s
+cold success, ordinary timeout, cold timeout, spurious wakes, interruption,
+already-completed race, source ownership and every prior panel/oracle case.
+Complete current GPU TU compiles with the actual CI command/headers PASS.
+The regenerated native-output-direct.patch retains all original two native
+header copies plus the full direct path, adding the startup wait transaction.
+No new userland/compiler/UI build: existing035131/Mesa1a4ad42c../Metal17d0f01f../
+cache496301fc../UI layout-v2 e155cb49.. are retained. Next CI24 kernel and one
+combined run; fresh V102 must bind1707842. Prepared V98 still uses old CI23
+and is unused; next corrected kernel image V99. V101 stays STALE/never reuse.
+
+Read-only next-block research confirms real Redfin PON/GPIO5/DSI DBV facts
+and preferred button code pins in UPSTREAM.md; no controls/camera completion.
+Broad goal remains active, with required human checks deferred only as needed.
+
 ## REDFIN complete physical-output/clock block V101 applied; V97 starts — 2026-10-27
 
 Source b6e1a1e; completed kernel Actions40417409066/run23/source5fedeae,

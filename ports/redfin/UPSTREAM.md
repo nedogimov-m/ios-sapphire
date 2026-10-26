@@ -1,5 +1,39 @@
 # HackiOS upstream review — 2026-10-22
 
+## Output initialization and steady-frame deadlines have separate scopes — 2026-10-27
+
+Own Redfin integration correction; retain the reviewed native GPU/physical
+queue and all full pixel/guard checks. V97 proves the independent fused cases
+and the first real physical panel reference bit for bit. It then records a
+2000694us caller return while the complete cold output job takes2654148us.
+The ordinary RF_GQ_WAIT_NS2000ms expiry latches uncertain output before that
+successful job finishes; continued GLES activity is not physical output.
+
+Publish startup readiness with release/acquire only after complete successful
+native validation and panel mapping. Give that one-time job a finite10000ms
+wait; retain the ordinary2000ms frame wait and all hardware/fence deadlines.
+Spurious wakes cannot extend deadlines; timeout/interruption still retains
+in-flight references and a late completion never clears uncertainty. The
+actual initializer/wait/callback regression and all existing ownership/
+pixel/oracle cases pass; full native GPU TU compiles with actual CI flags.
+No new steady FPS or four-frame physical reference success is claimed yet.
+
+## Power/volume and brightness hardware review for the next block — 2026-10-27
+
+Rechecked preferred kernel main pointer88513176b1e96ecf0b764cd62c6f4e6ac71345e3;
+reviewed actual button implementation at the already archived main commit
+c84b4634277a70beac73921029b1fb6afc2530af, xnu/files/bsd/dev/hakios.buttons.c,
+against the preserved Redwood source. Its read-only SPMI channel ownership,
+release-before-arming and two-sample debounce remain useful; POCO's PON
+0x013/PM7325GPIO6/0x18d must not be imported. Captured Redfin FDT identifies
+SID0PM8150PON@0x800 (power/volume-down), SID4PM8150LGPIO5@0xc400 (volume-up,
+active-low,15ms debounce). Google's500b3a2059c1eec0fec08ec56add06320ea901a8
+drivers/input/misc/qpnp-power-on.c confirms RT_STS+0x10 bits0/1.
+Native S6E3HC2 DTS/display source already captured for90Hz identifies DCS
+backlight, DBV4..1023/high-byte offset8. New controls/brightness implementation
+and physical key/brightness evidence remain required; source review is not
+functional device proof. Private source captures stay under research.
+
 ## Native clock-frame ownership and dual-mode observer pairing — 2026-10-27
 
 Keep the previously reviewed preferred kernel/userland pins and the existing

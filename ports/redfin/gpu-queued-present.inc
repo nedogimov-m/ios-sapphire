@@ -68,6 +68,30 @@ static int gd_before_cpu_fallback(void)
     if(redfinGpuQueueBarrier(NULL,false)==kIOReturnSuccess)return 0;
     __atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);return -1;
 }
+static int gd_queued_wait(gd_queued_present *p)
+{
+    /* The first owned output performs full private native pixel/guard checks
+     * before mapping the panel. V97 measured2.65s for that one-time work;
+     * it must not inherit the ordinary two-second frame deadline. An acquire
+     * pairs with complete successful initialization, not merely "attempted".
+     * Both paths stay finite; spurious wakes never extend either deadline. */
+    bool startup=!__atomic_load_n(&gd.startup_ready,__ATOMIC_ACQUIRE);
+    uint64_t budget=startup?UINT64_C(10000000000):RF_GQ_WAIT_NS;
+    uint64_t began=gpuNow(),deadline=gpuQueueAbsolute(began+budget);
+    IOLockLock(p->lock);
+    while(!p->done) {
+        int waited=IOLockSleepDeadline(p->lock,&p->done,deadline,THREAD_ABORTSAFE);
+        if(waited!=THREAD_AWAKENED&&!p->done)break;
+    }
+    bool completed=p->done;int result=completed?p->result:-1;
+    if(!completed)__atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);
+    IOLockUnlock(p->lock);
+    if(startup||!completed)
+        IOLog("REDFIN GPU DISPLAY WAIT: startup=%u budget-ms=%llu elapsed-us=%llu completed=%u result=%d ordinary-ms=%llu uncertain=%u\n",
+            startup,budget/1000000,(gpuNow()-began)/1000,completed,result,
+            RF_GQ_WAIT_NS/1000000,!completed);
+    gd_queued_release(p);return result;
+}
 int RedfinGPUPresent(SweetSurface *panel,const redfin_display_geometry *geometry,const uint8_t *record)
 {
     if(!RedfinGPUDisplayWritable())return -1;
@@ -127,13 +151,5 @@ int RedfinGPUPresent(SweetSurface *panel,const redfin_display_geometry *geometry
         __atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);
         gd_queued_release(p);gd_queued_release(p);return -1;
     }
-    uint64_t deadline=gpuQueueAbsolute(gpuNow()+RF_GQ_WAIT_NS);
-    IOLockLock(p->lock);
-    while(!p->done) {
-        int waited=IOLockSleepDeadline(p->lock,&p->done,deadline,THREAD_ABORTSAFE);
-        if(waited!=THREAD_AWAKENED&&!p->done)break;
-    }
-    int result=p->done?p->result:-1;
-    if(!p->done)__atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);
-    IOLockUnlock(p->lock);gd_queued_release(p);return result;
+    return gd_queued_wait(p);
 }

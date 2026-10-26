@@ -130,7 +130,7 @@ IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job){
  gate_changed.wait(gate,[&]{return job->count==1?first_allowed:future_allowed;});
  return kIOReturnSuccess;
 }
-static struct {bool uncertain=false;} gd;
+static struct {bool uncertain=false,startup_ready=true;} gd;
 static bool RedfinGPUDisplayWritable(){return !__atomic_load_n(&gd.uncertain,__ATOMIC_ACQUIRE);}
 static bool gd_selected(){return true;}
 static uint32_t gd_u32(const uint8_t *at){uint32_t value;memcpy(&value,at,4);return value;}

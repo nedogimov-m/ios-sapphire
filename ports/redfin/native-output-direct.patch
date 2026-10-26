@@ -8,7 +8,7 @@
 -    bool attempted, tested, disabled, uncertain;
 -    uint64_t frame, calls, elapsed, fallbacks,wc_sources,cached_sources;
 +    gd_buffer stage, commands, panel, verification, sources[GD_CACHE];
-+    bool attempted, tested, disabled, uncertain,direct_tested;
++    bool attempted, tested, disabled, uncertain,direct_tested,startup_ready;
 +    unsigned direct_verified;
 +    uint64_t frame, calls, elapsed, fallbacks,wc_sources,cached_sources,direct_calls,staged_calls;
  } gd;
@@ -151,7 +151,17 @@
      bool dropped_input = gd_drop(&input), dropped_output = gd_drop(&output);
      return full && margins && dropped_input && dropped_output;
  }
-@@ -247,23 +343,43 @@
+@@ -186,6 +282,9 @@
+         RF_GD_PANEL_MAPPED, false, true)) return false;
+     IOLog("REDFIN GPU DISPLAY START: A620-2D scale=%u packed-pitch=%u GPU-row-pack=2 CPU-pixel-copy=0\n",
+         RF_GD_STAGE_PITCH, RF_GD_PANEL_PITCH);
++    /* First use includes all native private pixel/guard checks and mapping.
++     * Publish readiness only after that complete initialization succeeds. */
++    __atomic_store_n(&gd.startup_ready,true,__ATOMIC_RELEASE);
+     return true;
+ }
+ static gd_buffer *gd_source(SweetSurface *s)
+@@ -247,23 +346,43 @@
          }
      }
  }
@@ -201,7 +211,7 @@
      return !mismatches;
  }
  static int gd_present_locked(SweetSurface *panel, const redfin_display_geometry *g, const uint8_t *record)
-@@ -313,8 +429,9 @@
+@@ -313,8 +432,9 @@
          if (!RedfinGPUDisplayWritable()) {gd_hold_uncertain(); return -1;}
          return 0;
      }
@@ -532,3 +542,51 @@
 +    return s.failed?0:s.used;
 +}
  #endif
+--- a/iokit/Kernel/arm/RedfinGPUQueuedPresent.inc
++++ b/iokit/Kernel/arm/RedfinGPUQueuedPresent.inc
+@@ -68,6 +68,30 @@
+     if(redfinGpuQueueBarrier(NULL,false)==kIOReturnSuccess)return 0;
+     __atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);return -1;
+ }
++static int gd_queued_wait(gd_queued_present *p)
++{
++    /* The first owned output performs full private native pixel/guard checks
++     * before mapping the panel. V97 measured2.65s for that one-time work;
++     * it must not inherit the ordinary two-second frame deadline. An acquire
++     * pairs with complete successful initialization, not merely "attempted".
++     * Both paths stay finite; spurious wakes never extend either deadline. */
++    bool startup=!__atomic_load_n(&gd.startup_ready,__ATOMIC_ACQUIRE);
++    uint64_t budget=startup?UINT64_C(10000000000):RF_GQ_WAIT_NS;
++    uint64_t began=gpuNow(),deadline=gpuQueueAbsolute(began+budget);
++    IOLockLock(p->lock);
++    while(!p->done) {
++        int waited=IOLockSleepDeadline(p->lock,&p->done,deadline,THREAD_ABORTSAFE);
++        if(waited!=THREAD_AWAKENED&&!p->done)break;
++    }
++    bool completed=p->done;int result=completed?p->result:-1;
++    if(!completed)__atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);
++    IOLockUnlock(p->lock);
++    if(startup||!completed)
++        IOLog("REDFIN GPU DISPLAY WAIT: startup=%u budget-ms=%llu elapsed-us=%llu completed=%u result=%d ordinary-ms=%llu uncertain=%u\n",
++            startup,budget/1000000,(gpuNow()-began)/1000,completed,result,
++            RF_GQ_WAIT_NS/1000000,!completed);
++    gd_queued_release(p);return result;
++}
+ int RedfinGPUPresent(SweetSurface *panel,const redfin_display_geometry *geometry,const uint8_t *record)
+ {
+     if(!RedfinGPUDisplayWritable())return -1;
+@@ -127,13 +151,5 @@
+         __atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);
+         gd_queued_release(p);gd_queued_release(p);return -1;
+     }
+-    uint64_t deadline=gpuQueueAbsolute(gpuNow()+RF_GQ_WAIT_NS);
+-    IOLockLock(p->lock);
+-    while(!p->done) {
+-        int waited=IOLockSleepDeadline(p->lock,&p->done,deadline,THREAD_ABORTSAFE);
+-        if(waited!=THREAD_AWAKENED&&!p->done)break;
+-    }
+-    int result=p->done?p->result:-1;
+-    if(!p->done)__atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);
+-    IOLockUnlock(p->lock);gd_queued_release(p);return result;
++    return gd_queued_wait(p);
+ }

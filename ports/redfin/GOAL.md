@@ -26,20 +26,27 @@ Completed bring-up is a preserved baseline; only remaining work is listed.
 
 ## Current handoff
 
-The latest recorded implementation checkpoint is source `17a190d` /
-`5fedeae`: full independent native GMEM/sysmem checker and the physical-output
-reference correction. NOTES.md records the V96 integrated cycle on the known
-working output kernel (Actions `40403226041`, run20), native build `035131`,
-and the separate CI23 physical-reference kernel build. Terminal evidence
-for these in-flight results must be collected before claiming success.
-V100 has been applied once and is stale; use a fresh V101 / V97 image against
-the actual postboot root generation for any subsequent update.
+V96 independently proves full native GMEM/sysmem and actual scoped sysmem
+GLES/app Metal. Source `b6e1a1e` adds late clock-frame correction and the paired
+two-mode FPS gate. CI23 (Actions `40417409066`, source `5fedeae`) / V97 passes
+all private output cases and the first actual physical reference; its cold
+initialization takes 2.654 seconds and exceeds the old 2-second caller wait,
+latching uncertain output. GLES continues offscreen; no V97 FPS is valid.
 
-This scope edit adds no device boot, kernel build or changed boot arguments.
-Exact previous boot arguments and results remain in the newest technical
-entries of [NOTES.md](../../NOTES.md). Phone/Photos automatic launches stay off.
-Earlier failed/incomplete experiments remain in NOTES.md as history, not as
-new tasks to repeat.
+The complete startup fix publishes readiness after successful checks/mapping,
+allows 10 seconds only before readiness and keeps the ordinary 2-second limit.
+All 28 affected contracts and the complete native GPU TU pass. Next: CI24 and
+one combined physical-output/UI run, reusing native `035131`, all existing
+GPU/compiler artifacts and `research/redfin-ui-layout-v2`.
+
+Last clean root generation is `1707842`, verified Fastboot; V101 is stale and
+must never be reused. Create fresh V102 against that actual root. Prepared
+V98 contains the old CI23 kernel and stays unused; corrected image is V99.
+Exact builds, boot arguments and evidence are in [NOTES.md](../../NOTES.md).
+Phone/Photos automatic launches stay off. The clock hooks are installed on
+the real UIKit class; physical lock/rotation persistence remains unproved.
+Power/volume and brightness source/hardware review is ready for the next block;
+its implementation and the full wider goal remain open.
 
 ## Constraints and private state
 

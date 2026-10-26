@@ -16,7 +16,7 @@ struct gd_buffer {
 };
 static struct {
     gd_buffer stage, commands, panel, verification, sources[GD_CACHE];
-    bool attempted, tested, disabled, uncertain,direct_tested;
+    bool attempted, tested, disabled, uncertain,direct_tested,startup_ready;
     unsigned direct_verified;
     uint64_t frame, calls, elapsed, fallbacks,wc_sources,cached_sources,direct_calls,staged_calls;
 } gd;
@@ -282,6 +282,9 @@ static bool gd_initialize(SweetSurface *panel)
         RF_GD_PANEL_MAPPED, false, true)) return false;
     IOLog("REDFIN GPU DISPLAY START: A620-2D scale=%u packed-pitch=%u GPU-row-pack=2 CPU-pixel-copy=0\n",
         RF_GD_STAGE_PITCH, RF_GD_PANEL_PITCH);
+    /* First use includes all native private pixel/guard checks and mapping.
+     * Publish readiness only after that complete initialization succeeds. */
+    __atomic_store_n(&gd.startup_ready,true,__ATOMIC_RELEASE);
     return true;
 }
 static gd_buffer *gd_source(SweetSurface *s)
