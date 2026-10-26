@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V73 file update verified; combined V67 running — 2026-10-26
+
+Code2132029. Complete native input2f5fc017../pair8fe49d7f../cache496301fc..,
+unchanged UI and actual Actions40314982431/run10/kernel5f0d5f48.. verified.
+Fresh V73 snapshot actual clean1444923/empty journal; complete file/preimage/
+signature/native readonly fsck proof PASS. Apply ONCE10682368bytes,2new blocks,
+zero freed blocks; all live preimages/backups/transfers/full files read back;
+root clean and verified Fastboot. V73 STALE, never reuse. Next fresh V74/imageV68;
+postboot epoch is unknown until collection.
+
+V67 image6576c1e5ce63bf0f55b855f5453f3889db44c45cfefb4baabe9a712a8eeae923
+passes full native preflight. Fresh nonce66620caf9ce68f1c, exact args are in
+the prepared entry below. One combined native A620 correctness cycle is RUNNING:
+prior full contract, GPU constant overwrite/byte-tail/argument/rollover guards
+and independent vertex/fragment repeats. animate-checked requires actual
+successful current-nonce full CHECK EXIT. Captures and automatic app opens OFF.
+No other device command until terminal collection; no new hardware success or
+FPS gain is claimed yet. Broad platform goal stays active.
+
 ## REDFIN complete GPU-ordered constant snapshots built; combined V67 next — 2026-10-26
 
 Baseca8b7f0. Implement the whole related runtime block before combined tests:
