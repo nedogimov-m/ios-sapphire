@@ -1,5 +1,16 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete resource-access native delivery — 2026-10-26
+
+CI40256228186/run5/sourcec0d129b completes the full native kernel with all four
+retained/scoped/access/statistics ABIs. The exact reviewed overlay/source hashes
+and actual binary markers match. Full graphics/UI actual20H392 ABI/signatures
+and52affected host cases pass. Compiled OSMesa/AIR retain the proven old shader
+cache ID; compiled AIR/plugin share their new strict full source pairing.
+Fresh V58/root1288851 stages the complete bundle with full bytes/signatures and
+readonly fsck PASS. V52 preflight/current one-boot request pass; hardware
+correctness and real FPS are next. Preferred pins stay unchanged.
+
 ## Native resource intent, cache-line hazards and build-cache compatibility — 2026-10-26
 
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland

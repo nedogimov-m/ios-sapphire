@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete resource-access CI delivered; V58 staged/V52 ready — 2026-10-26
+
+Sourcec0d129b876f6ec396fc142ef18371919a8bd5b7e, GitHub Actions40256228186/run5
+SUCCESS with ccache. Matching complete kernel
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315,
+18742360bytes; exact resource-access/throughput/retained-queue/statistics source
+hashes and all four native ABI markers PASS. Graphics input
+741e17a268907fe4a1263bd0c4397e07429487a708771782a8449fc0d1a84db2,
+full pairing5f5aa2615ca9ab5b16016595b5a3ad8f39413e6d87f3d51c23b875afda6b7358,
+actual20H392 ABI/signatures PASS. Actual OSMesa/AIR binaries both retain the
+verified prior shader cache ID496301fc..; AIR/plugin both contain the NEW full
+pairing. UIaccess-v1 ABI/signatures/current source hashes/abort observer PASS.
+52affected host cases PASS, including the final actual queue/late callback.
+
+Fresh V58 reads actual clean1288851 and empty journal; complete stage25673728bytes,
+4new blocks/zero freed. Full file owners/modes/bytes/signatures and native
+readonly fsck PASS. V58 READY, not applied. V52 imageaf8aaaf2d6c0c3dbd37cd8c2804e80f53f76e7046d61d94a2b70e85c9380bf89; complete
+payload/ADT/FDT/firmware/power/DVFS/return and current source/ABI preflight PASS.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x62717b4007d6c52d redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Root-owned49-byte checked-animation request matches this fresh boot. All native
+correctness jobs ON; app opens and heavy captures OFF. The observer uses finite
+idle protection,8second warmup and actual10second native frame counters after
+BOTH current jobs pass. Phone idle in temporary Linux recovery; no root write
+since V51. Next: apply V58 ONCE then one combined device cycle. Actual new
+correctness, cache reuse and FPS improvement remain pending. Broad goal active.
+
 ## REDFIN complete resource-access/cache/observer block implemented;52host cases/native builds PASS — 2026-10-26
 
 Source base25d6516 plus this complete block. Re-review preferred kernel
