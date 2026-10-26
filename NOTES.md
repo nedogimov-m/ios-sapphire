@@ -1,5 +1,55 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V87 ordinary policy verified; V81 starts — 2026-10-26
+
+Exact validated Actions40372742634/run18/kernel4fa88838a6c24fc87017aca5e33b48ed27110b2bb4015876341b88e23a963922,
+native6e6e432c../pair1bf36b6d../UI/cache. Full V80 ON native inventory archived
+and verified before policy-only OFF; no native/compiler/kernel rebuild.
+V81 loader/liveFDT/ADT/private inputs/full native source/old+new ABI PASS.
+Fresh V87 at clean1568574/empty journal applied ONCE; all live preimages backed
+up, signatures/native readonly fsck/range and whole-file readback PASS, clean
+root/verified Fastboot. Cached/file diagnostic jobs agree OFF. V87 STALE/never
+reuse. Next fresh V88/imageV82, actual postboot epoch pending collection.
+
+V81 imageb4dbab48160e9260005826fcc6e9bb083b81ede539e4efbe396003afe63341d6, fresh84f79bebece8c5b5; ordinary animate request. Startup correctness,
+captures and automatic app opens OFF. No ordinary FPS claim before terminal
+nonce-authenticated evidence. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x84f79bebece8c5b5 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal active/unfinished.
+
+## REDFIN V80 complete native latency contract PASS; checked32.564FPS — 2026-10-26
+
+Actual source0d3767d0e8d988c7d744307323d1fcb4e661397a, Actions40372742634/run18,
+arm64/non-PAC kernel4fa88838a6c24fc87017aca5e33b48ed27110b2bb4015876341b88e23a963922,
+18726088bytes. Full old+new ordered patch map/native ABI identity PASS. Build
+597.515s/build.sh502.094s, fresh verified download14.751s/expansion47.798s;
+compiler delta1411direct+2preprocessed hits,4misses. Overall build is slower
+than run15; no overall preparation speedup claimed. Native exported-header/
+actual-CI-flag preflight helper is research/redfin-gpu/compile-gpu-latency-native.py.
+
+Cycle77698 TERMINAL exit0, fresh authenticated815a7467330b7c62, one backboardd62,
+no runtime GPU stop/kernel panic. Clean unmounted HFSX1568574/verified Fastboot.
+V86 applied ONCE/full preimages/backups/signatures/readonly fsck/ranges/whole
+file readback PASS; STALE/never reuse. Complete explicit CHECK EXIT0, all4cache
+modes/CPU-GPU pixels/guards and all prior Metal/output/lifetime/error cases,
+actual2pending publication/completion PASS.23PUB/17DONE/28PIPE records valid.
+System output remains WC;1443clean/1418invalidate skips observed.
+
+30hardware CLOCK/26WAIT/14CACHE partition records validate. Native100us poll
+per-wait maximum pause median119.5us, maximum192us. Sampled actual9-IB+WFI
+groups median17.1305ms/max17.293ms; end marker excludes the final cache-flush
+fence. This is not isolated shader time or a complete-frame duration. Sampled
+per-job cache averages: CPU24.5us median, predecessor wait1.4335ms median.
+Critical timer correctness is established; it does not establish FPS gain.
+
+Checked326GPU frames/10.010961physical seconds =32.564306FPS,902callbacks/90Hz,
+stable complete interval/no missed samples/timeout/server replacement, idle
+restored. Native6e6e432c../pair1bf36b6d../UI/cache retained and exact ON native
+inventory archived/verified at research/redfin-metal-latency-v80-validated.
+Next fresh V87/imageV81 ordinary policy-only OFF, no native/kernel/compiler
+rebuild. Captures/automatic Phone/Photos opens OFF. Exact V80 boot args are in
+its starting entry below. Broad goal active; smooth60/90render FPS unfinished.
+
 ## REDFIN corrected native latency kernel run18/V86 verified; combined V80 starts — 2026-10-26
 
 Code0d3767d0e8d988c7d744307323d1fcb4e661397a, actual Actions40372742634/run18 TERMINAL SUCCESS;
