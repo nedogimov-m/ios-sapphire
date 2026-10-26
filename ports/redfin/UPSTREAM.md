@@ -56,7 +56,9 @@ for100ms, forcing real mapping/DVFS/external transitions and latching failures.
 The public documented high-refresh bundle opt-in is gated by actual90Hz/profile;
 no private object offsets are written. Native frame policy still needs device
 proof.91affected host cases and complete paired graphics/UI native/ABI/signatures
-pass. New CI kernel and combined correctness-then-performance evidence pending.
+pass. Native CI40249668400/run4/sourceeb4d1dc now also succeeds with exact
+source/ABI delivery. V48 and V54 pass preflight/full readonly staging audits;
+combined correctness-then-performance evidence remains pending.
 
 ## Retained submission and separate native completion — 2026-10-26
 

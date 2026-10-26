@@ -1,5 +1,30 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete throughput CI delivered; V54 staged/V48 ready — 2026-10-26
+
+Kernel sourceeb4d1dc, GitHub Actions40249668400/run4 SUCCESS, ccache enabled,
+08dab9cd4d50c2223a68ea2d6ffc5080bafd9f583fde1429b553a16436507fb0,
+18741856bytes. Exact throughput/queued/presentation source hashes and all
+three native ABI markers PASS. Paired native graphics/Metal input
+8bd468b86d75b0e095908dd6d9029588c6f27c6a508c6efaabf42f4a5ca2caa8,
+pairingf4e437ea7f24005f8bc4a4e2f531d935e2b260504655f4b7f3591794c271047f,
+checks ON. UIgate source10c4ec8, native/actual20H392 ABI/signatures PASS.
+No app auto-opens/heavy capture.91affected host cases and2gate cases PASS,
+including held hardware, fair output, physical aliases, generation changes and
+late callback after the actual2s timeout. Actual V44 log gate replay PASS.
+
+Fresh V54 read actual1253412, complete stage25464832bytes/
+2new/zero freed. Full file owner/mode/bytes/signatures and native readonly
+fsck PASS. V54 READY, not applied; use ONCE and then mark stale. V48 image
+d7dc7e35708e1c9cc211c424b2571d2a961497c0c3cffe87f0027f03ada4c85e, complete
+loader/ADT/live FDT/firmware/power/DVFS/return/current ABI-source preflight PASS.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x648a3338b2e655be redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+The root-owned49-byte checked-animation control matches this one boot. FPS is
+sampled only after both current correctness jobs finish successfully. Phone idle
+in temporary Linux recovery, no root write or iOS boot since V47. Next: applyV54
+once, one combined hardware cycle. Actual improvement from17.4FPS and90callbacks
+still pending; broader goal active.
+
 ## REDFIN one-cycle correctness-then-FPS gate ready; throughput CI running — 2026-10-26
 
 Complete native block sourceeb4d1dc is building in GitHub Actions40249668400/run4.
