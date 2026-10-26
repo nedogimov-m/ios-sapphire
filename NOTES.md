@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V85 ordinary policy verified; V79 starts — 2026-10-26
+
+Same exact validated Actions40359286479/run15/kernel8cd59aca../native1bf36b6d../
+input6e6e432c../cache496301fc../UI. Full V78 native inventory frozen and verified
+before policy-only OFF flip; no native/compiler/kernel/UI rebuild. Actual V79
+loader/liveFDT/ADT/private inputs/complete native source/ABI preflight PASS.
+Fresh V85 readonly epoch1550502/empty journal, staged signatures/files/preimages/
+readonly fsck PASS. Apply ONCE266240bytes, all live preimages backed up,
+transfers/ranges/whole files read back, root clean/verified Fastboot. Actual
+cached/file diagnostic jobs agree Disabled=true/RunAtLoad=false. V85 STALE/
+never reuse; next fresh V86/imageV80, actual postboot epoch pending collection.
+
+V79 imageee157ec44588effc5e6d5f1ed0460a3a27f38080aa7ac98299a5fbec81a4127e, freshd9751151bbfd2764; ordinary animate request,
+startup correctness/captures/automatic app opens OFF. One ordinary system
+cycle starts; no ordinary FPS claim before terminal authenticated evidence.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xd9751151bbfd2764 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal remains active/unfinished.
+
+## REDFIN V78 full realtime/system-WC proof PASS; checked34.262FPS — 2026-10-26
+
+Code d723d7a/docs0d5324b, actual Actions40359286479/run15/kernel8cd59aca..,
+native6e6e432c../pair1bf36b6d../UI/cache. Cycle61765 TERMINAL exit0: authenticated
+fresh08d45babaf50e634, one backboardd62, no GPU runtime stop/kernel panic,
+clean unmounted HFSX1550502 and verified Fastboot. V84 STALE/never reuse.
+All4cache modes(0/0x400/0x300/0x700),3CPU/GPU pixel/guard rounds each and full
+explicit CHECK EXIT0 PASS. Prior Metal/raster/alias/error/lifetime/output
+contracts and actual2pending completion remain PASS.20PUB/16DONE/23PIPE,
+18frontend/30owner/9output partitions validate, zero invalid.
+
+Both actual full11239424byte CoreAnimation buffers request0x700 and now select
+WC1; actual output WC600/cached0.1076clean/1051invalidate skips establish the
+native route together with the full pixel/guard contract in this same boot.
+Complete native-WC/system-output proof true. Source synchronization median1us;
+output median5.509ms. Warm clean traffic352KiB/invalidate0; invalidation bucket
+8..9us. The remaining~4.8ms cleaning bucket includes real predecessor drains,
+so it must not be called isolated CPU cache work.
+
+Checked343GPU frames/10.011205physical seconds =34.261610FPS at90Hz callbacks,
+complete stable interval/no missed samples/timeout/window replacement, idle
+restored. This proves correctness/routing, not a whole-frame gain. Preserve
+full native proof and take one exact-binary diagnostics-OFF observation next.
+No Phone/Photos opens or captures. Exact V78 args are recorded in its starting
+entry below. Broad goal active; smooth60/90render FPS remains unfinished.
+
 ## REDFIN realtime-cache policy2 run15/V84 verified; combined V78 starts — 2026-10-26
 
 Complete coded723d7a7a36b0569288ebc7a24883600b06e19e2/docsb8ec652. Actual

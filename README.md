@@ -52,7 +52,10 @@ system output remains on the cached route. Corrected selection separates
 cache attributes from GMEM padding and honors explicit WC requests. Its
 three-mode native contract passes in V77. Actual system buffers request
 Apple realtime cache0x700; that request is now adapted to Redfin's proven
-WC mappings. Its complete native system route and performance remain to verify.
+WC mappings. V78 passes all four native CPU/GPU cache-mode contracts and
+actual system output selects WC600/cached0. Source synchronization falls to
+1us median; its checked animation is34.262FPS, so a whole-frame speedup is
+not established. The same binaries now await an ordinary measurement.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).

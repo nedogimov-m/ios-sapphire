@@ -1,5 +1,22 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native realtime cache and actual system WC route PASS — 2026-10-26
+
+V78/Actions40359286479/run15/source d723d7a/kernel8cd59aca.., native pair1bf36b6d..
+passes full CHECK EXIT0, default/WC/copyback/realtime CPU/GPU pixels/guards,
+all prior Metal/output cases and actual2pending completion. Both11239424byte
+CoreAnimation allocations now select WC for actual0x700; output WC600/cached0.
+1076native clean/1051invalidate skips observed. One server, no runtime stop/
+panic, clean1550502/Fastboot. Preferred pins and Angelpro344a8af unchanged.
+
+Output source synchronization is1us median, total output5.509ms. Warm cache
+traffic falls from about11MiB per direction to352KiB clean/0invalidate;
+invalidate accounting is8..9us. The remaining4.8ms "clean" bucket includes
+real predecessor quiescence and is not isolated CPU cache time. Checked
+343GPU frames/10.011205s =34.261610FPS at90Hz callbacks does not establish a
+whole-frame gain. Preserve this complete native correctness proof and measure
+the exact binaries/kernel/UI/cache with startup checks OFF before promotion.
+
 ## Actual CoreAnimation0x700 realtime-cache request identified/adapted — 2026-10-26
 
 V77/Actions40354200257/run14/kernelcda58cf5.. passes the full native contract,
