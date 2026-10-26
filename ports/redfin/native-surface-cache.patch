@@ -121,20 +121,41 @@ diff --git a/iokit/Kernel/arm/RedfinSurfaceCache.h b/iokit/Kernel/arm/RedfinSurf
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinSurfaceCache.h
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,56 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Include after SweetSurface and IOBufferMemoryDescriptor declarations.
 + * Only the allocator may publish redfinWriteCombined, before the surface
 + * becomes visible. All kernel, IOSurface and GPU-client CPU mappings of
 + * those exact owned pages use the same actual Write Combine attribute.
-+ * Wrapped, parent, explicit-cache and physical scanout memory keep their
-+ * original cache ownership protocol, including unseeded CPU writers.
++ * Wrapped and physical scanout memory keep the original cache protocol.
++ * A parent ID alone is metadata: only a fresh allocation can receive this
++ * attribute. No existing parent descriptor or image view can inherit it.
 + */
 +#ifndef REDFIN_SURFACE_CACHE_H
 +#define REDFIN_SURFACE_CACHE_H
 +#include <stdint.h>
 +
 +#define RF_GS_ABI 1u
++#define RF_GS_PAGE_BYTES UINT64_C(16384)
++#define RF_GS_MAX_BYTES (UINT64_C(128) * 1024 * 1024)
++
++static inline bool redfin_surface_wc_hint(uint32_t hint)
++{ return !hint || hint == kIOMapWriteCombineCache; }
++
++/* Cache attributes describe allocated pages, independently of GMEM image
++ * padding. An explicit WC request uses the IOSurface/IOKit shifted value.
++ * Other explicit requests keep the existing cached path. */
++static inline bool redfin_surface_wc_allocation(const SweetSurface *surface, bool selected)
++{
++    return selected && surface && !surface->memory && !surface->wrapped &&
++        !surface->wrapDelta && !surface->scanoutPhys && surface->scanoutSlot < 0 &&
++        surface->allocSize && surface->allocSize <= RF_GS_MAX_BYTES &&
++        !(surface->allocSize & (RF_GS_PAGE_BYTES - 1)) &&
++        surface->width && surface->height && !surface->planeCount &&
++        surface->pixelFormat == UINT32_C(0x42475241) &&
++        surface->bytesPerElement == 4 && surface->elementWidth == 1 &&
++        surface->elementHeight == 1 && redfin_surface_wc_hint(surface->cacheMode);
++}
 +
 +static inline void redfin_surface_cache_barrier(void)
 +{
@@ -152,9 +173,9 @@ new file mode 100644
 +        surface->memory == memory && surface->allocSize == bytes &&
 +        memory->getLength() == bytes &&
 +        OSDynamicCast(IOBufferMemoryDescriptor, memory) &&
-+        surface->mapCache == kIOMapWriteCombineCache && !surface->cacheMode &&
-+        surface->redfinRenderExtent && !surface->wrapped && !surface->wrapDelta &&
-+        !surface->parentID && !surface->scanoutPhys && surface->scanoutSlot < 0;
++        surface->mapCache == kIOMapWriteCombineCache && redfin_surface_wc_hint(surface->cacheMode) &&
++        !surface->wrapped && !surface->wrapDelta &&
++        !surface->scanoutPhys && surface->scanoutSlot < 0;
 +}
 +#endif
 diff --git a/iokit/Kernel/arm/RedfinSurfaceCacheAllocator.inc b/iokit/Kernel/arm/RedfinSurfaceCacheAllocator.inc
@@ -210,20 +231,26 @@ diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.c
 -			mem = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
 -			    kIODirectionInOut | kIOMemoryKernelUserShared, s->allocSize, page_size);
 -		}
-+		/* Default-cache fresh owned BGRA images choose WC at allocation.
-+		 * Explicit cache hints and every pre-existing/wrapped alias stay as-is. */
-+		bool write_combined = padded && !s->cacheMode;
++		/* Select CPU cache attributes from actual fresh ownership and the
++		 * requested mode, independently of additional GMEM image storage. */
++		bool write_combined = redfin_surface_wc_allocation(s, sweet_redfin_padding_selected());
 +		IOBufferMemoryDescriptor *mem = sweet_redfin_owned_memory(s->allocSize, write_combined);
  		if (mem == NULL) {
 -			OSAddAtomic64(-(SInt64)s->allocSize, (volatile SInt64 *)&sweet_surface_wired);
  			ret = kIOReturnNoMemory;
  		} else {
  			bzero(mem->getBytesNoCopy(), s->allocSize);
-@@ -901,7 +901,14 @@
+@@ -901,7 +901,20 @@
  					IOLog("REDFIN SURFACE PAD: width=%u height=%u pitch=%u allocation=%u extent=%llu owned=1 ABI=1\n",
  					    s->width,s->height,s->bytesPerRow,s->allocSize,s->redfinRenderExtent);
  			}
 -			s->mapCache = kIOMapDefaultCache;
++			if (sweet_redfin_padding_selected() && s->allocSize >= (4u << 20)) {
++				static uint32_t cache_policy_notices;
++				if (__atomic_fetch_add(&cache_policy_notices,1,__ATOMIC_RELAXED) < 8)
++					IOLog("REDFIN SURFACE CACHE POLICY: allocation=%u hint=%#x parent=%u offset=%u planes=%u WC=%u fresh-owned=1\n",
++					    s->allocSize,s->cacheMode,s->parentID,s->offset,s->planeCount,write_combined);
++			}
 +			s->redfinWriteCombined = write_combined;
 +			s->mapCache = write_combined ? kIOMapWriteCombineCache : kIOMapDefaultCache;
 +			if (write_combined) {
@@ -235,7 +262,7 @@ diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.c
  			if (!sweet_surface_publish(s)) {
  				ret = kIOReturnNoResources;
  			}
-@@ -1412,7 +1419,10 @@
+@@ -1412,7 +1425,10 @@
  		return kIOReturnNotFound;
  	}
  	IOReturn ret = (IOReturn)redfin_gpu_queue_memory_barrier(s->memory);
@@ -247,7 +274,7 @@ diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.c
  	s->release();
  	return ret;
  }
-@@ -1425,6 +1435,9 @@
+@@ -1425,6 +1441,9 @@
  	if (s == NULL) {
  		return kIOReturnNotFound;
  	}

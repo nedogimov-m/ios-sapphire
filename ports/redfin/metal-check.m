@@ -27,6 +27,7 @@
 @end
 
 #include "metal-raster-check.inc"
+#include "metal-surface-cache-check.inc"
 #include "metal-vertex-check.inc"
 #include "metal-half-check.inc"
 #include "metal-blit-check.inc"
@@ -328,6 +329,7 @@ int main(void)
         int mode=gpu ? registry_number(gpu,CFSTR("RedfinMetalPolicy")) : 0;
         int paddingABI=gpu?registry_number(gpu,CFSTR("RedfinSurfacePaddingABI")):0;
         int physicalABI=gpu?registry_number(gpu,CFSTR("RedfinPhysicalSubmissionABI")):0;
+        int surfaceCacheABI=gpu?registry_number(gpu,CFSTR("RedfinSurfaceCacheABI")):0;
         if (gpu) IOObjectRelease(gpu);
         if (mode!=1 && mode!=2) return 0;
         printf("REDFIN METAL CHECK BOOT: %016llx mode=%d pid=%d\n",(unsigned long long)nonce,mode,getpid());
@@ -412,6 +414,7 @@ int main(void)
             BOOL uboExtents=short_bounds&&ubo_extents_native(device,library,nonce);
             BOOL resourceReferences=short_bounds&&redfin_metal_resource_check("/redfin/lib/redfin-resource-check.bc",nonce);
             BOOL retainedMemory=retained_memory_native(device,nonce);
+            BOOL surfaceCache=short_bounds&&surfaceCacheABI==1&&surface_cache_native(device,nonce);
             uint64_t routes[2]={0};BOOL gmem=dependencies&&native_gmem_statistics(device,routes);
             /* Run the bounded busy probe last. An actual GPU failure retires
              * the context; no later checker may create/use new native pipes. */
@@ -422,7 +425,7 @@ int main(void)
             printf("REDFIN METAL COMPOSITION RESULT: boot=%016llx clear-only-mrt-scissor-viewport-fetch-pixels-guards=%u vertex-stream-varying-sample-pixels-guards=%u pitch480-two-seeds-pixels-guards=%u pitch4512-two-seeds-pixels-guards=%u resolve480-pixels-guards=%u resolve4512-pixels-guards=%u visible-overlay=0\n",
                 (unsigned long long)nonce,raster,vertices,pitch480,pitch4512,resolve480,resolve4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
-            int status=gmem&&short_bounds&&wrapped_bounds&&padded_bounds&&padded_restore&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&scheduling&&uboExtents&&physicalPending&&resourceReferences&&retainedMemory ? 0 : 1;
+            int status=gmem&&short_bounds&&wrapped_bounds&&padded_bounds&&padded_restore&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&scheduling&&uboExtents&&physicalPending&&resourceReferences&&retainedMemory&&surfaceCache ? 0 : 1;
             redfin_graphics_memory_report("checker-after",0);
             /* task_info's status above describes memory accounting only. */
             printf("REDFIN METAL CHECK EXIT: boot=%016llx result=%u full-contract=1\n",

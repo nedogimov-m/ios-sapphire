@@ -1,5 +1,55 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete cache selection correction;54host/native checker build PASS — 2026-10-26
+
+Preserve exact run12 preimages and the validated run13 native source privately.
+Correct the whole allocation/alias/CPU-lock/queue/output policy: CPU cache
+attributes are independent of GMEM transfer padding. Standard shifted explicit
+WC0x400 and default requests select fresh owned BGRA WC allocations, including
+independently allocated objects carrying parent metadata or image offsets.
+No existing parent/view/wrapped/physical descriptor acquires the attribute.
+Full actual IOBuffer identity, length, map mode and immutable allocation flag
+still gate skips; other explicit cache requests retain original maintenance.
+Bounded large-allocation records report actual hints/metadata/selected mode.
+
+54combined host contracts PASS, including real allocation selection, exact
+shifted flags, metadata versus true alias ownership, CPU lock/unlock and FIFO
+completion/cached fallback. No mini-task hardware boots. Native checker adds
+three real cache requests(default/WC/copyback),3rounds each: CPU pattern->GPU
+texture read->buffer pixels/prefix/tail guards, then actual GPU clear->CPU
+pixels/full surface-tail guards. Full actual20H392 build/ABI/import/signature
+PASS; input6e6e432c.. unchanged, new pair45c09a8189dd029af0bc19f8c364c7fcd84105f8dcd23b14ee21870568994717,
+same shader-cache496301fc../UI. New matching kernel CI and complete native
+system WC/output proof required. Next fresh V83/imageV77 at clean1532435;
+no redundant ordinary run while actual system output still selects cached RAM.
+Broader platform goal remains active/unfinished.
+
+## REDFIN V76 full native WC passes; system display still cached — 2026-10-26
+
+Codef536de6/docs3927b65; actual Actions40348304483/run13/kernelb66aa712..,
+native6e6e432c../pair1d031356../UI/cache. Cycle92252 TERMINAL exit0: authenticated
+fresh3ef7db5965e7e5ec, one backboardd62, no runtime GPU stop/kernel panic,
+clean unmounted HFSX1532435 and verified Fastboot. V82 STALE/never reuse;
+next fresh V83/imageV77 at actual1532435. Captures/automatic app opens OFF.
+
+Full explicit CHECK EXIT0 and all previous Metal/CPU rewrite/alias/binding/
+lifetime/error/padding/pixel/guard/physical output cases PASS. Four bounded
+physical cases and actual post-doorbell2pending complete together.18PUB/
+13DONE/22PIPE records validate; no invalid. Eight owned WC allocation records,
+127actual native clean skips/119invalidate skips; those prove the native path.
+System output WC0/cached600 shows that the compositor's output does NOT use it.
+Do not promote this as full system-WC or throughput success.
+
+Checked animation371GPU/10.011184physical seconds =37.058554FPS at90Hz
+callbacks; one stable interval, no misses/timeouts, idle restored.17frontend/
+28owner/9output partitions validate; output median6.116ms. This is not a
+matched ordinary performance comparison. Warm system jobs still maintain
+about11MiB per direction, roughly5ms each; the intended system saving is absent.
+Correct selection independently of GMEM permission and test explicit cache
+requests as the complete next block. Exact observed boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3ef7db5965e7e5ec redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal active; smooth60/90render FPS remains unfinished.
+
 ## REDFIN WC surface run13 artifact/V82 update verified; combined V76 starts — 2026-10-26
 
 Codef536de6959238bf236b7e725e04b8ab7bed14bff/docs22251d5. Actions40348304483/

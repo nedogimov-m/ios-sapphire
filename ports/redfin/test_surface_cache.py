@@ -12,13 +12,13 @@ from ports.redfin.test_usb_owned_route import added_file
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-NATIVE = ROOT / 'research/redfin-gpu/surface-cache-native-v1'
+NATIVE = ROOT / 'research/redfin-gpu/surface-cache-policy-native-v1'
 
 TYPES = r'''
 #include <cstdint>
 #include <cstddef>
 #include <cassert>
-enum {kIOMapDefaultCache=0,kIOMapWriteCombineCache=4};
+enum {kIOMapDefaultCache=0,kIOMapWriteCombineCache=0x400};
 struct IOMemoryDescriptor {
  uint64_t length=1228800;virtual ~IOMemoryDescriptor(){}uint64_t getLength(){return length;}
 };
@@ -27,6 +27,8 @@ struct IOBufferMemoryDescriptor:public IOMemoryDescriptor {};
 struct SweetSurface {
  IOMemoryDescriptor *memory=nullptr;uint64_t redfinRenderExtent=1217792,scanoutPhys=0;
  uint32_t allocSize=1228800,cacheMode=0,mapCache=kIOMapWriteCombineCache,wrapDelta=0,parentID=0;
+ uint32_t width=64,height=64,planeCount=0,pixelFormat=0x42475241,offset=0;
+ uint16_t bytesPerElement=4;uint8_t elementWidth=1,elementHeight=1;
  int scanoutSlot=-1;bool wrapped=false,redfinWriteCombined=true;
  unsigned releases=0;void release(){++releases;}
 };
@@ -58,7 +60,7 @@ class SurfaceCacheTests(unittest.TestCase):
     def test_actual_owned_mapping_proof_rejects_each_cached_or_foreign_alias(self):
         self.compile_run(TYPES+r'''
 int main(){
- for(unsigned fault=0;fault<20;++fault){
+ for(unsigned fault=0;fault<22;++fault){
   IOBufferMemoryDescriptor memory,other;IOMemoryDescriptor foreign;
   SweetSurface surface;surface.memory=&memory;IOMemoryDescriptor *request=&memory;
   uint64_t bytes=surface.allocSize;SweetSurface *owner=&surface;
@@ -72,10 +74,37 @@ int main(){
    case 12:surface.scanoutSlot=0;break;case 13:surface.memory=request=&foreign;break;
    case 14:request=nullptr;break;case 15:owner=nullptr;break;case 16:bytes=0;break;
    case 17:bytes-=16384;break;case 18:request=&other;break;case 19:bytes=UINT64_MAX;break;
+   case 20:surface.cacheMode=kIOMapWriteCombineCache;break;case 21:surface.cacheMode=0x300;break;
   }
-  assert(redfin_surface_write_combined(owner,request,bytes)==(fault==0));
+  /* Parent metadata and GMEM padding cannot change actual CPU attributes. */
+  assert(redfin_surface_write_combined(owner,request,bytes)==(fault==0||fault==7||fault==10||fault==20));
  }
  redfin_surface_cache_barrier();return 0;
+}
+''')
+
+    def test_actual_allocation_selection_honors_explicit_wc_without_gmem_permission(self):
+        self.compile_run(TYPES+r'''
+int main(){
+ for(unsigned fault=0;fault<22;++fault){
+  SweetSurface surface;IOBufferMemoryDescriptor existing;bool selected=true;
+  switch(fault){
+   case 0:break;case 1:selected=false;break;case 2:surface.memory=&existing;break;
+   case 3:surface.wrapped=true;break;case 4:surface.wrapDelta=4;break;
+   case 5:surface.scanoutPhys=4096;break;case 6:surface.scanoutSlot=0;break;
+   case 7:surface.allocSize=0;break;case 8:surface.allocSize=RF_GS_MAX_BYTES+RF_GS_PAGE_BYTES;break;
+   case 9:surface.allocSize++;break;case 10:surface.width=0;break;case 11:surface.height=0;break;
+   case 12:surface.planeCount=1;break;case 13:surface.pixelFormat=0;break;
+   case 14:surface.bytesPerElement=2;break;case 15:surface.elementWidth=2;break;
+   case 16:surface.elementHeight=2;break;case 17:surface.cacheMode=0x300;break;
+   case 18:surface.cacheMode=kIOMapWriteCombineCache;break;
+   case 19:surface.parentID=123;break;case 20:surface.offset=64;break;
+   case 21:surface.redfinRenderExtent=0;break;
+  }
+  assert(redfin_surface_wc_allocation(&surface,selected)==
+      (fault==0||fault==18||fault==19||fault==20||fault==21));
+ }
+ assert(!redfin_surface_wc_allocation(nullptr,true));return 0;
 }
 ''')
 
@@ -85,7 +114,7 @@ int main(){
 #include <cstddef>
 #include <cassert>
 using SInt64=int64_t;using IOOptionBits=uint64_t;
-enum {kIODirectionInOut=1,kIOMemoryKernelUserShared=2,kIOMapWriteCombineCache=4};
+enum {kIODirectionInOut=1,kIOMemoryKernelUserShared=2,kIOMapWriteCombineCache=0x400};
 static int kernel_task;static uint64_t page_size=16384;
 static uint64_t sweet_surface_wired;
 static constexpr uint64_t SWEET_SURFACE_WIRED_MAX=128*1024*1024;
@@ -165,12 +194,13 @@ int main(){
         last = native.index('\nvoid RedwoodGPUUserClient::retireQueued(', first)
         receiver = (HERE/'gpu-physical-worker-host.cpp').read_text()
         fields = r'''
-enum {kIOMapWriteCombineCache=4};
+enum {kIOMapWriteCombineCache=0x400};
 struct IOMemoryDescriptor {uint64_t length=16384;virtual ~IOMemoryDescriptor(){}uint64_t getLength(){return length;}};
 struct IOBufferMemoryDescriptor:public IOMemoryDescriptor {};
 #define OSDynamicCast(type,value) dynamic_cast<type *>(value)
 struct fake_surface {
- fake_state *state;IOMemoryDescriptor *memory=nullptr;uint32_t allocSize=16384,mapCache=4,cacheMode=0,wrapDelta=0,parentID=0;
+ fake_state *state;IOMemoryDescriptor *memory=nullptr;uint32_t allocSize=16384,mapCache=kIOMapWriteCombineCache,cacheMode=0,wrapDelta=0,parentID=0;
+ uint32_t width=64,height=64,planeCount=0,pixelFormat=0x42475241;uint16_t bytesPerElement=4;uint8_t elementWidth=1,elementHeight=1;
  uint64_t redfinRenderExtent=16384,scanoutPhys=0;int scanoutSlot=-1;bool redfinWriteCombined=false,wrapped=false;
 };
 using SweetSurface=fake_surface;
@@ -223,10 +253,10 @@ using SweetSurface=fake_surface;
                  'iokit/Kernel/arm/SweetSurface.cpp')
         formats = []
         for target in files:
-            formats += re.findall(r'IOLog\("(REDFIN (?:SURFACE CACHE|GPU SURFACE CACHE|GPU OUTPUT CACHE):[^"\n]+)"', self.native(target))
-        self.assertEqual(len(formats), 3)
+            formats += re.findall(r'IOLog\("(REDFIN (?:SURFACE CACHE(?: POLICY)?|GPU SURFACE CACHE|GPU OUTPUT CACHE):[^"\n]+)"', self.native(target))
+        self.assertEqual(len(formats), 4)
         for value in formats:
-            value = value.replace('%llu', str(2**64-1)).replace('%u', str(2**32-1))
+            value = value.replace('%llu', str(2**64-1)).replace('%u', str(2**32-1)).replace('%#x', '0xffffffff')
             self.assertNotIn('%', value)
             self.assertLessEqual(len(value.replace(r'\n', '\n').encode()), 255)
 

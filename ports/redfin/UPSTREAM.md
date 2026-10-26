@@ -1,5 +1,27 @@
 # HackiOS upstream review — 2026-10-22
 
+## V76 native WC correctness PASS; system allocation selection corrected — 2026-10-26
+
+Actual Actions40348304483/run13/sourcef536de6/kernelb66aa712.. passes full
+native CHECK EXIT0, actual2pending completion and all previous output/guard
+checks. Native WC route counters observe127clean/119invalidate skips, but
+system output records WC0/cached600. Checked37.058554FPS is not an ordinary
+speedup proof; the system display did not use the new allocation policy.
+Root clean1532435/Fastboot, one server, no runtime stop/panic.
+
+Correct the policy as one complete block: actual fresh owned pixels choose
+CPU cache attributes independently of extra GMEM image rows. Parent metadata
+alone does not alias a newly allocated IOBuffer. No existing descriptor/view
+inherits WC permission; full memory identity/length/type and actual map mode
+remain mandatory. Honor the standard shifted explicit WC request0x400 as
+documented by IOSurfaceTypes.h and XNU IOMapTypes.h; other explicit requests
+retain the existing cached path. Add bounded large-allocation policy records.
+54combined host contracts PASS. Native20H392 checker now adds3cache requests,
+3rounds each of CPU->GPU pixel reads/output guards and GPU->CPU clear pixels/
+tail guards. Native build/import/signature/pair45c09a81.. PASS, with exact
+compiler input6e6e432c../cache496301fc.. retained. Matching kernel CI/native
+system-route proof is next. Preferred pins and Angelpro344a8af review unchanged.
+
 ## Complete owned surface cache block; combined host contracts PASS — 2026-10-26
 
 Retain preferred kernel8e611870../userland906425b7.. and reviewed Angelpro344a8af.
