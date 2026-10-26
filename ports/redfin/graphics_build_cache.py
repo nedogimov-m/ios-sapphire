@@ -11,6 +11,7 @@ VERSION=1
 # AIR/NIR, Adreno programs or shader options. Every other input stays strict.
 TRANSPORT_INPUTS=frozenset('ports/redfin/'+name for name in (
     'surface-padding.h','mesa-surface-padding.patch',
+    'retained-memory.h','mesa-retained-memory.patch',
     'drm-profile.h','metal-scoped-submission.patch','include/redfin_gpu_scope.h',
     'mesa-scoped-submit.inc','mesa-submit-merge.patch','mesa-submit-merge.h',
     'mesa-submit-merge.inc','include/redfin_gpu_access.h',
@@ -26,6 +27,13 @@ TRANSPORT_PATCH_TARGETS=frozenset((
     'src/gallium/drivers/freedreno/freedreno_resource.h',
     'src/gallium/drivers/freedreno/freedreno_batch.c'))
 RUNTIME_PATCH_TARGETS={
+    # Capability checks, BO residency answers and their counters touch no
+    # shader, NIR/AIR serialization or compiled program/cache representation.
+    'ports/redfin/mesa-retained-memory.patch':frozenset((
+        'src/freedreno/drm/msm/msm_priv.h','src/freedreno/drm/msm/msm_device.c',
+        'src/freedreno/drm/msm/msm_bo.c','src/freedreno/drm/freedreno_drmif.h',
+        'src/gallium/drivers/freedreno/freedreno_context.c',
+        'src/compiler/air/air_metal.c','src/compiler/air/air_metal.h')),
     # Attested full-image allocation metadata/routing changes neither AIR/NIR
     # nor shader/program serialization. Compiler and options remain strict.
     'ports/redfin/mesa-surface-padding.patch':frozenset((

@@ -1,5 +1,30 @@
 # HackiOS upstream review — 2026-10-22
 
+## Guarded retained-BO reuse adaptation and bounded dynamic uploads — 2026-10-26
+
+From reviewed Angelpro sapphire344a8af2a9d5baf3597933a2e4601499ea0f623b,
+adapt the useful local MADVISE residency answer to an explicit native RFM1
+capability. One strict query per device enables it only for an existing held
+Mesa BO. Keep raw invalid-handle validation, unsupported-kernel fallback,
+CPU/cache/fence ownership and all native resource lifetime rules. No Sapphire
+physical RAM pool, guessed cache mode or unproved clock setting is imported.
+Actual residency counters remain distinct from completion, GPU time and FPS.
+
+The same whole preparation block extends the existing read-only UBO snapshot
+proof with Mesa25.0.7 unsigned SSA bounds; preserve unknown/overflow fallbacks
+and function-local analysis caches.16real NIR cases prove serialization stays
+unchanged.29combined host contracts and complete native20H392 ABI/signature/
+current-export/paired-statistics/shader builds PASS. Input0de23d41../native
+pair096836ce.. preserves shader cache496301fc.. and existing UI artifacts.
+Native kernel CI and actual new A620 cases/performance remain pending.
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain the base. Physical-ring
+asynchronous publication is a separate reviewed opportunity: Redfin's current
+retained client queue still proves a real fence in its hardware owner. Do not
+claim that layer has become fully asynchronous merely because client admission
+returns early or because Sapphire's A610 implementation does so.
+
 ## User-requested Angelpro09xd sapphire review — 2026-10-26
 
 Reviewed https://github.com/Angelpro09xd/ios-sapphire/tree/sapphire at exact

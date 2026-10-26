@@ -1,0 +1,53 @@
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -14,6 +14,7 @@
+  */
+ #include "SweetSurface.h"
+ #include "RedfinSurfacePadding.h"
++#include "RedfinGPUMemoryPolicy.h"
+ #if defined(SWEET)
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOUserClient.h>
+@@ -151,6 +152,7 @@
+     setProperty("RedfinScopedWaitABI",RF_GW_ABI,32);
+     setProperty("RedfinResourceAccessABI",RF_GA_ABI,32);
+     setProperty("RedfinSurfacePaddingABI",RF_GP_ABI,32);
++    setProperty("RedfinRetainedMemoryABI",RF_GM_ABI,32);
+     if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
+     registerService();return true;
+ }
+@@ -423,6 +425,7 @@
+     case RF_GQ_PARAM:*value=RF_GQ_ABI;return true;
+     case RF_GW_PARAM:*value=RF_GW_ABI;return true;
+     case RF_GA_PARAM:*value=RF_GA_ABI;return true;
++    case RF_GM_PARAM:*value=RF_GM_ABI;return true;
+     /* A620 uses native UBWC3. Do not advertise A642L UBWC4 parameters. */
+     default:return false;
+     }
+@@ -471,7 +474,12 @@
+     GPUClientTransaction client(clientLock);
+     if(closed||queue.closing||!redfin_gpu_ready())return kIOReturnNotReady;
+     switch(selector) {
+-    case GetParam:if(r.param.pipe!=0x10 || !parameter(r.param.param,&r.param.value))result=kIOReturnBadArgument;break;
++    case GetParam:
++        if(r.param.param==RF_GM_PARAM && (r.param.len || r.param.pad)) {
++            r.param.value=0;result=kIOReturnBadArgument;break;
++        }
++        if(r.param.pipe!=0x10 || !parameter(r.param.param,&r.param.value))result=kIOReturnBadArgument;
++        break;
+     case SetParam:break;
+     case GemNew:{GPUTransaction hardware;result=create(&r.create);break;}
+     case GemInfo:result=info(&r.info);break;
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPUMemoryPolicy.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: MIT */
++/* Explicit native policy: a live GEM handle retains its descriptor until
++ * close/real retirement. This grants no CPU access, completion or cache proof. */
++#ifndef REDFIN_RETAINED_MEMORY_H
++#define REDFIN_RETAINED_MEMORY_H
++#include <stdint.h>
++#define RF_GM_PARAM UINT32_C(0x52464d31)
++#define RF_GM_ABI 1u
++enum {RF_GM_CAPABILITY,RF_GM_QUERIES,RF_GM_FAST,RF_GM_FALLBACK,RF_GM_WORDS};
++#endif

@@ -13,12 +13,17 @@ static uint32_t ubo_source_word(uint64_t nonce,unsigned phase,unsigned index)
 
 static BOOL ubo_compute_extents(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce)
 {
-    enum {tail=256*1024,sourceBytes=tail+64,outputWords=128,outputFirst=16,threads=16};
+    enum {tail=256*1024,sourceBytes=tail+64,outputWords=128,outputFirst=16};
     unsigned passed=0;BOOL valid=YES;
-    for(unsigned phase=0;valid&&phase<6;++phase) {
-        BOOL dynamic=phase==1||phase==3||phase==5,indirect=phase>=2&&phase!=5,gpu=phase>=4;
-        NSString *name=indirect?(dynamic?@"redfin_ubo_argument_dynamic":@"redfin_ubo_argument_fixed"):
-            (dynamic?@"redfin_ubo_dynamic":@"redfin_ubo_fixed");
+    for(unsigned phase=0;valid&&phase<10;++phase) {
+        unsigned bounded=phase<6?0:(phase==6||phase==8?1:2),threads=bounded?64:16;
+        BOOL dynamic=phase==1||phase==3||phase==5||bounded,
+            indirect=(phase>=2&&phase<=4)||phase==7||phase==8,
+            gpu=phase==4||phase==5||phase>=8;
+        NSString *name=bounded==1?(indirect?@"redfin_ubo_argument_masked":@"redfin_ubo_masked"):
+            bounded==2?(indirect?@"redfin_ubo_argument_clamped":@"redfin_ubo_clamped"):
+            indirect?(dynamic?@"redfin_ubo_argument_dynamic":@"redfin_ubo_argument_fixed"):
+                (dynamic?@"redfin_ubo_dynamic":@"redfin_ubo_fixed");
         id<MTLFunction> function=[library newFunctionWithName:name];NSError *error=nil;
         id<MTLComputePipelineState> pipeline=function?[device newComputePipelineStateWithFunction:function error:&error]:nil;
         id<MTLBuffer> source=[device newBufferWithLength:sourceBytes options:MTLResourceStorageModeShared];
@@ -43,6 +48,8 @@ static BOOL ubo_compute_extents(id<MTLDevice> device,id<MTLLibrary> library,uint
             if(valid)[producer commit];
         }
         id<MTLCommandBuffer> command=[reader commandBuffer];id<MTLComputeCommandEncoder> encoder=[command computeCommandEncoder];
+        uint64_t boundsBefore[REDFIN_METAL_FRONTEND_WORDS]={0},boundsAfter[REDFIN_METAL_FRONTEND_WORDS]={0};
+        if(bounded)valid=valid&&ubo_frontend_statistics(device,boundsBefore);
         [encoder setComputePipelineState:pipeline];
         if(indirect)[encoder setBuffer:table offset:0 atIndex:0];
         else {[encoder setBuffer:output offset:outputFirst*4 atIndex:0];[encoder setBuffer:source offset:4 atIndex:1];}
@@ -52,7 +59,8 @@ static BOOL ubo_compute_extents(id<MTLDevice> device,id<MTLLibrary> library,uint
         for(unsigned i=0;valid&&i<outputWords;++i) {
             uint32_t wanted=0xa5a5a5a5u;
             if(i>=outputFirst&&i<outputFirst+threads) {
-                unsigned thread=i-outputFirst,selected=dynamic?thread+34:14;
+                unsigned thread=i-outputFirst,selected=bounded==1?(thread&31u)+34u:
+                    bounded==2?(thread<15u?thread:15u)+34u:dynamic?thread+34:14;
                 uint32_t a=gpu?0x5a5a5a5au:ubo_source_word(nonce,phase,selected);
                 uint32_t b=gpu?0x5a5a5a5au:ubo_source_word(nonce,phase,1);
                 wanted=a+b*17u+thread;
@@ -63,12 +71,25 @@ static BOOL ubo_compute_extents(id<MTLDevice> device,id<MTLLibrary> library,uint
             uint32_t wanted=gpu&&i>=1&&i<=tail/4?0x5a5a5a5au:ubo_source_word(nonce,phase,i);
             if(input[i]!=wanted){printf("REDFIN METAL UBO SOURCE: phase=%u word=%u input/guard changed\n",phase,i);valid=NO;}
         }
-        printf("REDFIN METAL UBO CASE: boot=%016llx phase=%u dynamic=%u argument-buffer=%u GPU-written=%u actual-values-and-guards=%u\n",
-            (unsigned long long)nonce,phase,dynamic,indirect,gpu,valid);
+        uint64_t copied=0,proofs=0;
+        if(bounded) {
+            valid=valid&&ubo_frontend_statistics(device,boundsAfter)&&
+                boundsAfter[RF_MFP_CONSTANT_BYTES]>=boundsBefore[RF_MFP_CONSTANT_BYTES]&&
+                boundsAfter[RF_MFP_CONSTANT_PROVEN]>boundsBefore[RF_MFP_CONSTANT_PROVEN]&&
+                boundsAfter[RF_MFP_CONSTANT_FALLBACK]==boundsBefore[RF_MFP_CONSTANT_FALLBACK];
+            if(valid) {
+                copied=boundsAfter[RF_MFP_CONSTANT_BYTES]-boundsBefore[RF_MFP_CONSTANT_BYTES];
+                proofs=boundsAfter[RF_MFP_CONSTANT_PROVEN]-boundsBefore[RF_MFP_CONSTANT_PROVEN];
+                valid=copied>0&&copied<=1024;
+            }
+        }
+        printf("REDFIN METAL UBO CASE: boot=%016llx phase=%u dynamic=%u bounded=%u argument-buffer=%u GPU-written=%u threads=%u copied-bytes=%llu proven-snapshots=%llu actual-values-and-guards=%u\n",
+            (unsigned long long)nonce,phase,dynamic,bounded,indirect,gpu,threads,
+            (unsigned long long)copied,(unsigned long long)proofs,valid);
         if(valid)++passed;
         [table release];[arguments release];[writer release];[reader release];[output release];[source release];[pipeline release];[function release];
     }
-    return valid&&passed==6;
+    return valid&&passed==10;
 }
 
 static BOOL ubo_render_extents(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce)
@@ -108,8 +129,8 @@ static BOOL ubo_extents_native(id<MTLDevice> device,id<MTLLibrary> library,uint6
     uint64_t proven=after[RF_MFP_CONSTANT_PROVEN]>=before[RF_MFP_CONSTANT_PROVEN]?after[RF_MFP_CONSTANT_PROVEN]-before[RF_MFP_CONSTANT_PROVEN]:0;
     uint64_t avoided=after[RF_MFP_CONSTANT_AVOIDED_BYTES]>=before[RF_MFP_CONSTANT_AVOIDED_BYTES]?after[RF_MFP_CONSTANT_AVOIDED_BYTES]-before[RF_MFP_CONSTANT_AVOIDED_BYTES]:0;
     uint64_t full=after[RF_MFP_CONSTANT_FALLBACK]>=before[RF_MFP_CONSTANT_FALLBACK]?after[RF_MFP_CONSTANT_FALLBACK]-before[RF_MFP_CONSTANT_FALLBACK]:0;
-    valid=valid&&proven>=3&&avoided>=2*(256*1024-256)&&full>=3;
-    printf("REDFIN METAL UBO RESULT: boot=%016llx fixed-dynamic-arguments-GPU-writers-raster-guards=%u proven-snapshots=%llu avoided-bytes=%llu conservative-full=%llu\n",
+    valid=valid&&proven>=7&&avoided>=2*(256*1024-256)&&full>=3;
+    printf("REDFIN METAL UBO RESULT: boot=%016llx fixed-dynamic-arguments-GPU-writers-raster-guards=%u masked-clamped-boundaries=1 proven-snapshots=%llu avoided-bytes=%llu conservative-full=%llu\n",
         (unsigned long long)nonce,valid,(unsigned long long)proven,(unsigned long long)avoided,(unsigned long long)full);
     return valid;
 }

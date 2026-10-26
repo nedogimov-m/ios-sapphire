@@ -55,6 +55,7 @@ class MetalScheduledTests(unittest.TestCase):
 #include "metal-queued.h"
 #include "metal-frontend-profile.h"
 #include "metal-scheduling.h"
+#include "retained-memory.h"
 enum {RW_CB_COMMITTED=2,RW_CB_SCHEDULED=3,RW_CB_COMPLETED=4,RW_CB_ERROR=5};
 static dispatch_semaphore_t entered,release_fence,publish_entered,release_publish,dealloc_done;
 static dispatch_queue_t callbacks_queue;
@@ -84,7 +85,9 @@ static struct {int (*commands_begin)(void *,char *,size_t);int (*commands_submit
  int (*submission_statistics)(void *,uint64_t *,size_t);
  int (*ordering_statistics)(void *,uint64_t *,size_t);
  int (*binding_statistics)(void *,uint64_t *,size_t);
- int (*frontend_statistics)(void *,uint64_t *,size_t);} mesa={begin,submit,wait_ticket,retire,destroy,statistics,statistics,statistics,statistics};
+ int (*frontend_statistics)(void *,uint64_t *,size_t);
+ int (*raster_statistics)(void *,uint64_t *,size_t);
+ int (*retained_statistics)(void *,uint64_t *,size_t);} mesa={begin,submit,wait_ticket,retire,destroy,statistics,statistics,statistics,statistics,statistics,statistics};
 static const char redfin_fence_boot[]="host-publication-fixture";
 static void rw_print(const char *format,...){(void)format;}
 static uint64_t redfin_phase_us(uint64_t a,uint64_t b){mach_timebase_info_data_t s;assert(!mach_timebase_info(&s));return b>=a?(uint64_t)(((__uint128_t)(b-a)*s.numer)/s.denom/1000):0;}

@@ -1,0 +1,174 @@
+--- a/src/freedreno/drm/msm/msm_priv.h
++++ b/src/freedreno/drm/msm/msm_priv.h
+@@ -24,6 +24,10 @@
+ 
+ struct msm_device {
+    struct fd_device base;
++#ifdef __APPLE__
++   bool redfin_retained;
++   uint64_t redfin_retention_queries,redfin_retention_fast,redfin_retention_fallback;
++#endif
+ };
+ FD_DEFINE_CAST(fd_device, msm_device);
+ 
+--- a/src/freedreno/drm/freedreno_drmif.h
++++ b/src/freedreno/drm/freedreno_drmif.h
+@@ -206,6 +206,8 @@
+ 
+ #ifdef __APPLE__
+ #include "redfin_surface_padding.h"
++#include "redfin_retained_memory.h"
++int fd_device_retained_statistics(struct fd_device *,uint64_t[RF_GM_WORDS]);
+ #endif
+ 
+ struct fd_bo {
+--- a/src/freedreno/drm/msm/msm_device.c
++++ b/src/freedreno/drm/msm/msm_device.c
+@@ -27,6 +27,22 @@
+    .destroy = msm_device_destroy,
+ };
+ 
++#ifdef __APPLE__
++/* One immutable capability read per retained device. Unsupported/changed
++ * replies keep the real MADVISE ioctl. No completion or CPU access is granted. */
++static void
++msm_redfin_retention_init(struct msm_device *device,int fd)
++{
++   if(device->base.version<FD_VERSION_MADVISE)return;
++   struct drm_msm_param request={.pipe=0x10,.param=RF_GM_PARAM};
++   STATIC_ASSERT(sizeof(request)==24);
++   device->redfin_retention_queries=1;
++   int error=drmCommandWriteRead(fd,DRM_MSM_GET_PARAM,&request,sizeof(request));
++   device->redfin_retained=!error && request.pipe==0x10 && request.param==RF_GM_PARAM &&
++      request.value==RF_GM_ABI && !request.len && !request.pad;
++}
++#endif
++
+ struct fd_device *
+ msm_device_new(int fd, drmVersionPtr version)
+ {
+@@ -44,6 +60,9 @@
+    dev = &msm_dev->base;
+    dev->funcs = &funcs;
+    dev->version = version->version_minor;
++#ifdef __APPLE__
++   msm_redfin_retention_init(msm_dev,fd);
++#endif
+ 
+    if (version->version_minor >= FD_VERSION_CACHED_COHERENT) {
+       struct drm_msm_gem_new new_req = {
+@@ -70,3 +89,17 @@
+ 
+    return dev;
+ }
++#ifdef __APPLE__
++int
++fd_device_retained_statistics(struct fd_device *device,uint64_t counts[RF_GM_WORDS])
++{
++   if(!device || !counts || device->funcs!=&funcs)return -1;
++   struct msm_device *msm=to_msm_device(device);
++   counts[RF_GM_CAPABILITY]=msm->redfin_retained?RF_GM_ABI:0;
++   counts[RF_GM_QUERIES]=__atomic_load_n(&msm->redfin_retention_queries,__ATOMIC_RELAXED);
++   counts[RF_GM_FAST]=__atomic_load_n(&msm->redfin_retention_fast,__ATOMIC_RELAXED);
++   counts[RF_GM_FALLBACK]=__atomic_load_n(&msm->redfin_retention_fallback,__ATOMIC_RELAXED);
++   return 0;
++}
++#endif
++
+--- a/src/freedreno/drm/msm/msm_bo.c
++++ b/src/freedreno/drm/msm/msm_bo.c
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include "msm_priv.h"
++#include <errno.h>
+ 
+ static int
+ bo_allocate(struct msm_bo *msm_bo)
+@@ -71,6 +72,9 @@
+ static int
+ msm_bo_madvise(struct fd_bo *bo, int willneed)
+ {
++#ifdef __APPLE__
++   if(!bo || !bo->dev || !bo->handle)return -EINVAL;
++#endif
+    struct drm_msm_gem_madvise req = {
+       .handle = bo->handle,
+       .madv = willneed ? MSM_MADV_WILLNEED : MSM_MADV_DONTNEED,
+@@ -81,6 +85,16 @@
+    if (bo->dev->version < FD_VERSION_MADVISE)
+       return willneed;
+ 
++#ifdef __APPLE__
++   /* Only this still-owned BO may use the kernel's explicit resident-handle
++    * promise. Raw ioctls, close, CPU preparation and fence waits stay native. */
++   struct msm_device *device=to_msm_device(bo->dev);
++   if(device->redfin_retained) {
++      __atomic_fetch_add(&device->redfin_retention_fast,1,__ATOMIC_RELAXED);
++      return 1;
++   }
++   __atomic_fetch_add(&device->redfin_retention_fallback,1,__ATOMIC_RELAXED);
++#endif
+    ret =
+       drmCommandWriteRead(bo->dev->fd, DRM_MSM_GEM_MADVISE, &req, sizeof(req));
+    if (ret)
+--- a/src/gallium/drivers/freedreno/freedreno_context.c
++++ b/src/gallium/drivers/freedreno/freedreno_context.c
+@@ -35,6 +35,20 @@
+    counts[1]=ctx->stats.batch_sysmem;
+    fd_context_access_end(ctx);
+ }
++
++#ifdef __APPLE__
++int redfin_freedreno_retained_statistics(struct pipe_context *,uint64_t[RF_GM_WORDS]);
++int
++redfin_freedreno_retained_statistics(struct pipe_context *pipe,uint64_t counts[RF_GM_WORDS])
++{
++   if(!pipe || !counts)return -1;
++   struct fd_context *ctx=fd_context(pipe);
++   fd_context_access_begin(ctx);
++   int result=fd_device_retained_statistics(ctx->screen->dev,counts);
++   fd_context_access_end(ctx);
++   return result;
++}
++#endif
+ 
+ static void
+ fd_context_flush(struct pipe_context *pctx, struct pipe_fence_handle **fencep,
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -83,6 +83,8 @@
+ #include "redfin_metal_queued.h"
+ #include "redfin_metal_frontend_profile.h"
+ #include "redfin_metal_ubo_extents.h"
++#include "redfin_retained_memory.h"
++extern int redfin_freedreno_retained_statistics(struct pipe_context *,uint64_t[RF_GM_WORDS]);
+ #include <pthread.h>
+ #define REDFIN_METAL_BINDINGS_RUNTIME 1
+ #include "redfin_metal_bindings.h"
+@@ -714,6 +716,14 @@
+    int status=redfin_drm_profile_read(counts,8);if(status)return status;
+    uint64_t compiler[5]={0};status=redfin_ir3_disk_cache_statistics(compiler,5);
+    counts[8]=compiler[3];counts[9]=compiler[4];return status;
++}
++
++int
++rwa_redfin_retained_statistics(struct rwa_device *device,uint64_t *counts,size_t words)
++{
++   if(!device || !counts || words!=RF_GM_WORDS || device->software ||
++      strcmp(rwa_device_name(device),"FD620"))return -1;
++   return redfin_freedreno_retained_statistics(device->pipe,counts);
+ }
+ 
+ const char *
+--- a/src/compiler/air/air_metal.h
++++ b/src/compiler/air/air_metal.h
+@@ -69,6 +69,8 @@
+ int rwa_commands_end(struct rwa_device *device,char *why,size_t why_size);
+ /* Counts actual GMEM/sysmem batches; caller serializes the device. */
+ int rwa_redfin_raster_stats(struct rwa_device *device,uint64_t *counts,size_t words);
++/* Explicit resident-handle policy/query/fast/fallback counts, caller serialized. */
++int rwa_redfin_retained_statistics(struct rwa_device *device,uint64_t *counts,size_t words);
+ int rwa_redfin_submission_stats(struct rwa_device *device,uint64_t *counts,size_t words);
+ 
+ /* What the driver should call the GPU, as Mesa knows it ("Adreno 7c+ Gen 3"). Never NULL. */

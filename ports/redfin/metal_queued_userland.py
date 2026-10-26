@@ -76,8 +76,9 @@ struct redfin_metal_encoded_stats {
     uint64_t bindings_start[REDFIN_METAL_BINDING_WORDS],bindings_end[REDFIN_METAL_BINDING_WORDS];
     uint64_t order_start[REDFIN_METAL_ORDERING_WORDS],order_end[REDFIN_METAL_ORDERING_WORDS];
     uint64_t routes_start[2],routes_end[2];
+    uint64_t residency[RF_GM_WORDS];
     unsigned draws,computes;
-    BOOL io_valid,frontend_valid,bindings_valid,order_valid,routes_valid;
+    BOOL io_valid,frontend_valid,bindings_valid,order_valid,routes_valid,residency_valid;
 };
 struct redfin_metal_retirement_stats {
     uint64_t worker,native_done,previous_done,gate,retired,resources,slot;
@@ -93,6 +94,11 @@ static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats 
     if(s->io_valid)redfin_metal_io_sequence(s->io_start,s->io_end,n);
     if(n>4&&(n&(n-1))&&(n%120))return;
     redfin_scheduling_report(n);
+    if(s->residency_valid)
+        rw_print("REDFIN METAL RESIDENCY: boot=%s sequence=%llu ABI=%llu queries=%llu fast=%llu fallback=%llu process-cumulative=1 captured-at-encode-end=1\n",
+            redfin_fence_boot,(unsigned long long)n,
+            (unsigned long long)s->residency[RF_GM_CAPABILITY],(unsigned long long)s->residency[RF_GM_QUERIES],
+            (unsigned long long)s->residency[RF_GM_FAST],(unsigned long long)s->residency[RF_GM_FALLBACK]);
     if(s->routes_valid && s->routes_end[0]>=s->routes_start[0] && s->routes_end[1]>=s->routes_start[1])
         rw_print("REDFIN METAL ROUTES: boot=%s sequence=%llu actual-finish=1 gmem-batches=%llu sysmem-batches=%llu command-delta=1\n",
             redfin_fence_boot,(unsigned long long)n,
@@ -188,7 +194,7 @@ SCHEDULING=r'''
 
 
 def adapt(text):
-    text=replace_once(text,'#include "metal-ordering.h"','#include "metal-ordering.h"\n#include "metal-queued.h"\n#include "metal-frontend-profile.h"\n#include "metal-scheduling.h"')
+    text=replace_once(text,'#include "metal-ordering.h"','#include "metal-ordering.h"\n#include "metal-queued.h"\n#include "metal-frontend-profile.h"\n#include "metal-scheduling.h"\n#include "retained-memory.h"')
     text=replace_once(text,'\t_Atomic(BOOL) _redfinFinalized;',
         '\t_Atomic(BOOL) _redfinFinalized;\n\t_Atomic(BOOL) _redfinScheduled;\n'
         '\tdispatch_group_t _redfinScheduling;\n\tBOOL _redfinSchedulingPending;')
@@ -205,6 +211,7 @@ def adapt(text):
     text=replace_once(text,point,point+'''
     int (*commands_submit)(struct rwa_device *,struct rwa_redfin_completion **,char *,size_t);
     int (*frontend_statistics)(struct rwa_device *,uint64_t *,size_t);
+    int (*retained_statistics)(struct rwa_device *,uint64_t *,size_t);
     int (*completion_wait)(struct rwa_redfin_completion *,char *,size_t);
     int (*completion_retire)(struct rwa_redfin_completion *,char *,size_t);
     void (*completion_destroy)(struct rwa_redfin_completion *);''')
@@ -212,11 +219,12 @@ def adapt(text):
     text=replace_once(text,point,point+'''
     *(void **)&mesa.commands_submit=dlsym(mesa.handle,"rwa_redfin_commands_submit");
     *(void **)&mesa.frontend_statistics=dlsym(mesa.handle,"rwa_redfin_frontend_statistics");
+    *(void **)&mesa.retained_statistics=dlsym(mesa.handle,"rwa_redfin_retained_statistics");
     *(void **)&mesa.completion_wait=dlsym(mesa.handle,"rwa_redfin_completion_wait");
     *(void **)&mesa.completion_retire=dlsym(mesa.handle,"rwa_redfin_completion_retire");
     *(void **)&mesa.completion_destroy=dlsym(mesa.handle,"rwa_redfin_completion_destroy");''')
     text=replace_once(text,'if (mesa.redfin_compute_create == NULL ||',
-        'if (!mesa.commands_submit || !mesa.frontend_statistics || !mesa.completion_wait || !mesa.completion_retire || !mesa.completion_destroy || mesa.redfin_compute_create == NULL ||')
+        'if (!mesa.commands_submit || !mesa.frontend_statistics || !mesa.retained_statistics || !mesa.completion_wait || !mesa.completion_retire || !mesa.completion_destroy || mesa.redfin_compute_create == NULL ||')
     first=text.index('/* A native -commit enqueues work;');last=text.index('/* Completion evidence',first)
     text=text[:first]+EXECUTION+'\n'+text[last:]
     # Reporting depends on the existing actual-fence timing helpers, so put
@@ -274,6 +282,7 @@ def adapt(text):
             stats.bindings_valid=stats.bindings_valid&&mesa.binding_statistics(device,stats.bindings_end,REDFIN_METAL_BINDING_WORDS)==0;
             stats.order_valid=stats.order_valid&&mesa.ordering_statistics(device,stats.order_end,REDFIN_METAL_ORDERING_WORDS)==0;
             stats.routes_valid=stats.routes_valid&&mesa.raster_statistics(device,stats.routes_end,2)==0;
+            stats.residency_valid=mesa.retained_statistics(device,stats.residency,RF_GM_WORDS)==0;
         }
     } /* Release the Gallium gate before any actual GPU wait. */
     if(published)[self redfinPublishScheduled];
@@ -371,6 +380,13 @@ int redfin_metal_frontend_statistics(id device,uint64_t *counts,size_t words)
     if(!device||![device isKindOfClass:[RedwoodMetalDevice class]]||!mesa_available()||
        !mesa.frontend_statistics)return -1;
     return mesa.frontend_statistics([(RedwoodMetalDevice *)device mesaDevice],counts,words);
+}
+int redfin_metal_retained_statistics(id device,uint64_t *counts,size_t words)
+{
+    REDFIN_MESA_SCOPE;
+    if(!device||![device isKindOfClass:[RedwoodMetalDevice class]]||!mesa_available()||
+       !mesa.retained_statistics)return -1;
+    return mesa.retained_statistics([(RedwoodMetalDevice *)device mesaDevice],counts,words);
 }
 int redfin_metal_scheduling_statistics(id device,uint64_t *counts,size_t words)
 {

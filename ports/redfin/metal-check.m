@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "surface-padding.h"
+#include "retained-memory.h"
 #include <string.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
@@ -295,6 +296,22 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL ba
     return valid;
 }
 
+static BOOL retained_memory_native(id device,uint64_t nonce)
+{
+    void *plugin=dlopen("/System/Library/Extensions/RedfinMetal.bundle/RedfinMetal",RTLD_NOW|RTLD_LOCAL|RTLD_NOLOAD);
+    int (*read)(id,uint64_t *,size_t)=plugin?
+        (int (*)(id,uint64_t *,size_t))dlsym(plugin,"redfin_metal_retained_statistics"):NULL;
+    uint64_t counts[RF_GM_WORDS]={0};
+    BOOL valid=read&&!read(device,counts,RF_GM_WORDS)&&counts[RF_GM_CAPABILITY]==RF_GM_ABI&&
+        counts[RF_GM_QUERIES]==1&&counts[RF_GM_FAST]>0&&counts[RF_GM_FALLBACK]==0;
+    if(plugin)dlclose(plugin);
+    printf("REDFIN METAL RETAINED MEMORY: boot=%016llx ABI=%llu queries=%llu fast=%llu fallback=%llu passed=%u real-fences-and-CPU-ownership=1\n",
+        (unsigned long long)nonce,(unsigned long long)counts[RF_GM_CAPABILITY],
+        (unsigned long long)counts[RF_GM_QUERIES],(unsigned long long)counts[RF_GM_FAST],
+        (unsigned long long)counts[RF_GM_FALLBACK],valid);
+    return valid;
+}
+
 int main(void)
 {
     @autoreleasepool {
@@ -392,6 +409,7 @@ int main(void)
             BOOL scheduling=short_bounds&&scheduling_native(device,nonce);
             BOOL uboExtents=short_bounds&&ubo_extents_native(device,library,nonce);
             BOOL resourceReferences=short_bounds&&redfin_metal_resource_check("/redfin/lib/redfin-resource-check.bc",nonce);
+            BOOL retainedMemory=retained_memory_native(device,nonce);
             uint64_t routes[2]={0};BOOL gmem=dependencies&&native_gmem_statistics(device,routes);
             printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u batch-pixels-and-guards=%u dependency-pixels-and-guards=%u short-surface-pixels-guards-and-sysmem=%u actual-gmem=%u gmem-batches=%llu sysmem-batches=%llu\n",
                 (unsigned long long)nonce,mode,(unsigned)(first+second),(unsigned)(first && second),(unsigned)(first && second),(unsigned)pixels,(unsigned)masks,(unsigned)batches,(unsigned)dependencies,(unsigned)short_bounds,(unsigned)gmem,
@@ -399,7 +417,7 @@ int main(void)
             printf("REDFIN METAL COMPOSITION RESULT: boot=%016llx clear-only-mrt-scissor-viewport-fetch-pixels-guards=%u vertex-stream-varying-sample-pixels-guards=%u pitch480-two-seeds-pixels-guards=%u pitch4512-two-seeds-pixels-guards=%u resolve480-pixels-guards=%u resolve4512-pixels-guards=%u visible-overlay=0\n",
                 (unsigned long long)nonce,raster,vertices,pitch480,pitch4512,resolve480,resolve4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
-            int status=gmem&&short_bounds&&wrapped_bounds&&padded_bounds&&padded_restore&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&scheduling&&uboExtents&&resourceReferences ? 0 : 1;
+            int status=gmem&&short_bounds&&wrapped_bounds&&padded_bounds&&padded_restore&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&scheduling&&uboExtents&&resourceReferences&&retainedMemory ? 0 : 1;
             redfin_graphics_memory_report("checker-after",0);
             /* task_info's status above describes memory accounting only. */
             printf("REDFIN METAL CHECK EXIT: boot=%016llx result=%u full-contract=1\n",

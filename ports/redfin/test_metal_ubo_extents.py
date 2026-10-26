@@ -31,11 +31,12 @@ class MetalUBOExtentsTests(unittest.TestCase):
                     at=compile.index(flag);del compile[at:at+2]
             if '-MD' in compile:compile.remove('-MD')
             compile+=['-I'+str(HERE)]
-            subprocess.run(compile,cwd=build,check=True,capture_output=True,text=True)
+            compiled=subprocess.run(compile,cwd=build,capture_output=True,text=True)
+            self.assertEqual(compiled.returncode,0,compiled.stderr)
             link[link.index('-o')+1]=str(binary);link[link.index(original)]=str(obj)
             subprocess.run(link,cwd=build,check=True,capture_output=True,text=True)
             result=subprocess.run([str(binary)],check=True,capture_output=True,text=True)
-            self.assertIn('cases=9',result.stdout)
+            self.assertIn('cases=16',result.stdout)
             self.assertIn('serialized-NIR-unchanged=1',result.stdout)
 
 

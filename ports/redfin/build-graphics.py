@@ -130,6 +130,7 @@ def main():
                            ('metal-ubo-extents.patch','metal-ubo-extents.h','metal-ubo-extents.inc')]
             if a.metal:
                 inputs += [ROOT/'ports/redfin/mesa-surface-padding.patch',ROOT/'ports/redfin/surface-padding.h']
+                inputs += [ROOT/'ports/redfin/mesa-retained-memory.patch',ROOT/'ports/redfin/retained-memory.h']
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -240,6 +241,9 @@ def main():
                     for directory in ('src/freedreno/drm','src/gallium/drivers/freedreno','src/redwood-drm'):
                         shutil.copy2(ROOT/'ports/redfin/surface-padding.h',source/directory/'redfin_surface_padding.h')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-surface-padding.patch'],source)
+                    for directory in ('src/freedreno/drm','src/compiler/air'):
+                        shutil.copy2(ROOT/'ports/redfin/retained-memory.h',source/directory/'redfin_retained_memory.h')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-retained-memory.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             if (source/'src/util/redfin_mesa_cache_build.h').read_text()!=\
                     '#define REDFIN_MESA_CACHE_BUILD_ID '+json.dumps(cache_proof['cache_id'])+'\n':
@@ -339,6 +343,7 @@ def main():
                                   ('metal_queued_userland.py','metal-queued.h','metal-queued-check.inc','metal-queued-resource-check.inc','metal-frontend-profile.h')]
                 metal_sources += [ROOT/'ports/redfin/metal-ubo-extents-check.inc']
                 metal_sources += [ROOT/'ports/redfin/surface-padding.h',ROOT/'ports/redfin/surface-padding-check.inc']
+                metal_sources += [ROOT/'ports/redfin/retained-memory.h']
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal-scheduling.h','metal-scheduling-check.inc')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()

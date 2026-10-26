@@ -22,6 +22,14 @@ static void fixed(nir_builder *b,unsigned slot,uint32_t offset,unsigned componen
    (void)nir_load_ubo(b,components,bits,nir_imm_int(b,slot),nir_imm_int(b,offset),
       .align_mul=1,.align_offset=0,.range_base=0,.range=~0u);
 }
+static void indexed(nir_builder *b,unsigned slot,nir_def *offset,unsigned components,unsigned bits)
+{
+   /* Deliberately tiny metadata must not substitute for the actual SSA proof. */
+   (void)nir_load_ubo(b,components,bits,nir_imm_int(b,slot),offset,
+      .align_mul=1,.align_offset=0,.range_base=0,.range=4);
+}
+static nir_def *unknown(nir_builder *b)
+{return nir_channel(b,nir_load_global_invocation_id(b,32),0);}
 static struct redfin_metal_ubo_extents analyze(nir_builder *b)
 {
    struct blob before,after;blob_init(&before);blob_init(&after);
@@ -82,7 +90,43 @@ int main(void)
 
    redfin_metal_ubo_read_extents(NULL,&e);extent(&e,0,8192,8192,false);
    extent(NULL,0,8192,8192,false);++cases;
+
+   b=shader();dynamic=nir_iadd_imm(&b,nir_ishl_imm(&b,nir_iand_imm(&b,unknown(&b),31),2),132);
+   indexed(&b,1,dynamic,2,32);e=analyze(&b);
+   extent(&e,1,256*1024,264,true);extent(&e,1,128,128,false);ralloc_free(b.shader);++cases;
+
+   b=shader();dynamic=nir_iadd_imm(&b,nir_ishl_imm(&b,nir_umin(&b,unknown(&b),nir_imm_int(&b,15)),2),132);
+   indexed(&b,1,dynamic,1,32);e=analyze(&b);extent(&e,1,256*1024,196,true);ralloc_free(b.shader);++cases;
+
+   b=shader();dynamic=nir_bcsel(&b,nir_ieq_imm(&b,unknown(&b),0),nir_imm_int(&b,4),nir_imm_int(&b,132));
+   indexed(&b,1,dynamic,2,64);e=analyze(&b);extent(&e,1,256*1024,148,true);ralloc_free(b.shader);++cases;
+
+   b=shader();nir_push_if(&b,nir_ieq_imm(&b,unknown(&b),0));
+   nir_def *yes=nir_imm_int(&b,4);nir_push_else(&b,NULL);nir_def *no=nir_imm_int(&b,1020);nir_pop_if(&b,NULL);
+   indexed(&b,1,nir_if_phi(&b,yes,no),1,32);e=analyze(&b);
+   extent(&e,1,256*1024,1024,true);ralloc_free(b.shader);++cases;
+
+   b=shader();fixed(&b,1,0,1,32);
+   dynamic=nir_imul(&b,nir_iand_imm(&b,unknown(&b),1),nir_imm_int(&b,UINT32_MAX));
+   indexed(&b,1,dynamic,1,32);e=analyze(&b);
+   extent(&e,1,256*1024,256*1024,false);ralloc_free(b.shader);++cases;
+
+   /* SSA indices overlap between functions. A shader-global cache could reuse
+    * the first mask's bound for the larger mask and silently truncate data. */
+   b=shader();indexed(&b,1,nir_ishl_imm(&b,nir_iand_imm(&b,unknown(&b),3),2),1,32);
+   nir_function *other=nir_function_create(b.shader,"different SSA index domain");
+   nir_builder second=nir_builder_create(nir_function_impl_create(other));
+   second.cursor=nir_after_cf_list(&second.impl->body);
+   indexed(&second,1,nir_ishl_imm(&second,nir_iand_imm(&second,unknown(&second),255),2),1,32);
+   e=analyze(&b);extent(&e,1,256*1024,1024,true);ralloc_free(b.shader);++cases;
+
+   /* Mesa's generic range helper deliberately leaves a narrowed64-bit
+    * expression unknown. Never turn that missing proof into a short copy. */
+   b=shader();dynamic=nir_u2u32(&b,nir_iadd_imm(&b,nir_u2u64(&b,unknown(&b)),1024));
+   indexed(&b,1,dynamic,1,32);e=analyze(&b);
+   extent(&e,1,256*1024,256*1024,false);ralloc_free(b.shader);++cases;
+
    glsl_type_singleton_decref();
-   printf("NIR UBO EXTENTS: cases=%u fixed-half-vector64-boundaries=1 unknown-dominates=1 dynamic-binding-size-deref-call-fallback=1 serialized-NIR-unchanged=1\n",cases);
+   printf("NIR UBO EXTENTS: cases=%u fixed-half-vector64-boundaries=1 masked-clamped-select-phi=1 function-local-SSA-cache=1 unknown-overflow-dominates=1 dynamic-binding-size-deref-call-fallback=1 serialized-NIR-unchanged=1\n",cases);
    return 0;
 }

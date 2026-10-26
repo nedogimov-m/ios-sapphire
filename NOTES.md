@@ -1,5 +1,73 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete CPU-preparation block built;29host contracts PASS; new kernel CI next — 2026-10-26
+
+Base67dcddb; whole related block implemented before combined host checks.
+Adapt the useful Angelpro sapphire344a8af retained-MADVISE idea with explicit
+native policy, not its unguarded ioctl reply. New RFM1 parameter/registry ABI1
+states that a live GEM handle retains its descriptor until real retirement/
+close. Only a still-owned Mesa BO may skip repeated residency hints after one
+strict successful capability reply per device; unsupported/error/changed
+replies retain actual legacy ioctls. Raw invalid-handle MADVISE still fails;
+CPU preparation, cache maintenance, fences, aliases and releases remain real.
+Atomic actual per-device query/fast/fallback counts are observable through the
+paired native API and sparse command-retirement logs; they are not GPU time.
+
+Extend read-only UBO analysis with Mesa's conservative unsigned SSA bounds
+for masked/clamped/select/phi offsets. Range/type metadata does not grant a
+bound; unknown/overflow/dynamic bindings and unsupported reads stay full.
+The analysis cache is per function because Mesa keys it by local SSA indices.
+No shader, index numbering or AIR/NIR/cache serialization is changed.
+Native checker adds four64thread masked/clamped direct/argument-buffer cases,
+CPU/GPU-written inputs, exact source/output guards and per-case actual short
+copy/proof/no-fallback requirements; all earlier cases remain mandatory.
+Explicit native resident-memory ABI/query/actual-fast-use proof joins EXIT0.
+
+29affected host contracts PASS: actual patched kernel query/raw invalid-handle
+cases; actual Mesa factory/once-only capability and BO routines including
+7refusal variants, legacy purged/error returns and4concurrent reuse threads;
+16real NIR cases with serialized bytes unchanged, overlapping per-function
+SSA indices,64-bit unknowns and overflow; retained queue/scheduled callbacks,
+CPU aliases, native route analysis, owned surface bounds and strict cache reuse.
+Correct the scheduled fixture's missing existing raster/new residency entries;
+all actual status/wait/resource/callback logic stays compiled.
+
+Full native incremental build, current source/pairing, actual20H392 ABI/imports/
+signatures, actual exported C statistics and all4native shader entries PASS.
+Input0de23d41433115703d1767b0011093ef6af302153624e914d328b76b66605310;
+pair096836ce7c4dda2a2ecdff6950e97760ab4b3752a5c3ff19e4d77dcb8af3d4b8.
+Prior complete V63 native work preserved as research/redfin-metal-padding-v63-validated;
+compiler/cache496301fc.. and existing UIpadding-contract-v1 retained. Exact
+source preimages/results and semantic cache compatibility audited before
+reusing the existing native build tree. Startup correctness ON for the next
+combined run; Phone/Photos opens/captures OFF. No new phone test yet.
+
+Last actual kernel remains Actions40300639111/run9/source5be3287/c363bc80..;
+new final native-retained-memory overlay still needs matching CI/hardware.
+Next fresh V71/imageV65 at actual clean1427210; do not apply against run9 merely
+because older queue/padding ABIs match. No FPS gain or broad goal completion.
+
+## REDFIN native journal recovery clean; recovered V64 FPS invalid from window transitions — 2026-10-26
+
+V64-recovery/cycle94283 TERMINAL exit0, authenticated04d232a31e05369b, same
+run9/source5be3287/kernelc363bc80.. and exact recovery args below. Native HFS
+records journal replay done; root unmount and orderly GPU stop complete.
+Clean unmounted/not-inconsistent HFSX1427210, full bounded user logs captured,
+verified Fastboot. No raw filesystem repair, clean-bit edit or new root file
+update. Optional ADSP omission and this outcome do not by themselves prove
+the cause of V64's unmount stall.
+
+Recover V64's original5813a5332605e6bb file records from that verified clean
+capture without altering the original dirty-root manifest. Actual animation
+starts/warmup completes, but4window transitions discard its interval and end
+with stats-valid0/window-churn. Therefore ordinary FPS remains unproved; do
+not reuse V63's checks-gated33.162FPS as an ordinary result.88contacts/releases
+are observed over the original boot, user activity unconfirmed.33complete
+recovered frontend samples validate,0invalid; median snapshot5038bytes/111us,
+maximum2236084bytes/22827us. These are variable interactive sampled workloads,
+not evidence of a matched quiet comparison or a new universal upload bottleneck.
+Private recovered-presentation-summary/recovered-frontend-latency in V64 logs.
+
 ## REDFIN V64 ordinary capture incomplete; user-supplied sapphire reviewed; native journal recovery next — 2026-10-26
 
 V64/cycle88855 TERMINAL exit0, authenticated5813a5332605e6bb, one backboardd61,

@@ -14,6 +14,18 @@ kernel void redfin_ubo_dynamic(device uint *output [[buffer(0)]],
     constant uint *values=&first;
     output[index]=values[index+33]+values[0]*17u+index;
 }
+kernel void redfin_ubo_masked(device uint *output [[buffer(0)]],
+    constant uint &first [[buffer(1)]],uint index [[thread_position_in_grid]])
+{
+    constant uint *values=&first;
+    output[index]=values[(index&31u)+33u]+values[0]*17u+index;
+}
+kernel void redfin_ubo_clamped(device uint *output [[buffer(0)]],
+    constant uint &first [[buffer(1)]],uint index [[thread_position_in_grid]])
+{
+    constant uint *values=&first;
+    output[index]=values[min(index,15u)+33u]+values[0]*17u+index;
+}
 struct RedfinUBOArguments {
     constant uint *values [[id(0)]];
     device uint *output [[id(1)]];
@@ -24,6 +36,12 @@ kernel void redfin_ubo_argument_fixed(constant RedfinUBOArguments &args [[buffer
 kernel void redfin_ubo_argument_dynamic(constant RedfinUBOArguments &args [[buffer(0)]],
     uint index [[thread_position_in_grid]])
 { args.output[index]=args.values[index+33]+args.values[0]*17u+index; }
+kernel void redfin_ubo_argument_masked(constant RedfinUBOArguments &args [[buffer(0)]],
+    uint index [[thread_position_in_grid]])
+{ args.output[index]=args.values[(index&31u)+33u]+args.values[0]*17u+index; }
+kernel void redfin_ubo_argument_clamped(constant RedfinUBOArguments &args [[buffer(0)]],
+    uint index [[thread_position_in_grid]])
+{ args.output[index]=args.values[min(index,15u)+33u]+args.values[0]*17u+index; }
 vertex float4 redfin_ubo_vertex(uint index [[vertex_id]],constant float &first [[buffer(1)]])
 {
     constant float *values=&first;

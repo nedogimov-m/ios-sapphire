@@ -8,7 +8,7 @@ def sensor_overlay(original, target):
     with tempfile.TemporaryDirectory() as directory:
         path=Path(directory)/target;path.parent.mkdir(parents=True);path.write_text(original)
         for name in ('sensor-platform.patch','native-sensor-cold.patch',
-                     'native-gpu-dvfs.patch','native-sensor-discovery.patch','native-failure-capture.patch','native-surface-lifecycle.patch', 'native-runtime-queues.patch', 'native-queued-submission.patch', 'native-presentation-observer.patch','native-throughput.patch','native-resource-access.patch','native-cadence.patch','native-display-output.patch','native-surface-padding.patch'):
+                     'native-gpu-dvfs.patch','native-sensor-discovery.patch','native-failure-capture.patch','native-surface-lifecycle.patch', 'native-runtime-queues.patch', 'native-queued-submission.patch', 'native-presentation-observer.patch','native-throughput.patch','native-resource-access.patch','native-cadence.patch','native-display-output.patch','native-surface-padding.patch','native-retained-memory.patch'):
             patch=Path(__file__).with_name(name)
             if patch.exists():
                 subprocess.run(['git','apply','--include='+target,str(patch)],cwd=directory,check=True,capture_output=True)
