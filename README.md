@@ -33,7 +33,9 @@ V67's complete GPU-ordered large-constant snapshot and repeated raster
 checks also pass on A620. Ordinary V68 measures30.967FPS, below V66, so that
 unconditional copy policy is being corrected: CPU-owned constants keep the
 uploader; large GPU-written sources may snapshot without a CPU dependency wait.
-The corrected native build/host checks pass; hardware proof is pending.
+V69's corrected native A620 contract passes both CPU/GPU producer modes;
+actual compositor groups preserve CPU uploads. Its checked animation measures
+32.564FPS. Ordinary performance of the corrected policy is pending.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).

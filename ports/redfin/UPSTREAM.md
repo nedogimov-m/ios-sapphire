@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Producer-aware snapshot policy passes actual A620 routes/pixels — 2026-10-26
+
+V69/code844b125 with actual run10/kernel5f0d5f48.., input6e6e432c../pair24dfc27b..
+passes full native CHECK EXIT0. Five snapshots prove1CPU+4GPU/1310897GPU bytes
+across overwrites/byte tails/rollover. Both repeated vertex/fragment raster
+modes pass changed colours,128pixels/guards and exact0/4GPU-copy routes. Actual
+warm compositor37draw groups retain77CPU snapshots/518130bytes,0GPU copies.
+All prior Metal, physical output, alias/fence/lifetime/error cases remain PASS.
+
+Checked animation32.563718FPS at90Hz callbacks does not establish ordinary
+FPS recovery. Reuse the exact compiled native/kernel/UI/cache for OFF V70.
+Preferred pins and reviewed Angelpro344a8af stay unchanged. The new physical
+ring files remain incomplete/uncompiled drafts, excluded from current builds;
+no asynchronous hardware implementation or throughput gain is claimed.
+
 ## Whole-frame result requires producer-aware snapshot policy — 2026-10-26
 
 V68 ordinary same-binary observation completes310GPU frames/10.010634s:

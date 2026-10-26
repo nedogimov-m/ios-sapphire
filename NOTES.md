@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V69 producer-aware native contract PASS; ordinary V70 preparation — 2026-10-26
+
+Code844b125/docsb96c123, unchanged Actions40314982431/run10/kernel5f0d5f48..,
+native input6e6e432c../pair24dfc27b../UIpadding-contract-v1/cache496301fc.. exact.
+Cycle82496 TERMINAL exit0: authenticated fresha3795b47ec3fd7f3, one backboardd62,
+no runtime GPU fault/panic,0contacts/releases, clean unmounted HFSX1470450 and
+verified Fastboot. V75 STALE/never reuse. Next fresh V76/imageV70 at clean1470450.
+Exact observed args are in V69's prepared entry below. No captures/app opens.
+
+Explicit full CHECK EXIT0/full-contract1. All10prior UBO cases pass. Large CPU
+sources require zero GPU snapshots; GPU producer phase requires one. The actual
+five-snapshot sequence proves1CPU+4GPU/1310897GPU bytes, with GPU overwrites,
+byte offsets/tails, immutable values/guards and chunk rollover. Both large
+vertex/fragment producer modes pass2repeated draws each, changed expected
+colours and128pixels total: CPU mode0GPU snapshots, GPU mode4. Full prior
+192compute/half/MRT/blit/buffer/cache/resource/ordering/binding/scheduling/
+lifetime/error/padding/byte-pitch cases PASS; native RFM ABI1/query1/766fast/
+0fallback. Full+margin output5054400pixels/guards PASS. Actual warm37draw
+compositor groups correctly retain the CPU uploader:77snapshots/518130bytes,
+zero GPU snapshots/chunks. This is actual route evidence, not inferred speed.
+
+Checked animation326GPU frames/10.011142physical seconds =32.563718FPS,
+902callbacks/90Hz, no missed samples/timeouts/window replacements, idle restored.
+18frontend and28owner/9output partitions validate, zero invalid. This is not
+an ordinary FPS recovery or a measured isolated gain. Exact diagnostics-OFF
+V70 preparation follows with every compiled native/kernel/UI/cache byte retained.
+Freeze verified current work as constant-ownership-v69-validated; V76 readonly
+snapshot RUNNING. Request animate; captures/app opens OFF.
+
+Private native-constant-ownership-evidence.json contains exact native cases.
+Physical-ring draft files gpu-physical-runtime.inc/include/redfin_gpu_physical.h
+are incomplete, uncompiled and untested; no current build/CI/image includes them.
+Exact7file/14overlay kernel sources are reconstructed privately. Complete the
+whole runtime/worker/cache/DVFS/TLB/retirement block before its combined checks.
+All broader platform requirements remain active and unfinished.
+
 ## REDFIN V75 producer-aware file update verified; combined V69 running — 2026-10-26
 
 Code844b125; native input6e6e432c../pair24dfc27b../UIpadding-contract-v1/
