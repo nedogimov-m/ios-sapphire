@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V92 ordinary GLES policy verified; V86 starts — 2026-10-27
+
+Exact full-coexistence-validated V85 sourcea7ddbe1/native input323bf7ed../
+pair7e0f4a5c../kernel Actions40372742634/run18/4fa88838.., unchanged UI/compiler
+cache. Full ON inventory archived and verified before policy-only OFF. No
+native/compiler/kernel rebuild. V86 complete image/ABI/scoped GLES/app Metal
+preflight PASS. Fresh V92 at clean1614111/empty journal applied ONCE; full
+live preimages/backups/signatures/readonly fsck/ranges and whole-file readback,
+clean Fastboot PASS. Cached/file diagnostic jobs agree OFF; backboardd GLES,
+global app Metal system mode unchanged. V92 STALE/never reuse. Next fresh
+V93/imageV87, actual postboot epoch pending collection.
+
+V86 imaged88572bdeb19b8616765ade756d39530423fca47d84bb4817ee400d1196da6fe, freshe4b2ce634db6801e, ordinary animate. Startup correctness,
+captures and automatic Phone/Photos opens OFF. Touch-startup recovery is separately in CI; run18 remains this benchmark kernel.
+No ordinary FPS claim before
+terminal authenticated evidence. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xe4b2ce634db6801e redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal active/unfinished; smooth60/90render FPS not yet proved.
+
 ## REDFIN V85 GLES publication/native Metal PASS54.639FPS; startup touch overflow fixed in source — 2026-10-27
 
 Sourcea7ddbe1/start821bf41, Mesa input323bf7ed../native pair7e0f4a5c../same
