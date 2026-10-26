@@ -1,5 +1,27 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V78 bounded physical-compute probe update verified; V72 running — 2026-10-26
+
+Code8ef1316; unchanged actual Actions40334564897/run12/source df38a25/kernel8ea7b3b6..
+and compiler input6e6e432c../cache496301fc../UIpadding-contract-v1. New checker/
+shader/paired marker8989ba6a.. pass full actual20H392 ABI/source/export/signature
+proof. Kernel/runtime/compiler are not rebuilt. Fresh V78 snapshot actual
+clean1487941/empty journal; full preimages, signatures, staged files and native
+readonly fsck PASS. Apply ONCE339968bytes,1new block,0freed; all live preimages/
+backups/transfers/whole device files read back; clean root/verified Fastboot.
+V78 STALE/never reuse. Next fresh V79/imageV73; postboot epoch pending.
+
+V72 image05f8c109d478019ca6ed71d736d9902fa9a82d32feb30bcc83b9bdaa3999f639
+full native preflight PASS. Fresh01d075273298a388, exact args are in the
+prepared entry below. One full combined native cycle RUNNING: all previous
+Metal/output contracts plus a warmup and3bounded long raw-buffer compute pairs,
+full values/guards and native post-doorbell physical counter evidence. Both
+commands commit before either wait; that CPU fact does not by itself prove
+two physical submissions remained pending. animate-checked requires actual
+full current-nonce CHECK EXIT0. Captures and automatic Phone/Photos opens OFF.
+No other device command until terminal collection; no new physical overlap
+or FPS claim before actual results. Broad goal remains active/unfinished.
+
 ## REDFIN V71 full native FIFO correctness PASS;37.558FPS,2pending not yet observed — 2026-10-26
 
 Final kernel codedf38a25/docs14d1332, actual Actions40334564897/run12/kernel8ea7b3b6..
