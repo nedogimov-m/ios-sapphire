@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V96 bounded GLES/native pairing verified; combined V90 starts — 2026-10-27
+
+Complete two-frame real GL fence sourceaddde14;99common host/native20H392
+build/ABI/signature checks PASS. Exact Mesa input1a4ad42c../app Metal pair17d0f01f../
+shader cache496301fc../UI/kernel Actions40403226041/run20/source5b06349/
+01be8081.. retained. Full image/private source/ABI and new budget markers PASS.
+Fresh V96 at clean1653419/empty journal applied ONCE; all live preimages/backups,
+signatures/readonly fsck/ranges and whole-file readback, clean Fastboot PASS.
+Cached/file startup jobs agree ON; GLES/direct GUI/global app Metal system.
+Captures/automatic Phone/Photos launches OFF. V96 STALE/never reuse; next fresh
+V97/imageV91 at actual postboot root generation pending collection.
+
+V90 image032e1fee2d81ba897a409f955d08eaf7957b3388c398b0e99ebbc88fbafd2728, fresha1286e4931e74c54: full native Metal/GPU/direct fetch/seed/pixel/
+guard contract, new actual12-round alternating-surface two-frame fence checker,
+real backboardd bounded-pending records, continued input and animate-checked.
+Hardware FPS improvement is unproved; prior direct V89 severe7.192FPS baseline
+stays authoritative until terminal evidence. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa1286e4931e74c54 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains unfinished.
+
 ## REDFIN complete two-frame GLES admission block/native build;99common contracts PASS — 2026-10-27
 
 V88 full direct correctness and ordinary V89 severe7.192FPS regression remain
