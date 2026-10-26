@@ -88,13 +88,22 @@ class GPUDisplayTests(unittest.TestCase):
         count = self.lib.program(out, WORDS, C.byref(stage), packed, size, layers, len(layers))
         return list(out[:count]), out
 
+    def test_final_owned_display_sources_match_the_actual_ordered_kernel_overlay(self):
+        from test_smp_gui import patched_source
+        for target, owned in (
+            ('iokit/Kernel/arm/RedfinGPUDisplay.inc', 'gpu-display.inc'),
+            ('iokit/Kernel/arm/redfin_gpu_display.h', 'include/redfin_gpu_display.h'),
+            ('bsd/dev/redfin_gpu_display.h', 'include/redfin_gpu_display.h')):
+            self.assertEqual(patched_source(target), (HERE/owned).read_text())
+
     def test_decoded_gpu_pack_covers_every_panel_row_exactly_without_cpu_copy(self):
         stage, layers = self.scene()
         words, _ = self.emit(stage, layers)
         _, blits, events = decode(words)
-        self.assertEqual(len(blits), 4)  # clear, scaled layer, even, odd
-        self.assertTrue(blits[0][0x8c00] & (1 << 7))
-        self.assertEqual(blits[0][0x8c2f], 255)
+        self.assertEqual(len(blits), 6)  # three margins, scaled layer, even, odd
+        for clear in blits[:3]:
+            self.assertTrue(clear[0x8c00] & (1 << 7))
+            self.assertEqual(clear[0x8c2f], 255)
         rows = []
         for registers in blits[-2:]:
             src = registers[0xb4c2] | (registers[0xb4c3] << 32)
@@ -123,8 +132,8 @@ class GPUDisplayTests(unittest.TestCase):
         stage, layers = self.scene(4)
         words, _ = self.emit(stage, layers)
         _, blits, _ = decode(words)
-        self.assertEqual(len(blits), 7)
-        for registers in blits[1:5]:
+        self.assertEqual(len(blits), 9)
+        for registers in blits[3:7]:
             self.assertEqual([registers[n] >> 8 for n in range(0x8401,0x8405)], [0,1124,0,2435])
             self.assertEqual(registers[0x8405], 31 | (136 << 16))
             self.assertEqual(registers[0x8406], 1047 | (2339 << 16))
@@ -134,6 +143,55 @@ class GPUDisplayTests(unittest.TestCase):
         for start, end in ((0x8401,0x8406),(0xb4c0,0xb4c4),(0x8c17,0x8c1a),(0x8c2c,0x8c2f)):
             allowed.update(range(start,end+1))
         self.assertFalse(set(regs)-allowed)
+
+    def test_actual_clears_and_first_overwrite_tile_the_panel_without_overlap_or_old_pixels(self):
+        # Decode the emitted operations rather than calling the clear planner.
+        # Every cell cut by their rectangle edges must be written exactly once
+        # by the first overwrite or an opaque black clear, including corners.
+        cases = ((0,0,W,H), (5,6,1070,2328), (31,136,1017,2204),
+                 (0,0,1,1), (W-1,H-1,1,1), (7,9,1,1),
+                 (0,13,W,17), (17,0,31,H), (0,0,W-1,H-1))
+        for cover in cases:
+            with self.subTest(cover=cover):
+                stage, layers = self.scene(2)
+                layers[0].destination = Rect(*cover)
+                layers[1].destination = Rect(17,23,41,53)
+                words, _ = self.emit(stage, layers)
+                _, blits, _ = decode(words)
+                clears = [r for r in blits if r[0x8c00] & (1 << 7)]
+                draws = [r for r in blits[:-2] if not r[0x8c00] & (1 << 7)]
+                self.assertEqual(len(draws), 2)
+                if cover == (0,0,W,H):
+                    self.assertEqual(len(blits), 4)  # two layers and two packs
+                    self.assertFalse(clears)
+                rects = [cover]
+                for r in clears:
+                    self.assertEqual([r[n] for n in range(0x8c2c,0x8c30)], [0,0,0,255])
+                    x,y = r[0x8405] & 65535,r[0x8405] >> 16
+                    right,bottom = (r[0x8406] & 65535)+1,(r[0x8406] >> 16)+1
+                    self.assertTrue(0 <= x < right <= W and 0 <= y < bottom <= H)
+                    rects.append((x,y,right-x,bottom-y))
+                self.assertEqual(sum(w*h for _,_,w,h in rects), W*H)
+                xs = sorted({0,W,*(v for x,_,w,_ in rects for v in (x,x+w))})
+                ys = sorted({0,H,*(v for _,y,_,h in rects for v in (y,y+h))})
+                for x in xs[:-1]:
+                    for y in ys[:-1]:
+                        self.assertEqual(sum(a <= x < a+w and b <= y < b+h
+                                             for a,b,w,h in rects), 1)
+
+    def test_fullscreen_first_layer_does_not_hide_invalid_later_layers(self):
+        for invalid in ('source', 'destination', 'alias'):
+            stage, layers = self.scene(4)
+            layers[0].destination = Rect(0,0,W,H)
+            if invalid == 'source':
+                layers[3].source = Rect(1124,0,2,1)
+            elif invalid == 'destination':
+                layers[3].destination = Rect(W-1,H-1,2,1)
+            else:
+                layers[3].surface = stage
+            words, raw = self.emit(stage,layers)
+            self.assertFalse(words)
+            self.assertEqual(raw[0], 0xdeadbeef)
 
     def test_invalid_bos_rectangles_and_aliases_emit_nothing(self):
         for field, value in (('pitch',4320),('offset',4),('width',16385),

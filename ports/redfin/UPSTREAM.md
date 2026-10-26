@@ -1,5 +1,24 @@
 # HackiOS upstream review — 2026-10-22
 
+## Redfin A620 output clears and complete native budgets — 2026-10-26
+
+Keep reviewed preferred pins kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and updated-mainc84b4634277a70beac73921029b1fb6afc2530af
+assessment below. Review current Mesa25.0.7 fd6_blitter.cc emit_blit_setup/fini
+and a6xx.xml: existing MASK0xf/replace BGRA scaling defines the whole first
+rectangle; no alpha blending preserves earlier stage pixels. Redfin adapts
+this by clearing only its exact complement. Fullscreen output removes a full
+10,108,800byte GPU clear while preserving the existing bilinear coordinates,
+4320panel/4352stage pitches, even/odd packing and native cache/fence contracts.
+No unproved fractional scaler or DPU register/stride change is imported.
+
+44combined host contracts pass actual PM4 geometry/rows/bounds, retained FIFO,
+CPU consumers, source ownership, mode/cutout and the bounded complete logging
+contract. Both full/partial native poisoned pixel+guard cases precede panel
+mapping; native CI/hardware remains pending. Reuse existing Metal/compiler/UI
+and cache binaries. Keep actual90Hz and distinguish rendered FPS from callbacks;
+source/host success alone proves no runtime speedup.
+
 ## Actual native CLCD90Hz and original-period proof PASS — 2026-10-26
 
 V60/source8d493ea, kernel Actions40279964939/run6 passes authenticated hardware

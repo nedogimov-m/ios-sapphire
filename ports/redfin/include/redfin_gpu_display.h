@@ -147,6 +147,28 @@ static inline void rf_gd_blit(struct rf_gd_stream *s,
     rf_gd_reg(s, 0x8e04, 0);
 }
 
+/* Every layer replaces all four destination channels. Clear only the exact
+ * complement of the first validated rectangle; that layer defines its whole
+ * interior even when later layers cover only part of it. No previous frame's
+ * contents or cross-frame clear state are assumed. A fullscreen first layer
+ * needs no clear at all. The rectangles are disjoint, including at corners. */
+static inline unsigned rf_gd_margins(const struct rf_gd_rect *cover,
+    struct rf_gd_rect margins[4])
+{
+    unsigned count = 0;
+    if (cover->y)
+        margins[count++] = (struct rf_gd_rect){0, 0, RF_GD_PANEL_W, cover->y};
+    if (cover->y + cover->h < RF_GD_PANEL_H)
+        margins[count++] = (struct rf_gd_rect){0, cover->y + cover->h,
+            RF_GD_PANEL_W, RF_GD_PANEL_H - cover->y - cover->h};
+    if (cover->x)
+        margins[count++] = (struct rf_gd_rect){0, cover->y, cover->x, cover->h};
+    if (cover->x + cover->w < RF_GD_PANEL_W)
+        margins[count++] = (struct rf_gd_rect){cover->x + cover->w, cover->y,
+            RF_GD_PANEL_W - cover->x - cover->w, cover->h};
+    return count;
+}
+
 /* All geometry and complete BO extents are checked before the first word.
  * Caller must retain/map these exact descriptors and use the native queue's
  * completion/fault checks. An emitted command stream is never a completion. */
@@ -178,11 +200,12 @@ static inline unsigned rf_gd_program(uint32_t *words, unsigned room,
     struct rf_gd_surface odd_dst = {packed + RF_GD_PANEL_PITCH - 32,
         packed_length - (RF_GD_PANEL_PITCH - 32), 0, RF_GD_PANEL_W + 8,
         RF_GD_PANEL_H / 2, 2 * RF_GD_PANEL_PITCH};
-    struct rf_gd_rect full = {0, 0, RF_GD_PANEL_W, RF_GD_PANEL_H};
     struct rf_gd_rect half = {0, 0, RF_GD_PANEL_W, RF_GD_PANEL_H / 2};
     struct rf_gd_rect odd = {8, 0, RF_GD_PANEL_W, RF_GD_PANEL_H / 2};
     if (!rf_gd_rect_valid(&even_src, &half) || !rf_gd_rect_valid(&odd_src, &half) ||
         !rf_gd_rect_valid(&even_dst, &half) || !rf_gd_rect_valid(&odd_dst, &odd)) return 0;
+    struct rf_gd_rect margins[4];
+    unsigned clear_count = rf_gd_margins(&layers[0].destination, margins);
     struct rf_gd_stream s = {words, 0, room, false, stage->address + RF_GD_CONTROL};
     rf_gd_event(&s, 29, true); rf_gd_event(&s, 28, true);
     rf_gd_idle(&s); rf_gd_event(&s, 25, false); rf_gd_event(&s, 24, false);
@@ -191,7 +214,8 @@ static inline unsigned rf_gd_program(uint32_t *words, unsigned room,
      * Same sysmem CCU configuration as the installed Mesa/A620 driver. */
     rf_gd_reg(&s, 0x8e07, 0x01000001u);
     rf_gd_packet(&s, 0x65, 0xcu);
-    rf_gd_blit(&s, NULL, NULL, stage, &full, false, true);
+    for (unsigned i = 0; i < clear_count; ++i)
+        rf_gd_blit(&s, NULL, NULL, stage, &margins[i], false, true);
     for (unsigned i = 0; i < count; ++i)
         rf_gd_blit(&s, &layers[i].surface, &layers[i].source, stage, &layers[i].destination, true, false);
     rf_gd_publish_color(&s);

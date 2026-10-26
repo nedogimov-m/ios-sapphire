@@ -1,5 +1,46 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete GPU output-clear/budget block;44host contracts PASS — 2026-10-26
+
+Base4e5bd70; final overlay native-display-output.patch is last in both kernel
+build lists and source replay. First validated 2D layer replaces all channels:
+clear only its exact disjoint complement. A fullscreen first layer removes
+one entire1080x2340clear (10,108,800bytes/frame); scale/sampling/even+odd packing,
+DPU stride/registers and native CCU/UCHE dependencies stay exact. No prior-frame
+contents or cross-frame clear state are assumed. All layer/BO/alias checks
+still precede the first emitted word. Partial/cutout clears define every pixel.
+
+Before physical panel mapping, one combined native admission check now runs
+both clear-free full coverage and partial coverage, with a scaled second layer,
+poisoned stage/output, all2,527,200pixels/case and prefix/tail guards. Hardware
+results are pending. Sparse output scopes distinguish prepare/source-cache/
+command-build/command-cache/native submit+wait/readback; real full-BO cache
+maintenance remains for CPU writers. The original average keeps its prior
+scope for comparability. Compact complete owner scopes and separate joined
+identity records fit the actual255byte logger bound at full type maxima. New
+strict analyzer rejects truncated, duplicate, unpaired and nonpartitioning
+records; native execution still includes CPU programming and actual fence wait.
+
+44affected combined host contracts PASS, including independently decoded PM4,
+exact every-row packed bounds, fullscreen/thin/edge/cutout clear tiling without
+old pixels, late invalid layers before writes, complete source-overlay matches,
+actual concurrent retained FIFO/CPU-consumer/source-lifetime/error paths,
+resource aliases, geometry/touch/presenter, real cadence units and logger/parser
+bounds. New source-match check exposed the old owned display template's stale
+pre-FIFO wrapper; it now matches the already compiled gd_present_locked and
+retained queued-present include exactly. No change to actual FIFO ownership.
+Evidence private research/redfin-gpu/display-output-host-tests.log.
+
+No new kernel/phone run yet; next one CI build and combined V67/V61 temporary
+hardware cycle. Last known actual kernel Actions40279964939/run6/source8d493ea,
+SHA2563d743f5357ff1de665691337de70401e4132d5cc452b32f8acac8f104e15f7fe.
+Keep exact reusable Metal pair2407206f.., UIcadence-v1 and compiler cache496301fc..
+with startup jobs/captures/Phone+Photos launches OFF. Last observed boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x92ccad0dd67c6763 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Phone last verified Fastboot/clean root1380808; V66 and earlier applied stages
+STALE, never reuse. Native90Hz remains proven; no FPS increase is claimed from
+source/host checks. Preserve interactive V60 context. Broad goal remains active.
+
 ## REDFIN V60 real native90Hz clock/callbacks PASS; interactive31.665FPS — 2026-10-26
 
 Code8d493ea, CI GitHub Actions40279964939/run6 SUCCESS,

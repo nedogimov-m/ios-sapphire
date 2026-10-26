@@ -1,6 +1,7 @@
 """Actual physical dependencies, Mesa view ownership and native FIFO presentation."""
 import ctypes as C
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -24,6 +25,24 @@ def compile_host(root,name,source,cpp=False):
 
 
 class PhysicalScopeTests(unittest.TestCase):
+    def test_complete_native_owner_and_output_records_fit_the_actual_logger(self):
+        # Real hardware lost the old record's total and units at255 bytes.
+        # Bound the production formats at full argument type maxima, including
+        # newline; useful prefixes alone must never count as a whole record.
+        formats = []
+        for name in ('gpu-throughput-queue.inc', 'gpu-display.inc'):
+            formats.extend(re.findall(r'IOLog\("(REDFIN GPU (?:OWNER(?: ID)?|OUTPUT):[^"\n]+)"',
+                                      (HERE/name).read_text()))
+        self.assertEqual(len(formats), 3)
+        maxima = {'%llu': str(2**64-1), '%u': str(2**32-1),
+                  '%x': 'ffffffff', '%d': str(-2**31), '%c': 'R', '%s': 'x'*19}
+        for value in formats:
+            for spec, maximum in maxima.items():
+                value = value.replace(spec, maximum)
+            self.assertNotIn('%', value)
+            self.assertTrue(value.endswith(r'\n'))
+            self.assertLessEqual(len(value.replace(r'\n','\n').encode()), 255)
+
     def test_final_owned_native_wait_and_presentation_sources_match_the_compiled_overlay(self):
         from test_smp_gui import patched_source
         for target,owned in (

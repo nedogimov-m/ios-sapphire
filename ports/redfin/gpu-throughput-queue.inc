@@ -100,11 +100,18 @@ static void redfinGpuQueueWorker(void *,wait_result_t)
         IOLockUnlock(gGPUQueue.lock);
         if(job->sequence<=4||!(job->sequence&(job->sequence-1))||!(job->sequence%120)) {
             uint64_t queue_retired=gpuNow();
-            IOLog("REDFIN GPU OWNER PHASE: sequence=%llu kind=%s name=%s pid=%d client-fence=%u physical-fence=%u result=%#x admission-queue-us=%llu hardware-lock-us=%llu owner-execute-us=%llu hardware-release-us=%llu client-retire-us=%llu queue-retire-us=%llu accepted-to-retired-us=%llu host-scopes=1\n",
-                job->sequence,job->owner?"render":"present",job->owner?job->process:"kernel",job->owner?job->pid:0,
-                job->fence,job->physical_fence,result,(dequeued-job->accepted)/1000,(locked-dequeued)/1000,
+            /* The actual kernel logger retains at most255 bytes. Even all
+             * uint64 maxima fit these separate records; sequence joins them.
+             * us: admission, lock, execution, release, client retire, queue
+             * retire, total. These are host scopes, not isolated GPU cycles. */
+            IOLog("REDFIN GPU OWNER: s=%llu k=%c r=%x us=%llu,%llu,%llu,%llu,%llu,%llu,%llu host=1\n",
+                job->sequence,job->owner?'R':'P',result,
+                (dequeued-job->accepted)/1000,(locked-dequeued)/1000,
                 (ran-locked)/1000,(released-ran)/1000,(client_retired-released)/1000,
                 (queue_retired-client_retired)/1000,(queue_retired-job->accepted)/1000);
+            IOLog("REDFIN GPU OWNER ID: s=%llu name=%s pid=%d cf=%u pf=%u\n",
+                job->sequence,job->owner?job->process:"kernel",job->owner?job->pid:0,
+                job->fence,job->physical_fence);
         }
         if(job->kernel_complete)job->kernel_complete(job->kernel_argument,result);
         RedwoodGPUUserClient *owner=job->owner;uint64_t charge=job->charge;

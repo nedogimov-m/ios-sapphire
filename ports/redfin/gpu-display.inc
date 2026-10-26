@@ -88,14 +88,18 @@ static rf_gd_surface gd_stage_surface(void)
 {
     return {gd.stage.address, gd.stage.size, 0, RF_GD_PANEL_W, RF_GD_PANEL_H, RF_GD_STAGE_PITCH};
 }
+struct gd_submit_marks {uint64_t built, published, finished;};
 static bool gd_submit(const rf_gd_layer *layers, unsigned count,
-    uint64_t packed, uint64_t packed_length, bool panel, uint32_t *fence)
+    uint64_t packed, uint64_t packed_length, bool panel, uint32_t *fence,
+    gd_submit_marks *marks = NULL)
 {
     rf_gd_surface stage = gd_stage_surface();
     uint32_t *commands = (uint32_t *)gd.commands.kernel;
     unsigned words = rf_gd_program(commands, RF_GD_WORDS, &stage, packed, packed_length, layers, count);
     if (!words) return false; /* No doorbell or target write occurred. */
+    if (marks) marks->built = gpuNow();
     redfin_gpu_sync(commands, words * sizeof(uint32_t), false);
+    if (marks) marks->published = gpuNow();
     const uint64_t address = gd.commands.address;
     int error = redfin_gpu_submit(&address, &words, 1, fence);
     if (error || !redfin_gpu_done(*fence)) {
@@ -103,11 +107,50 @@ static bool gd_submit(const rf_gd_layer *layers, unsigned count,
         IOLog("REDFIN GPU DISPLAY STOP: submit=%d fence=%u panel=%u; DMA objects retained\n", error, *fence, panel);
         return false;
     }
+    if (marks) marks->finished = gpuNow();
     return true;
 }
-/* One native check inside the complete boot, before the panel is GPU-mapped.
- * Exercise scaling, BGRA, all even/odd rows and prefix/tail guards in private
- * owned RAM. Actual fenced readback decides admission to physical output. */
+/* Both clear-free fullscreen and exact margin clears use real A620 output
+ * before the physical panel is mapped. Poisoning stage/output first excludes
+ * a pass based on old pixels; fenced full-frame readback checks all packed
+ * rows, the scaled second layer, channel values and prefix/tail guards. */
+static bool gd_check_case(const gd_buffer *input, gd_buffer *output, bool full)
+{
+    memset(gd.stage.kernel, 0x3c, gd.stage.size);
+    memset(output->kernel, 0x5a, output->size);
+    redfin_gpu_sync(gd.stage.kernel, gd.stage.size, true);
+    redfin_gpu_sync(output->kernel, output->size, true);
+    rf_gd_surface source = {input->address, input->size, 0, RF_GD_PANEL_W, RF_GD_PANEL_H, RF_GD_STAGE_PITCH};
+    rf_gd_rect first = full ? rf_gd_rect{0,0,RF_GD_PANEL_W,RF_GD_PANEL_H} : rf_gd_rect{5,6,1070,2328};
+    rf_gd_layer layers[2] = {
+        {source, first, first},
+        {source, {0,0,16,16}, {64,160,128,128}}
+    };
+    uint32_t fence = 0;
+    bool ok = gd_submit(layers, 2, output->address + 64, RF_GD_PANEL_MAPPED, false, &fence);
+    uint64_t mismatch = 0, guards = 0;
+    if (ok) {
+        redfin_gpu_invalidate(output->kernel, output->size);
+        for (uint32_t y = 0; y < RF_GD_PANEL_H; ++y) {
+            const uint32_t *row = (const uint32_t *)(output->kernel + 64 + (uint64_t)y * RF_GD_PANEL_PITCH);
+            for (uint32_t x = 0; x < RF_GD_PANEL_W; ++x) {
+                uint32_t expected = !full && (x < 5 || x >= 1075 || y < 6 || y >= 2334) ? 0xff000000u :
+                    x >= 64 && x < 192 && y >= 160 && y < 288 ? 0xffe02010u : gd_pattern(x, y);
+                if (row[x] != expected) {
+                    if (mismatch < 4) IOLog("REDFIN GPU DISPLAY PIXEL: x=%u y=%u actual=%#x expected=%#x\n",
+                        x, y, row[x], expected);
+                    ++mismatch;
+                }
+            }
+        }
+        for (uint64_t i = 0; i < 64; ++i) guards += output->kernel[i] != 0x5a;
+        for (uint64_t i = 64 + RF_GD_PANEL_BYTES; i < output->size; ++i) guards += output->kernel[i] != 0x5a;
+        ok = !mismatch && !guards;
+    }
+    IOLog("REDFIN GPU OUTPUT CHECK: full=%u completed=%u fence=%u pixels=%u mismatches=%llu guard-errors=%llu panel-mapped=0\n",
+        full, fence != 0 && redfin_gpu_done(fence), fence, RF_GD_PANEL_W * RF_GD_PANEL_H, mismatch, guards);
+    return ok;
+}
 static bool gd_check(void)
 {
     gd_buffer input = {}, output = {};
@@ -120,39 +163,13 @@ static bool gd_check(void)
         uint32_t *row = (uint32_t *)(input.kernel + (uint64_t)y * RF_GD_STAGE_PITCH);
         for (uint32_t x = 0; x < RF_GD_PANEL_W; ++x) row[x] = gd_pattern(x, y);
     }
-    memset(output.kernel, 0x5a, output.size);
     redfin_gpu_sync(input.kernel, input.size, false);
-    redfin_gpu_sync(output.kernel, output.size, true);
-    rf_gd_surface source = {input.address, input.size, 0, RF_GD_PANEL_W, RF_GD_PANEL_H, RF_GD_STAGE_PITCH};
-    rf_gd_layer layers[2] = {
-        {source, {5,6,1070,2328}, {5,6,1070,2328}},
-        {source, {0,0,16,16}, {64,160,128,128}}
-    };
-    uint32_t fence = 0;
-    bool ok = gd_submit(layers, 2, output.address + 64, RF_GD_PANEL_MAPPED, false, &fence);
-    uint64_t mismatch = 0, guards = 0;
-    if (ok) {
-        redfin_gpu_invalidate(output.kernel, output.size);
-        for (uint32_t y = 0; y < RF_GD_PANEL_H; ++y) {
-            const uint32_t *row = (const uint32_t *)(output.kernel + 64 + (uint64_t)y * RF_GD_PANEL_PITCH);
-            for (uint32_t x = 0; x < RF_GD_PANEL_W; ++x) {
-                uint32_t expected = x < 5 || x >= 1075 || y < 6 || y >= 2334 ? 0xff000000u :
-                    x >= 64 && x < 192 && y >= 160 && y < 288 ? 0xffe02010u : gd_pattern(x, y);
-                if (row[x] != expected) {
-                    if (mismatch < 4) IOLog("REDFIN GPU DISPLAY PIXEL: x=%u y=%u actual=%#x expected=%#x\n",
-                        x, y, row[x], expected);
-                    ++mismatch;
-                }
-            }
-        }
-        for (uint64_t i = 0; i < 64; ++i) guards += output.kernel[i] != 0x5a;
-        for (uint64_t i = 64 + RF_GD_PANEL_BYTES; i < output.size; ++i) guards += output.kernel[i] != 0x5a;
-        ok = !mismatch && !guards;
-    }
-    IOLog("REDFIN GPU DISPLAY CHECK: completed=%u fence=%u pixels=%u mismatches=%llu guard-errors=%llu panel-mapped=0\n",
-        fence != 0 && redfin_gpu_done(fence), fence, RF_GD_PANEL_W * RF_GD_PANEL_H, mismatch, guards);
+    bool full = gd_check_case(&input, &output, true);
+    bool margins = full && gd_check_case(&input, &output, false);
+    IOLog("REDFIN GPU DISPLAY CHECK: completed=%u full=%u margins=%u pixels-per-case=%u panel-mapped=0\n",
+        full && margins, full, margins, RF_GD_PANEL_W * RF_GD_PANEL_H);
     bool dropped_input = gd_drop(&input), dropped_output = gd_drop(&output);
-    return ok && dropped_input && dropped_output;
+    return full && margins && dropped_input && dropped_output;
 }
 static bool gd_initialize(SweetSurface *panel)
 {
@@ -249,12 +266,11 @@ static bool gd_panel_readback(uint32_t fence)
     IOLog("REDFIN GPU DISPLAY PANEL: fence=%u samples=64 mismatches=%u CPU-pixel-copy=0\n", fence, mismatches);
     return !mismatches;
 }
-int RedfinGPUPresent(SweetSurface *panel, const redfin_display_geometry *g, const uint8_t *record)
+static int gd_present_locked(SweetSurface *panel, const redfin_display_geometry *g, const uint8_t *record)
 {
     if (!RedfinGPUDisplayWritable()) return -1;
     if (!gLock || !redfin_gpu_ready() || !gd_selected() || !record ||
         !redfin_display_geometry_valid(g)) return 0;
-    GPUTransaction transaction;
     if (!RedfinGPUDisplayWritable()) return -1;
     if (!redfin_gpu_ready() || gd.disabled) return 0;
     if (!gd.attempted && !gd_initialize(panel)) {
@@ -264,6 +280,7 @@ int RedfinGPUPresent(SweetSurface *panel, const redfin_display_geometry *g, cons
     }
     if (!gd.tested || gd.panel.surface != panel || gd.frame == UINT64_MAX) return 0;
     ++gd.frame;
+    uint64_t began = gpuNow();
     uint32_t mask = gd_u32(record+0x104); if (!mask || (mask & ~15u)) return 0;
     rf_gd_layer layers[RF_GD_LAYERS]; unsigned count = 0;
     bool full = false, ok = true;
@@ -279,13 +296,15 @@ int RedfinGPUPresent(SweetSurface *panel, const redfin_display_geometry *g, cons
         ++count;
     }
     if (!ok || !count || !full) {++gd.fallbacks; return 0;}
+    uint64_t prepared = gpuNow();
     /* Surface BOs may also have native CPU writers. Push their actual pages;
      * this is cache maintenance, with no CPU scaling or pixel copy. */
     for (unsigned i = 0; i < GD_CACHE; ++i)
         if (gd.sources[i].memory && gd.sources[i].seen == gd.frame)
             redfin_gpu_sync(gd.sources[i].kernel, gd.sources[i].size, false);
-    uint32_t fence = 0; uint64_t began = gpuNow();
-    if (!gd_submit(layers, count, gd.panel.address, gd.panel.size, true, &fence)) {
+    uint64_t synced = gpuNow();
+    uint32_t fence = 0; gd_submit_marks marks = {};
+    if (!gd_submit(layers, count, gd.panel.address, gd.panel.size, true, &fence, &marks)) {
         gd.disabled = true;
         if (!RedfinGPUDisplayWritable()) {gd_hold_uncertain(); return -1;}
         return 0;
@@ -295,9 +314,23 @@ int RedfinGPUPresent(SweetSurface *panel, const redfin_display_geometry *g, cons
         IOLog("REDFIN GPU DISPLAY: completed panel readback differs; CPU fallback restored\n");
         return 0;
     }
-    ++gd.calls; gd.elapsed += gpuNow() - began;
-    if (gd.calls <= 4 || !(gd.calls % 120))
+    uint64_t checked = gpuNow();
+    ++gd.calls; gd.elapsed += checked - synced;
+    if (gd.calls <= 4 || !(gd.calls % 120)) {
         IOLog("REDFIN GPU DISPLAY PRESENT: calls=%llu fence=%u layers=%u average-us=%llu CPU-pixel-copy=0 fallbacks=%llu\n",
             gd.calls, fence, count, gd.elapsed / 1000 / gd.calls, gd.fallbacks);
+        /* Adjacent host scopes in us: prepare, source sync, build, command
+         * sync, native submit/wait, readback, total. All values fit one line
+         * even at their type maxima. No extra pixel readback is introduced. */
+        uint32_t cleared = RF_GD_PANEL_W * RF_GD_PANEL_H -
+            layers[0].destination.w * layers[0].destination.h;
+        IOLog("REDFIN GPU OUTPUT: f=%llu n=%u clear=%u us=%llu,%llu,%llu,%llu,%llu,%llu,%llu scope=1\n",
+            gd.calls, count, cleared, (prepared-began)/1000, (synced-prepared)/1000,
+            (marks.built-synced)/1000, (marks.published-marks.built)/1000,
+            (marks.finished-marks.published)/1000, (checked-marks.finished)/1000,
+            (checked-began)/1000);
+    }
     return 1;
 }
+
+#include "RedfinGPUQueuedPresent.inc"
