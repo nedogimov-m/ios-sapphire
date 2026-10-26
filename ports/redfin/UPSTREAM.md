@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Whole-frame result requires producer-aware snapshot policy — 2026-10-26
+
+V68 ordinary same-binary observation completes310GPU frames/10.010634s:
+30.967070FPS at90Hz callbacks,0contacts/window replacements/runtime faults,
+clean root/Fastboot. This is below V66's35.561FPS. Actual CPU encoding shrinks,
+but new GPU copies do not establish a whole-frame speedup. Keep the complete
+V67 correctness proof; do not promote unconditional copies for CPU-owned data.
+
+Correct the complete runtime policy to GPU snapshots only for large sources
+with actual pending GPU writes; CPU-owned constants retain the prior uploader.
+Preserve every full read bound, real CPU/cache/alias/fence/lifetime/error rule.
+Native cases now require actual CPU/GPU route counters,5snapshots across GPU
+overwrites/rollover and changed-colour CPU/GPU producer raster modes.29host
+contracts and actual20H392 native signatures/paired build PASS; corrected A620
+proof remains pending. New input6e6e432c../pair24dfc27b.. reuses the same compiler
+cache, UI and actual run10 kernel. Preferred pins/Angelpro344a8af stay unchanged;
+physical-ring source reconstruction/review is not an implementation claim.
+
 ## Native immutable GPU snapshots and raster cases PASS — 2026-10-26
 
 V67/code2132029 with unchanged Actions40314982431/run10/kernel5f0d5f48..,

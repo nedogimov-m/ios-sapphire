@@ -113,7 +113,7 @@ static int rwa_redfin_gpu_prepare(struct rwa_device *device,char *why,size_t byt
 static int rwa_redfin_buffer_prepare(struct rwa_buffer *buffer,char *why,size_t bytes)
 {return rwa_redfin_gpu_prepare(buffer->device,why,bytes);}
 static int rwa_redfin_buffer_cpu_prepare(struct rwa_buffer *buffer,char *why,size_t bytes)
-{++receiver(buffer->device)->cpu_prepares;return buffer->gpu_pending?redfin_metal_scope_drain(&buffer->device->command_scope,finish,buffer->device,why,bytes):0;}
+{++receiver(buffer->device)->cpu_prepares;int error=buffer->gpu_pending?redfin_metal_scope_drain(&buffer->device->command_scope,finish,buffer->device,why,bytes):0;if(!error)buffer->gpu_pending=false;return error;}
 static uint64_t rwa_redfin_profile_clock(void){static uint64_t tick;return ++tick;}
 static void rwa_redfin_profile_elapsed(struct rwa_device *device,unsigned field,uint64_t began)
 {device->frontend_stats[field]+=rwa_redfin_profile_clock()-began;}
@@ -152,15 +152,16 @@ int main(void)
    source.map=((struct resource *)source.res)->data;memset(source.map,0x13,source.size);
    struct air_resource unknown={0};char why[256]={0};
    REQUIRE(!redfin_metal_scope_begin(&device.command_scope));
-   const unsigned offsets[4]={1,3,4,63};struct pipe_constant_buffer slices[4]={0};
-   for(unsigned i=0;i<4;++i){if(i)queue_fill(&device,&source,0x13+i);
+   const unsigned offsets[5]={1,3,4,63,5};struct pipe_constant_buffer slices[5]={0};
+   for(unsigned i=0;i<5;++i){if(i)queue_fill(&device,&source,0x13+i);
       REQUIRE(!rwa_redfin_profile_constant_snapshot(&device,&unknown,&source,offsets[i],source.size-offsets[i],&slices[i],why,sizeof(why)));
-      REQUIRE(slices[i].buffer_offset%64==0&&slices[i].buffer_size==source.size-offsets[i]&&device.command_scope.pending);
+      REQUIRE(slices[i].buffer_offset%64==0&&slices[i].buffer_size==source.size-offsets[i]);
+      REQUIRE(i?device.command_scope.pending:!device.command_scope.pending);
    }
-   REQUIRE(actual.finishes==0&&actual.cpu_prepares==0&&device.frontend_stats[RF_MFP_CONSTANT_GPU]==4&&device.frontend_stats[RF_MFP_CONSTANT_GPU_CHUNKS]==2);
-   REQUIRE(slices[0].buffer!=slices[3].buffer&&slices[0].buffer_offset!=slices[1].buffer_offset);
+   REQUIRE(actual.finishes==0&&actual.cpu_prepares==1&&device.frontend_stats[RF_MFP_CONSTANT_GPU]==4&&device.frontend_stats[RF_MFP_CONSTANT_GPU_CHUNKS]==2);
+   REQUIRE(slices[1].buffer!=slices[4].buffer&&slices[1].buffer_offset!=slices[2].buffer_offset);
    REQUIRE(!redfin_metal_scope_end(&device.command_scope,finish,&device,why,sizeof(why))&&actual.finishes==1);
-   for(unsigned i=0;i<4;++i){struct resource *res=(struct resource *)slices[i].buffer;
+   for(unsigned i=0;i<5;++i){struct resource *res=(struct resource *)slices[i].buffer;
       for(unsigned j=0;j<slices[i].buffer_size;++j)REQUIRE(res->data[slices[i].buffer_offset+j]==0x13+i);
       for(unsigned j=slices[i].buffer_offset+slices[i].buffer_size;j<res->pipe.width0&&j%64;++j)REQUIRE(res->data[j]==0xa5);
       for(unsigned j=res->pipe.width0;j<res->pipe.width0+64;++j)REQUIRE(res->data[j]==0xa5);
@@ -169,17 +170,18 @@ int main(void)
    /* Small copies stay on CPU. Invalid logical/native ranges emit nothing. */
    REQUIRE(!redfin_metal_scope_begin(&device.command_scope));source.gpu_pending=false;
    struct pipe_constant_buffer result={0};unsigned queued=actual.count;
-   REQUIRE(!rwa_redfin_profile_constant_snapshot(&device,&unknown,&source,3,67,&result,why,sizeof(why))&&actual.cpu_prepares==1);
+   REQUIRE(!rwa_redfin_profile_constant_snapshot(&device,&unknown,&source,3,67,&result,why,sizeof(why))&&actual.cpu_prepares==2);
    pipe_resource_reference(&result.buffer,NULL);
    REQUIRE(rwa_redfin_profile_constant_snapshot(&device,&unknown,&source,source.size-3,4,&result,why,sizeof(why))<0&&actual.count==queued);
    source.size+=4;REQUIRE(rwa_redfin_profile_constant_snapshot(&device,&unknown,&source,source.size-4,4,&result,why,sizeof(why))<0);source.size-=4;
    /* A refusal before work preserves the real CPU dependency wait. */
    queue_fill(&device,&source,0x91);device.constant_arena.offset=REDFIN_METAL_GPU_SNAPSHOT_CHUNK;
    actual.fail_create=true;
-   REQUIRE(!rwa_redfin_profile_constant_snapshot(&device,&unknown,&source,1,source.size-1,&result,why,sizeof(why))&&actual.finishes==2&&actual.cpu_prepares==2);
+   REQUIRE(!rwa_redfin_profile_constant_snapshot(&device,&unknown,&source,1,source.size-1,&result,why,sizeof(why))&&actual.finishes==2&&actual.cpu_prepares==3);
    REQUIRE(((struct resource *)result.buffer)->data[0]==0x91);pipe_resource_reference(&result.buffer,NULL);
    /* Work emitted before a later error retains its source/destination until
     * the failed scope pays its actual drain, even after API owners go away. */
+   queue_fill(&device,&source,0x92);
    REQUIRE(!rwa_redfin_profile_constant_snapshot(&device,&unknown,&source,3,source.size-3,&result,why,sizeof(why)));
    struct resource *pending=(struct resource *)result.buffer,*original=(struct resource *)source.res;
    pipe_resource_reference(&result.buffer,NULL);pipe_resource_reference(&device.constant_arena.resource,NULL);

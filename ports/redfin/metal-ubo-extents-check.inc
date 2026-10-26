@@ -85,9 +85,11 @@ static BOOL ubo_compute_extents(id<MTLDevice> device,id<MTLLibrary> library,uint
                     boundsAfter[RF_MFP_CONSTANT_GPU]==boundsBefore[RF_MFP_CONSTANT_GPU];
             }
         }
-        if(phase==1||phase==3||phase==5)
-            valid=valid&&boundsAfter[RF_MFP_CONSTANT_GPU]==boundsBefore[RF_MFP_CONSTANT_GPU]+1&&
-                boundsAfter[RF_MFP_CONSTANT_GPU_BYTES]==boundsBefore[RF_MFP_CONSTANT_GPU_BYTES]+sourceBytes-4;
+        if(phase==1||phase==3||phase==5) {
+            unsigned selected=phase==5;
+            valid=valid&&boundsAfter[RF_MFP_CONSTANT_GPU]==boundsBefore[RF_MFP_CONSTANT_GPU]+selected&&
+                boundsAfter[RF_MFP_CONSTANT_GPU_BYTES]==boundsBefore[RF_MFP_CONSTANT_GPU_BYTES]+selected*(sourceBytes-4);
+        }
         printf("REDFIN METAL UBO CASE: boot=%016llx phase=%u dynamic=%u bounded=%u argument-buffer=%u GPU-written=%u threads=%u copied-bytes=%llu proven-snapshots=%llu actual-values-and-guards=%u\n",
             (unsigned long long)nonce,phase,dynamic,bounded,indirect,gpu,threads,
             (unsigned long long)copied,(unsigned long long)proofs,valid);
@@ -97,14 +99,14 @@ static BOOL ubo_compute_extents(id<MTLDevice> device,id<MTLLibrary> library,uint
     return valid&&passed==10;
 }
 
-/* Four distinct snapshots in one deferred command, across GPU overwrites of
+/* Five distinct snapshots in one deferred command, across GPU overwrites of
  * the same source. Exercise byte offsets/tails and argument-buffer restoration;
  * prior slices and queued resource references must survive arena rollover. */
 static BOOL ubo_gpu_snapshots(id<MTLDevice> device,id<MTLLibrary> library,uint64_t nonce)
 {
-    enum {rounds=4,sourceBytes=320*1024+63,outputWords=128,threads=64,first=16};
-    const unsigned offsets[rounds]={1,3,4,63};
-    const uint8_t fills[rounds]={0,0x5a,0xc3,0x7e};
+    enum {rounds=5,sourceBytes=320*1024+63,outputWords=128,threads=64,first=16};
+    const unsigned offsets[rounds]={1,3,4,63,5};
+    const uint8_t fills[rounds]={0,0x5a,0xc3,0x7e,0x29};
     id<MTLFunction> function=[library newFunctionWithName:@"redfin_ubo_argument_dynamic"];
     NSError *error=nil;
     id<MTLComputePipelineState> pipeline=function?[device newComputePipelineStateWithFunction:function error:&error]:nil;
@@ -143,9 +145,10 @@ static BOOL ubo_gpu_snapshots(id<MTLDevice> device,id<MTLLibrary> library,uint64
         [encoder dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(threads,1,1)];[encoder endEncoding];
     }
     if(valid)valid=command&&blit_completed(command,"large-constant-snapshots-byte-tails-argument-GPU-overwrites");
-    uint64_t expectedBytes=0;
+    uint64_t expectedBytes=0,expectedGPUBytes=0;
     for(unsigned round=0;round<rounds;++round) {
         expectedBytes+=sourceBytes-offsets[round];
+        if(round)expectedGPUBytes+=sourceBytes-offsets[round];
         const uint32_t *result=outputs[round].contents;
         for(unsigned i=0;valid&&i<outputWords;++i) {
             uint32_t wanted=0xa5a5a5a5u;
@@ -167,11 +170,11 @@ static BOOL ubo_gpu_snapshots(id<MTLDevice> device,id<MTLLibrary> library,uint64
         if(input[i]!=wanted){printf("REDFIN METAL GPU SNAPSHOT SOURCE: byte=%u\n",i);valid=NO;}
     }
     valid=valid&&ubo_frontend_statistics(device,after)&&
-        after[RF_MFP_CONSTANT_GPU]==before[RF_MFP_CONSTANT_GPU]+rounds&&
-        after[RF_MFP_CONSTANT_GPU_BYTES]==before[RF_MFP_CONSTANT_GPU_BYTES]+expectedBytes&&
+        after[RF_MFP_CONSTANT_GPU]==before[RF_MFP_CONSTANT_GPU]+rounds-1&&
+        after[RF_MFP_CONSTANT_GPU_BYTES]==before[RF_MFP_CONSTANT_GPU_BYTES]+expectedGPUBytes&&
         after[RF_MFP_CONSTANT_GPU_CHUNKS]>before[RF_MFP_CONSTANT_GPU_CHUNKS];
-    printf("REDFIN METAL GPU SNAPSHOT RESULT: boot=%016llx snapshots=%u bytes=%llu byte-tails-arguments-overwrites-rollover-guards=%u\n",
-        (unsigned long long)nonce,rounds,(unsigned long long)expectedBytes,valid);
+    printf("REDFIN METAL GPU SNAPSHOT RESULT: boot=%016llx snapshots=%u GPU-snapshots=%u bytes=%llu GPU-bytes=%llu byte-tails-arguments-overwrites-rollover-guards=%u\n",
+        (unsigned long long)nonce,rounds,rounds-1,(unsigned long long)expectedBytes,(unsigned long long)expectedGPUBytes,valid);
     for(unsigned i=0;i<rounds;++i){[tables[i] release];[arguments[i] release];[outputs[i] release];}
     free(initial);[queue release];[source release];[pipeline release];[function release];return valid;
 }
@@ -215,34 +218,50 @@ static BOOL ubo_render_gpu_snapshots(id<MTLDevice> device,id<MTLLibrary> library
     shape.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;shape.storageMode=MTLStorageModeShared;
     id<MTLTexture> target=[device newTextureWithDescriptor:shape];id<MTLCommandQueue> queue=[device newCommandQueue];
     uint8_t *v=vertex.contents,*f=fragment.contents;
-    BOOL valid=pipeline&&vertex&&fragment&&target&&queue&&v&&f;
     uint8_t *expectedVertex=malloc(bytes),*expectedFragment=malloc(bytes);
-    valid=valid&&expectedVertex&&expectedFragment;
-    if(valid) {
-        memset(v,0xa5,bytes);memset(f,0xa5,bytes);
+    BOOL valid=pipeline&&vertex&&fragment&&target&&queue&&v&&f&&expectedVertex&&expectedFragment;
+    unsigned passed=0;
+    for(unsigned mode=0;valid&&mode<2;++mode) {
+        memset(expectedVertex,0xa5,bytes);memset(expectedFragment,0xa5,bytes);
         for(unsigned i=0;i<64;++i) {
-            float a=1,b=i==0?0.375f:i==5?0.625f:i==9?0.875f:0.125f;
-            memcpy(v+3+4*i,&a,4);memcpy(f+1+4*i,&b,4);
+            float a=1,b=mode?(i==0?0.25f:i==5?0.5f:i==9?1.0f:0.75f):
+                (i==0?0.375f:i==5?0.625f:i==9?0.875f:0.125f);
+            memcpy(expectedVertex+3+4*i,&a,4);memcpy(expectedFragment+1+4*i,&b,4);
         }
-        memcpy(expectedVertex,v,bytes);memcpy(expectedFragment,f,bytes);
+        id<MTLBuffer> stageVertex=nil,stageFragment=nil;
+        if(mode) {
+            stageVertex=[device newBufferWithBytes:expectedVertex length:bytes options:MTLResourceStorageModeShared];
+            stageFragment=[device newBufferWithBytes:expectedFragment length:bytes options:MTLResourceStorageModeShared];
+            valid=stageVertex&&stageFragment;
+        } else {memcpy(v,expectedVertex,bytes);memcpy(f,expectedFragment,bytes);}
         uint64_t before[REDFIN_METAL_FRONTEND_WORDS]={0},after[REDFIN_METAL_FRONTEND_WORDS]={0};
-        valid=ubo_frontend_statistics(device,before);
-        id<MTLCommandBuffer> command=[queue commandBuffer];id<MTLRenderCommandEncoder> draw=[command renderCommandEncoderWithDescriptor:ordering_pass(target)];
+        valid=valid&&ubo_frontend_statistics(device,before);
+        id<MTLCommandBuffer> command=[queue commandBuffer];
+        if(mode) {
+            id<MTLBlitCommandEncoder> copy=[command blitCommandEncoder];valid=valid&&copy!=nil;
+            [copy copyFromBuffer:stageVertex sourceOffset:0 toBuffer:vertex destinationOffset:0 size:bytes];
+            [copy copyFromBuffer:stageFragment sourceOffset:0 toBuffer:fragment destinationOffset:0 size:bytes];[copy endEncoding];
+        }
+        id<MTLRenderCommandEncoder> draw=[command renderCommandEncoderWithDescriptor:ordering_pass(target)];
         [draw setRenderPipelineState:pipeline];[draw setVertexBuffer:vertex offset:3 atIndex:1];[draw setFragmentBuffer:fragment offset:1 atIndex:1];
-        for(unsigned i=0;i<2;++i)[draw drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-        [draw endEncoding];
-        valid=valid&&command&&draw&&blit_completed(command,"large-constant-independent-vertex-fragment-repeated-draws")&&
-            ubo_frontend_statistics(device,after)&&after[RF_MFP_CONSTANT_GPU]==before[RF_MFP_CONSTANT_GPU]+4&&
-            after[RF_MFP_CONSTANT_GPU_BYTES]==before[RF_MFP_CONSTANT_GPU_BYTES]+2*((uint64_t)bytes*2-4);
+        for(unsigned i=0;i<2;++i)[draw drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[draw endEncoding];
+        unsigned copies=mode?4:0;
+        valid=valid&&command&&draw&&blit_completed(command,"large-constant-CPU-or-GPU-writer-independent-vertex-fragment-repeated-draws")&&
+            ubo_frontend_statistics(device,after)&&after[RF_MFP_CONSTANT_GPU]==before[RF_MFP_CONSTANT_GPU]+copies&&
+            after[RF_MFP_CONSTANT_GPU_BYTES]==before[RF_MFP_CONSTANT_GPU_BYTES]+(mode?2*((uint64_t)bytes*2-4):0);
         uint8_t pixels[width*height*4]={0};[target getBytes:pixels bytesPerRow:width*4 fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
-        const unsigned expected[4]={32,96,159,223};
+        const unsigned expected[2][4]={{32,96,159,223},{191,64,128,255}};
         for(unsigned i=0;valid&&i<sizeof(pixels);++i) {
-            int difference=(int)pixels[i]-(int)expected[i%4];if(difference<-1||difference>1)valid=NO;
+            int difference=(int)pixels[i]-(int)expected[mode][i%4];if(difference<-1||difference>1)valid=NO;
         }
         valid=valid&&!memcmp(v,expectedVertex,bytes)&&!memcmp(f,expectedFragment,bytes);
+        printf("REDFIN METAL GPU SNAPSHOT RASTER CASE: boot=%016llx GPU-written=%u GPU-snapshots=%u CPU-owned-keeps-uploader=1 actual-pixels-and-source-guards=%u\n",
+            (unsigned long long)nonce,mode,copies,valid);
+        if(valid)++passed;[stageFragment release];[stageVertex release];
     }
-    printf("REDFIN METAL GPU SNAPSHOT RASTER: boot=%016llx independent-vertex-fragment-two-draws-values-guards=%u pixels=%u\n",
-        (unsigned long long)nonce,valid,valid?width*height:0);
+    valid=valid&&passed==2;
+    printf("REDFIN METAL GPU SNAPSHOT RASTER: boot=%016llx independent-vertex-fragment-two-draws-values-guards=%u CPU-and-GPU-writers=%u pixels=%u\n",
+        (unsigned long long)nonce,valid,passed,valid?2*width*height:0);
     free(expectedFragment);free(expectedVertex);
     [queue release];[target release];[fragment release];[vertex release];[pipeline release];return valid;
 }

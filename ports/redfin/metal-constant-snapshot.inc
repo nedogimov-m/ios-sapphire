@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT
- * Large misaligned constants are immutable, queue-ordered GPU snapshots.
- * Small/unsupported copies retain the real CPU preparation/uploader path.
+ * Large GPU-written misaligned constants are immutable, queue-ordered GPU
+ * snapshots. CPU-owned data retains the real uploader: inserting compute
+ * copies into ordinary raster work reduced whole-system throughput on A620.
  * This only changes runtime storage; no AIR/NIR or shader cache is modified.
  */
 static bool
@@ -33,7 +34,10 @@ static int
 rwa_redfin_constant_gpu_snapshot(struct rwa_device *device,struct rwa_buffer *source,
    size_t offset,size_t bytes,struct pipe_constant_buffer *out,char *why,size_t why_size)
 {
-   if(!rwa_redfin_constant_gpu_supported(device,offset,bytes))return 1;
+   /* A GPU producer can pass its data directly to the GPU snapshot without
+    * the CPU dependency drain. CPU-owned constants already have a cheap
+    * upload; do not add another GPU operation merely because they are large. */
+   if(!source->gpu_pending||!rwa_redfin_constant_gpu_supported(device,offset,bytes))return 1;
    unsigned alignment=MAX2(64,device->ubo_offset_align);
    if((alignment&(alignment-1))||alignment>REDFIN_METAL_GPU_SNAPSHOT_CHUNK)return 1;
    struct redfin_metal_constant_arena *arena=&device->constant_arena;

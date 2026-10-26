@@ -30,8 +30,10 @@ startup checks OFF completes356GPU frames in10.010942physical seconds:
 35.561FPS, with90Hz callbacks, no contacts or window-server replacements,
 and a clean shutdown. Smooth60/90render FPS remains unfinished.
 V67's complete GPU-ordered large-constant snapshot and repeated raster
-checks also pass on A620. Its post-check animation measures31.964FPS;
-ordinary performance with those binaries is pending, with no speedup claimed.
+checks also pass on A620. Ordinary V68 measures30.967FPS, below V66, so that
+unconditional copy policy is being corrected: CPU-owned constants keep the
+uploader; large GPU-written sources may snapshot without a CPU dependency wait.
+The corrected native build/host checks pass; hardware proof is pending.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).

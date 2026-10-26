@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V68 ordinary31FPS; complete constant-ownership policy correction built — 2026-10-26
+
+V68 cycle21757 TERMINAL exit0: authenticated fresh617bcb6935a3f8b2, one
+backboardd61, no runtime GPU fault/panic,0contacts/releases, clean unmounted
+HFSX1461644 and verified Fastboot. Exact observed args are in the starting
+entry below.310GPU/310total frames in10.010634physical seconds =30.967070FPS;
+902callbacks/90Hz, no missed samples/timeouts/window changes, idle restored.
+Startup checks/captures/app opens OFF; zero current-nonce checker records.
+18frontend and24owner/9output partitions validate, zero invalid. Actual warm
+groups retain37draws/518130snapshot bytes, including2GPU snapshots/514432bytes.
+Median CPU copy/encode scope149.5us, native render owner18281us/output5892us;
+reducing the CPU scope does not establish improved total latency. This ordinary
+observation is below V66's35.561FPS. Do not keep unconditional GPU snapshots
+as a throughput optimization or claim that all-GPU copies made this GUI faster.
+V74 remains STALE/never reuse. Next fresh V75/imageV69 at clean1461644.
+
+Complete related policy correction before combined tests: only a large source
+with actual pending GPU writes may use the immutable GPU snapshot. CPU-owned
+constants retain the previously validated CPU uploader without adding GPU
+compute work. This preserves exact full read bounds and every real preparation,
+alias/cache dependency, pending-error drain, resource reference and final fence.
+Add native route requirements: unknown CPU-owned phases use zero GPU snapshots;
+GPU-written phase requires one. Five snapshots in one command prove1CPU+4GPU,
+GPU overwrites, byte offsets/tails, guards and chunk rollover. Both large raster
+stages exercise CPU and GPU producers separately with changed expected colours,
+2repeated draws each, and exact0/4GPU-copy counter requirements.
+
+29combined host contracts and full native actual20H392 ABI/signature/source/
+pairing/current-marker build PASS. Native input6e6e432c00f5ee117909b56037108f7bc272c18594523c6a11a72745f15ad582;
+pair24dfc27b296699983f19a57162360cdc14eb84e435c863cbd908a1fd66fd19e9.
+Same compiler cache496301fc../UI and Actions40314982431/run10/kernel5f0d5f48..
+retained. Prior V67 complete native work is frozen/verified. V69 imagea10ecfa4271bcbf2d0b186a49283a876db8a9e197b569209156cc7cc553af613
+passes full loader/liveFDT/ADT/firmware/private/native CI/source/ABI preflight.
+Fresh V75 readonly snapshot is running; no new filesystem writes or hardware
+success claimed yet. Next one combined native run, request animate-checked;
+captures/automatic app launches OFF. Exact prepared args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa3795b47ec3fd7f3 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Physical-ring work remains design/exact source preparation only; broader goal
+stays active and unfinished. No new kernel CI build is required for this policy.
+
 ## REDFIN V74 exact policy update verified; ordinary V68 running — 2026-10-26
 
 Code2132029/results624bf14. V67 full native A620 contract remains PASS.
