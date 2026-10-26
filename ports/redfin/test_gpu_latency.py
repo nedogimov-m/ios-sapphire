@@ -115,7 +115,14 @@ int main(void)
                     continue
                 target = str(path.relative_to(NATIVE))
                 self.assertEqual((directory/target).read_bytes(), path.read_bytes(), target)
-                self.assertEqual(patched_source(target), path.read_text(), target)
+                # Preserve the exact run18 prefix proof, then replay the later
+                # producer extension before comparing the current final tree.
+                if target=='iokit/Kernel/arm/RedfinGPU.cpp':
+                    later=HERE/'native-surface-producer.patch'
+                    if later.exists():
+                        subprocess.run(['git','apply','--include='+target,str(later)],
+                                       cwd=directory,check=True,capture_output=True)
+                self.assertEqual(patched_source(target),(directory/target).read_text(),target)
         for owned, target in (
             ('gpu-precise-pause.inc', 'bsd/dev/redfin_gpu_precise_pause.inc'),
             ('gpu-runtime.inc', 'bsd/dev/redfin_gpu_runtime.inc'),

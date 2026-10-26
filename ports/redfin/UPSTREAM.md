@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Preferred GLES direct surface rendering adapted with native producer ownership — 2026-10-27
+
+Reviewed existing pinned preferred userland906425b7.. eagl.c and equivalent
+relocated preferred kernel88513176.. surface_shared/surface_mirrored/frame_end.
+Keep complete bridge/framebuffer-fetch shader fixes; enable direct full-image
+imports only with actual Redfin owned padding/BO identity and a new explicit
+surface-producer ABI. Preserve reversed/wrapped/subview/mirror/CPU fallbacks.
+
+Upstream seed-only IOSurfaceLock is a real CPU barrier on Redfin. After real
+Mesa CPU-worker/kernel-fence publication, announce GPU modification through a
+checked live handle/surface/full-image/fence call that advances only the seed.
+No early completion, CPU cache handoff or ownership bypass. Mesa admission
+uses the bound GL resource's retained BO; direct/mirror choice is reversible
+and backboardd-only. Full native framebuffer-fetch odd-canvas pixels/tail
+check added, together with all previous native app Metal tests.96common host
+contracts/complete native kernel TU compile PASS. Fresh kernel CI/userland
+build/hardware result pending; tested V87 hardware baseline remains valid.
+
 ## Native input/GLES V87 integration passes with user-confirmed touch — 2026-10-27
 
 Own startup-recovery sourcec559395, Actions40394810408/run19/sourcec7d69581..

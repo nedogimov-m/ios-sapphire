@@ -76,6 +76,47 @@ def adapt_source(text, abi):
 \t\t}'''
     text = replace_once(text, publication,
         '\t\tif (!redfin_eagl_publish_frame()) glFinish();')
+    text = replace_once(text,'\tGLuint mirror;',
+        '\tuint32_t producer;             /* native full-image producer handle, or0 */\n\tGLuint mirror;')
+    text = replace_once(text,'\tbool in_frame;',
+        '\tbool producer_transfer;       /* transfer only; metadata is announced after publication */\n\tbool in_frame;')
+    direct = '''static bool
+surface_direct(struct eagl *e,struct image *image)
+{
+    IOSurfaceRef surface=image->surface;
+    if(!redfin_eagl_direct_requested() || !image->target ||
+       image->invert || image->alpha_first || image->format!=GL_BGRA ||
+       image->type!=GL_UNSIGNED_BYTE || image->plane ||
+       (size_t)image->width!=IOSurfaceGetWidth(surface) ||
+       (size_t)image->height!=IOSurfaceGetHeight(surface) ||
+       !redwood_gl_surface_texture(e->gl,IOSurfaceGetID(surface)))return false;
+    image->producer=redfin_eagl_surface_producer(IOSurfaceGetID(surface));
+    if(!image->producer)return false;
+    image->shared=true;++e->shared;return true;
+}
+
+'''
+    text = replace_once(text,'static bool\nsurface_mirrored(',direct+'static bool\nsurface_mirrored(')
+    text = replace_once(text,'\tglBindTexture(GL_TEXTURE_2D, (GLuint)bound);\n\te->shared++;\n\treturn true;',
+        '\timage->producer=redfin_eagl_surface_producer(IOSurfaceGetID(surface));\n'
+        '\tglBindTexture(GL_TEXTURE_2D, (GLuint)bound);\n\te->shared++;\n\treturn true;')
+    attach='\tif (surface_mirrored(e, image) || !surface_shared(e, image)) {'
+    text = replace_once(text,attach,
+        '\tif (!surface_direct(e,image) && (surface_mirrored(e, image) || !surface_shared(e, image))) {')
+    # These two GPU branches only changed a modification seed; they do not
+    # access CPU pixels. The new producer path announces that seed afterwards.
+    seed_lock='\t\tif (IOSurfaceLock(surface, 0, NULL) == 0) {'
+    require(text.count(seed_lock)==2,'unreviewed GPU IOSurface seed locks')
+    text=text.replace(seed_lock,'\t\tif (!e->producer_transfer && IOSurfaceLock(surface, 0, NULL) == 0) {')
+    text = replace_once(text,'static void frame_functions(struct eagl *e);',
+        '#include "eagl-direct-frame.inc"\n\nstatic void frame_functions(struct eagl *e);')
+    start=text.index('\tfor (unsigned i = 0; i < e->image_count; i++) {',text.index('frame_end(struct eagl *e, bool finished)'))
+    end=text.index('\tif (!e->in_frame) {',start)
+    legacy=text[start:end]
+    text=text[:start]+'''\tif (redfin_eagl_producer_ready() && sync_frames) {
+\t\tcopied=redfin_eagl_produce_frame(e,finished,&waited,&in_place);
+\t} else {
+'''+''.join('\t'+line if line.strip() else line for line in legacy.splitlines(True))+'\t}\n'+text[end:]
     text = replace_once(text, '\te->frames++;\n',
         '\te->frames++;\n\tredfin_eagl_frame(e->frames,e->draws,e->triangles,in_place,copied,e->errors);\n')
     text = replace_once(text, '\tcurrent = e;\n\te->object = self;',

@@ -2,10 +2,22 @@
 import re
 
 
+def native_direct_check(lines,boot):
+    rows=[]
+    for line in lines:
+        if 'REDFIN GLES DIRECT CHECK:' not in line or 'boot='+boot not in line:continue
+        fields=dict(re.findall(r'([A-Za-z][A-Za-z-]*)=([^\s]+)',line))
+        try:rows.append({k:int(fields[k]) for k in ('width','height','pitch','rounds','pixels',
+            'tail-guard-bytes','fetch','seed-progress','CPU-lock-first','result')})
+        except (KeyError,ValueError):return False
+    return bool(len(rows)==1 and rows[0]==dict(width=1125,height=2435,pitch=4608,rounds=4,
+        pixels=1125*2435*4,**{'tail-guard-bytes':57344,'fetch':1,'seed-progress':1,'CPU-lock-first':1,'result':0}))
+
+
 def analyze(lines,boot):
     if not re.fullmatch('[0-9a-f]{16}',boot):
         raise ValueError('exact actual boot identity required')
-    frames=[];hardware=[];requested=[];declined=[];metal=[];publications=[];driver_waits=[]
+    frames=[];hardware=[];requested=[];declined=[];metal=[];publications=[];driver_waits=[];direct=[]
     for line in lines:
         if 'boot='+boot not in line:continue
         if 'REDFIN COMPOSITOR:' in line and 'process=backboardd' in line:
@@ -22,6 +34,10 @@ def analyze(lines,boot):
             fields=dict(re.findall(r'([a-zA-Z][a-zA-Z-]*)=([^\s]+)',line))
             try:publications.append({k:int(fields[k]) for k in ('pid','published','fallbacks','result','GPU-wait')})
             except (KeyError,ValueError):pass
+        if 'REDFIN EAGL DIRECT FRAME:' in line:
+            fields=dict(re.findall(r'([a-zA-Z][a-zA-Z-]*)=([^\s]+)',line))
+            try:direct.append({k:int(fields[k]) for k in ('pid','frame','direct','mirrored','producer-notified')})
+            except (KeyError,ValueError):pass
         if re.search(r'redwoodmetal\[backboardd \d+\]: REDFIN METAL FENCE:',line):metal.append(line)
     native=bool(hardware and all('620' in line and not any(x in line.lower() for x in
         ('softpipe','llvmpipe','software')) for line in hardware))
@@ -35,6 +51,12 @@ def analyze(lines,boot):
         driver_waits_for_GPU=bool(driver_waits),publication_records=len(publications),
         kernel_published_GLES_frames=max((r['published'] for r in publications),default=0),
         publication_fallbacks=max((r['fallbacks'] for r in publications),default=0),
+        direct_surface_frame_records=sum(r['direct']>0 for r in direct),
+        direct_surface_latest_frame=max((r['frame'] for r in direct if r['direct']),default=0),
+        direct_surface_GPU_composition=bool(native and requested and frames and direct and
+            max((r['frame'] for r in direct if r['direct']),default=0)>=60 and
+            not any(r['direct'] and (r['mirrored'] or not r['producer-notified']) for r in direct) and
+            not any(r['errors'] for r in frames)),
         asynchronous_GLES_handoff=bool(driver_waits and publications and
             max(r['published'] for r in publications)>=60 and
             not any(r['fallbacks'] or r['result'] or r['GPU-wait'] for r in publications)),
@@ -60,10 +82,18 @@ def main():
     app_metal=bool(authenticated and native.get('metal_exit_result')==0)
     gpu=bool(authenticated and (native.get('gpu') or {}).get('result')=='0')
     kernel=(root/'xnu-console.txt').read_text(errors='replace')
+    direct_native=native_direct_check((root/'userspace-gpu-render.log').read_text(errors='replace').splitlines(),boot)
+    producer_lines=re.findall(r'^REDFIN GPU SURFACE PRODUCER: n=(\d+) surface=(\d+) cf=(\d+) issued=(\d+) seed=(\d+) seed-only=1 completion=0\s*$',kernel,re.M)
+    producers=[tuple(map(int,row)) for row in producer_lines]
+    producer_valid=bool(producers and all(n>0 and sid>0 and 0<cf<=issued and 0<=seed<2**32 for n,sid,cf,issued,seed in producers))
     crashes=sorted({(int(pid),int(signal)) for pid,signal in
         re.findall(r'CRASH backboardd\[(\d+)\] sig (\d+)',kernel)})
     report.update(cycle=str(root),authenticated_clean_runtime=authenticated,
         app_Metal_full_native_contract_pass=app_metal,offscreen_GPU_contract_pass=gpu,
+        native_direct_GL_pixels_and_guards_pass=direct_native,kernel_surface_producer_records=len(producers),
+        complete_direct_GLES_and_app_Metal_proof=bool(authenticated and
+            report['actual_GLES_composition'] and report['direct_surface_GPU_composition'] and
+            report['asynchronous_GLES_handoff'] and direct_native and producer_valid and app_metal and gpu and not crashes),
         backboardd_crashes=[dict(pid=pid,signal=signal) for pid,signal in crashes],
         complete_GLES_GUI_and_app_Metal_proof=bool(authenticated and
             report['actual_GLES_composition'] and app_metal and gpu and not crashes))

@@ -1,0 +1,99 @@
+--- a/src/freedreno/drm/freedreno_bo.c
++++ b/src/freedreno/drm/freedreno_bo.c
+@@ -79,7 +79,7 @@
+    assert(bo->funcs);
+ 
+ #ifdef __APPLE__
+-   bo->redfin_padding=(struct rf_gp_import){0};
++   bo->redfin_padding=(struct rf_gp_import){0};bo->redfin_surface=0;
+    __atomic_store_n(&bo->redfin_padding_ready,false,__ATOMIC_RELAXED);
+ #endif
+    bo->dev = dev;
+@@ -285,7 +285,7 @@
+          if(!rf_gp_storage_plan(&owner.image,bo->size,&plan) || plan.allocation!=bo->size ||
+             plan.extent!=owner.extent)owner=(struct rf_gp_import){0};
+       }
+-      bo->redfin_padding=owner;
++      bo->redfin_padding=owner;bo->redfin_surface=surface.surface;
+       __atomic_store_n(&bo->redfin_padding_ready,true,__ATOMIC_RELEASE);
+    }
+ #endif
+--- a/src/freedreno/drm/freedreno_drmif.h
++++ b/src/freedreno/drm/freedreno_drmif.h
+@@ -214,6 +214,7 @@
+ #ifdef __APPLE__
+    struct rf_gp_import redfin_padding;
+    bool redfin_padding_ready;
++   uint32_t redfin_surface;
+ #endif
+    struct fd_device *dev;
+    uint32_t size;
+--- a/src/gallium/drivers/freedreno/freedreno_fence.c
++++ b/src/gallium/drivers/freedreno/freedreno_fence.c
+@@ -85,6 +85,8 @@
+     * the kernel. Only a materialized logical fence proves admission. */
+    return fence->fence->kfence?0:-1;
+ }
++
++#include "redfin_gles_fence_surfaces.inc"
+ 
+ void
+ fd_pipe_fence_repopulate(struct pipe_fence_handle *fence,
+--- a/src/gallium/drivers/freedreno/freedreno_resource.c
++++ b/src/gallium/drivers/freedreno/freedreno_resource.c
+@@ -1908,6 +1908,8 @@
+    free(pmemobj);
+ }
+ 
++#include "redfin_gles_resource_producer.inc"
++
+ void
+ fd_resource_screen_init(struct pipe_screen *pscreen)
+ {
+--- a/src/gallium/frontends/osmesa/osmesa.c
++++ b/src/gallium/frontends/osmesa/osmesa.c
+@@ -62,6 +62,7 @@
+ #include <c11/threads.h>
+ 
+ #include "state_tracker/st_context.h"
++#include "state_tracker/st_texture.h"
+ 
+ #include "glapi/glapi.h"  /* for OSMesaGetProcAddress below */
+ 
+@@ -852,6 +853,8 @@
+ }
+ 
+ #include "redfin_gles_publication.inc"
++#include "redfin_gpu_surface.h"
++#include "redfin_gles_direct.inc"
+ 
+ 
+ 
+--- a/src/redwood-drm/redwood_drm.c
++++ b/src/redwood-drm/redwood_drm.c
+@@ -271,6 +271,8 @@
+ 	return 0;
+ }
+ 
++#include "redfin_surface_producer.inc"
++
+ static int
+ none(void)
+ {
+--- a/src/redwood-drm/xf86drm.h
++++ b/src/redwood-drm/xf86drm.h
+@@ -78,11 +78,14 @@
+ #ifdef __APPLE__
+ #include "redfin_gpu_scope.h"
+ #include "redfin_gpu_access.h"
++#include "redfin_gpu_surface.h"
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ /* Kernel-owned full-image transfer permission; zero means unavailable. */
+ uint64_t redwood_drm_render_extent(int fd,uint32_t handle);
++uint32_t redwood_drm_surface_producer(int,uint32_t);
++int redwood_drm_surface_announce(int,const struct rf_gu_target *,uint32_t);
+ int redwood_drm_cpu_range(int,uint32_t,uint32_t,uint64_t,uint64_t,int64_t,int64_t);
+ int redwood_drm_submit_scoped(int,void *,size_t,const struct rf_gw_submit_range *,uint32_t);
+ int redwood_drm_submit_access(int,void *,size_t,const struct rf_gw_submit_range *,uint32_t);

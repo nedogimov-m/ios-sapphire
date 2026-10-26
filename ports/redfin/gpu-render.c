@@ -13,6 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
+#include "include/redfin_gpu_surface.h"
 #ifndef REDFIN_GLES_PUBLICATION
 #define REDFIN_GLES_PUBLICATION 0
 #endif
@@ -24,7 +25,10 @@ extern void OSMesaDestroyContext(OSMesaContext);
 extern void (*OSMesaGetProcAddress(const char *))(void);
 #if REDFIN_GLES_PUBLICATION
 extern int redfin_gl_frame_publish(void);
+extern uint32_t redfin_gl_surface_producer(uint32_t);
+extern int redfin_gl_publish_surfaces(const struct rf_gu_target *,unsigned);
 #endif
+typedef void (*ImageTexture)(GLenum,void *);
 enum {W=256,H=256,ROW=W*4};
 static uint64_t boot_nonce;
 static void number(CFMutableDictionaryRef d,CFStringRef key,int32_t value)
@@ -44,6 +48,7 @@ static int close_color(const unsigned char *pixel,const unsigned char *expected)
     for(unsigned i=0;i<4;i++)if(abs((int)pixel[i]-expected[i])>1)return 0;
     return 1;
 }
+#include "gles-direct-check.inc"
 static int render(void)
 {
     io_service_t service=0;
@@ -81,7 +86,6 @@ static int render(void)
     if(!surface){puts("REDFIN GPU RENDER FAIL: IOSurfaceCreate");return 7;}
     if(IOSurfaceLock(surface,0,NULL)){puts("REDFIN GPU RENDER FAIL: initial lock");return 8;}
     memset(IOSurfaceGetBaseAddress(surface),0,ROW*H);IOSurfaceUnlock(surface,0,NULL);
-    typedef void (*ImageTexture)(GLenum,void *);
     ImageTexture image=(ImageTexture)OSMesaGetProcAddress("glEGLImageTargetTexture2DOES");
     if(!image){puts("REDFIN GPU RENDER FAIL: IOSurface texture import absent");return 9;}
     GLuint texture=0,framebuffer=0;
@@ -150,7 +154,8 @@ static int render(void)
     }
     glDeleteBuffers(1,&vertexBuffer);glDeleteProgram(program);glDeleteShader(vs);glDeleteShader(fs);
     glDeleteFramebuffers(1,&framebuffer);glDeleteTextures(1,&texture);CFRelease(surface);
-    OSMesaDestroyContext(context);return 0;
+    int direct=redfin_gles_direct_check();
+    OSMesaDestroyContext(context);return direct;
 }
 int main(void)
 {

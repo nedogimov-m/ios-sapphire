@@ -1,0 +1,144 @@
+diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -36,6 +36,7 @@
+ #include "RedfinGPUWaits.h"
+ #include "RedfinGPUAccess.h"
+ #include "RedfinSurfaceCache.h"
++#include "RedfinGPUSurface.h"
+ struct gpu_queued_job;
+ 
+ enum {
+@@ -154,6 +155,7 @@
+     setProperty("RedfinScopedWaitABI",RF_GW_ABI,32);
+     setProperty("RedfinResourceAccessABI",RF_GA_ABI,32);
+     setProperty("RedfinSurfacePaddingABI",RF_GP_ABI,32);
++    setProperty("RedfinSurfaceProducerABI",RF_GU_ABI,32);
+     setProperty("RedfinSurfaceCacheABI",RF_GS_ABI,32);
+     setProperty("RedfinSurfaceCachePolicy",RF_GS_POLICY,32);
+     setProperty("RedfinPreciseWaitABI",1,32);
+@@ -198,7 +200,7 @@
+     SweetSurface *surface;
+     uint8_t *kernel;
+     uint64_t address,size;
+-    uint32_t flags,fence,pending;
++    uint32_t flags,fence,pending,producerFence;
+     uint64_t generation;
+     uint32_t *pages,page_count;
+     rf_gr_surface_cache cache;
+@@ -427,6 +429,7 @@
+     *options=b->surface?b->surface->mapCache:kIOMapWriteCombineCache;return kIOReturnSuccess;
+ }
+ #include "RedfinGPUQueue.inc"
++#include "RedfinGPUSurfaceProducer.inc"
+ static bool parameter(uint32_t param,uint64_t *value)
+ {
+     switch(param) {
+@@ -441,6 +444,7 @@
+     case RF_GW_PARAM:*value=RF_GW_ABI;return true;
+     case RF_GA_PARAM:*value=RF_GA_ABI;return true;
+     case RF_GM_PARAM:*value=RF_GM_ABI;return true;
++    case RF_GU_PARAM:*value=RF_GU_ABI;return true;
+     /* A620 uses native UBWC3. Do not advertise A642L UBWC4 parameters. */
+     default:return false;
+     }
+@@ -452,7 +456,7 @@
+         msm_param param;msm_gem_new create;msm_gem_info info;msm_cpu_prep prep;msm_submit submit;
+         msm_wait wait;msm_madvise madvise;msm_queue queue;msm_query query;drm_close close;
+         rf_gw_cpu_range range;msm_scoped_submit scoped;
+-        redwood_surface surface;redwood_show show;
++        redwood_surface surface;redwood_show show;rf_gu_surface_producer producer;
+     } r;
+     if(!args || !buffers || !clientLock || !args->structureInput || args->scalarInputCount ||
+         args->scalarOutputCount)return kIOReturnBadArgument;
+@@ -473,6 +477,7 @@
+     case QueueQuery:expected=sizeof(msm_query);break;
+     case GemClose:expected=sizeof(drm_close);break;
+     case Surface:expected=sizeof(redwood_surface);break;
++    case RF_GU_ANNOUNCE:expected=sizeof(rf_gu_surface_producer);break;
+     case Show:expected=sizeof(redwood_show);break;
+     default:return kIOReturnUnsupported;
+     }
+@@ -490,7 +495,7 @@
+     if(closed||queue.closing||!redfin_gpu_ready())return kIOReturnNotReady;
+     switch(selector) {
+     case GetParam:
+-        if(r.param.param==RF_GM_PARAM && (r.param.len || r.param.pad)) {
++        if((r.param.param==RF_GM_PARAM || r.param.param==RF_GU_PARAM) && (r.param.len || r.param.pad)) {
+             r.param.value=0;result=kIOReturnBadArgument;break;
+         }
+         if(r.param.pipe!=0x10 || !parameter(r.param.param,&r.param.value))result=kIOReturnBadArgument;
+@@ -508,6 +513,15 @@
+         break;
+     case GemClose:result=drop(r.close.handle);break;
+     case Surface:{GPUTransaction hardware;result=importSurface(&r.surface);break;}
++    case RF_GU_ANNOUNCE: {
++        msm_gem_info extent={r.producer.handle,RF_GP_INFO_RENDER_EXTENT,0,0,0};
++        result=info(&extent); /* Reuse the full owned-image transfer attestation. */
++        if(result==kIOReturnSuccess) {
++            if(!extent.value)result=kIOReturnUnsupported;
++            else result=gpuSurfaceAnnounce(buffer(r.producer.handle),&queue,&r.producer);
++        }
++        break;
++    }
+     case Show:result=kIOReturnUnsupported;break; /* Use IOMobileFramebuffer/IOSurface for display. */
+     default:result=kIOReturnUnsupported;break;
+     }
+diff --git a/iokit/Kernel/arm/RedfinGPUSurface.h b/iokit/Kernel/arm/RedfinGPUSurface.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPUSurface.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: MIT */
++/* Announce a modification by an already admitted GPU producer. This only
++ * advances the IOSurface seed; it never retires a fence or grants CPU access. */
++#ifndef REDFIN_GPU_SURFACE_H
++#define REDFIN_GPU_SURFACE_H
++#include <stdint.h>
++#define RF_GU_ABI 1u
++#define RF_GU_PARAM UINT32_C(0x52465531)
++#define RF_GU_ANNOUNCE UINT32_C(0x52465532)
++#define RF_GU_MAX_TARGETS 256u
++#define RF_GU_SEED_OFFSET 12u /* Actual Redfin SweetSurface state ABI. */
++struct rf_gu_target {uint32_t handle,surface;};
++struct rf_gu_surface_producer {uint32_t handle,surface,fence,reserved;};
++#ifdef __cplusplus
++static_assert(sizeof(rf_gu_target)==8 && sizeof(rf_gu_surface_producer)==16,"GPU producer ABI1");
++#else
++_Static_assert(sizeof(struct rf_gu_target)==8 && sizeof(struct rf_gu_surface_producer)==16,"GPU producer ABI1");
++#endif
++#endif
+diff --git a/iokit/Kernel/arm/RedfinGPUSurfaceProducer.inc b/iokit/Kernel/arm/RedfinGPUSurfaceProducer.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPUSurfaceProducer.inc
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: MIT */
++/* Caller holds the existing client lock and has reused GemInfo's full owned
++ * image attestation. No queue/hardware/CPU-memory barrier is skipped by a
++ * consumer: normal IOSurfaceLock/WaitFence and display FIFO are unchanged. */
++static IOReturn gpuSurfaceAnnounce(gpu_buffer *b,const rf_gq_client *q,
++    const rf_gu_surface_producer *r)
++{
++    if(!b || !q || !r || !r->handle || !r->surface || !r->fence || r->reserved ||
++       !b->surface || b->surface->id!=r->surface || !b->fence ||
++       b->fence>r->fence || r->fence>q->issued || b->producerFence>r->fence)
++        return kIOReturnBadArgument;
++    if(q->closing || q->failed)return kIOReturnNotReady;
++    if(!b->surface->state || b->surface->state->getLength()<RF_GU_SEED_OFFSET+sizeof(uint32_t))
++        return kIOReturnUnsupported;
++    if(b->producerFence==r->fence)return kIOReturnSuccess;
++    uint8_t *state=(uint8_t *)b->surface->state->getBytesNoCopy();
++    if(!state)return kIOReturnUnsupported;
++    volatile SInt32 *seed=(volatile SInt32 *)(state+RF_GU_SEED_OFFSET);
++    /* Exactly the primitive used by IOSurfaceRootUserClient::trapUnlock.
++     * Announced pixels may still be in flight. Do not mutate q or b->pending. */
++    uint32_t value=(uint32_t)OSIncrementAtomic(seed)+1u;
++    b->producerFence=r->fence;
++    static uint64_t notices;
++    uint64_t sample=__atomic_add_fetch(&notices,1,__ATOMIC_RELAXED);
++    if(sample<=4 || !(sample%120))
++        IOLog("REDFIN GPU SURFACE PRODUCER: n=%llu surface=%u cf=%u issued=%u seed=%u seed-only=1 completion=0\n",
++            sample,r->surface,r->fence,q->issued,value);
++    return kIOReturnSuccess;
++}

@@ -134,6 +134,10 @@ def main():
                 inputs += [ROOT/'ports/redfin/mesa-surface-padding.patch',ROOT/'ports/redfin/surface-padding.h']
                 inputs += [ROOT/'ports/redfin/mesa-retained-memory.patch',ROOT/'ports/redfin/retained-memory.h']
                 inputs += [ROOT/'ports/redfin/mesa-gles-publication.patch',ROOT/'ports/redfin/gles-publication.inc']
+                inputs += [ROOT/'ports/redfin'/name for name in
+                           ('mesa-gles-direct.patch','include/redfin_gpu_surface.h','gles-direct.inc',
+                            'gles-fence-surfaces.inc','mesa-surface-producer.inc')]
+                inputs += [ROOT/'ports/redfin/gles-resource-producer.inc']
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -250,6 +254,15 @@ def main():
                     shutil.copy2(ROOT/'ports/redfin/gles-publication.inc',
                                  source/'src/gallium/frontends/osmesa/redfin_gles_publication.inc')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-gles-publication.patch'],source)
+                    for directory in ('src/gallium/frontends/osmesa','src/redwood-drm'):
+                        shutil.copy2(ROOT/'ports/redfin/include/redfin_gpu_surface.h',source/directory/'redfin_gpu_surface.h')
+                    for owned,native in (
+                        ('gles-direct.inc','src/gallium/frontends/osmesa/redfin_gles_direct.inc'),
+                        ('gles-fence-surfaces.inc','src/gallium/drivers/freedreno/redfin_gles_fence_surfaces.inc'),
+                        ('gles-resource-producer.inc','src/gallium/drivers/freedreno/redfin_gles_resource_producer.inc'),
+                        ('mesa-surface-producer.inc','src/redwood-drm/redfin_surface_producer.inc')):
+                        shutil.copy2(ROOT/'ports/redfin'/owned,source/native)
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-gles-direct.patch'],source)
                     for suffix in ('h','inc'):
                         shutil.copy2(ROOT/'ports/redfin'/('metal-constant-snapshot.'+suffix),
                                      source/'src/compiler/air'/('redfin_metal_constant_snapshot.'+suffix))
@@ -469,7 +482,8 @@ def main():
                 gui_profile_sha256=hashlib.sha256((ROOT/'ports/redfin/gui-profile.h').read_bytes()).hexdigest(),
                 gui_sources_sha256={name:hashlib.sha256((ROOT/'ports/redfin'/name).read_bytes()).hexdigest()
                     for name in ('graphics-loader.c','graphics-memory-report.h','eagl-guard.c',
-                                 'eagl-guard.h','eagl_userland.py','gles-publication.inc')},
+                                 'eagl-guard.h','eagl_userland.py','gles-publication.inc',
+                                 'eagl-direct-frame.inc','gles-direct-check.inc','compositor-policy.h')},
                 artifacts={str(x.relative_to(bundle)):hashlib.sha256(x.read_bytes()).hexdigest()
                            for x in sorted(bundle.rglob('*')) if x.is_file()})
             (work/'compiler-inputs.json').write_text(json.dumps(cache_proof,indent=2)+'\n')

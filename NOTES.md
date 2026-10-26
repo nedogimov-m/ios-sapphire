@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete GLES direct-target/producer block;96common host/native kernel compile PASS — 2026-10-27
+
+V87 user-confirmed touch/GLES4800frames is the hardware baseline, clean1634464/
+Fastboot, next fresh V94/imageV88. Full source+binary+build archive verified at
+research/redfin-gles-direct-v87-validated. Preferred pins88513176../906425b7..
+remain. No new hardware or FPS claim yet; implementation first/common checks
+follow, no phone boots between mini-tasks.
+
+Review complete preferred eagl.c surface_mirrored/surface_shared/frame_end:
+system full-frame BGRA1125x2436 gets an extra GPU blit before panel output.
+Its seed-only IOSurfaceLock also uses a real CPU handoff. Implement one related
+block: direct rendering only when actual bound GL BO and native kernel attest
+exact full owned padded BGRA image identity/layout; wrapped/subview/inverted/
+unsupported surfaces retain the existing mirror/copy path. Preserve upstream
+framebuffer-fetch flush semantics and all source shader adaptations.
+
+New explicit surface-producer ABI1 announces a modification after actual
+kernel-fence admission. Validate live client handle/surface identity/full-image
+GemInfo extent and logical fence; mutate only atomic IOSurface seed, never
+pending jobs/completed fences/ownership. Idempotent repeated fence. Real
+WaitFence/CPU IOSurfaceLock/FIFO display completion remain unchanged. Mesa
+queries the actual bound GL resource's retained BO; no unlocked GEM import,
+new handle ownership or borrowed stale ID. Frame path publishes all producer
+targets after transfers; legacy/unsupported/failed paths use real synchronous
+completion and CPU locks. Explicit glFinish includes any mirror copy too.
+Backboardd-only direct/mirror policy reversible; old kernel uses proven path.
+
+96combined host tests PASS: actual native producer/BO identity/fence/transfer
+functions, strict aliases/invalid handles/pending-before-real-retire, failed
+announcements/mixed CPU paths/glFinish plus previous Metal/queue/cache/output/
+GPU latency/touch startup suites. Complete actual native RedfinGPU.cpp TU with
+run19 CI flags/headers compiles PASS. Offscreen native diagnostic adds full-
+canvas odd-height1125x2435/4608pitch clear+two-region ordinary draws followed by
+framebuffer-fetch, seed advance, CPU-lock-first full pixels and beyond-extent
+tail guard over4rounds. Complete previous app Metal native checker stays ON
+for the combined boot. Native build/new kernel CI are next; compiler/shader
+cache retained. Kernel baseline Actions40394810408/run19/c98c4cbb.., new
+native-surface-producer.patch required. Broad platform goal stays active.
+
 ## REDFIN V87 native CI19 touch works157contacts; GLES4800frames/interactive76.290FPS — 2026-10-27
 
 Implementationc559395/CI sourcec7d69581aa08de8e2adf01f8a145777e6c4ce8f4,

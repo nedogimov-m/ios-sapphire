@@ -5,6 +5,7 @@
 #include <string.h>
 
 #define REDFIN_COMPOSITOR_ENV "REDFIN_COMPOSITOR_API"
+#define REDFIN_GLES_TARGETS_ENV "REDFIN_GLES_TARGETS"
 
 /* Only the render server selects a composition API. Metal discovery in apps,
  * including the native correctness checker, keeps its ordinary device path.

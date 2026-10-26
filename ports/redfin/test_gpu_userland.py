@@ -53,8 +53,9 @@ class GPUUserlandTests(unittest.TestCase):
         self.assertEqual(after['LaunchDaemons'].pop(gpu_userland.JOB_PATH),job)
         backboard=after['LaunchDaemons'].pop(gpu_userland.BACKBOARD_PATH)
         self.assertEqual(backboard['EnvironmentVariables'],
-            {'EXISTING_OPTION':'retained','REDFIN_COMPOSITOR_API':'gles'})
+            {'EXISTING_OPTION':'retained','REDFIN_COMPOSITOR_API':'gles','REDFIN_GLES_TARGETS':'direct'})
         backboard['EnvironmentVariables'].pop('REDFIN_COMPOSITOR_API')
+        backboard['EnvironmentVariables'].pop('REDFIN_GLES_TARGETS')
         for key in ('StandardOutPath','StandardErrorPath'):self.assertEqual(backboard.pop(key),gpu_userland.EAGL_LOG)
         self.assertEqual(backboard.pop('JetsamProperties'),{'ActiveHardMemoryLimit':512,'InactiveHardMemoryLimit':512})
         self.assertEqual(backboard,self.backboard())
@@ -133,6 +134,18 @@ class GPUUserlandTests(unittest.TestCase):
         for value in ('',None,'software','GLES'):
             with self.assertRaises(ValueError):
                 gpu_userland.patch_launchd_cache(raw,system_eagl=True,compositor_api=value)
+
+    def test_direct_target_choice_is_reversible_and_preserves_all_other_jobs(self):
+        before=plistlib.loads(self.original());before['LaunchDaemons'][gpu_userland.BACKBOARD_PATH]=self.backboard()
+        raw=wifi_userland._encode_same_size(before,len(self.original()))[0]
+        direct,_=gpu_userland.patch_launchd_cache(raw,system_eagl=True)
+        mirror,_=gpu_userland.patch_launchd_cache(direct,system_eagl=True,gles_targets='mirror')
+        a,b=plistlib.loads(direct),plistlib.loads(mirror)
+        a['LaunchDaemons'][gpu_userland.BACKBOARD_PATH]['EnvironmentVariables']['REDFIN_GLES_TARGETS']='mirror'
+        self.assertEqual(a,b)
+        self.assertEqual(gpu_userland.patch_launchd_cache(mirror,system_eagl=True)[0],direct)
+        for invalid in ('',None,'cpu','DIRECT'):
+            with self.assertRaises(ValueError):gpu_userland.backboardd_job(self.backboard(),gles_targets=invalid)
 
 
 if __name__=='__main__':unittest.main()

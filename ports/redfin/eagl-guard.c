@@ -20,6 +20,7 @@
 #include "gui-profile.h"
 #include "eagl-guard.h"
 #include "eagl-abi.h"
+#include "compositor-policy.h"
 
 typedef void *OSMesaContext;
 extern OSMesaContext OSMesaCreateContextAttribs(const int *,OSMesaContext);
@@ -34,6 +35,8 @@ static void (*original_uniform)(void *,unsigned,size_t,size_t,const float *);
 extern void redwood_gl_function_values(void *,unsigned,unsigned,size_t,size_t,const float *);
 #if REDFIN_GLES_PUBLICATION
 extern int redfin_gl_frame_publish(void);
+extern uint32_t redfin_gl_surface_producer(uint32_t);
+extern int redfin_gl_publish_surfaces(const struct rf_gu_target *,unsigned);
 #endif
 
 static bool display_number(io_service_t service,const char *name,int expected)
@@ -80,6 +83,59 @@ int redfin_eagl_publish_frame(void)
         dprintf(2,"REDFIN EAGL PUBLISH: boot=%016llx pid=%d published=%u fallbacks=%u result=%d GPU-wait=0\n",
             boot_nonce,getpid(),published_frames,publication_fallbacks,result);
     return result==0;
+}
+
+static pthread_once_t producer_once=PTHREAD_ONCE_INIT;
+static bool producer_ready;
+static void discover_producer(void)
+{
+    io_service_t gpu=IOServiceGetMatchingService(0,IOServiceMatching("RedwoodGPU"));
+    producer_ready=gpu && display_number(gpu,"chip-id",0x06020001) &&
+        display_number(gpu,"RedfinSurfaceProducerABI",RF_GU_ABI) &&
+        display_number(gpu,"RedfinSurfacePaddingABI",1) &&
+        display_number(gpu,"RedfinQueuedSubmissionABI",1);
+    if(gpu)IOObjectRelease(gpu);
+    dprintf(2,"REDFIN EAGL PRODUCER: boot=%016llx ABI=%u ready=%u seed-only=1 completion=0\n",
+        boot_nonce,RF_GU_ABI,producer_ready);
+}
+int redfin_eagl_producer_ready(void)
+{
+    if(!REDFIN_GLES_PUBLICATION || !boot_nonce)return 0;
+    pthread_once(&producer_once,discover_producer);
+    return producer_ready;
+}
+int redfin_eagl_direct_requested(void)
+{
+    const char *choice=getenv(REDFIN_GLES_TARGETS_ENV);
+    return choice && !strcmp(choice,"direct") && redfin_eagl_producer_ready();
+}
+unsigned redfin_eagl_surface_producer(unsigned surface)
+{
+#if REDFIN_GLES_PUBLICATION
+    return redfin_eagl_producer_ready()?redfin_gl_surface_producer(surface):0;
+#else
+    (void)surface;return 0;
+#endif
+}
+int redfin_eagl_publish_surfaces(const struct rf_gu_target *targets,unsigned count)
+{
+    int result=-1;
+#if REDFIN_GLES_PUBLICATION
+    if(targets && count && count<=RF_GU_MAX_TARGETS)result=redfin_gl_publish_surfaces(targets,count);
+#else
+    (void)targets;(void)count;
+#endif
+    if(!result)++published_frames;else ++publication_fallbacks;
+    if(published_frames<=4 || !(published_frames%120) || result)
+        dprintf(2,"REDFIN EAGL PUBLISH: boot=%016llx pid=%d published=%u fallbacks=%u result=%d GPU-wait=0 seed-targets=%u\n",
+            boot_nonce,getpid(),published_frames,publication_fallbacks,result,count);
+    return result==0;
+}
+void redfin_eagl_direct_frame(unsigned frame,unsigned direct,unsigned mirrored,int notified)
+{
+    if(frame<=4 || !(frame%60))
+        dprintf(2,"REDFIN EAGL DIRECT FRAME: boot=%016llx pid=%d frame=%u direct=%u mirrored=%u producer-notified=%u\n",
+            boot_nonce,getpid(),frame,direct,mirrored,notified!=0);
 }
 
 static void observe_uniform(void *context,unsigned index,size_t components,size_t count,const float *values)

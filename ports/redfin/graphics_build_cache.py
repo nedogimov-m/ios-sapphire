@@ -12,6 +12,8 @@ VERSION=1
 TRANSPORT_INPUTS=frozenset('ports/redfin/'+name for name in (
     'surface-padding.h','mesa-surface-padding.patch',
     'retained-memory.h','mesa-retained-memory.patch','mesa-gles-publication.patch','gles-publication.inc',
+    'mesa-gles-direct.patch','include/redfin_gpu_surface.h','gles-direct.inc',
+    'gles-fence-surfaces.inc','mesa-surface-producer.inc','gles-resource-producer.inc',
     'drm-profile.h','metal-scoped-submission.patch','include/redfin_gpu_scope.h',
     'mesa-scoped-submit.inc','mesa-submit-merge.patch','mesa-submit-merge.h',
     'mesa-submit-merge.inc','include/redfin_gpu_access.h',
@@ -28,6 +30,11 @@ TRANSPORT_PATCH_TARGETS=frozenset((
     'src/gallium/drivers/freedreno/freedreno_resource.h',
     'src/gallium/drivers/freedreno/freedreno_batch.c'))
 RUNTIME_PATCH_TARGETS={
+    'ports/redfin/mesa-gles-direct.patch':frozenset((
+        'src/gallium/frontends/osmesa/osmesa.c','src/gallium/drivers/freedreno/freedreno_fence.c',
+        'src/redwood-drm/redwood_drm.c','src/redwood-drm/xf86drm.h',
+        'src/freedreno/drm/freedreno_bo.c','src/freedreno/drm/freedreno_drmif.h',
+        'src/gallium/drivers/freedreno/freedreno_resource.c')),
     # CPU-worker/kernel publication only. No GL/AIR/NIR shader generation,
     # compiler options, serialized metadata or cache representation changes.
     'ports/redfin/mesa-gles-publication.patch':frozenset((

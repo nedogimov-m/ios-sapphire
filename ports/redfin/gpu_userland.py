@@ -34,10 +34,12 @@ def job(enabled=True):
     return value
 
 
-def backboardd_job(original,draw_capture=False,compositor_api='gles'):
+def backboardd_job(original,draw_capture=False,compositor_api='gles',gles_targets='direct'):
     """Preserve the event server; exec supplies the gated loader after launchd."""
     if compositor_api not in ('gles','metal'):
         raise ValueError('compositor API must be gles or metal')
+    if gles_targets not in ('direct','mirror'):
+        raise ValueError('GLES targets must be direct or mirror')
     services=original.get('MachServices')
     if (original.get('Label')!='com.apple.backboardd' or
         original.get('ProgramArguments')!=['/usr/libexec/backboardd'] or 'Program' in original or
@@ -55,6 +57,7 @@ def backboardd_job(original,draw_capture=False,compositor_api='gles'):
     env.pop('DYLD_INSERT_LIBRARIES',None)
     env.pop('REDFIN_METAL_DRAW_CAPTURE',None)
     env['REDFIN_COMPOSITOR_API']=compositor_api
+    env['REDFIN_GLES_TARGETS']=gles_targets
     if draw_capture:env['REDFIN_METAL_DRAW_CAPTURE']='1'
     if env:job['EnvironmentVariables']=env
     else:job.pop('EnvironmentVariables',None)
@@ -68,7 +71,7 @@ def backboardd_job(original,draw_capture=False,compositor_api='gles'):
     return job
 
 
-def patch_launchd_cache(original,system_eagl=False,draw_capture=False,startup_checks=True,compositor_api='gles'):
+def patch_launchd_cache(original,system_eagl=False,draw_capture=False,startup_checks=True,compositor_api='gles',gles_targets='direct'):
     if draw_capture and not system_eagl:raise ValueError('draw capture requires the native window-server job')
     if not isinstance(original,bytes) or not original.startswith(b'bplist00') or not 40<=len(original)<=0x1000000:
         raise ValueError('GPU diagnostic requires the current bounded binary launchd cache')
@@ -94,7 +97,7 @@ def patch_launchd_cache(original,system_eagl=False,draw_capture=False,startup_ch
         backboards=[key for key,value in jobs.items() if value.get('Label')=='com.apple.backboardd']
         if backboards!=[BACKBOARD_PATH]:raise ValueError('expected exactly one stock System backboardd job')
         expected['LaunchDaemons'][BACKBOARD_PATH]=backboardd_job(jobs[BACKBOARD_PATH],
-            draw_capture=draw_capture,compositor_api=compositor_api)
+            draw_capture=draw_capture,compositor_api=compositor_api,gles_targets=gles_targets)
         allowed.add(BACKBOARD_PATH)
     common=dict(label=LABEL,job_key=JOB_PATH,system_eagl=system_eagl,migrated_from=OLD_JOB_PATH if migrated else None,
         bytes=len(original),before_sha256=before,root_writes=False,startup_checks=startup_checks,
@@ -118,9 +121,10 @@ def main():
     parser.add_argument('--system-eagl',action='store_true')
     parser.add_argument('--startup-checks',choices=('on','off'),default='on')
     parser.add_argument('--compositor-api',choices=('gles','metal'),default='gles')
+    parser.add_argument('--gles-targets',choices=('direct','mirror'),default='direct')
     args=parser.parse_args()
     data,report=patch_launchd_cache(args.input.read_bytes(),args.system_eagl,
-        startup_checks=args.startup_checks=='on',compositor_api=args.compositor_api)
+        startup_checks=args.startup_checks=='on',compositor_api=args.compositor_api,gles_targets=args.gles_targets)
     with args.output.open('xb') as stream:stream.write(data)
     print(json.dumps(report,indent=2))
 
