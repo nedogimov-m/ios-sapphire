@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V71 full native FIFO correctness PASS;37.558FPS,2pending not yet observed — 2026-10-26
+
+Final kernel codedf38a25/docs14d1332, actual Actions40334564897/run12/kernel8ea7b3b6..
+and exact native6e6e432c../pair24dfc27b../UI/cache. Cycle78070 TERMINAL exit0:
+authenticated fresh427d6f0959b81acb, one backboardd62, no runtime GPU fault/
+panic,0contacts/releases, clean unmounted HFSX1487941 and verified Fastboot.
+Exact observed args are in the starting entry below. V77 STALE/never reuse.
+Next fresh V78/imageV72 at actual clean1487941.
+
+Explicit full native CHECK EXIT0: prior192compute, all10UBO phases, actual
+CPU/GPU snapshot routes/5overwrites/byte tails/rollover, both128pixel producer
+raster modes, every half/MRT/blit/buffer/cache/alias/ordering/binding/callback/
+lifetime/error/padding/guard case PASS. Native RFM query1/766fast/0fallback;
+physical full/margin output5054400pixels/guards PASS. Checked animation376GPU
+frames/10.011137physical seconds =37.558171FPS;902callbacks/90Hz, no misses,
+timeouts/window replacements, idle restored.18frontend/28owner/9output
+partitions validate, zero invalid. This is not ordinary diagnostics-OFF FPS
+or an isolated matched speedup claim. Sustained60/90FPS remains unfinished.
+
+15complete post-doorbell physical publication/done records and22PIPE records
+validate, zero invalid. Maximum actual pending count is1, overlap counter0.
+The full native correctness pass does NOT prove two simultaneous physical
+submissions remained pending. Do not equate two CPU commits with that proof.
+Private physical-ring-evidence.json records this limitation explicitly.
+
+Complete bounded long-compute proof added to the native checker before its
+next combined test: one64thread/16runtime-iteration warmup pair, then3pairs
+of1048576threads/4096runtime iterations, separate raw4MiB outputs and immutable
+8byte parameter buffers. Commit both before either wait, verify every GPU
+output and all prefix/tail/source guards with independent affine composition.
+No texture-cache handoff is requested by this raw-buffer workload. Its actual
+duration and physical pending count remain unmeasured until hardware capture;
+only the kernel's post-doorbell counter may establish overlap. No new runtime,
+kernel, shader compiler/serialization, UI or cache-format change.
+
+Full native actual20H392 ABI/import/signature/pair/source/current-shader proof
+PASS. Input6e6e432c.. unchanged; new checker pairing8989ba6ac6d9fbaad869b656991084ea91ba906864d8739cf48561d490d554db.
+Reuse exact run12/kernel8ea7b3b6../cache496301fc../UI. V72 image05f8c109d478019ca6ed71d736d9902fa9a82d32feb30bcc83b9bdaa3999f639
+passes full loader/liveFDT/ADT/private/native source/ABI preflight. Fresh V78
+readonly snapshot RUNNING at clean1487941. Next one full native combined
+checked run; captures/app opens OFF. Exact prepared args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x01d075273298a388 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broader platform requirements remain active/unfinished.
+
 ## REDFIN physical FIFO run12 artifact/V77 update verified; combined V71 running — 2026-10-26
 
 Final codedf38a253a6ba67a1a186856fd971fa324ef1ed32. Actions40334564897/run12

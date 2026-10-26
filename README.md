@@ -38,6 +38,9 @@ actual compositor groups preserve CPU uploads. Its checked animation measures
 32.564FPS. Ordinary V70 completes329GPU frames/10.011390physical seconds:
 32.863FPS at90Hz callbacks, one server, no fault and a clean shutdown. Whole
 physical render/output queue costs remain; smooth60/90FPS is unfinished.
+V71's physical-publication/FIFO-retirement kernel passes the full native Metal
+and output contract. Its checked animation measures37.558FPS at90Hz callbacks;
+ordinary performance and actual two-pending publication still need proof.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).

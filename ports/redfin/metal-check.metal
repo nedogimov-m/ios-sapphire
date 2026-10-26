@@ -2,6 +2,17 @@
 #include <metal_stdlib>
 using namespace metal;
 
+/* A bounded dependent workload keeps one raw-buffer submission on the GPU
+ * long enough for the second real publication to be observed. The iteration
+ * count is a runtime uniform, so shader preparation does not unroll it. */
+kernel void redfin_physical_pending(device uint *output [[buffer(0)]],
+    constant uint2 &parameters [[buffer(1)]],uint index [[thread_position_in_grid]])
+{
+    uint value=index^parameters.x;
+    for(uint i=0;i<parameters.y;++i)value=value*1664525u+1013904223u;
+    output[index]=value;
+}
+
 kernel void redfin_ubo_fixed(device uint *output [[buffer(0)]],
     constant uint &first [[buffer(1)]],uint index [[thread_position_in_grid]])
 {

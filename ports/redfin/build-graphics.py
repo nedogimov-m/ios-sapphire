@@ -348,6 +348,7 @@ def main():
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal_queued_userland.py','metal-queued.h','metal-queued-check.inc','metal-queued-resource-check.inc','metal-frontend-profile.h')]
                 metal_sources += [ROOT/'ports/redfin/metal-ubo-extents-check.inc']
+                metal_sources += [ROOT/'ports/redfin/metal-physical-check.inc']
                 metal_sources += [ROOT/'ports/redfin/surface-padding.h',ROOT/'ports/redfin/surface-padding-check.inc']
                 metal_sources += [ROOT/'ports/redfin/retained-memory.h']
                 metal_sources += [ROOT/'ports/redfin'/name for name in

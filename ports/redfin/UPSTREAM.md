@@ -1,5 +1,22 @@
 # HackiOS upstream review — 2026-10-22
 
+## A620 FIFO correctness passes; actual2pending observation still required — 2026-10-26
+
+V71/run12/kernel8ea7b3b6.. passes the explicit complete native Metal/output
+contract with one server, zero faults/panic/contacts and clean root/Fastboot.
+Checked376GPU frames/10.011137s =37.558171FPS at90Hz callbacks, no invalid
+interval. This is not ordinary performance or an isolated speedup claim.
+15post-doorbell PUB/DONE and22PIPE records validate; max-pending1/overlap0.
+The actual hardware has not yet demonstrated the new two-publication window.
+
+Add one bounded real long-compute checker block to exercise it with warm raw
+resources,3pairs of1048576threads/4096runtime iterations, both commits before
+waits, independent complete expected values and source/output guards. Only
+post-doorbell native counters decide physical overlap. Actual20H392 native
+pair8989ba6a.. builds/signs with unchanged compiler input6e6e432c../cache/UI and
+exact run12 kernel. Hardware proof remains pending; preferred pins and reviewed
+Angelpro344a8af stay unchanged. No additional kernel CI is needed for the probe.
+
 ## Complete physical FIFO native CI/run12 artifact PASS — 2026-10-26
 
 Final sourcedf38a253a6ba67a1a186856fd971fa324ef1ed32, actual Actions40334564897/
