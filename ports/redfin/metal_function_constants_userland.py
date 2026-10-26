@@ -26,7 +26,7 @@ static struct redfin_metal_constants redfin_function_constants(id);
     *(void **)&mesa.redfin_module_argbufs=dlsym(mesa.handle,"rwa_redfin_module_argbufs");''')
     point='if (mesa.redfin_texture_from_buffer == NULL ||'
     text=replace_once(text,point,'if (mesa.redfin_compute_create == NULL || mesa.redfin_render_create == NULL || mesa.redfin_module_argbufs == NULL || mesa.redfin_texture_from_buffer == NULL ||')
-    point='if (!redfin_metal_abi_ready() || !redfin_metal_hardware_ready()) { [self release]; return nil; }'
+    point='if (!redfin_metal_abi_ready() || !redfin_metal_hardware_ready()) { object_dispose(self); return nil; }'
     text=replace_once(text,point,point+'\n    redfin_install_function_constants();')
     point='\tstruct rwa_render *render = RF_MESA(render_create,_mesa,'
     text=replace_once(text,point,'''

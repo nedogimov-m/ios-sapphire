@@ -408,7 +408,8 @@ def adapt_driver(text):
         '+ (void)load\n{\n\tif (redfin_metal_abi_ready()) ensure_spi(self);')
     text = replace_once(text, '- (instancetype)initWithAcceleratorPort:(io_service_t)port\n{\n\tensure_spi([self class]);',
         '- (instancetype)initWithAcceleratorPort:(io_service_t)port\n{\n'
-        '\tif (!redfin_metal_abi_ready() || !redfin_metal_hardware_ready()) { [self release]; return nil; }\n'
+        '\t/* No superclass init has run: its dealloc assumes live dispatch queues. */\n'
+        '\tif (!redfin_metal_abi_ready() || !redfin_metal_hardware_ready()) { object_dispose(self); return nil; }\n'
         '\tensure_spi([self class]);')
     text = replace_once(text, '\t/* The struct Metal reads out of this device by raw pointer,',
         '\tif (_gpu == IO_OBJECT_NULL || _mesa == NULL || strcmp(RF_MESA(device_name,_mesa),"FD620")) { [self release]; return nil; }\n\n'

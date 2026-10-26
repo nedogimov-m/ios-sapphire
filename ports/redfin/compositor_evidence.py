@@ -48,10 +48,14 @@ def main():
         fresh.get('status')=='boot-id-matched' and fresh.get('capture_authenticated'))
     app_metal=bool(authenticated and native.get('metal_exit_result')==0)
     gpu=bool(authenticated and (native.get('gpu') or {}).get('result')=='0')
+    kernel=(root/'xnu-console.txt').read_text(errors='replace')
+    crashes=sorted({(int(pid),int(signal)) for pid,signal in
+        re.findall(r'CRASH backboardd\[(\d+)\] sig (\d+)',kernel)})
     report.update(cycle=str(root),authenticated_clean_runtime=authenticated,
         app_Metal_full_native_contract_pass=app_metal,offscreen_GPU_contract_pass=gpu,
+        backboardd_crashes=[dict(pid=pid,signal=signal) for pid,signal in crashes],
         complete_GLES_GUI_and_app_Metal_proof=bool(authenticated and
-            report['actual_GLES_composition'] and app_metal and gpu))
+            report['actual_GLES_composition'] and app_metal and gpu and not crashes))
     (root/'compositor-evidence.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k!='frames'},indent=2))
 

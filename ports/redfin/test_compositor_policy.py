@@ -6,11 +6,64 @@ import unittest
 
 from test_display_geometry import function
 from ports.redfin.compositor_evidence import analyze
+from ports.redfin import metal_userland
 
 HERE=Path(__file__).resolve().parent
 
 
 class CompositorPolicyTests(unittest.TestCase):
+    def test_actual_preinit_metal_decline_disposes_without_entering_private_superclass_dealloc(self):
+        upstream=HERE.parents[1]/'research/hackios-upstream/userland/userland/src/redwoodmetal.m'
+        if not upstream.is_file():self.skipTest('pinned preferred Metal source unavailable')
+        adapted=metal_userland.adapt_driver(upstream.read_text())
+        first=adapted.index('- (instancetype)initWithAcceleratorPort:(io_service_t)port\n{')
+        last=adapted.index('\t_acceleratorService = port;',first)
+        prefix=adapted[first:last]+'\t(void)port;return self;\n}\n'
+        source=r'''
+#import <Foundation/Foundation.h>
+#import <objc/runtime.h>
+#include <assert.h>
+typedef unsigned io_service_t;
+static BOOL abi,hardware;
+static unsigned initialized,deallocated,disposed,hardware_queries;
+static int redfin_metal_abi_ready(void){return abi;}
+static int redfin_metal_hardware_ready(void){++hardware_queries;return hardware;}
+static void ensure_spi(Class cls){assert(cls);}
+static void redfin_install_function_constants(void){}
+static id record_dispose(id object){++disposed;return object_dispose(object);}
+#define object_dispose record_dispose
+@interface NativeMetalBase:NSObject {BOOL ready;}
+@end
+@implementation NativeMetalBase
+- (instancetype)init {self=[super init];if(self){ready=YES;++initialized;}return self;}
+- (void)dealloc {assert(ready);++deallocated;[super dealloc];}
+@end
+@interface RedwoodMetalDevice:NativeMetalBase
+- (instancetype)initWithAcceleratorPort:(io_service_t)port;
+@end
+@implementation RedwoodMetalDevice
+'''+prefix+r'''
+@end
+int main(void){@autoreleasepool {
+ for(unsigned a=0;a<2;++a)for(unsigned h=0;h<2;++h){
+  abi=a;hardware=h;initialized=deallocated=disposed=hardware_queries=0;
+  id object=[[RedwoodMetalDevice alloc] initWithAcceleratorPort:0];
+  BOOL accepted=abi&&hardware;
+  assert((object!=nil)==accepted);
+  assert(initialized==accepted&&disposed==!accepted&&hardware_queries==abi);
+  if(object)[object release];
+  assert(deallocated==accepted);
+ }
+}return 0;}
+'''
+        with tempfile.TemporaryDirectory(prefix='redfin-metal-decline-') as directory:
+            folder=Path(directory);path=folder/'decline.m';path.write_text(source)
+            built=subprocess.run(['cc','-O2','-fno-objc-arc','-Wall','-Wextra','-Werror',
+                str(path),'-framework','Foundation','-o',str(folder/'decline')],capture_output=True,text=True)
+            self.assertEqual(built.returncode,0,built.stderr)
+            run=subprocess.run([str(folder/'decline')],capture_output=True,text=True,timeout=10)
+            self.assertEqual(run.returncode,0,run.stderr)
+
     def test_backend_evidence_requires_actual_hardware_frames_and_rejects_mixed_or_stale_activity(self):
         boot='0123456789abcdef'
         policy=f'REDFIN COMPOSITOR: boot={boot} process=backboardd requested=gles'

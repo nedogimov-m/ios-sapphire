@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V82 app Metal PASS, GUI startup failure isolated/corrected;58host PASS — 2026-10-27
+
+V82 cycle89618 TERMINAL exit0, authenticated5851feac30b7cf00, no kernel panic,
+clean unmounted HFSX1587957/verified Fastboot. Full app Metal CHECK EXIT0 and
+offscreen GPU result0 PASS with pair2579e38b../input6e6e432c../kernel4fa88838...
+The requested backboardd-only Metal decline occurs; EAGL hardware FD620 and
+all11method/457wrapper registration are accepted, but actual GLES frames0.
+Backboardd repeatedly SIGSEGVs immediately after declining Metal. No GUI/FPS
+or complete GLES/app Metal success. Touch setup times out because the event
+server never stays ready; no independent touch-driver regression is established.
+V88 STALE/never reuse. Next fresh V89/imageV83 at actual1587957.
+
+Native stack resolves through _MTLDevice dealloc into libdispatch with NULL:
+our pre-superclass-init refusal used [self release], invoking private teardown
+whose dispatch objects had not been initialized. Dispose that raw allocated
+object with object_dispose instead; initialized-object teardown stays intact.
+Keep the same scoped GLES policy and app Metal path. Align the function-
+constant adapter's checked insertion point with this corrected constructor.
+
+58combined host contracts PASS, including the actual adapted ObjC constructor
+against a superclass that rejects dealloc before init: both ABI/hardware
+refusals dispose once without entering superclass teardown; admitted objects
+initialize and release normally. Backend proof now also rejects any kernel-
+reported backboardd crash. Native import/signature rebuild and one corrected
+combined device cycle remain pending; no extra kernel CI required. Phone/
+Photos automatic opens and captures stay OFF. Broad goal active/unfinished.
+
 ## REDFIN upstream GLES GUI/app Metal native build/V88 verified; combined V82 starts — 2026-10-27
 
 GLES/application policy sourcee19c19e, exact Mesa input6e6e432c.. unchanged;
