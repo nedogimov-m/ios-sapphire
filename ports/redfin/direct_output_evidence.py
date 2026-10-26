@@ -5,7 +5,7 @@ import re
 
 
 def analyze(lines):
-    checks=[];cases=[];presents=[];invalid=[]
+    checks=[];cases=[];presents=[];panels=[];invalid=[]
     for line in lines:
         if 'REDFIN GPU DIRECT CHECK:' in line:
             keys=('ABI','cases','pixels','mismatches','guard-errors','stage-writes','completed','tolerance',
@@ -23,6 +23,11 @@ def analyze(lines):
             fields=dict(re.findall(r'([A-Za-z][A-Za-z-]*)=([^\s]+)',line))
             try:presents.append({k:int(fields[k]) for k in keys})
             except (KeyError,ValueError):invalid.append('malformed-direct-present')
+        if 'REDFIN GPU DIRECT PANEL:' in line:
+            keys=('n','fence','reference-fence','samples','mismatches','exact','stage-reference')
+            fields=dict(re.findall(r'([A-Za-z][A-Za-z0-9-]*)=([^\s]+)',line))
+            try:panels.append({k:int(fields[k]) for k in keys})
+            except (KeyError,ValueError):invalid.append('malformed-direct-panel')
     geometry=((1080,2340),(1125,2436),(1125,2435),(80,61))
     valid_cases=bool(len(cases)==4)
     for index,row in enumerate(cases):
@@ -42,11 +47,16 @@ def analyze(lines):
             invalid.append('invalid-direct-present-counter')
         previous=row['n'];previous_direct=row['direct'];previous_staged=row['staged']
     direct=max((r['direct'] for r in presents),default=0)
+    physical=bool(len(panels)==4 and all(row['n']==i+1 and row['fence']>0 and
+        row['reference-fence']>row['fence'] and row['samples']==64 and not row['mismatches'] and
+        row['exact']==1 and row['stage-reference']==0 for i,row in enumerate(panels)))
     return dict(native_full_image_direct_pixels_and_guards_pass=native,
         actual_direct_output_present_records=len(presents),actual_direct_output_frames=direct,
         staged_output_frames=max((r['staged'] for r in presents),default=0),
-        actual_direct_GPU_output=bool(native and direct>=60 and not invalid),
-        invalid_records=invalid,full_native_direct_check=checks,native_direct_cases=cases)
+        physical_direct_mapping_samples_pass=physical,
+        actual_direct_GPU_output=bool(native and physical and direct>=60 and not invalid),
+        invalid_records=invalid,full_native_direct_check=checks,native_direct_cases=cases,
+        physical_direct_panel_checks=panels)
 
 
 def main():

@@ -58,8 +58,8 @@ static int redfin_gles_budget_check(void)
     if(budget.maximum!=2 || budget.waits!=ROUNDS-1 || budget.fallbacks || budget.disabled || checked!=BW*BH*ROUNDS)return 49;
     glDeleteFramebuffers(2,fb);glDeleteTextures(2,textures);
     for(unsigned i=0;i<2;++i)CFRelease(surfaces[i]);
-    printf("REDFIN GLES BUDGET CHECK: boot=%016llx bound=2 rounds=%u maximum=%u waits=%u pixels=%u tail-guard-bytes=%zu real-GL-fences=1 CPU-pixels=1 result=0\n",
-        (unsigned long long)boot_nonce,ROUNDS,budget.maximum,budget.waits,checked,guards);
+    printf("REDFIN GLES BUDGET CHECK: boot=%016llx mode=%s bound=2 rounds=%u maximum=%u waits=%u pixels=%u tail-guard-bytes=%zu real-GL-fences=1 CPU-pixels=1 result=0\n",
+        (unsigned long long)boot_nonce,render_mode,ROUNDS,budget.maximum,budget.waits,checked,guards);
 #endif
     return 0;
 }

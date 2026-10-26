@@ -1,5 +1,19 @@
 # HackiOS upstream review — 2026-10-22
 
+## Physical direct-output oracle now follows its actual route — 2026-10-27
+
+Own Redfin integration correction after native V94private output passed all
+four full cases with0identity/2scaled maxima. Existing physical oracle still
+read the deliberately untouched intermediate and disabled output after1frame.
+Preserve the full independent golden tests; actual direct frames now compare
+physical memory with a completed private fused reference under the same FIFO
+source hold. Four exact physical checks and actual sustained route counters
+are mandatory. Original legacy oracle/fallback and real completion remain.
+107selected host contracts/current whole native TU compile PASS. Corrected
+GMEM/sysmem native checker also compiles/audits on actual20H392; both complete
+modes still need fresh hardware proof. Preferred source pins/compiler/shader
+cache remain exact; fresh CI23and full combined device result pending.
+
 ## GLES sysmem policy joins the complete native output block — 2026-10-27
 
 Same preferred88513176../906425b7.. bridge and Mesa25.0.7 implementation.

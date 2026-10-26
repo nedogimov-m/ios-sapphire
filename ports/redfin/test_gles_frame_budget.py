@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 
-from ports.redfin.compositor_evidence import analyze,native_budget_check
+from ports.redfin.compositor_evidence import analyze,native_budget_check,native_mode_checks
 from test_display_geometry import function
 
 HERE=Path(__file__).resolve().parent
@@ -127,6 +127,21 @@ int main(void){
                     native.replace('CPU-pixels=1','CPU-pixels=0'),native.replace(boot,'fedcba9876543210')):
             self.assertFalse(native_budget_check([bad],boot))
         self.assertFalse(native_budget_check([native,native],boot))
+
+    def test_both_GPU_modes_need_independent_actual_pixels_guards_and_exit(self):
+        boot='0123456789abcdef'
+        lines=[]
+        for mode in ('gmem','sysmem'):
+            lines.extend([
+                f'REDFIN GLES DIRECT CHECK: boot={boot} mode={mode} width=1125 height=2435 pitch=4608 rounds=4 pixels=10957500 tail-guard-bytes=57344 fetch=1 seed-progress=1 CPU-lock-first=1 result=0',
+                f'REDFIN GLES BUDGET CHECK: boot={boot} mode={mode} bound=2 rounds=12 maximum=2 waits=11 pixels=58560 tail-guard-bytes=147456 real-GL-fences=1 CPU-pixels=1 result=0',
+                f'REDFIN GLES MODE RESULT: boot={boot} mode={mode} result=0 hardware=1'])
+        self.assertTrue(native_mode_checks(lines,boot))
+        for bad in (lines[:3],lines[3:],lines+lines[3:],
+                    [line.replace('mode=sysmem','mode=gmem') for line in lines],
+                    [line.replace('mode=sysmem result=0','mode=sysmem result=28') for line in lines],
+                    [line.replace('tail-guard-bytes=147456','tail-guard-bytes=0') for line in lines]):
+            self.assertFalse(native_mode_checks(bad,boot))
 
 
 if __name__=='__main__':unittest.main()

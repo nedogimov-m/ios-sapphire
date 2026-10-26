@@ -9,20 +9,24 @@ class DirectOutputEvidenceTests(unittest.TestCase):
                for c,(w,h) in enumerate(((1080,2340),(1125,2436),(1125,2435),(80,61)))]
         first='REDFIN GPU DIRECT PRESENT: n=1 direct=1 staged=0 ABI=2 full-image-only=1 CPU-pixel-copy=0'
         last='REDFIN GPU DIRECT PRESENT: n=120 direct=120 staged=0 ABI=2 full-image-only=1 CPU-pixel-copy=0'
-        self.assertTrue(analyze([native,*cases,first,last])['actual_direct_GPU_output'])
+        panels=[f'REDFIN GPU DIRECT PANEL: n={n} fence={2*n} reference-fence={2*n+1} samples=64 mismatches=0 exact=1 stage-reference=0' for n in range(1,5)]
+        self.assertTrue(analyze([native,*cases,*panels,first,last])['actual_direct_GPU_output'])
         self.assertFalse(analyze([native,*cases])['actual_direct_GPU_output'])
         self.assertFalse(analyze([first,last])['actual_direct_GPU_output'])
         for bad in (native.replace('cases=4','cases=1'),native.replace('mismatches=0','mismatches=1'),
                     native.replace('stage-writes=0','stage-writes=1'),native.replace('tolerance=2','tolerance=255'),
                     native.replace('exact-pixels=2527200','exact-pixels=0'),native.replace('alpha-exact=1','alpha-exact=0')):
-            self.assertFalse(analyze([bad,*cases,first,last])['actual_direct_GPU_output'])
+            self.assertFalse(analyze([bad,*cases,*panels,first,last])['actual_direct_GPU_output'])
         for bad in (last.replace('direct=120','direct=0'),last.replace('n=120','n=1'),
                     last.replace('CPU-pixel-copy=0','CPU-pixel-copy=1'),last.replace('ABI=2','ABI=1')):
-            self.assertFalse(analyze([native,*cases,first,bad])['actual_direct_GPU_output'])
+            self.assertFalse(analyze([native,*cases,*panels,first,bad])['actual_direct_GPU_output'])
         for bad in (cases[:3],cases+[cases[0]],[cases[0].replace('max=0','max=1'),*cases[1:]],
                     [cases[0],cases[1].replace('max=2','max=3'),*cases[2:]],
                     [cases[0],cases[1].replace('limit=2','limit=3'),*cases[2:]]):
-            self.assertFalse(analyze([native,*bad,first,last])['actual_direct_GPU_output'])
+            self.assertFalse(analyze([native,*bad,*panels,first,last])['actual_direct_GPU_output'])
+        for bad in (panels[:3],[panels[0].replace('mismatches=0','mismatches=1'),*panels[1:]],
+                    [panels[0].replace('stage-reference=0','stage-reference=1'),*panels[1:]]):
+            self.assertFalse(analyze([native,*cases,*bad,first,last])['actual_direct_GPU_output'])
 
 
 if __name__=='__main__':unittest.main()

@@ -12,6 +12,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <sys/sysctl.h>
 #include "include/redfin_gpu_surface.h"
 #include "gles-frame-budget.h"
@@ -32,6 +36,7 @@ extern int redfin_gl_publish_surfaces(const struct rf_gu_target *,unsigned);
 typedef void (*ImageTexture)(GLenum,void *);
 enum {W=256,H=256,ROW=W*4};
 static uint64_t boot_nonce;
+static const char *render_mode="gmem";
 static void number(CFMutableDictionaryRef d,CFStringRef key,int32_t value)
 {
     CFNumberRef n=CFNumberCreate(kCFAllocatorDefault,kCFNumberSInt32Type,&value);
@@ -160,9 +165,38 @@ static int render(void)
     if(!direct)direct=redfin_gles_budget_check();
     OSMesaDestroyContext(context);return direct;
 }
-int main(void)
+static int sysmem_process(void)
+{
+    extern char **environ;
+    unsigned n=0;while(n<=4096 && environ[n])++n;
+    if(n>4096)return 51;
+    char **environment=calloc(n+3,sizeof(*environment));if(!environment)return 52;
+    unsigned at=0;
+    for(unsigned i=0;i<n;++i)
+        if(strncmp(environ[i],"FD_MESA_DEBUG=",14) && strncmp(environ[i],"OSMESA_SOFTWARE=",16))
+            environment[at++]=environ[i];
+    environment[at++]="FD_MESA_DEBUG=sysmem";environment[at++]="OSMESA_SOFTWARE=0";
+    char *args[]={"/redfin/bin/gpu-render","--sysmem-child",NULL};pid_t child=0;
+    int error=posix_spawn(&child,args[0],NULL,NULL,args,environment);free(environment);
+    if(error)return 53;
+    /* Bounded native correctness process only, no system app launches. */
+    for(unsigned i=0;i<900;++i) {
+        int status=0;pid_t observed=waitpid(child,&status,WNOHANG);
+        if(observed==child)return WIFEXITED(status)?WEXITSTATUS(status):54;
+        if(observed<0 && errno!=EINTR)return 55;
+        usleep(100000);
+    }
+    (void)kill(child,SIGKILL);while(waitpid(child,NULL,0)<0 && errno==EINTR){}
+    return 56;
+}
+int main(int argc,char **argv)
 {
     setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
+    bool child=argc==2 && !strcmp(argv[1],"--sysmem-child");
+    if(argc!=1 && !child)return 50;
+    if(child)render_mode="sysmem";
+    const char *mode=getenv("FD_MESA_DEBUG"),*software=getenv("OSMESA_SOFTWARE");
+    if(!mode || strcmp(mode,render_mode) || !software || strcmp(software,"0"))return 57;
     char arguments[608]={0};size_t argument_bytes=sizeof(arguments);bool selected=false;
     if(sysctlbyname("kern.bootargs",arguments,&argument_bytes,NULL,0) ||
         !argument_bytes || argument_bytes>sizeof(arguments) || arguments[argument_bytes-1]) {
@@ -175,8 +209,14 @@ int main(void)
     }
     if(!selected){puts("REDFIN GPU RENDER: skipped; GUI3 was not selected");return 0;}
     if(!boot_nonce){puts("REDFIN GPU RENDER FAIL: missing boot nonce");return 17;}
-    printf("REDFIN GPU RENDER BOOT: %016llx\n",(unsigned long long)boot_nonce);
+    if(!child)printf("REDFIN GPU RENDER BOOT: %016llx\n",(unsigned long long)boot_nonce);
+    printf("REDFIN GLES MODE: boot=%016llx mode=%s hardware-required=1\n",(unsigned long long)boot_nonce,render_mode);
     puts("REDFIN GPU RENDER: iOS Mesa/A620 shader + IOSurface two-draw test starts");
-    int result=render();printf("REDFIN GPU RENDER RESULT: result=%d hardware=%u draws=%u\n",result,!result,result?0:2);
+    int result=render();
+    printf("REDFIN GLES MODE RESULT: boot=%016llx mode=%s result=%d hardware=%u\n",
+        (unsigned long long)boot_nonce,render_mode,result,!result);
+    if(child)return result;
+    if(!result)result=sysmem_process();
+    printf("REDFIN GPU RENDER RESULT: result=%d hardware=%u draws=%u modes=gmem,sysmem\n",result,!result,result?0:4);
     return result;
 }

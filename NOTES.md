@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete physical-panel reference/dual GPU-mode block ready — 2026-10-27
+
+V94 source-proved physical oracle error is fixed as a complete block. Retain one
+bounded private GPU target after full native golden checks; for the first four
+actual direct panel frames, render the same validated fused coordinates there
+under the same serialized queue ownership. Compare64physical mapping samples
+bit for bit, both parities/full extent; never compare to obsolete gd.stage.
+Keep the independent10.1Mpixel staged-golden/precision/source/tail oracle.
+Legacy output retains its original stage oracle. Direct verification has its
+own4frame budget independent of previous legacy frames and zero steady work;
+transport failure retains buffers/stops CPU writes. New real panel records
+are mandatory alongside native cases and60actual direct frames for proof.
+
+Native regression compiles/executes the actual panel function with a poisoned
+old stage, independent target data, real corruption rejection,4frame bound,
+legacy route and failed GPU-reference ownership. Complete107contracts now
+pass (106retained combined cases plus final panel regression after correcting
+its host-only initializer_list include); full native current GPU TU compiles
+PASS with CI flags. Source overlay exactly matches final owned files.
+
+Full dual-mode native checker is also complete: parent GMEM and separate
+bounded exec sysmem process, exact environments/software refusal, full draws/
+fetch/seed/CPU-first/pixel/tail/frame-budget checks in each, one final success
+only after both actual process exits.106combined host/native build035131/
+actual20H392 imports/signatures/source pairing PASS. Earlier sysmem coverage
+claim corrected; fresh hardware proof remains required. Existing Source1a4ad42c../
+Metal17d0f01f../shader cache496301fc../UI retained.
+
+Next kernel CI23 for physical reference. While it builds, run full new dual-mode
+GLES/native app Metal integration on known-good CI20output kernel to restore
+working output without waiting idle; one combined imageV96/fresh V100 at actual
+1689000. Then new physical-reference kernel/full combined integration. No
+Phone/Photos launches/captures. Broad goal remains unfinished.
+
 ## REDFIN V94 private fused pixels pass; obsolete physical-stage oracle disables output — 2026-10-27
 
 Kernel Actions40413610563/run22/sourcedbd18cc/99d6baf1..; GUI source289a8ee/

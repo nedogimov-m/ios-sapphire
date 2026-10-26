@@ -80,8 +80,8 @@ static int redfin_gles_direct_check(void)
     }
     glDeleteBuffers(1,&vertices);glDeleteFramebuffers(1,&framebuffer);glDeleteTextures(1,&texture);
     glDeleteProgram(programs[0]);glDeleteProgram(programs[1]);glDeleteShader(vs);glDeleteShader(fs);glDeleteShader(plain);CFRelease(surface);
-    printf("REDFIN GLES DIRECT CHECK: boot=%016llx width=%u height=%u pitch=%u rounds=%u pixels=%u tail-guard-bytes=%u fetch=1 seed-progress=1 CPU-lock-first=1 result=0\n",
-        (unsigned long long)boot_nonce,DW,DH,DP,ROUNDS,pixels_checked,guard_checked);
+    printf("REDFIN GLES DIRECT CHECK: boot=%016llx mode=%s width=%u height=%u pitch=%u rounds=%u pixels=%u tail-guard-bytes=%u fetch=1 seed-progress=1 CPU-lock-first=1 result=0\n",
+        (unsigned long long)boot_nonce,render_mode,DW,DH,DP,ROUNDS,pixels_checked,guard_checked);
 #endif
     return 0;
 }

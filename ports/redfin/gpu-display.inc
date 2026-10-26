@@ -15,8 +15,9 @@ struct gd_buffer {
     bool held;
 };
 static struct {
-    gd_buffer stage, commands, panel, sources[GD_CACHE];
+    gd_buffer stage, commands, panel, verification, sources[GD_CACHE];
     bool attempted, tested, disabled, uncertain,direct_tested;
+    unsigned direct_verified;
     uint64_t frame, calls, elapsed, fallbacks,wc_sources,cached_sources,direct_calls,staged_calls;
 } gd;
 
@@ -238,7 +239,11 @@ static bool gd_check_direct(void)
     bool complete=ok && !mismatches && passed==4 && pixels==UINT64_C(4)*RF_GD_PANEL_W*RF_GD_PANEL_H;
     IOLog("REDFIN GPU DIRECT CHECK: ABI=%u cases=%u pixels=%llu mismatches=%llu guard-errors=%llu stage-writes=%llu completed=%u tolerance=2 exact-pixels=%llu alpha-exact=1 max-error=%u\n",
         RF_GD_DIRECT_ABI,passed,pixels,mismatches,guards,stage_writes,complete,exact_pixels,maximum);
-    bool dropped=gd_drop(&input) && gd_drop(&reference) && gd_drop(&output);
+    /* Retain one bounded private target for the first four real panel
+     * readbacks. It is never a source for ordinary presentation. */
+    if(complete){gd.verification=reference;reference={};}
+    bool dropped_input=gd_drop(&input),dropped_reference=gd_drop(&reference),dropped_output=gd_drop(&output);
+    bool dropped=dropped_input && dropped_reference && dropped_output;
     return complete && dropped;
 }
 static bool gd_check(void)
@@ -338,23 +343,43 @@ static void gd_hold_uncertain(void)
         }
     }
 }
-static bool gd_panel_readback(uint32_t fence)
+static bool gd_panel_readback(uint32_t fence,const rf_gd_layer *layers,unsigned count,bool direct)
 {
-    if (gd.calls >= 4) return true;
-    redfin_gpu_invalidate(gd.stage.kernel, gd.stage.size);
+    if (direct?gd.direct_verified>=4:gd.calls>=4) return true;
+    uint32_t reference_fence=0;
+    const gd_buffer *reference=&gd.stage;uint32_t pitch=RF_GD_STAGE_PITCH;uint64_t offset=0;
+    if(direct) {
+        /* The source is still retained by this serialized kernel queue job;
+         * no later render can execute between these two completed outputs.
+         * Reuse the exact fused coordinates/format in private memory, then
+         * compare physical mapping samples bit for bit. The independent
+         * full golden tests above already establish filter correctness. */
+        if(!gd.verification.memory || !gd_submit(layers,count,gd.verification.address+64,
+            RF_GD_PANEL_MAPPED,false,&reference_fence,NULL,1)) {
+            __atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);return false;
+        }
+        reference=&gd.verification;pitch=RF_GD_PANEL_PITCH;offset=64;
+    }
+    redfin_gpu_invalidate(reference->kernel,reference->size);
+    redfin_gpu_invalidate(gd.panel.kernel,gd.panel.size);
     __asm__ volatile("dsb sy" ::: "memory");
     unsigned mismatches = 0;
     for (unsigned y = 0; y < 8; ++y) for (unsigned x = 0; x < 8; ++x) {
         /* Both parities, both margins and the full content extent. */
         uint32_t px = x * (RF_GD_PANEL_W - 1) / 7;
         uint32_t py = y * (RF_GD_PANEL_H - 2) / 7 + (x & 1);
-        const volatile uint32_t *from = (const volatile uint32_t *)(gd.stage.kernel +
-            (uint64_t)py * RF_GD_STAGE_PITCH + (uint64_t)px * 4);
+        const volatile uint32_t *from = (const volatile uint32_t *)(reference->kernel + offset +
+            (uint64_t)py * pitch + (uint64_t)px * 4);
         const volatile uint32_t *shown = (const volatile uint32_t *)(gd.panel.kernel +
             (uint64_t)py * RF_GD_PANEL_PITCH + (uint64_t)px * 4);
         if (*from != *shown) ++mismatches;
     }
     IOLog("REDFIN GPU DISPLAY PANEL: fence=%u samples=64 mismatches=%u CPU-pixel-copy=0\n", fence, mismatches);
+    if(direct) {
+        IOLog("REDFIN GPU DIRECT PANEL: n=%u fence=%u reference-fence=%u samples=64 mismatches=%u exact=1 stage-reference=0\n",
+            gd.direct_verified+1,fence,reference_fence,mismatches);
+        if(!mismatches)++gd.direct_verified;
+    }
     return !mismatches;
 }
 static int gd_present_locked(SweetSurface *panel, const redfin_display_geometry *g, const uint8_t *record)
@@ -404,8 +429,9 @@ static int gd_present_locked(SweetSurface *panel, const redfin_display_geometry 
         if (!RedfinGPUDisplayWritable()) {gd_hold_uncertain(); return -1;}
         return 0;
     }
-    if (!gd_panel_readback(fence)) {
+    if (!gd_panel_readback(fence,layers,count,marks.direct)) {
         gd.disabled = true;
+        if(!RedfinGPUDisplayWritable()){gd_hold_uncertain();return -1;}
         IOLog("REDFIN GPU DISPLAY: completed panel readback differs; CPU fallback restored\n");
         return 0;
     }
