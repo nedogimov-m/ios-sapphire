@@ -1,5 +1,19 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual A620 bounded-constant integration PASS — 2026-10-26
+
+V55/source1c2a15b passes the six native fixed/dynamic/direct/argument/GPU-writer
+read cases, full source/output guards and independent unaligned vertex/fragment
+pixels. Actual counters prove both bounded and conservative full paths. All
+previous native Metal/A620 cases pass too, including192compute commands,
+70cached variants and asynchronous errors/aliases/lifetime. One window server,
+no panic/GPU fault and a clean root remain. The ordinary39draw group shrinks
+from9449834copied bytes to3314, with104..233us upload and0..1us retirement gate
+wait in the sampled warm groups. Preferred source pins and native shader code/
+cache identity stay unchanged. The first ~51.5FPS counter was not checks-gated;
+strict ordinary FPS validation remains pending on the same native binaries
+with diagnostics OFF. Preserve the complete native correctness evidence.
+
 ## Runtime proof of constant-buffer read extents — 2026-10-26
 
 Re-reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772

@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V55 actual constant-extent correctness PASS; system copies now ~3KiB — 2026-10-26
+
+Source1c2a15b; unchanged kernel CI40256228186/run5/sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Native input7548b9b0.., pairingce3ff07e.., same shader cache496301fc.. .
+Fresh V61 applies ONCE:24436736bytes,9new/zero freed blocks, full preimages/
+backups/full files/signatures/native readonly fsck/readback PASS. V61 STALE.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x162ea234b372ff4d redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no panic or GPU stop/fault; one backboardd62;
+clean unmounted consistent HFSX/write_count1329465; verified Fastboot. All six
+new UBO cases PASS: fixed/dynamic, direct/argument, real GPU-written inputs and
+other queues; full input/output guards. Independent unaligned vertex/fragment
+render passes64pixels. Real counters prove5bounded snapshots,524296avoided
+bytes and3conservative full extents. BOTH previous native jobs also PASS:
+192compute commands/two queues,70cache variants, half/MRT/varyings/samplers/
+blits/pitches/guards, actual binding reuse, mixed aliases, CPU consumers,
+persistent programs and queued error/callback/epoch/lifetime contracts.
+
+All45backboardd sampled phase sets validate. Ordinary39draw groups now copy
+3314bytes rather than V54's9449834bytes:86proven snapshots,0full fallbacks,
+9446520avoided bytes. Uploader104..233us and full draw encoding3.3..4.3ms
+replace the observed large CPU preparation costs. Retirement-gate wait is
+0..1us in those samples; real ticket wait remains about21..27ms.
+
+The counter observes515GPU frames/10.000249physical seconds (~51.5FPS), but
+the request mistakenly used ordinary `animate` with diagnostics ON, rather
+than `animate-checked`. The observer therefore says native-checks-completed0
+and the strict analyzer correctly refuses a controlled FPS claim. Do not alter
+that evidence or rerun already-passed correctness cases. The planned ordinary
+same-binary OFF comparison resolves this independently. Existing policy-only
+mode preserves all native bytes/cache/full pairing and archives checks-on proof.
+Fresh V62 at actual1329465 and fresh V56 noncef3f3d3f114002994 are prepared;
+complete unchanged-kernel image/source/ABI preflight PASS. V62 offline stage
+is running; not applied. App opens/captures stay OFF. Full goal remains active.
+
 ## REDFIN complete runtime UBO extent block implemented/native built; V55 ready — 2026-10-26
 
 Source base7bfb520 plus this complete block. Inspect the exact optimized NIR
