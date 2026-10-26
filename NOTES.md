@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN WC surface run13 artifact/V82 update verified; combined V76 starts — 2026-10-26
+
+Codef536de6959238bf236b7e725e04b8ab7bed14bff/docs22251d5. Actions40348304483/
+run13 TERMINAL SUCCESS; native arm64/non-PAC18742256byte kernel,
+SHA256b66aa7128597ab5980a3309ace5d722b96160ade2068af710ce87413379d9d02.
+Actual complete builder/XNU/KDK/ordered source map, every retained ABI and new
+owned WC surface/queue/output markers PASS. Build elapsed479.073s; actual
+build.sh414.439s, KDK expansion35.634s. First expanded-KDK cache miss; cache
+now saved. No unmeasured future preparation speedup is claimed.
+
+Reuse exact native6e6e432c../pair1d031356../UIpadding-contract-v1/cache496301fc..,
+startup correctness ON. V82 actual fresh clean1523803/empty journal, complete
+staged files/signatures/preimages/readonly fsck PASS. Apply ONCE266240bytes,
+0new/freed blocks; every live preimage backed up, transfers/ranges/whole files
+read back; clean root/verified Fastboot. Actual cached and standalone GPU/Metal
+startup jobs agree ON. V82 STALE/never reuse; next fresh V83/imageV77, postboot
+epoch pending collection. Extra Wi-Fi preference inspection was readonly and
+verified the unchanged V82 root generation; private data stays outside git.
+
+V76 imagef5ca457ecd5afc90cc5420118f524ddda88ef536221eadc22e75adbd3ec86a9b, full loader/liveFDT/ADT/private inputs/
+complete old+new native source/ABI preflight PASS. Fresh3ef7db5965e7e5ec; one combined
+full Metal/CPU rewrite/alias/pixel/guard/physical output and actual WC route
+cycle starts. animate-checked gate ON; captures/app opens OFF. No new hardware
+correctness/speedup before terminal authenticated evidence. Exact args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3ef7db5965e7e5ec redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains active/unfinished.
+
 ## REDFIN owned WC surface kernel run13 compiling; V82 readonly snapshot complete — 2026-10-26
 
 Complete codef536de6959238bf236b7e725e04b8ab7bed14bff pushed only to owned
