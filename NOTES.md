@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete scoped-wait/FIFO/cadence block implemented; native builds PASS — 2026-10-26
+
+Source base3633c0c plus this block. Re-review preferred kernel8e611870's
+RedwoodGPU.cpp newBuffer/gemNew and global CpuPrep, and Mesa25.0.7's native
+heap-view tables/deferred-submit merging. Preserve all backing BO/descriptor
+lifetimes, actual physical completion/cache visibility and client fence ABI1.
+
+Implement a bounded4MiB physical-page retirement history over the same owned
+upper2GiB RAM. Shared physical aliases receive the same dependency even with
+different clients/handles/VAs. Scoped submission declares actual retained Mesa
+views, preserves direct whole-backing use and view references when merging;
+validate every BO/range/IB before admission. CPU range preparation waits only
+that actual dependency; legacy full-BO and unsupported-descriptor barriers stay
+compatible. Publish scoped ABI1 through GetParam/registry and require it in the
+paired Darwin backend. No synthetic fences or early resource release.
+
+Admit retained internal display jobs into the existing single hardware FIFO,
+including their source/in-use holds. Complete them after the real fence and
+retirement, outside hardware/client locks. Future render jobs cannot overtake
+an admitted presentation. Unknown/late completion keeps source holds and stops
+CPU output; only CPU metadata is freed. All live hardware/foreign-state audits
+remain complete per submit. Amortize only re-comparing private immutable firmware
+bytes within100ms, force checks at page-table/DVFS/external-audit boundaries,
+and permanently latch a source failure. Expose actual check/reuse counts.
+
+For the independently observed60callback cap, add iOS's documented main-bundle
+CADisableMinimumFrameDurationOnPhone opt-in through public bundle accessors,
+only with the measured physical90Hz registry/profile. Preserve original bundle
+metadata in a process-local copy; no Apple plist/file or private ivar is edited.
+Actual20H392 Foundation ABI/UUID and all native UI imports/signatures pass.
+Actual90callbacks and improved render FPS remain unproved.
+
+All91affected host cases PASS (including physical aliases/range overflow,
+actual merged view refs/direct backing use, actual native FIFO/scoped wait/
+close-generation/unknown completion, and late callback after the real2s caller
+timeout). Paired native graphics/Metal actual20H392 ABI/signatures PASS in
+research/redfin-metal-throughput-v1, correctness jobs ON. Reuse cached archive/
+tools; no download/package preparation. Final compiler identity/pairing remain
+in its private result.json. UI native/ABI/signatures PASS in
+research/redfin-ui-throughput-v1. Matching new CI kernel is next; no new device
+boot/root write occurred. Phone verified Fastboot, clean generation1253412;
+V53 remains stale. Next freshV54/imageV48. Finish measurement gating so the one
+combined hardware cycle measures after both correctness jobs complete. No
+Phone/Photos auto-opens or heavy captures. Full goal remains active.
+
 ## REDFIN V47 actual ordinary system FPS measured:17.4 GPU FPS — 2026-10-26
 
 Source224291e/kernel source5afedeb, CI40243857927/run3 SUCCESS, kernel

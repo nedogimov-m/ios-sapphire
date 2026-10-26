@@ -39,6 +39,25 @@ server, probes/captures/app opens off and a clean root are observed. Stable60/90
 render FPS remains unfinished. Review next the global CpuPrep/IOSurface/display
 barriers, presentation admission and actual native frame-rate policy together.
 
+## Scoped dependencies and retained FIFO output — 2026-10-26
+
+Re-reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's
+RedwoodGPU.cpp allocation and global CpuPrep. Preferred userland remains
+906425b75e02b4f99eb5d7bb1ef7c9583472d772. Adapt Mesa25.0.7's actual heap-view
+and deferred-submit tables into validated native ranges, preserving direct native
+use, merged references, whole-BO lifetime and actual post-cache retirement.
+Physical-page history accounts for aliases across handles/clients, including
+internal display reads. Retain legacy calls; require scoped ABI1 in the pair.
+
+Use the same FIFO for internal output and user render jobs, with explicit retained
+source/in-use references and late/failed completion semantics. Keep every live
+hardware/foreign snapshot; cache only repeated immutable CPU source comparisons
+for100ms, forcing real mapping/DVFS/external transitions and latching failures.
+The public documented high-refresh bundle opt-in is gated by actual90Hz/profile;
+no private object offsets are written. Native frame policy still needs device
+proof.91affected host cases and complete paired graphics/UI native/ABI/signatures
+pass. New CI kernel and combined correctness-then-performance evidence pending.
+
 ## Retained submission and separate native completion — 2026-10-26
 
 Review preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab's msm bridge

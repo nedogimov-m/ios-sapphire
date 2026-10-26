@@ -14,7 +14,7 @@ static struct {
 } redfin_drm_profile={PTHREAD_MUTEX_INITIALIZER,{0}};
 static inline void redfin_drm_profile_record(unsigned selector,uint64_t nanos)
 {
-    unsigned index=selector==0x46?0:selector==0x42?2:4;
+    unsigned index=(selector==0x46||selector==0x52465352u)?0:selector==0x42?2:4;
     pthread_mutex_lock(&redfin_drm_profile.lock);
     ++redfin_drm_profile.value[index];redfin_drm_profile.value[index+1]+=nanos;
     pthread_mutex_unlock(&redfin_drm_profile.lock);

@@ -48,6 +48,11 @@ def build(out,cache_path=None):
             if any(key not in actual or actual[key]['types']!=types for key,types in wanted.items()):
                 raise ValueError('native display-period ABI differs: '+name)
         quartz_uuid=quartz.uuid
+        foundation=cache.image('/System/Library/Frameworks/Foundation.framework/Foundation')
+        bundle_methods=foundation.objc_methods('NSBundle')
+        if bundle_methods.get('-objectForInfoDictionaryKey:',{}).get('types')!='@24@0:8@16':
+            raise ValueError('native main-bundle public info getter ABI differs')
+        foundation_uuid=foundation.uuid
     define=','.join('0x'+uuid[i:i+2] for i in range(0,32,2))
     sdk=subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()
     library=out/'libredfin-ui.dylib'
@@ -64,10 +69,12 @@ def build(out,cache_path=None):
         subprocess.run(['codesign','--verify','--strict',str(library)],check=True,stdout=log,stderr=log)
         refresh=out/'libredfin-refresh.dylib'
         quartz_define=','.join('0x'+quartz_uuid[i:i+2] for i in range(0,32,2))
+        foundation_define=','.join('0x'+foundation_uuid[i:i+2] for i in range(0,32,2))
         command=['xcrun','--sdk','iphoneos','clang','-arch','arm64','-isysroot',sdk,
             '-miphoneos-version-min=16.0','-O2','-fobjc-arc','-Wall','-Wextra','-Werror',
             '-Wno-deprecated-declarations','-dynamiclib','-install_name',REFRESH_LIBRARY,
             '-DREDFIN_UIKIT_UUID_BYTES='+define,'-DREDFIN_QUARTZ_UUID_BYTES='+quartz_define,
+            '-DREDFIN_FOUNDATION_UUID_BYTES='+foundation_define,
             '-I',str(HERE),str(HERE/'display-refresh.m'),'-framework','Foundation',
             '-framework','QuartzCore','-framework','IOKit','-o',str(refresh)]
         subprocess.run(command,check=True,stdout=log,stderr=log)
@@ -83,6 +90,7 @@ def build(out,cache_path=None):
         refresh_sha256=hashlib.sha256(refresh.read_bytes()).hexdigest(),
         sha256=hashlib.sha256(library.read_bytes()).hexdigest(),full_panel=True,physical_refresh_claimed=False)
     report.update(probe_opt_in_only=True,probe_uses_native_completed_counts=True,probe_statistics_version=2,
+        high_refresh_main_bundle_opt_in=True,foundation_uuid=foundation_uuid,
         probe_request_path='/redfin/display-probe-request',
         source_sha256={name:hashlib.sha256((HERE/name).read_bytes()).hexdigest() for name in
             ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m',

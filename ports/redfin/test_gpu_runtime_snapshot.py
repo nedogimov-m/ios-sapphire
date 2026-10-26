@@ -21,8 +21,11 @@ class RuntimeSnapshotTests(unittest.TestCase):
 #include <string.h>
 #include "redfin_gpu_context.h"
 #include "redfin_gmu_tcm.h"
+#include "redfin_gpu_runtime.h"
 struct gm_context {unsigned smmu_mode;uintptr_t smmu,cb,base[3];bool gx_requested;};
 static struct gm_context context;
+static struct {struct rf_gr_payload_cache payload_cache;} gr;
+static uint64_t gm_time_ns(void *c){(void)c;return 1000;}
 static struct {struct gm_context *context;bool poisoned;
  struct {struct {unsigned active,poisoned;struct rf_gs_snapshot expected;}state;}mapping;}gx;
 static uint32_t global[0x8000/4],banks[0x2000/4];
@@ -57,7 +60,7 @@ static uint32_t gm_scalar_read(uintptr_t at){
 '''
         suffix = r'''
 int run(unsigned problem){
- memset(global,0,sizeof(global));memset(banks,0,sizeof(banks));memset(&gx,0,sizeof(gx));
+ memset(global,0,sizeof(global));memset(banks,0,sizeof(banks));memset(&gx,0,sizeof(gx));memset(&gr,0,sizeof(gr));
  issue=problem;reads=live_checks=payload_checks=power_lost=payload_lost=0;ready=caller=1;
  context=(struct gm_context){.smmu_mode=6,.smmu=(uintptr_t)global,.cb=(uintptr_t)banks,.gx_requested=true};gx.context=&context;
  gx.mapping.state.active=1;
@@ -88,6 +91,10 @@ int audit_run(unsigned problem){
  if(source_check(0))return EIO;reads=live_checks=payload_checks=0;issue=problem;
  power_lost=0;payload_lost=problem==9;gcc[0x10/4]=1;
  return redfin_gpu_audit();
+}
+int cached_audit(unsigned problem){
+ if(audit_run(0))return EIO;
+ reads=live_checks=payload_checks=0;issue=problem;return gr_audit(false);
 }
 '''
         source, library = root / 'snapshot.c', root / 'snapshot.so'
@@ -126,6 +133,13 @@ int audit_run(unsigned problem){
             self.assertEqual(self.lib.metric(0), 17)
         self.assertEqual(self.lib.run(10), errno.ECANCELED)
         self.assertEqual(self.lib.metric(0), 0)
+
+    def test_cached_source_bytes_still_require_the_complete_live_hardware_guard(self):
+        self.assertEqual(self.lib.cached_audit(0),0)
+        self.assertEqual(self.lib.metric(2),0)
+        for issue in (1,3,4,5,6):
+            self.assertNotEqual(self.lib.cached_audit(issue),0)
+            self.assertEqual(self.lib.metric(3),1)
 
     def test_changed_foreign_state_and_out_of_scope_addresses_are_rejected(self):
         self.assertEqual(self.lib.run(7), errno.EAGAIN)

@@ -23,6 +23,60 @@ static Class display_class;
 static unsigned verified_hz,observations;
 static __thread bool in_refresh;
 static char boot_nonce[17];
+static bool refresh_policy_active;
+static __thread bool in_info_policy;
+static CFDictionaryRef high_refresh_info;
+static id (*bundle_info_value)(id,SEL,NSString *);
+static void refresh_policy_log(const char *);
+
+/* Public per-app opt-in required by iOS for rates above60. Preserve the
+ * original main-bundle dictionary and add the documented key in a retained
+ * process-local copy only after the physical90Hz contract is verified. */
+static unsigned physical_rate(void);
+static BOOL high_refresh_bundle(CFBundleRef bundle)
+{
+    return refresh_policy_active && bundle && !in_info_policy && bundle==CFBundleGetMainBundle() && physical_rate()==90;
+}
+static CFTypeRef redfin_bundle_value(CFBundleRef bundle,CFStringRef key)
+{
+    CFTypeRef original=CFBundleGetValueForInfoDictionaryKey(bundle,key);
+    if(!key||!CFEqual(key,CFSTR("CADisableMinimumFrameDurationOnPhone"))||!high_refresh_bundle(bundle))return original;
+    refresh_policy_log("CFBundleGetValueForInfoDictionaryKey");
+    return kCFBooleanTrue;
+}
+static CFDictionaryRef redfin_bundle_dictionary(CFBundleRef bundle)
+{
+    CFDictionaryRef original=CFBundleGetInfoDictionary(bundle);
+    if(!high_refresh_bundle(bundle))return original;
+    in_info_policy=true;
+    CFDictionaryRef cached=__atomic_load_n(&high_refresh_info,__ATOMIC_ACQUIRE);
+    if(!cached) {
+        CFMutableDictionaryRef copy=original?CFDictionaryCreateMutableCopy(NULL,0,original):
+            CFDictionaryCreateMutable(NULL,0,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
+        if(copy) {
+            CFDictionarySetValue(copy,CFSTR("CADisableMinimumFrameDurationOnPhone"),kCFBooleanTrue);
+            CFDictionaryRef expected=NULL;
+            if(__atomic_compare_exchange_n(&high_refresh_info,&expected,copy,false,__ATOMIC_RELEASE,__ATOMIC_ACQUIRE))
+                cached=copy;
+            else {CFRelease(copy);cached=expected;}
+        }
+    }
+    in_info_policy=false;
+    if(cached)refresh_policy_log("CFBundleGetInfoDictionary");
+    return cached?cached:original;
+}
+/* dyld excludes the defining interposer image when binding its own calls to
+ * the original public functions. Other bundles retain their native values. */
+__attribute__((used,section("__DATA,__interpose")))
+static const struct {
+    CFTypeRef (*replacement)(CFBundleRef,CFStringRef);
+    CFTypeRef (*original)(CFBundleRef,CFStringRef);
+} redfin_info_value_interpose={redfin_bundle_value,CFBundleGetValueForInfoDictionaryKey};
+__attribute__((used,section("__DATA,__interpose")))
+static const struct {
+    CFDictionaryRef (*replacement)(CFBundleRef);
+    CFDictionaryRef (*original)(CFBundleRef);
+} redfin_info_dictionary_interpose={redfin_bundle_dictionary,CFBundleGetInfoDictionary};
 
 static BOOL method_abi(Class cls,const char *name,const char *types,BOOL meta)
 {
@@ -56,11 +110,24 @@ static void refresh_log(const char *what,double period,long maximum)
     int fd=open("/private/var/mobile/Library/Logs/redfin-refresh.log",O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW,0600);
     if (fd>=0) {(void)write(fd,line,(size_t)n);close(fd);}
 }
+static void refresh_policy_log(const char *method)
+{
+    static bool reported;
+    if(__atomic_exchange_n(&reported,true,__ATOMIC_RELAXED))return;
+    char line[384];int n=snprintf(line,sizeof(line),
+        "REDFIN REFRESH POLICY: boot=%s pid=%d main-bundle-public-opt-in=1 physical-hz=90 source=%s\n",
+        boot_nonce,getpid(),method);
+    if(n<=0||(size_t)n>=sizeof(line))return;
+    int fd=open("/private/var/mobile/Library/Logs/redfin-refresh.log",O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW,0600);
+    if(fd>=0){(void)write(fd,line,(size_t)n);close(fd);}
+}
 static unsigned physical_rate(void)
 {
     unsigned cached=__atomic_load_n(&verified_hz,__ATOMIC_ACQUIRE);if (cached) return cached;
+    if(in_info_policy)return 0;
+    in_info_policy=true;
     io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("IOMobileFramebuffer"));
-    if (!service) return 0;
+    if (!service) {in_info_policy=false;return 0;}
     CFTypeRef rate=IORegistryEntryCreateCFProperty(service,CFSTR("RedfinVerifiedRefreshHz"),NULL,0);
     CFTypeRef verified=IORegistryEntryCreateCFProperty(service,CFSTR("RedfinPhysicalRefreshVerified"),NULL,0);
     unsigned hz=0;
@@ -69,7 +136,18 @@ static unsigned physical_rate(void)
         hz==90 && verified==kCFBooleanTrue;
     if (rate) CFRelease(rate);if (verified) CFRelease(verified);IOObjectRelease(service);
     if (valid) __atomic_store_n(&verified_hz,hz,__ATOMIC_RELEASE);
+    in_info_policy=false;
     return valid ? hz : 0;
+}
+static id redfin_bundle_info_value(id object,SEL selector,NSString *key)
+{
+    id value=bundle_info_value(object,selector,key);
+    if(refresh_policy_active && object==NSBundle.mainBundle &&
+       [key isEqualToString:@"CADisableMinimumFrameDurationOnPhone"] && physical_rate()==90) {
+        refresh_policy_log("NSBundle.objectForInfoDictionaryKey:");
+        return @YES;
+    }
+    return value;
 }
 static BOOL main_display(id object)
 {
@@ -114,7 +192,17 @@ __attribute__((constructor)) static void redfin_refresh_install(void)
         !redfin_ui_fullscreen(args,(unsigned)bytes)) return;
     const char *nonce=strstr(args,"redfinbootid=0x");if (!nonce || strlen(nonce+15)<16) return;
     memcpy(boot_nonce,nonce+15,16);
+    refresh_policy_active=true;
     static const unsigned char quartz[16]={REDFIN_QUARTZ_UUID_BYTES},uikit[16]={REDFIN_UIKIT_UUID_BYTES};
+    static const unsigned char foundation[16]={REDFIN_FOUNDATION_UUID_BYTES};
+    Class bundle=objc_getClass("NSBundle");
+    if(method_abi(bundle,"objectForInfoDictionaryKey:","@24@0:8@16",NO)) {
+        Method method=class_getInstanceMethod(bundle,sel_registerName("objectForInfoDictionaryKey:"));
+        if(image_uuid(method_getImplementation(method),foundation)) {
+            bundle_info_value=(id (*)(id,SEL,NSString *))method_getImplementation(method);
+            method_setImplementation(method,(IMP)redfin_bundle_info_value);
+        }
+    }
     display_class=objc_getClass("CADisplay");
     if (!method_abi(display_class,"mainDisplay","@16@0:8",YES) ||
         !method_abi(display_class,"refreshRate","d16@0:8",NO) ||

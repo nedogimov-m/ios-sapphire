@@ -116,6 +116,8 @@ class RedfinGMUContractTests(unittest.TestCase):
                            cwd=root,check=True,capture_output=True)
             subprocess.run(['git','apply','--include=bsd/dev/*',str(HERE/'native-runtime-queues.patch')],
                            cwd=root,check=True,capture_output=True)
+            subprocess.run(['git','apply','--include=bsd/dev/*',str(HERE/'native-throughput.patch')],
+                           cwd=root,check=True,capture_output=True)
             wanted = {
                 'bsd/dev/redfin_gmu_probe.c': HERE/'gmu-probe.c',
                 'bsd/dev/redfin_gmu_probe.h': HERE/'gmu-probe.h',

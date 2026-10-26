@@ -106,6 +106,9 @@ def main():
                            ('metal-bindings.patch','metal-bindings.h','metal-bindings.inc')]
                 inputs += [ROOT/'ports/redfin'/name for name in
                            ('metal-queued-submission.patch','metal-queued.h','metal-queued.inc')]
+                inputs += [ROOT/'ports/redfin/metal-scoped-submission.patch',
+                           ROOT/'ports/redfin/include/redfin_gpu_scope.h',
+                           ROOT/'ports/redfin/mesa-scoped-submit.inc']
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -187,6 +190,12 @@ def main():
                         shutil.copy2(ROOT/'ports/redfin'/('metal-queued.'+suffix),
                                      source/'src/compiler/air'/('redfin_metal_queued.'+suffix))
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-queued-submission.patch'],source)
+                    for directory in ('src/freedreno/drm','src/redwood-drm'):
+                        shutil.copy2(ROOT/'ports/redfin/include/redfin_gpu_scope.h',
+                                     source/directory/'redfin_gpu_scope.h')
+                    shutil.copy2(ROOT/'ports/redfin/mesa-scoped-submit.inc',
+                                 source/'src/freedreno/drm/msm/redfin_mesa_scoped_submit.inc')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-scoped-submission.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]

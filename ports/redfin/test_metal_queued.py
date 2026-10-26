@@ -282,6 +282,9 @@ int main(void) {
             applied=subprocess.run(['git','apply','--include='+name,str(HERE/'metal-queued-submission.patch')],
                                    cwd=directory,capture_output=True)
             self.assertEqual(applied.returncode,0,applied.stderr.decode(errors='replace'))
+            scoped=subprocess.run(['git','apply','--include='+name,str(HERE/'metal-scoped-submission.patch')],
+                                  cwd=directory,capture_output=True)
+            self.assertEqual(scoped.returncode,0,scoped.stderr.decode(errors='replace'))
             source=target.read_text();first=source.index('int\nfd_bo_cpu_prep(');last=source.index('\n}',first)+2
             function=source[first:last]
         self.run_c(r'''
@@ -291,22 +294,34 @@ int main(void) {
 #include <errno.h>
 #define FD_BO_PREP_FLUSH 8u
 struct fd_pipe {unsigned unused;};struct fd_bo;
-struct fd_bo_funcs {int (*cpu_prep)(struct fd_bo *,struct fd_pipe *,uint32_t);};
-struct fd_bo {const struct fd_bo_funcs *funcs;struct fd_bo *parent;unsigned handle,flushes;};
+struct fd_bo_funcs {int (*cpu_prep)(struct fd_bo *,struct fd_pipe *,uint32_t);
+ int (*redfin_cpu_range)(struct fd_bo *,struct fd_pipe *,uint32_t,uint64_t,uint64_t);};
+struct fd_bo {const struct fd_bo_funcs *funcs;struct fd_bo *parent;unsigned handle,flushes;uint64_t iova,size;};
 static unsigned calls;static int refused;static struct fd_bo *wanted;static struct fd_pipe *wanted_pipe;
 static bool suballoc_bo(struct fd_bo *b){return b->parent!=0;}
 static struct fd_bo *fd_bo_heap_block(struct fd_bo *b){assert(b->parent);return b->parent;}
+static uint64_t fd_bo_get_iova(struct fd_bo *b){return b->iova;}
 static void bo_flush(struct fd_bo *b){++b->flushes;}
 static int native_prepare(struct fd_bo *b,struct fd_pipe *p,uint32_t op){assert(b==wanted&&p==wanted_pipe&&op==3&&b->handle==7);++calls;return refused;}
+static unsigned range_calls;
+static int native_range(struct fd_bo *b,struct fd_pipe *p,uint32_t op,uint64_t offset,uint64_t bytes){
+ assert(b==wanted&&p==wanted_pipe&&op==3&&offset==16384&&bytes==1024);++range_calls;return refused;}
 '''+function+r'''
 int main(void) {
- const struct fd_bo_funcs kernel={native_prepare},suballocation={0};struct fd_pipe pipe={0};wanted_pipe=&pipe;
- struct fd_bo parent={&kernel,0,7,0},small={&suballocation,&parent,0,0};wanted=&parent;
+ const struct fd_bo_funcs kernel={native_prepare,0},suballocation={0},scoped={native_prepare,native_range};
+ struct fd_pipe pipe={0};wanted_pipe=&pipe;
+ struct fd_bo parent={&kernel,0,7,0,0x10000,65536},small={&suballocation,&parent,0,0,0x14000,1024};wanted=&parent;
  assert(!fd_bo_cpu_prep(&parent,&pipe,3)&&calls==1&&parent.flushes==1);
  assert(!fd_bo_cpu_prep(&small,&pipe,3|FD_BO_PREP_FLUSH)&&calls==2&&small.flushes==1);
  assert(!fd_bo_cpu_prep(&small,&pipe,FD_BO_PREP_FLUSH)&&calls==2&&small.flushes==2);
  refused=-ETIMEDOUT;assert(fd_bo_cpu_prep(&small,&pipe,3)==-ETIMEDOUT&&calls==3);
  parent.funcs=&suballocation;assert(fd_bo_cpu_prep(&small,&pipe,3)==-ENOTSUP&&calls==3);
+ parent.funcs=&scoped;refused=0;
+ assert(!fd_bo_cpu_prep(&small,&pipe,3)&&range_calls==1&&calls==3);
+ small.iova=parent.iova-1;assert(fd_bo_cpu_prep(&small,&pipe,3)==-EINVAL&&range_calls==1);
+ small.iova=parent.iova+parent.size;assert(fd_bo_cpu_prep(&small,&pipe,3)==-EINVAL&&range_calls==1);
+ small.iova=0x14000;refused=-ETIMEDOUT;
+ assert(fd_bo_cpu_prep(&small,&pipe,3)==-ETIMEDOUT&&range_calls==2&&calls==3);
  return 0;
 }
 ''')

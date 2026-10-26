@@ -15,6 +15,7 @@ static struct {
     uint64_t *l2,*leaves;
     uint64_t *dirty_first,*dirty_end;
     uint64_t audit_ns,wait_ns,publish_ns,gpu_ticks,polls;
+    struct rf_gr_payload_cache payload_cache;
     uint32_t state,fence,completed;
     uint32_t fault_fsr,fault_syndrome;
     uint64_t fault_address;
@@ -162,7 +163,9 @@ static int gr_source_read(void *argument,unsigned unit,uint32_t at,uint32_t *val
         !c->base[unit] || !rf_gt_allowed(unit,at,false))return EPERM;
     *value=gm_scalar_read(c->base[unit]+at);return 0;
 }
-int redfin_gpu_audit(void)
+static bool gr_payload_verify(void *argument)
+{return gm_payloads_valid((struct gm_context *)argument);}
+static int gr_audit(bool force_payload)
 {
     struct gm_context *c=gx.context;
     int error=gr_live();
@@ -178,10 +181,13 @@ int redfin_gpu_audit(void)
     if(!error)for(unsigned bank=0;bank<2;bank++)
         if(gm_scalar_read(c->cb+4096*bank+0x28) || gm_scalar_read(c->cb+4096*bank+0x2c))error=EAGAIN;
     if(!error)error=gr_live();
-    if(!error && !gm_payloads_valid(c))error=ECANCELED;
+    if(!error && !rf_gr_payload_live(&gr.payload_cache,gm_time_ns(c),force_payload,c,gr_payload_verify))
+        error=ECANCELED;
     if(error)redfin_gpu_poison("complete SMMU/foreign-state audit failed");
     return error;
 }
+int redfin_gpu_audit(void)
+{return gr_audit(true);}
 static void gr_dirty(uint64_t *first,uint64_t *end)
 {
     if(!gr.dirty_first || first<gr.dirty_first)gr.dirty_first=first;
@@ -190,7 +196,9 @@ static void gr_dirty(uint64_t *first,uint64_t *end)
 }
 static int gr_tlb(void)
 {
-    if(gr_live())return ENXIO;
+    /* A page-table publication is a real ownership transition, unlike a
+     * repeated submit of already-mapped buffers: force its source proof. */
+    int audit=redfin_gpu_audit();if(audit)return audit;
     if(gr.dirty_first && gr.dirty_end)
         redfin_gpu_sync(gr.dirty_first,(uint64_t)(gr.dirty_end-gr.dirty_first)*8,false);
     if(gr_live())return ENXIO;
@@ -298,7 +306,7 @@ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned c
 {
     if(!fence || gr.fence==UINT32_MAX)return EINVAL;
     uint64_t audit_at=gm_time_ns(gx.context);
-    int error=redfin_gpu_audit();if(error)return error;
+    int error=gr_audit(false);if(error)return error;
     gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
     error=redfin_gpu_mapped();if(error)return error;
     uint32_t packets[RF_GR_PACKET_WORDS],next=gr.fence+1;
@@ -323,7 +331,7 @@ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned c
     error=rf_gr_wait(&ops,RF_A6_WAIT_NS,&polls);gr.polls+=polls;
     gr.wait_ns+=gm_time_ns(gx.context)-first;
     if(!error) {
-        audit_at=gm_time_ns(gx.context);error=redfin_gpu_audit();
+        audit_at=gm_time_ns(gx.context);error=gr_audit(false);
         gr.audit_ns+=gm_time_ns(gx.context)-audit_at;
         if(!error) {
             uint64_t start=(uint64_t)gm_scalar_read(gx.scratch+RF_GR_TIME_AT+4)<<32 |
@@ -334,9 +342,9 @@ int redfin_gpu_submit(const uint64_t *addresses,const uint32_t *words,unsigned c
             gr.completed=next;*fence=next;
             if(next<=8 || !(next%256)) {
                 printf("REDFIN GPU RUNTIME SUBMIT: fence=%u IBs=%u done=%u rptr=%u\n",next,count,observed.done,gx.wptr);
-                printf("REDFIN GPU RUNTIME TIMING: submits=%u audit-us=%llu publish-us=%llu wait-us=%llu gpu-us=%llu polls=%llu cpu=%u\n",
+                printf("REDFIN GPU RUNTIME TIMING: submits=%u audit-us=%llu publish-us=%llu wait-us=%llu gpu-us=%llu polls=%llu cpu=%u payload-checks=%llu payload-reuses=%llu\n",
                     next,gr.audit_ns/1000/next,gr.publish_ns/1000/next,gr.wait_ns/1000/next,
-                    gr.gpu_ticks*5/96/next,gr.polls,(unsigned)cpu_number());
+                    gr.gpu_ticks*5/96/next,gr.polls,(unsigned)cpu_number(),gr.payload_cache.checks,gr.payload_cache.hits);
             }
             return 0;
         }

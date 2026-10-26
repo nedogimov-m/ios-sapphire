@@ -22,6 +22,22 @@
 #define RF_GR_TIME_AT 0x210u
 #define RF_GR_PACKET_WORDS (4u*RF_GR_COMMANDS+24u)
 #define RF_GR_HOST_PAGE 16384u
+/* Runtime source bytes are private, pinned immutable firmware copies. Retain
+ * complete live hardware/foreign-state audits at every submission; only avoid
+ * comparing those same CPU bytes twice per batch. Mapping/DVFS/external audits
+ * force verification, and a failed verification is permanently latched. */
+#define RF_GR_PAYLOAD_RECHECK_NS UINT64_C(100000000)
+struct rf_gr_payload_cache {uint64_t checked,checks,hits;bool failed;};
+static inline bool rf_gr_payload_live(struct rf_gr_payload_cache *cache,uint64_t now,bool force,
+    void *context,bool (*verify)(void *))
+{
+    if(!cache||!verify||!now||cache->failed)return false;
+    if(cache->checked&&now<cache->checked){cache->failed=true;return false;}
+    if(!force&&cache->checked&&now-cache->checked<RF_GR_PAYLOAD_RECHECK_NS){++cache->hits;return true;}
+    ++cache->checks;
+    if(!verify(context)){cache->failed=true;return false;}
+    cache->checked=now;return true;
+}
 static const uint32_t rf_gr_policy[]={1,0x06020001,512,128,1024,128,500,0x10000,0x100000,1};
 
 struct rf_gr_object {uint64_t address,size,span;};
