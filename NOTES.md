@@ -1,5 +1,21 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN owned WC surface kernel run13 compiling; V82 readonly snapshot complete — 2026-10-26
+
+Complete codef536de6959238bf236b7e725e04b8ab7bed14bff pushed only to owned
+redfin-ci. Actions40348304483/run13 is compiling the matching full native
+kernel.53combined host contracts PASS; no new kernel artifact/hardware speedup
+exists yet. Reuse native6e6e432c../pair1d031356../UI/cache; only startup policy
+is ON for the next full correctness cycle, without rebuilding those binaries.
+
+Fresh V82 snapshot complete: actual clean1523803/empty journal and current
+native target preimages. No root filesystem writes; device verified readonly
+recovery idle. Final stage/apply waits for actual matching kernel and V76 image.
+Next V76 full Metal/CPU rewrite/alias/pixel/guard/physical output proof plus
+bounded native WC route counters; captures and automatic app opens stay OFF.
+No new boot args have been used; last actual V75 args are recorded below.
+Broad platform goal remains active/unfinished.
+
 ## REDFIN complete owned WC surface block;53combined host contracts PASS — 2026-10-26
 
 Base1266ee9; reconstruct exact current SweetSurface source from12original DXB
