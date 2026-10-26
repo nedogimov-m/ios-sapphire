@@ -1,5 +1,66 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V61 native full/margin GPU output PASS; real29.966FPS,60/90 unfinished — 2026-10-26
+
+Codefd21adf, documentationb07d388; GitHub Actions40286405146/run7/source
+fd21adfa968bdb3f8b9b4ef47e693ac57c6b63ac SUCCESS. Kernel18726296bytes,
+SHA25658db3d942910b30100cd1e3ce7b242a43953f78ac3d2f928fdbc26881141e6d3.
+Exact same Metal/client pair2407206f.., UIcadence-v1 and shader cache496301fc..
+retained. Fresh V67 applies ONCE:8192bytes,0new blocks; complete target preimages,
+backups/signatures/readonly fsck/readback PASS. V67 STALE, never reuse. Exact
+observed V61 args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x3b4f4caac46916ec redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Fresh authenticated userspace-alive capture, one backboardd61, no runtime GPU
+fault/stop/panic, clean unmounted HFSX1390436, verified Fastboot. Cycle3642 is
+TERMINAL exit0; no device/build/download process remains. Before panel mapping,
+real A620 checks clear-free full coverage then exact margin clears:2,527,200
+pixels EACH,5,054,400total,0mismatches and0prefix/tail guard errors. Both actual
+fences1/2 retire. Four subsequent physical-panel samples verify256pixels at
+actual fences3/6/8/10,0mismatches. All17sampled ordinary output records show
+clear-pixels0: the fullscreen fast path actually runs. CPU pixel copy remains0.
+No Phone/Photos auto launch; userspace startup correctness jobs/captures OFF.
+
+Full finite ordinary observation, valid physical counters,0window replacements,
+10.011191seconds:300GPU/300total completed frames =29.966465FPS. Ten samples
+27.995..32.002FPS,0missed, no timeout, idle restored. Physical panel remains90Hz;
+902callbacks,90.000reported callbackHz,901intervals under12ms, maximum11.111ms.
+Actual original refresh/hardware/heartbeat/link maximum periods remain1/90s;
+complete kernel/Mach contract and native environment setup accepted. This is
+NOT smooth60/90rendering and does not demonstrate an FPS improvement. The log
+records51contacts/releases in1534batches,0errors/overflow/recovery. User activity
+for V61 is unconfirmed; it is not a controlled quiet comparison with V59 or V60.
+Do not infer the cause of the workload difference or call contacts false touch.
+
+The repaired diagnostic now validates ALL41complete owner partitions and17
+output partitions,0invalid, with paired native identities. These sample host
+scopes across the run, not just the10second observation. Warm sequence>=1024:
+15render samples median execution15.891ms, admission5.760ms;7present samples
+median execution5.750ms, admission21.775ms. Hardware-lock waits0us median.
+Output medians: prepare4us/source-cache587us/build6us/command-cache0us/native
+submit+wait4929us/readback0us/total5699us. Native submit includes real audit,
+programming and GPU wait; do not label this isolated GPU core time. Actual
+aggregate hardware timer at3328submits averages9.127ms across render AND output,
+with1.471ms host audit and9.211ms native wait per submit. Significant render
+work and queued delay remain, beyond the removed full-frame clear.
+
+All27frontend/retirement and27scheduling samples validate. Warm command groups
+include107..109draws; snapshot median8244bytes/130us, max2full fallbacks at a
+sample, no justification for inventing a new multi-megabyte per-frame constant
+copy problem. Sampled late variant compiles0; direct scheduled/completed API
+wait counts0, handlers still active. Some imported unpadded linear attachments
+legitimately use GPU sysmem (e.g.1065x282/pitch4288,281x609/pitch1152); preserve
+that bounds rule until actual owned padding or a complete GPU resolve proves
+another path. This observation alone does not prove they dominate rendering.
+
+Private evidence logs/redfin/gui-platform-v61/{presentation-summary,
+native-output-evidence,gpu-output-budget,frontend-latency,scheduling-summary}.json.
+Next fresh updaterV68/imageV62/current clean1390436. Next whole graphics block:
+review actual render batches/GMEM vs sysmem and remaining GPU/host work; optimize
+with exact pixels, imported-view bounds, CPU consumers, true fences/ownership
+and current shader cache preserved. Native90Hz and complete budget reporting
+are proven; broad Wi-Fi/power/sensor/Apple-services requirements remain active.
+
 ## REDFIN GPU output kernel CI40286405146/run7 and V61 preflight PASS — 2026-10-26
 
 Codefd21adfa968bdb3f8b9b4ef47e693ac57c6b63ac; CI GitHub Actions40286405146/run7

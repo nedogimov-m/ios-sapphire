@@ -1,5 +1,24 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual A620 clear-free/margin output and complete budgets PASS — 2026-10-26
+
+V61/sourcefd21adf, Actions40286405146/run7/kernel58db3d94.. passes both poisoned
+native full/margin cases:5,054,400pixels and all guards, plus256physical-panel
+samples. All17ordinary output samples actually skip fullscreen clears;41owner
+and17output partitions validate completely. Retain preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 and reviewed updated-mainc84b4634277a70beac73921029b1fb6afc2530af
+decision. Exact Metal/compiler/UI/cache and all native90Hz contracts retained.
+
+Actual finite300GPU frames/10.011191s =29.966465FPS, callbacks90Hz, one server,
+no GPU fault/panic and clean Fastboot.51logged contacts make this an uncontrolled
+workload observation; user activity is unconfirmed for this run. No FPS gain
+is established. New output median5.699ms contains0.587ms source sync and4.929ms
+native submit/audit/wait. Warm render owner15.891ms and presentation admission
+21.775ms remain material. Sampled command groups107..109draws and actual native
+GPU timer include substantial render work. Review actual GMEM/sysmem batch
+routing and unpadded imported attachments; preserve the native16x4 footprint
+bounds. Do not simply relax guards or assume those fallbacks alone explain lag.
+
 ## Native output-clear optimization CI40286405146/run7 PASS — 2026-10-26
 
 Sourcefd21adf, kernel58db3d942910b30100cd1e3ce7b242a43953f78ac3d2f928fdbc26881141e6d3.

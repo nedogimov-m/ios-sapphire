@@ -16,6 +16,11 @@ The panel and native CoreAnimation clock now independently run at90Hz. V60's
 unmodified period getters report1/90second and actual callbacks average89.201Hz;
 its user-confirmed interactive workload renders31.665FPS. That observation is
 not a matched quiet comparison to V59. Sustained60/90render FPS is unfinished.
+The V61 output block removes redundant fullscreen GPU clears and passes both
+full/margin native pixel and guard checks. Complete owner/output budgets now
+validate; output costs5.699ms median. Its observed300GPU frames/10.011191s are
+29.966FPS at90Hz callbacks, with51logged contacts. This is not a controlled quiet
+comparison or a measured FPS gain; render execution and queue latency remain.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).
