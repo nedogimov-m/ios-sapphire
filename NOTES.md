@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V91 same-binary ordinary bounded GLES51.245FPS — 2026-10-27
+
+Sourceaddde14/docsab5781f/start55908d7; exact V90 input1a4ad42c../pair17d0f01f../
+UI/cache496301fc../kernel Actions40403226041/run20/source5b06349/01be8081..,
+policy-only native startup checks OFF. Cycle47121 TERMINAL exit0,
+authenticatedc1c8e757ff142706, one backboardd61/no crash/panic/GL errors,
+clean unmounted HFSX1670847/verified Fastboot. V97 STALE/never reuse; next fresh
+V98/imageV92 at actual1670847. Full same-binary native checker proof stays V90.
+
+513GPU frames/10.010698physical seconds =51.2451779FPS,902callbacks/90Hz,
+samples46.038..53.047FPS/max callback11.111ms, no timeout/missed samples/idle
+restored. Zero contacts, touch error0/batches0; no fresh manual input proof.
+GLES1020direct/shared frames/copied0/errors0, real seed/producer/publication
+and2-frame max/actual waits/zero fallbacks continue. All current-nonce GPU/
+Metal startup diagnostic counts0 as intended. Automatic Phone/Photos/captures
+remain OFF. Severe direct5..7FPS regression is corrected; this is still below
+ordinary mirror V86's54.738FPS. Stable60/90render remains unfinished.
+
+Next whole block fuses full-image GPU scaling and panel row packing, avoiding
+the intermediate image. Keep actual general cropped/multilayer path and select
+fusion only after four native full-output/golden-reference/source/tail/stage-
+untouched cases pass. No physical DPU register/scanout ownership change.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xc1c8e757ff142706 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad Wi-Fi/power/thermald/sensor/Apple-service goal remains unfinished.
+
 ## REDFIN V97 identical bounded GLES policy OFF verified; ordinary V91 starts — 2026-10-27
 
 V90 full native bounded/direct/fetch/pixels/guards/app Metal PASS, checked
