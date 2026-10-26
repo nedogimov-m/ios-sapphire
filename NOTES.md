@@ -1,5 +1,21 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN fused output kernel CI21 builds; fresh V98 readonly preparation complete — 2026-10-27
+
+Committedee02c23cfdb462f8c34d37a45ba8504aa1755616,102common contracts/actual full
+native GPU TU compile PASS. Actions40410544328/run21 IN_PROGRESS; no hardware
+fused-output result. Same hardware-proved userland1a4ad42c../Metal17d0f01f../
+cache496301fc../UI inventory verified and policy-only native startup checks ON.
+Fresh V98 actual1670847/empty journal/current target preimages read complete,
+no filesystem writes; verified unmounted recovery idle while CI builds.
+Stage/apply/new V92 boot remain gated on completed exact CI source/kernel/
+full old+new patch map and ABI proof. V97 is stale/never reuse.
+Next kernel artifact verification, prebuilt fresh V92/V93 images and one
+combined V92 full native output/reference/Metal/GLES/budget/animation cycle.
+Exact future boot nonce/args are pending image creation; last actual V91 args
+and51.245FPS ordinary evidence are recorded above. Captures/Phone/Photos
+automatic launches stay OFF. Broad goal active/unfinished.
+
 ## REDFIN full fused native GPU output block;102common/native compile PASS — 2026-10-27
 
 Hardware baseline V91 ordinary51.245FPS/90Hz/no input, full native bounded
