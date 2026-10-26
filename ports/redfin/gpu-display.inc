@@ -16,8 +16,8 @@ struct gd_buffer {
 };
 static struct {
     gd_buffer stage, commands, panel, sources[GD_CACHE];
-    bool attempted, tested, disabled, uncertain;
-    uint64_t frame, calls, elapsed, fallbacks,wc_sources,cached_sources;
+    bool attempted, tested, disabled, uncertain,direct_tested;
+    uint64_t frame, calls, elapsed, fallbacks,wc_sources,cached_sources,direct_calls,staged_calls;
 } gd;
 
 bool RedfinGPUDisplayWritable(void)
@@ -88,16 +88,18 @@ static rf_gd_surface gd_stage_surface(void)
 {
     return {gd.stage.address, gd.stage.size, 0, RF_GD_PANEL_W, RF_GD_PANEL_H, RF_GD_STAGE_PITCH};
 }
-struct gd_submit_marks {uint64_t built, published, finished;};
+struct gd_submit_marks {uint64_t built, published, finished;bool direct;};
 static bool gd_submit(const rf_gd_layer *layers, unsigned count,
     uint64_t packed, uint64_t packed_length, bool panel, uint32_t *fence,
-    gd_submit_marks *marks = NULL)
+    gd_submit_marks *marks = NULL,int route=-1)
 {
     rf_gd_surface stage = gd_stage_surface();
     uint32_t *commands = (uint32_t *)gd.commands.kernel;
-    unsigned words = rf_gd_program(commands, RF_GD_WORDS, &stage, packed, packed_length, layers, count);
+    bool direct=route>0 || (route<0 && gd.direct_tested && rf_gd_direct_eligible(layers,count));
+    unsigned words = direct ? rf_gd_program_direct(commands,RF_GD_WORDS,&stage,packed,packed_length,layers,count) :
+        rf_gd_program(commands, RF_GD_WORDS, &stage, packed, packed_length, layers, count);
     if (!words) return false; /* No doorbell or target write occurred. */
-    if (marks) marks->built = gpuNow();
+    if (marks) {marks->built = gpuNow();marks->direct=direct;}
     redfin_gpu_sync(commands, words * sizeof(uint32_t), false);
     if (marks) marks->published = gpuNow();
     const uint64_t address = gd.commands.address;
@@ -108,6 +110,13 @@ static bool gd_submit(const rf_gd_layer *layers, unsigned count,
         return false;
     }
     if (marks) marks->finished = gpuNow();
+    if(panel) {
+        if(direct)++gd.direct_calls;else ++gd.staged_calls;
+        uint64_t n=gd.direct_calls+gd.staged_calls;
+        if(n<=4 || !(n%120))
+            IOLog("REDFIN GPU DIRECT PRESENT: n=%llu direct=%llu staged=%llu ABI=%u full-image-only=1 CPU-pixel-copy=0\n",
+                n,gd.direct_calls,gd.staged_calls,RF_GD_DIRECT_ABI);
+    }
     return true;
 }
 /* Both clear-free fullscreen and exact margin clears use real A620 output
@@ -151,6 +160,74 @@ static bool gd_check_case(const gd_buffer *input, gd_buffer *output, bool full)
         full, fence != 0 && redfin_gpu_done(fence), fence, RF_GD_PANEL_W * RF_GD_PANEL_H, mismatch, guards);
     return ok;
 }
+/* Compare the native fused sampling against the actual already-proved GPU
+ * scale+pack program. Full input patterns, every output pixel, all tails,
+ * input padding and an untouched intermediate image are checked. Only the
+ * small control page may change in the intermediate allocation. A mismatch
+ * leaves the existing general output route selected for this boot. */
+static bool gd_check_direct(void)
+{
+    static const uint32_t geometry[4][3]={{1080,2340,4352},{1125,2436,4608},
+                                      {1125,2435,4608},{80,61,320}};
+    gd_buffer input={},reference={},output={};
+    bool ok=gd_allocate(&input,UINT64_C(4608)*2436+PAGE_SIZE,true) &&
+        gd_allocate(&reference,RF_GD_PANEL_MAPPED+PAGE_SIZE,false) &&
+        gd_allocate(&output,RF_GD_PANEL_MAPPED+PAGE_SIZE,false);
+    uint64_t pixels=0,mismatches=0,guards=0,stage_writes=0;unsigned passed=0;
+    for(unsigned c=0;ok && c<4;++c) {
+        uint32_t w=geometry[c][0],h=geometry[c][1],pitch=geometry[c][2];
+        memset(input.kernel,0xa7,input.size);
+        for(unsigned y=0;y<h;++y) {
+            uint32_t *row=(uint32_t *)(input.kernel+(uint64_t)y*pitch);
+            for(unsigned x=0;x<w;++x)row[x]=gd_pattern(x+3*c,y+5*c);
+        }
+        memset(reference.kernel,0x5a,reference.size);memset(output.kernel,0x5a,output.size);
+        redfin_gpu_sync(input.kernel,input.size,true);
+        redfin_gpu_sync(reference.kernel,reference.size,true);redfin_gpu_sync(output.kernel,output.size,true);
+        rf_gd_layer layer={{input.address,input.size,0,w,h,pitch},
+            {0,0,w,h},{0,0,RF_GD_PANEL_W,RF_GD_PANEL_H}};
+        uint32_t ref_fence=0,fence=0;
+        ok=gd_submit(&layer,1,reference.address+64,RF_GD_PANEL_MAPPED,false,&ref_fence,NULL,0);
+        if(!ok)break;
+        memset(gd.stage.kernel,0x3c,RF_GD_CONTROL);redfin_gpu_sync(gd.stage.kernel,RF_GD_CONTROL,true);
+        ok=gd_submit(&layer,1,output.address+64,RF_GD_PANEL_MAPPED,false,&fence,NULL,1);
+        if(!ok)break;
+        redfin_gpu_invalidate(reference.kernel,reference.size);redfin_gpu_invalidate(output.kernel,output.size);
+        redfin_gpu_invalidate(input.kernel,input.size);redfin_gpu_invalidate(gd.stage.kernel,RF_GD_CONTROL);
+        for(unsigned y=0;y<RF_GD_PANEL_H;++y) {
+            const uint32_t *gold=(const uint32_t *)(reference.kernel+64+(uint64_t)y*RF_GD_PANEL_PITCH);
+            const uint32_t *actual=(const uint32_t *)(output.kernel+64+(uint64_t)y*RF_GD_PANEL_PITCH);
+            for(unsigned x=0;x<RF_GD_PANEL_W;++x) {
+                bool match=true;
+                for(unsigned component=0;component<4;++component) {
+                    int a=(actual[x]>>(8*component))&255,b=(gold[x]>>(8*component))&255;
+                    if(a-b>1 || b-a>1)match=false;
+                }
+                if(!match) {
+                    if(mismatches<4)IOLog("REDFIN GPU DIRECT PIXEL: case=%u x=%u y=%u actual=%#x expected=%#x\n",c,x,y,actual[x],gold[x]);
+                    ++mismatches;
+                }
+                ++pixels;
+            }
+        }
+        for(uint64_t at=0;at<output.size;++at)
+            if(at<64 || at>=64+RF_GD_PANEL_BYTES)guards+=output.kernel[at]!=0x5a || reference.kernel[at]!=0x5a;
+        for(unsigned y=0;y<h;++y) {
+            const uint32_t *row=(const uint32_t *)(input.kernel+(uint64_t)y*pitch);
+            for(unsigned x=0;x<w;++x)guards+=row[x]!=gd_pattern(x+3*c,y+5*c);
+            for(unsigned at=w*4;at<pitch;++at)guards+=input.kernel[(uint64_t)y*pitch+at]!=0xa7;
+        }
+        for(uint64_t at=(uint64_t)h*pitch;at<input.size;++at)guards+=input.kernel[at]!=0xa7;
+        for(uint64_t at=0;at<RF_GD_CONTROL;++at)stage_writes+=gd.stage.kernel[at]!=0x3c;
+        ok=!mismatches && !guards && !stage_writes;
+        if(ok)++passed;
+    }
+    bool complete=ok && passed==4 && pixels==UINT64_C(4)*RF_GD_PANEL_W*RF_GD_PANEL_H;
+    IOLog("REDFIN GPU DIRECT CHECK: ABI=%u cases=%u pixels=%llu mismatches=%llu guard-errors=%llu stage-writes=%llu completed=%u tolerance=1\n",
+        RF_GD_DIRECT_ABI,passed,pixels,mismatches,guards,stage_writes,complete);
+    bool dropped=gd_drop(&input) && gd_drop(&reference) && gd_drop(&output);
+    return complete && dropped;
+}
 static bool gd_check(void)
 {
     gd_buffer input = {}, output = {};
@@ -168,6 +245,7 @@ static bool gd_check(void)
     bool margins = full && gd_check_case(&input, &output, false);
     IOLog("REDFIN GPU DISPLAY CHECK: completed=%u full=%u margins=%u pixels-per-case=%u panel-mapped=0\n",
         full && margins, full, margins, RF_GD_PANEL_W * RF_GD_PANEL_H);
+    if(full && margins)gd.direct_tested=gd_check_direct();
     bool dropped_input = gd_drop(&input), dropped_output = gd_drop(&output);
     return full && margins && dropped_input && dropped_output;
 }

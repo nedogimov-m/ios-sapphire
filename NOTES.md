@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN full fused native GPU output block;102common/native compile PASS — 2026-10-27
+
+Hardware baseline V91 ordinary51.245FPS/90Hz/no input, full native bounded
+GLES/app Metal proof V90; clean1670847/Fastboot. Preferred88513176../906425b7..
+and complete current20H392 userland1a4ad42c../pair17d0f01f../cache496301fc../UI
+remain exact. Kernel baseline Actions40403226041/run20/source5b06349/01be8081..
+needs one new native-output-direct.patch appended after all current overlays.
+
+Implement whole fullscreen single-source GPU scale/packed-row fusion. Two
+native2D operations write even/odd physical4320-byte rows with8640-byte pitches;
+keep full source dimensions and pixel-centred signed8fraction-bit coordinates.
+No intermediate pixel image, CPU copy, DPU register/scanout/SMMU ownership change.
+Full args/BO/alias/extent checks run before emission; existing cropped/multilayer/
+margin/general code is unchanged and remains default unless native admission
+passes. Ordinary Finish/CPU caches/retained FIFO/real completion are unchanged.
+
+Complete native admission compares four actual GPU golden-reference full
+outputs:1080x2340,1125x2436,1125x2435,80x61. Check every channel(tolerance1LSB),
+every input/output padding/tail, unchanged input pixels and untouched entire
+intermediate pixel range; only its separate control page may change. Any pixel
+mismatch keeps the general route for this boot. Independent evidence requires
+that actual check plus real selected-route counters; a source marker alone is
+not completion or a throughput result.
+102common host contracts PASS, including decoded emitted PM4/every physical
+row/source coordinates/bounds/general fallback/old native/GLES/Metal/touch.
+Complete actual current RedfinGPU.cpp with native CI flags compiles PASS.
+Next fresh kernel CI and one combined V92/full native+system measurement;
+no native userspace/compiler rebuild or Phone/Photos/capture launches.
+No hardware fused-output or FPS improvement claimed; broad goal unfinished.
+
 ## REDFIN V91 same-binary ordinary bounded GLES51.245FPS — 2026-10-27
 
 Sourceaddde14/docsab5781f/start55908d7; exact V90 input1a4ad42c../pair17d0f01f../

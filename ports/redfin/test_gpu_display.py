@@ -67,6 +67,8 @@ class GPUDisplayTests(unittest.TestCase):
         (root/'display.c').write_text('#include "redfin_gpu_runtime.h"\n#include "redfin_gpu_display.h"\n'
             'unsigned program(uint32_t *o,unsigned n,const struct rf_gd_surface *s,uint64_t p,uint64_t z,'
             'const struct rf_gd_layer *l,unsigned c){return rf_gd_program(o,n,s,p,z,l,c);}\n'
+            'unsigned program_direct(uint32_t *o,unsigned n,const struct rf_gd_surface *s,uint64_t p,uint64_t z,'
+            'const struct rf_gd_layer *l,unsigned c){return rf_gd_program_direct(o,n,s,p,z,l,c);}\n'
             'int panel_page(uint64_t p){return rf_gd_panel_page(p);}\n')
         subprocess.run(['cc', '-O2', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
             '-I', HERE/'include', root/'display.c', '-o', root/'display.so'], check=True, capture_output=True)
@@ -74,6 +76,7 @@ class GPUDisplayTests(unittest.TestCase):
         cls.lib.program.argtypes = [C.POINTER(C.c_uint32), C.c_uint, C.POINTER(Surface),
             C.c_uint64, C.c_uint64, C.POINTER(Layer), C.c_uint]
         cls.lib.panel_page.argtypes = [C.c_uint64]
+        cls.lib.program_direct.argtypes=cls.lib.program.argtypes
 
     def scene(self, count=1):
         stage = Surface(0x18000000, STAGE_SIZE, 0, W, H, STAGE_PITCH)
@@ -87,6 +90,79 @@ class GPUDisplayTests(unittest.TestCase):
         out = (C.c_uint32*WORDS)(*([0xdeadbeef]*WORDS))
         count = self.lib.program(out, WORDS, C.byref(stage), packed, size, layers, len(layers))
         return list(out[:count]), out
+
+    def emit_direct(self,stage,layers,packed=0x1a000000,size=PANEL_SIZE):
+        out=(C.c_uint32*WORDS)(*([0xdeadbeef]*WORDS))
+        count=self.lib.program_direct(out,WORDS,C.byref(stage),packed,size,layers,len(layers))
+        return list(out[:count]),out
+
+    def test_fused_output_covers_every_physical_row_once_without_an_intermediate_image(self):
+        for width,height,pitch in ((1080,2340,4352),(1125,2436,4608),(1125,2435,4608),
+                                   (80,61,320),(2,2,64),(16384,16384,65536)):
+            # Keep the actual128MiB BO limit: a larger declaration must fail.
+            with self.subTest(source=(width,height,pitch)):
+                stage,layers=self.scene()
+                layers[0].surface=Surface(0x24000000,pitch*height,0,width,height,pitch)
+                layers[0].source=Rect(0,0,width,height)
+                layers[0].destination=Rect(0,0,W,H)
+                words,raw=self.emit_direct(stage,layers)
+                if pitch*height>128*1024*1024:
+                    self.assertFalse(words);self.assertEqual(raw[0],0xdeadbeef);continue
+                _,blits,events=decode(words)
+                self.assertEqual(len(blits),2)
+                rows=[]
+                for registers in blits:
+                    self.assertFalse(registers[0x8c00]&(1<<7))
+                    self.assertTrue(registers[0xb4c0]&(1<<16))
+                    self.assertEqual(registers[0xb4c0]&((1<<20)|(1<<22)),(1<<20)|(1<<22))
+                    src=registers[0xb4c2]|(registers[0xb4c3]<<32)
+                    dst=registers[0x8c18]|(registers[0x8c19]<<32)
+                    self.assertEqual(src,layers[0].surface.address)
+                    self.assertNotEqual(dst,stage.address)
+                    self.assertEqual(registers[0x8c1a]*64,PITCH*2)
+                    self.assertEqual(((registers[0xb4c4]>>9)&0x7fff)*64,pitch)
+                    dx,dy=registers[0x8405]&65535,registers[0x8405]>>16
+                    dw=(registers[0x8406]&65535)-dx+1
+                    dh=(registers[0x8406]>>16)-dy+1
+                    self.assertEqual((dw,dh),(W,H//2))
+                    def signed_fixed(value):
+                        self.assertEqual(value&~0x01ffffff,0)
+                        return (value-(1<<25) if value&(1<<24) else value)/256
+                    sy1=signed_fixed(registers[0x8403]);sy2=signed_fixed(registers[0x8404])
+                    for row in range(dh):
+                        physical=dst+(dy+row)*PITCH*2+dx*4
+                        y=(physical-0x1a000000)//PITCH
+                        # Hardware uses pixel-centred source rectangles. The
+                        # only permitted difference is rounding its8fraction
+                        # bits once, not selecting a different source row.
+                        actual=sy1-0.5+(row+0.5)*(sy2-sy1+1)/dh
+                        expected=-0.5+(y+0.5)*height/H
+                        self.assertLessEqual(abs(actual-expected),1/256+1e-9)
+                        rows.append((physical,y,dw*4))
+                rows.sort();self.assertEqual(len(rows),H)
+                for y,(address,index,length) in enumerate(rows):
+                    self.assertEqual((address,index,length),(0x1a000000+y*PITCH,y,PITCH))
+                self.assertEqual(rows[-1][0]+rows[-1][2],0x1a000000+PITCH*H)
+                # No staged-image source or destination; only the retained
+                # native event timestamp touches its separate control page.
+                for event in events:
+                    if len(event)==4:self.assertEqual(event[1]|(event[2]<<32),stage.address+CONTROL)
+
+    def test_fusion_rejects_partial_cropped_multi_layer_and_invalid_extents_without_emitting(self):
+        for mode in ('margin','crop','small-source','extra-layer','alias','short','pitch','overflow'):
+            stage,layers=self.scene(2 if mode=='extra-layer' else 1)
+            for l in layers:l.destination=Rect(0,0,W,H)
+            if mode=='margin':layers[0].destination=Rect(0,0,W,H-1)
+            if mode=='crop':layers[0].source=Rect(1,0,1124,2436)
+            if mode=='small-source':layers[0].surface.height=layers[0].source.h=1
+            if mode=='alias':layers[0].surface=stage;layers[0].source=Rect(0,0,W,H)
+            if mode=='short':layers[0].surface.length=64
+            if mode=='pitch':layers[0].surface.pitch=4320
+            if mode=='overflow':layers[0].surface.address=0xfffffffffffff000
+            words,raw=self.emit_direct(stage,layers)
+            self.assertFalse(words);self.assertEqual(raw[0],0xdeadbeef)
+            if mode in ('margin','crop','small-source','extra-layer'):
+                self.assertTrue(self.emit(stage,layers)[0])
 
     def test_final_owned_display_sources_match_the_actual_ordered_kernel_overlay(self):
         from test_smp_gui import patched_source

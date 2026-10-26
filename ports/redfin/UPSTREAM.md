@@ -1,5 +1,21 @@
 # HackiOS upstream review — 2026-10-22
 
+## Fullscreen native A620 scale/packed-row fusion ready for hardware — 2026-10-27
+
+Preferred source pins unchanged. Reviewed Mesa25.0.7 fd6_blitter.cc
+emit_blit_texture/emit_blit_src and a6xx.xml0x8401..0x8406/source fields:
+original2D blits use pixel-centred source extents, documented low8source bits
+are valid and coordinates signed. Redfin's4320-byte panel pitch still needs
+aligned even/odd row views. Fuse scaling into those final views for exact
+single-full-image output, preserving all original sampling/cache/ECO/FIFO
+completion and general composition fallbacks; no foreign physical register
+addresses or DPU programming imported.
+Four native whole-output/reference/input/tail/intermediate-untouched cases gate
+each boot's admission.102common host/complete native kernel TU compile PASS.
+V91 ordinary51.245FPS remains the observation; kernel CI and actual direct
+output/pixel/throughput proof pending. Same20H392 native GLES/app Metal pair
+and compiler/shader cache are reused; this is a kernel output-only block.
+
 ## Native V90 two-frame direct pipeline passes at50.942FPS — 2026-10-27
 
 Own sourceaddde14, unchanged preferred88513176../906425b7.., actual20H392 native

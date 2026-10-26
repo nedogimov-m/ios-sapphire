@@ -31,6 +31,7 @@
 #define RF_GD_STAGE_BYTES (RF_GD_CONTROL + RF_GR_HOST_PAGE)
 #define RF_GD_WORDS 2048u
 #define RF_GD_LAYERS 4u
+#define RF_GD_DIRECT_ABI 1u
 
 struct rf_gd_surface {
     uint64_t address, length;
@@ -112,20 +113,20 @@ static inline void rf_gd_dst(struct rf_gd_stream *s, const struct rf_gd_surface 
     rf_gd_word(s, (uint32_t)at); rf_gd_word(s, (uint32_t)(at >> 32));
     rf_gd_word(s, dst->pitch >> 6);
 }
-static inline void rf_gd_blit(struct rf_gd_stream *s,
+static inline void rf_gd_blit_samples(struct rf_gd_stream *s,
     const struct rf_gd_surface *src, const struct rf_gd_rect *from,
     const struct rf_gd_surface *dst, const struct rf_gd_rect *to,
-    bool linear, bool clear)
+    bool linear, bool clear, const uint32_t *samples)
 {
     uint32_t ctl = (0xfu << 20) | (0x30u << 8) | (0x10u << 24) | (clear ? 1u << 7 : 0);
     rf_gd_reg(s, 0x8c00, ctl); rf_gd_reg(s, 0x8400, ctl);
     rf_gd_reg(s, 0xacc0, (0x30u << 3) | (0xfu << 12));
     rf_gd_reg(s, 0x8c01, 0);
     rf_gd_word(s, rf_gd_type4(0x8401, 6));
-    rf_gd_word(s, clear ? 0 : from->x << 8);
-    rf_gd_word(s, clear ? 0 : (from->x + from->w - 1) << 8);
-    rf_gd_word(s, clear ? 0 : from->y << 8);
-    rf_gd_word(s, clear ? 0 : (from->y + from->h - 1) << 8);
+    rf_gd_word(s, clear ? 0 : samples ? samples[0] : from->x << 8);
+    rf_gd_word(s, clear ? 0 : samples ? samples[1] : (from->x + from->w - 1) << 8);
+    rf_gd_word(s, clear ? 0 : samples ? samples[2] : from->y << 8);
+    rf_gd_word(s, clear ? 0 : samples ? samples[3] : (from->y + from->h - 1) << 8);
     rf_gd_word(s, to->x | (to->y << 16));
     rf_gd_word(s, (to->x + to->w - 1) | ((to->y + to->h - 1) << 16));
     rf_gd_word(s, rf_gd_type4(0xb4c0, 5));
@@ -146,6 +147,11 @@ static inline void rf_gd_blit(struct rf_gd_stream *s,
     rf_gd_packet(s, 0x2c, 3); rf_gd_idle(s);
     rf_gd_reg(s, 0x8e04, 0);
 }
+static inline void rf_gd_blit(struct rf_gd_stream *s,
+    const struct rf_gd_surface *src, const struct rf_gd_rect *from,
+    const struct rf_gd_surface *dst, const struct rf_gd_rect *to,
+    bool linear, bool clear)
+{rf_gd_blit_samples(s,src,from,dst,to,linear,clear,NULL);}
 
 /* Every layer replaces all four destination channels. Clear only the exact
  * complement of the first validated rectangle; that layer defines its whole
@@ -172,7 +178,7 @@ static inline unsigned rf_gd_margins(const struct rf_gd_rect *cover,
 /* All geometry and complete BO extents are checked before the first word.
  * Caller must retain/map these exact descriptors and use the native queue's
  * completion/fault checks. An emitted command stream is never a completion. */
-static inline unsigned rf_gd_program(uint32_t *words, unsigned room,
+static inline bool rf_gd_inputs_valid(uint32_t *words, unsigned room,
     const struct rf_gd_surface *stage, uint64_t packed, uint64_t packed_length,
     const struct rf_gd_layer *layers, unsigned count)
 {
@@ -183,14 +189,21 @@ static inline unsigned rf_gd_program(uint32_t *words, unsigned room,
         packed_length < RF_GD_PANEL_MAPPED || packed_length > RF_GR_BUFFER_MAX ||
         packed > UINT64_MAX - packed_length ||
         (packed < stage->address + stage->length && stage->address < packed + packed_length) ||
-        !layers || !count || count > RF_GD_LAYERS) return 0;
+        !layers || !count || count > RF_GD_LAYERS) return false;
     for (unsigned i = 0; i < count; ++i)
         if (!rf_gd_rect_valid(&layers[i].surface, &layers[i].source) ||
             !rf_gd_rect_valid(stage, &layers[i].destination) ||
             (layers[i].surface.address < stage->address + stage->length &&
              stage->address < layers[i].surface.address + layers[i].surface.length) ||
             (layers[i].surface.address < packed + packed_length &&
-             packed < layers[i].surface.address + layers[i].surface.length)) return 0;
+             packed < layers[i].surface.address + layers[i].surface.length)) return false;
+    return true;
+}
+static inline unsigned rf_gd_program(uint32_t *words, unsigned room,
+    const struct rf_gd_surface *stage, uint64_t packed, uint64_t packed_length,
+    const struct rf_gd_layer *layers, unsigned count)
+{
+    if(!rf_gd_inputs_valid(words,room,stage,packed,packed_length,layers,count))return 0;
     struct rf_gd_surface even_src = {stage->address, stage->length, 0,
         RF_GD_PANEL_W, RF_GD_PANEL_H / 2, 2 * RF_GD_STAGE_PITCH};
     struct rf_gd_surface odd_src = {stage->address + RF_GD_STAGE_PITCH,
@@ -225,5 +238,59 @@ static inline unsigned rf_gd_program(uint32_t *words, unsigned room,
     rf_gd_packet(&s, 0x65, 1); /* Return the marker to direct rendering. */
     rf_gd_reg(&s, 0x8e04, 0x04100000u);
     return s.failed ? 0 : s.used;
+}
+
+/* Full-image/single-layer output only. General composition, crop, partial
+ * destinations and unusual views retain the proved intermediate program.
+ * A6xx uses pixel-centred scaling: source TL-1/2+(i+1/2)*S/D. Splitting the
+ * destination into D/2 rows gives step2*S/D and source TL +/- S/(2*D).
+ * The native 2D source coordinates are signed, with8fraction bits; their low8 bits
+ * are valid (Mesa a6xx.xml). Keep the original native sampling flags and
+ * complete source dimensions; the native full-image comparison gates use.
+ * Samples remain inside the exact source image although the outer sampling
+ * rectangle can extend by half a source step. No BO slack is sampled. */
+static inline bool rf_gd_direct_eligible(const struct rf_gd_layer *layers,unsigned count)
+{
+    if(!layers || count!=1)return false;
+    const struct rf_gd_layer *l=&layers[0];
+    return rf_gd_rect_valid(&l->surface,&l->source) && l->surface.width>=2 &&
+        l->surface.height>=2 && !l->source.x && !l->source.y &&
+        l->source.w==l->surface.width && l->source.h==l->surface.height &&
+        !l->destination.x && !l->destination.y &&
+        l->destination.w==RF_GD_PANEL_W && l->destination.h==RF_GD_PANEL_H;
+}
+static inline unsigned rf_gd_program_direct(uint32_t *words,unsigned room,
+    const struct rf_gd_surface *stage,uint64_t packed,uint64_t packed_length,
+    const struct rf_gd_layer *layers,unsigned count)
+{
+    if(!rf_gd_inputs_valid(words,room,stage,packed,packed_length,layers,count) ||
+       !rf_gd_direct_eligible(layers,count))return 0;
+    struct rf_gd_surface even={packed,packed_length,0,RF_GD_PANEL_W,
+        RF_GD_PANEL_H/2,2*RF_GD_PANEL_PITCH};
+    struct rf_gd_surface odd={packed+RF_GD_PANEL_PITCH-32,
+        packed_length-(RF_GD_PANEL_PITCH-32),0,RF_GD_PANEL_W+8,
+        RF_GD_PANEL_H/2,2*RF_GD_PANEL_PITCH};
+    const struct rf_gd_rect halves[2]={{0,0,RF_GD_PANEL_W,RF_GD_PANEL_H/2},
+                                    {8,0,RF_GD_PANEL_W,RF_GD_PANEL_H/2}};
+    if(!rf_gd_rect_valid(&even,&halves[0]) || !rf_gd_rect_valid(&odd,&halves[1]))return 0;
+    const struct rf_gd_surface *source=&layers[0].surface;
+    int32_t shift=(int32_t)(((uint64_t)source->height*128+RF_GD_PANEL_H/2)/RF_GD_PANEL_H);
+    uint32_t samples[2][4];
+    for(unsigned p=0;p<2;++p) {
+        int32_t first=p?shift:-shift;
+        samples[p][0]=0;samples[p][1]=(source->width-1)<<8;
+        samples[p][2]=(uint32_t)first&0x01ffffffu;
+        samples[p][3]=(uint32_t)(first+(int32_t)((source->height-1)<<8))&0x01ffffffu;
+    }
+    struct rf_gd_stream s={words,0,room,false,stage->address+RF_GD_CONTROL};
+    rf_gd_event(&s,29,true);rf_gd_event(&s,28,true);
+    rf_gd_idle(&s);rf_gd_event(&s,25,false);rf_gd_event(&s,24,false);
+    rf_gd_event(&s,49,false);rf_gd_idle(&s);
+    rf_gd_reg(&s,0x8e07,0x01000001u);rf_gd_packet(&s,0x65,0xcu);
+    rf_gd_blit_samples(&s,source,&layers[0].source,&even,&halves[0],true,false,samples[0]);
+    rf_gd_blit_samples(&s,source,&layers[0].source,&odd,&halves[1],true,false,samples[1]);
+    rf_gd_publish_color(&s);rf_gd_packet(&s,0x65,1);
+    rf_gd_reg(&s,0x8e04,0x04100000u);
+    return s.failed?0:s.used;
 }
 #endif
