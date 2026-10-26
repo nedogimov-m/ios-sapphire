@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CI24 verified; fresh V102 applied; combined V99 starts — 2026-10-27
+
+Previous goal turn made concrete progress (b6e1a1e/e90b110 and V96/V97 evidence),
+then verified a live CI24 wait. That exact run40422287650/run24/sourcee90b110
+is now TERMINAL SUCCESS. Complete patch map, both native protocol copies,
+retained source/ABI, XNU/KDK, arm64 and artifact identity PASS. Actual kernel
+398b6b7adea2f51b69493be1a72eddf8e9d5ddcda6ed4045717edbedae9cf5b5.
+No userland/compiler/UI rebuild; current035131/Mesa1a4ad42c../Metal17d0f01f../
+cache496301fc../UI layout-v2 e155cb49.. retained. Full V99 image preflight PASS.
+
+V102 at actual clean1707842 applies ONCE: full live preimages/backups/native
+readonly fsck/signatures/ranges/whole-file readback PASS;2changed/zero new/
+zero freed blocks, clean Fastboot. V102 is STALE/never reuse. Current cached
+and standalone full native startup jobs agree ON; captures and automatic
+Phone/Photos opens OFF. V99 image 84866b1827e326af4ee7663eff403fee0e10dadb5b0810d34fce5d6a6264e337
+with fresh 077ad640e2795543: one combined complete GMEM/sysmem/native app Metal,
+full private filter/physical panel reference, cold readiness wait, actual
+ordinary output/finite animation and late-clock adaptation capture. No new
+physical/FPS/inset success inferred before terminal evidence. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x077ad640e2795543 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Next fresh V103/imageV100 must use the actual postboot root. All wider goal
+items remain required; next connected controls/brightness block is pending.
+
 ## REDFIN cold-output fix e90b110 in live CI24; fresh V102 read complete — 2026-10-27
 
 Previous goal turn made progress by registering the complete revised scope
