@@ -80,10 +80,17 @@ static inline unsigned redfin_display_probe_checks(const char *metal,size_t meta
     const char *gpu,size_t gpu_bytes,uint64_t nonce)
 {
     if(!nonce)return 0;
-    char boot[32],metal_success[128],gpu_boot[64];
+    char boot[32],metal_success[128],gpu_boot[64],mode_begin[2][112],mode_end[2][112];
     snprintf(boot,sizeof(boot),"boot=%016llx ",(unsigned long long)nonce);
     snprintf(metal_success,sizeof(metal_success),"REDFIN METAL CHECK EXIT: boot=%016llx result=0 full-contract=1",(unsigned long long)nonce);
     snprintf(gpu_boot,sizeof(gpu_boot),"REDFIN GPU RENDER BOOT: %016llx",(unsigned long long)nonce);
+    const char *modes[]={"gmem","sysmem"};
+    for(unsigned i=0;i<2;++i) {
+        snprintf(mode_begin[i],sizeof(mode_begin[i]),
+            "REDFIN GLES MODE: boot=%016llx mode=%s hardware-required=1",(unsigned long long)nonce,modes[i]);
+        snprintf(mode_end[i],sizeof(mode_end[i]),
+            "REDFIN GLES MODE RESULT: boot=%016llx mode=%s result=0 hardware=1",(unsigned long long)nonce,modes[i]);
+    }
     bool metal_done=false;
     for(size_t at=0;metal&&at<metal_bytes;) {
         const char *line=metal+at,*end=memchr(line,'\n',metal_bytes-at);
@@ -97,7 +104,9 @@ static inline unsigned redfin_display_probe_checks(const char *metal,size_t meta
         at+=bytes+(end?1:0);
     }
     bool gpu_current=false,gpu_done=false;
+    unsigned modes_started=0,modes_completed=0,mode_active=0;
     static const char gpu_success[]="REDFIN GPU RENDER RESULT: result=0 hardware=1 draws=2";
+    static const char gpu_dual_success[]="REDFIN GPU RENDER RESULT: result=0 hardware=1 draws=4 modes=gmem,sysmem";
     for(size_t at=0;gpu&&at<gpu_bytes;) {
         const char *line=gpu+at,*end=memchr(line,'\n',gpu_bytes-at);
         size_t bytes=end?(size_t)(end-line):gpu_bytes-at;
@@ -105,10 +114,30 @@ static inline unsigned redfin_display_probe_checks(const char *metal,size_t meta
         if(redfin_display_probe_find(line,bytes,"REDFIN GPU RENDER BOOT:")) {
             gpu_current=bytes==strlen(gpu_boot)&&!memcmp(line,gpu_boot,bytes);
             gpu_done=false;
+            modes_started=0;modes_completed=0;mode_active=0;
         } else if(gpu_current) {
             if(redfin_display_probe_find(line,bytes,"REDFIN GPU RENDER FAIL:"))return 2;
+            if(redfin_display_probe_find(line,bytes,"REDFIN GLES MODE:")) {
+                unsigned mode=0;
+                for(unsigned i=0;i<2;++i)
+                    if(bytes==strlen(mode_begin[i])&&!memcmp(line,mode_begin[i],bytes))mode=i+1;
+                if(!mode||mode_active||gpu_done||
+                    (mode==1?(modes_started!=0||modes_completed!=0):
+                             (modes_started!=1||modes_completed!=1)))return 2;
+                mode_active=mode;modes_started|=1u<<(mode-1);
+            }
+            if(redfin_display_probe_find(line,bytes,"REDFIN GLES MODE RESULT:")) {
+                unsigned mode=0;
+                for(unsigned i=0;i<2;++i)
+                    if(bytes==strlen(mode_end[i])&&!memcmp(line,mode_end[i],bytes))mode=i+1;
+                if(!mode||mode!=mode_active||gpu_done)return 2;
+                modes_completed|=1u<<(mode-1);mode_active=0;
+            }
             if(redfin_display_probe_find(line,bytes,"REDFIN GPU RENDER RESULT:")) {
-                if(bytes!=sizeof(gpu_success)-1||memcmp(line,gpu_success,bytes))return 2;
+                bool legacy=!modes_started&&bytes==sizeof(gpu_success)-1&&!memcmp(line,gpu_success,bytes);
+                bool dual=modes_started==3&&modes_completed==3&&!mode_active&&
+                    bytes==sizeof(gpu_dual_success)-1&&!memcmp(line,gpu_dual_success,bytes);
+                if(gpu_done||(!legacy&&!dual))return 2;
                 gpu_done=true;
             }
         }

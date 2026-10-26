@@ -233,7 +233,7 @@ class Image:
         walk(0, '')
         return exports, sorted(forwarded)
 
-    def objc_methods(self, class_name):
+    def objc_methods(self, class_name, *, selectors=None):
         objc = self.cache.image('/usr/lib/libobjc.A.dylib')
         opt, size = objc.sections['__objc_opt_ro']
         version, _ = struct.unpack('<II', self.cache.read(opt, 8))
@@ -267,7 +267,9 @@ class Image:
                         require(stride == 24, 'unknown absolute method layout')
                         name, types, imp = (self.cache.pointer(entry + 8 * i) for i in range(3))
                     key = ('+' if meta else '-') + self.cache.string(name)
-                    require(key not in methods, 'duplicate ObjC method')
+                    if selectors is not None and key not in selectors:
+                        continue
+                    require(key not in methods, 'duplicate ObjC method: ' + class_name + key)
                     methods[key] = dict(types=self.cache.string(types), rva=imp - self.base)
             return methods
         raise ValueError('actual cache lacks ObjC class ' + class_name)

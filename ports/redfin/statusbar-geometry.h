@@ -23,7 +23,10 @@ static inline bool redfin_ui_time_shift(struct redfin_ui_rect time,
     if (!shift || !redfin_ui_rect_valid(time) || !redfin_ui_rect_valid(camera) ||
         !redfin_ui_rect_valid(window)) return false;
     *shift=0;
-    if (!redfin_ui_intersects(time,camera)) return true;
+    /* Keep the same three-point clearance after a late native frame update,
+     * including frames that miss the camera but reset its intended margin. */
+    struct redfin_ui_rect exclusion=camera;exclusion.x-=3;exclusion.w+=6;
+    if (!redfin_ui_intersects(time,exclusion)) return true;
     double right=camera.x+camera.w+3-time.x;
     double left=camera.x-3-(time.x+time.w);
     bool fits_right=time.x+right>=window.x && time.x+right+time.w<=window.x+window.w;
@@ -31,6 +34,6 @@ static inline bool redfin_ui_time_shift(struct redfin_ui_rect time,
     if (!fits_right && !fits_left) return false;
     *shift=fits_right && (!fits_left || fabs(right)<=fabs(left)) ? right : left;
     struct redfin_ui_rect after=time; after.x+=*shift;
-    return !redfin_ui_intersects(after,camera);
+    return !redfin_ui_intersects(after,exclusion);
 }
 #endif

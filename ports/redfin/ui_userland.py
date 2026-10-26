@@ -16,6 +16,9 @@ REFRESH_LOG='/private/var/mobile/Library/Logs/redfin-refresh.log'
 LOG='/private/var/mobile/Library/Logs/redfin-ui.log'
 UIKIT='/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore'
 METHODS={
+    'UIView': {'-setFrame:':'v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16',
+        '-setBounds:':'v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16',
+        '-setCenter:':'v32@0:8{CGPoint=dd}16','-layoutSubviews':'v16@0:8'},
     'UIApplication': {'-isIdleTimerDisabled':'B16@0:8',
         '-setIdleTimerDisabled:':'v20@0:8B16'},
     '_UIStatusBar': {'-layoutSubviews':'v16@0:8',
@@ -42,7 +45,7 @@ def build(out,cache_path=None):
     with (Cache(cache_path) if cache_path else Cache()) as cache:
         image=cache.image(UIKIT)
         for name,wanted in METHODS.items():
-            methods=image.objc_methods(name)
+            methods=image.objc_methods(name,selectors=wanted)
             if any(key not in methods or methods[key]['types']!=types for key,types in wanted.items()):
                 raise ValueError('native status-bar ABI differs: '+name)
         uuid=image.uuid
@@ -102,7 +105,8 @@ def build(out,cache_path=None):
         probe_request_path='/redfin/display-probe-request',
         source_sha256={name:hashlib.sha256((HERE/name).read_bytes()).hexdigest() for name in
             ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m',
-             'display-refresh.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h')})
+             'display-refresh.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
+             'statusbar-geometry.h','graphics-exec-scope.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')
     (out/'refresh-log-initial').write_bytes(b'REDFIN verified physical refresh adaptation; native periods are seconds.\n')
     (out/'build.json').write_text(json.dumps(report,indent=2)+'\n')

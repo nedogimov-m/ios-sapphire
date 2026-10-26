@@ -87,5 +87,21 @@ int refresh(uint32_t hz,uint64_t clock_hz,struct redfin_display_refresh_paramete
             b'/Applications/MobilePhone.app/PlugIns/extension',b'/private/var/mobile/Applications/AppStore.app/AppStore']:
             self.assertFalse(self.lib.scope(path))
 
+    def test_late_native_clock_frames_restore_the_same_clearance_without_accumulating_offsets(self):
+        camera=Rect(0,0,375*145/1080,812*136/2340);window=Rect(0,0,375,812)
+        for width in (29,31.333333,54):
+            for native_x in (20,camera.w-0.5,camera.w,camera.w+0.5,camera.w+2.99):
+                clock=Rect(native_x,14,width,18);delta=C.c_double()
+                for _ in range(6):
+                    self.assertTrue(self.lib.shift(clock,camera,window,C.byref(delta)))
+                    clock.x+=delta.value
+                    self.assertAlmostEqual(clock.x,camera.w+3)
+                    self.assertTrue(self.lib.shift(clock,camera,window,C.byref(delta)))
+                    self.assertAlmostEqual(delta.value,0)
+                    clock.x=native_x # an independent later native layout resets the frame
+        # The physical exclusion is irrelevant to a clock on a different row.
+        clock=Rect(21,100,54,23);delta=C.c_double()
+        self.assertTrue(self.lib.shift(clock,camera,window,C.byref(delta)));self.assertEqual(delta.value,0)
+
 
 if __name__=='__main__':unittest.main()

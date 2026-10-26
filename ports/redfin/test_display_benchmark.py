@@ -103,5 +103,25 @@ unsigned ready(const char *m,size_t mb,const char *g,size_t gb,uint64_t n){
                         (metal,gpu+b'REDFIN GPU RENDER FAIL: bad pixels\n')):
                 self.assertEqual(call(m,g),2)
 
+            begin=lambda mode:b'REDFIN GLES MODE: boot=12345678abcdef01 mode='+mode+b' hardware-required=1\n'
+            end=lambda mode:b'REDFIN GLES MODE RESULT: boot=12345678abcdef01 mode='+mode+b' result=0 hardware=1\n'
+            start=gpu.split(b'REDFIN GPU RENDER RESULT:')[0]
+            terminal=b'REDFIN GPU RENDER RESULT: result=0 hardware=1 draws=4 modes=gmem,sysmem\n'
+            gmem=begin(b'gmem')+end(b'gmem');sysmem=begin(b'sysmem')+end(b'sysmem')
+            dual=start+gmem+sysmem+terminal
+            self.assertEqual(call(metal,dual),1)
+            self.assertEqual(call(metal,start+gmem+sysmem),0)
+            self.assertEqual(call(metal,dual[:-1]),0)
+            self.assertEqual(call(metal,dual.replace(b'abcdef01',b'abcdef02')),0)
+            for value in (start+terminal,start+gmem+terminal,start+sysmem+gmem+terminal,
+                          start+gmem+gmem+sysmem+terminal,start+begin(b'gmem')+sysmem+terminal,
+                          start+end(b'gmem')+sysmem+terminal,dual+terminal,
+                          dual.replace(b'mode=sysmem result=0',b'mode=sysmem result=1'),
+                          dual.replace(b'mode=sysmem hardware-required=1',b'mode=sysmem hardware-required=0'),
+                          dual.replace(b'draws=4 modes=gmem,sysmem',b'draws=2'),
+                          dual.replace(b'draws=4',b'draws=40'),
+                          dual+begin(b'gmem')):
+                with self.subTest(transcript=value):self.assertEqual(call(metal,value),2)
+
 
 if __name__=='__main__':unittest.main()

@@ -1,5 +1,29 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native clock-frame ownership and dual-mode observer pairing — 2026-10-27
+
+Keep the previously reviewed preferred kernel/userland pins and the existing
+88513176../906425b7.. GLES bridge/Mesa25.0.7 compiler pairing. Their reviewed
+display path has no Redfin-specific native camera-cutout layout adapter.
+Use the installed20H392 UIKitCore UUID1242978a2c2c37818d6c9777edce2804 and
+its verified UIView CGRect/CGPoint/layout method encodings for this own fix.
+
+Bind only actual native time-display views to their weak owning status bar.
+Restore the physical three-point camera clearance after late frame/bounds/
+center/layout updates as well as parent layout; retain every exact native
+predecessor, including hooked superclass calls, without replacing UIView's
+base methods. Native-runtime tests exercise resets, inherited overrides,
+unrelated views and owner destruction; full20H392 imports/signatures PASS.
+Physical lock/rotate/respring persistence remains to be observed.
+
+V96 now independently proves both full native GMEM/sysmem modes, actual scoped
+sysmem GLES composition and app Metal. Its old FPS observer rejects the new
+four-draw terminal record, so no V96 FPS is established. Pair that observer
+with the complete ordered two-mode result, retaining failed/missing/stale
+record rejection and the original legacy checker path. Reuse the completed
+physical-reference kernel Actions40417409066/run23/source5fedeae for one
+combined output/UI run; no new shader/compiler/kernel rebuild for this fix.
+
 ## Physical direct-output oracle now follows its actual route — 2026-10-27
 
 Own Redfin integration correction after native V94private output passed all

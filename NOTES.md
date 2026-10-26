@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V96 both native GPU modes pass; complete late-clock/gate fix built — 2026-10-27
+
+V96 TERMINAL: authenticated0553cfc7c755322b, userspace alive, one backboardd62,
+clean consistent unmounted HFSX1698420 and verified Fastboot; no live cycle
+process remains. Full independent GMEM and exec sysmem draw/direct/fetch/
+seed/CPU-first/pixel/tail/frame-budget checks PASS, final GPU result0/draws4;
+full native app Metal CHECK EXIT0 PASS. Actual scoped GPU sysmem/direct GLES
+reaches900frames with zero GL errors and bounded real-fence admission.
+Touch31contacts/31releases, error0/overflows0. Private compositor evidence is
+logs/redfin/gui-platform-v96/compositor-evidence.json. No automatic app opens.
+
+No V96 FPS claim: the observer immediately refuses state2 because it still
+requires the old draws2 terminal record. The complete fix accepts the new
+exact terminal only after both ordered nonce-bound hardware mode results;
+retains legacy support and rejects missing/failed/malformed/stale transcripts.
+Status-bar fix also handles the user's recurring inset reset: tag actual
+clock views, weakly retain their owner and reapply three-point physical-camera
+clearance after late native frame/bounds/center/layout changes. Parent-layout
+fallback remains; native predecessors, inherited dispatch and unrelated views
+are preserved. No layout polling or global UIView method replacement.
+
+18combined host/native-runtime contracts PASS, including inherited clocks,
+late resets, no accumulating offset, weak-owner destruction and strict dual
+mode evidence. Full native UI layout-v2 build, actual20H392 imports (52libs)
+and signatures PASS; UI e155cb49../refresh4a02d6e1.. . UIView metadata review
+is scoped to requested selectors; duplicate requested methods still fail.
+GLES/Mesa1a4ad42c../app Metal17d0f01f../shader cache496301fc.. are unchanged.
+
+Already completed kernel Actions40417409066/run23/source5fedeae is verified
+against the complete current patch map, native markers, XNU/KDK, arm64 and
+artifact checksum: a456fc9af8d208aa26bffe06c47bf52ca07258d4ac9d4805fe0575090c2dc69c.
+Prepared V97 full-image preflight PASS; fresh V101 snapshot is reading actual
+1698420 for the combined physical-reference/UI run. No V101 apply/boot or new
+physical inset/performance success claimed at this checkpoint. V100 stays
+STALE. Exact actual V96 boot args remain in its original entry below.
+Broad rewritten goal remains active; controls/brightness/cellular/eSIM/cameras
+and the remaining Wi-Fi/power/thermal/sensor/account work are unfinished.
+
 ## REDFIN remaining objective rewritten and registered — 2026-10-27
 
 User cleared the old goal and explicitly requested a rewritten `/goal` with
