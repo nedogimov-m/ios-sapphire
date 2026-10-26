@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN exact realtime-display cache policy implemented;54host/native build PASS — 2026-10-26
+
+Actual V77 metadata identifies Apple's realtime request0x700 on both full
+11239424byte CoreAnimation buffers. XNU IOMapTypes.h confirms kIORealTimeCache7
+shifted8; ARM memory_types.h's normal-uncached RT mapping includes WCOMB.
+Adapt that request to the existing proven Redfin WC allocation/mapping policy,
+with exact fresh descriptor ownership and all actual CPU/GPU barriers/fences.
+Other explicit cache modes remain on their original paths. Add separate
+RedfinSurfaceCachePolicy2; keep the existing cache ABI1. No cached allocation
+is retyped. Complete original/new source remains privately frozen.
+
+54combined host contracts PASS. Native checker requires actual policy2 and
+adds0x700 to default/WC/copyback:4modes,3rounds each of CPU pattern->real GPU
+texture copy/output guards and GPU clear->CPU pixels/surface-tail guards.
+Full actual20H392 ABI/import/signature/native build PASS; input6e6e432c..
+unchanged, pair1bf36b6d4a6fcfb8cd8ec59aff33f5cda8237a6f6125020161a6f032fe7762b3,
+shader-cache496301fc../UI retained. No new shader/kernel hardware proof yet.
+Next matching kernel CI, then one complete native/system-route cycle. Fresh
+V84/imageV78 at clean1541397; no ordinary run for the already cached system path.
+Broad platform goal active/unfinished; no throughput gain claimed.
+
+## REDFIN V77 full three-cache-mode PASS; actual system hint0x700 observed — 2026-10-26
+
+Code32f777a/docs3e69146; actual Actions40354200257/run14/kernelcda58cf5..,
+native6e6e432c../pair45c09a81../UI/cache. Cycle47092 TERMINAL exit0: authenticated
+freshea2a60c9f20c4016, one backboardd62, no GPU runtime stop/kernel panic,
+clean unmounted HFSX1541397, verified Fastboot. V83 STALE/never reuse;
+next fresh V84/imageV78 at actual1541397. Captures/automatic app opens OFF.
+
+Full explicit CHECK EXIT0, previous native Metal/output/pixel/guard contracts,
+all3cache modes(0/0x400/0x300),3CPU/GPU rounds each, all4physical pairs and actual
+post-doorbell2pending completion PASS.19PUB/14DONE/21PIPE records validate.
+Native153clean/131invalidate WC skips; every complete native cache case passes.
+Actual full display buffers request hint0x700, parent0, offset0, planes0 and
+still select WC0. System output WC0/cached600; the complete system-WC proof is
+false. This is an observed allocation request, not inferred from FPS.
+
+Checked368GPU frames/10.010185physical seconds =36.762557FPS at90Hz callbacks;
+complete stable interval, no misses/timeouts, idle restored.17frontend/28owner/
+9output partitions valid; output median6.121ms, warm per-direction cache work
+about5ms and11MiB persists. No ordinary/matched speedup or smooth60/90FPS claim.
+Exact observed args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xea2a60c9f20c4016 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broader platform requirements remain active/unfinished.
+
 ## REDFIN corrected cache policy run14/V83 verified; combined V77 starts — 2026-10-26
 
 Complete code32f777abdd8ec4edcf24968a70bf4ebb9f8aea7e, local tools/docs c87210e.

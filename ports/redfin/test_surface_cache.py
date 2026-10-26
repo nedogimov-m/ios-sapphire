@@ -12,13 +12,13 @@ from ports.redfin.test_usb_owned_route import added_file
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-NATIVE = ROOT / 'research/redfin-gpu/surface-cache-policy-native-v1'
+NATIVE = ROOT / 'research/redfin-gpu/surface-cache-realtime-native-v1'
 
 TYPES = r'''
 #include <cstdint>
 #include <cstddef>
 #include <cassert>
-enum {kIOMapDefaultCache=0,kIOMapWriteCombineCache=0x400};
+enum {kIOMapDefaultCache=0,kIOMapWriteCombineCache=0x400,kIOMapRealTimeCache=0x700};
 struct IOMemoryDescriptor {
  uint64_t length=1228800;virtual ~IOMemoryDescriptor(){}uint64_t getLength(){return length;}
 };
@@ -60,7 +60,7 @@ class SurfaceCacheTests(unittest.TestCase):
     def test_actual_owned_mapping_proof_rejects_each_cached_or_foreign_alias(self):
         self.compile_run(TYPES+r'''
 int main(){
- for(unsigned fault=0;fault<22;++fault){
+ for(unsigned fault=0;fault<23;++fault){
   IOBufferMemoryDescriptor memory,other;IOMemoryDescriptor foreign;
   SweetSurface surface;surface.memory=&memory;IOMemoryDescriptor *request=&memory;
   uint64_t bytes=surface.allocSize;SweetSurface *owner=&surface;
@@ -75,9 +75,10 @@ int main(){
    case 14:request=nullptr;break;case 15:owner=nullptr;break;case 16:bytes=0;break;
    case 17:bytes-=16384;break;case 18:request=&other;break;case 19:bytes=UINT64_MAX;break;
    case 20:surface.cacheMode=kIOMapWriteCombineCache;break;case 21:surface.cacheMode=0x300;break;
+   case 22:surface.cacheMode=kIOMapRealTimeCache;break;
   }
   /* Parent metadata and GMEM padding cannot change actual CPU attributes. */
-  assert(redfin_surface_write_combined(owner,request,bytes)==(fault==0||fault==7||fault==10||fault==20));
+  assert(redfin_surface_write_combined(owner,request,bytes)==(fault==0||fault==7||fault==10||fault==20||fault==22));
  }
  redfin_surface_cache_barrier();return 0;
 }
@@ -86,7 +87,7 @@ int main(){
     def test_actual_allocation_selection_honors_explicit_wc_without_gmem_permission(self):
         self.compile_run(TYPES+r'''
 int main(){
- for(unsigned fault=0;fault<22;++fault){
+ for(unsigned fault=0;fault<23;++fault){
   SweetSurface surface;IOBufferMemoryDescriptor existing;bool selected=true;
   switch(fault){
    case 0:break;case 1:selected=false;break;case 2:surface.memory=&existing;break;
@@ -100,9 +101,10 @@ int main(){
    case 18:surface.cacheMode=kIOMapWriteCombineCache;break;
    case 19:surface.parentID=123;break;case 20:surface.offset=64;break;
    case 21:surface.redfinRenderExtent=0;break;
+   case 22:surface.cacheMode=kIOMapRealTimeCache;break;
   }
   assert(redfin_surface_wc_allocation(&surface,selected)==
-      (fault==0||fault==18||fault==19||fault==20||fault==21));
+      (fault==0||fault==18||fault==19||fault==20||fault==21||fault==22));
  }
  assert(!redfin_surface_wc_allocation(nullptr,true));return 0;
 }
@@ -194,7 +196,7 @@ int main(){
         last = native.index('\nvoid RedwoodGPUUserClient::retireQueued(', first)
         receiver = (HERE/'gpu-physical-worker-host.cpp').read_text()
         fields = r'''
-enum {kIOMapWriteCombineCache=0x400};
+enum {kIOMapWriteCombineCache=0x400,kIOMapRealTimeCache=0x700};
 struct IOMemoryDescriptor {uint64_t length=16384;virtual ~IOMemoryDescriptor(){}uint64_t getLength(){return length;}};
 struct IOBufferMemoryDescriptor:public IOMemoryDescriptor {};
 #define OSDynamicCast(type,value) dynamic_cast<type *>(value)

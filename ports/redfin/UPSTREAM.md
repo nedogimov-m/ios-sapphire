@@ -1,5 +1,29 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual CoreAnimation0x700 realtime-cache request identified/adapted — 2026-10-26
+
+V77/Actions40354200257/run14/kernelcda58cf5.. passes the full native contract,
+all3cache-mode CPU/GPU/guard cases and actual2pending completion. Two actual
+11239424byte display allocations report hint0x700/parent0/offset0/planes0,
+and WC0; system output stays WC0/cached600. The earlier explicit-WC correction
+does not cover this distinct request. Checked36.762557FPS is not a matched
+ordinary speedup. One server, clean1541397/Fastboot, no runtime stop/panic.
+
+Reviewed actual XNU IOMapTypes.h:0x700 is kIOMapRealTimeCache, with8-bit map
+shift. arm/memory_types.h maps VM_WIMG_RT to WCOMB|VM_MEM_RT when normal
+uncached memory is available (otherwise guarded I/O). Adapt that Apple display
+request to Redfin's already proven normal non-cacheable WC mapping, only for
+fresh owned eligible BGRA allocations. All controlled CPU aliases, real
+barriers/fences, exact descriptor proof and other requested modes stay intact.
+Publish policy2 separately from the existing cache ABI1. No live cached memory
+is retagged, and no register/clock/voltage or compiler-cache change is made.
+
+54combined host contracts PASS. Native checker now requires policy2 and adds
+the exact0x700 request to default/WC/copyback,3CPU/GPU/guard rounds per mode.
+Native20H392 build/import/signature/pair1bf36b6d.. PASS; input6e6e432c../cache
+496301fc../UI retained. Matching kernel CI and full system-WC/throughput proof
+are next. Preferred pins and reviewed Angelpro344a8af stay unchanged.
+
 ## V76 native WC correctness PASS; system allocation selection corrected — 2026-10-26
 
 Actual Actions40348304483/run13/sourcef536de6/kernelb66aa712.. passes full

@@ -81,8 +81,10 @@ static BOOL surface_cache_native(id<MTLDevice> device,uint64_t nonce)
 {
     BOOL valid=surface_cache_case(device,nonce,kIOSurfaceMapDefaultCache)&&
         surface_cache_case(device,nonce,kIOSurfaceMapWriteCombineCache)&&
-        surface_cache_case(device,nonce,kIOSurfaceMapCopybackCache);
-    printf("REDFIN METAL SURFACE CACHE RESULT: boot=%016llx allocation-modes=3 rounds-each=3 full-CPU-GPU-pixels-and-guards=%u\n",
+        surface_cache_case(device,nonce,kIOSurfaceMapCopybackCache)&&
+        /* Actual20H392 CoreAnimation hint: kIOMapRealTimeCache. */
+        surface_cache_case(device,nonce,0x700u);
+    printf("REDFIN METAL SURFACE CACHE RESULT: boot=%016llx allocation-modes=4 rounds-each=3 full-CPU-GPU-pixels-and-guards=%u\n",
         (unsigned long long)nonce,valid);
     return valid;
 }

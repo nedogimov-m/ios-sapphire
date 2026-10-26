@@ -12,15 +12,21 @@
 #include <stdint.h>
 
 #define RF_GS_ABI 1u
+#define RF_GS_POLICY 2u
 #define RF_GS_PAGE_BYTES UINT64_C(16384)
 #define RF_GS_MAX_BYTES (UINT64_C(128) * 1024 * 1024)
 
 static inline bool redfin_surface_wc_hint(uint32_t hint)
-{ return !hint || hint == kIOMapWriteCombineCache; }
+{
+    /* Actual20H392 CoreAnimation display buffers request0x700. Redfin uses
+     * its proven normal non-cacheable WC mapping for Apple's realtime mode;
+     * every CPU alias and actual GPU/CPU handoff still follows this policy. */
+    return !hint || hint == kIOMapWriteCombineCache || hint == kIOMapRealTimeCache;
+}
 
 /* Cache attributes describe allocated pages, independently of GMEM image
- * padding. An explicit WC request uses the IOSurface/IOKit shifted value.
- * Other explicit requests keep the existing cached path. */
+ * padding. Explicit WC/realtime requests use the IOSurface/IOKit shifted
+ * values. Other explicit requests keep the existing cached path. */
 static inline bool redfin_surface_wc_allocation(const SweetSurface *surface, bool selected)
 {
     return selected && surface && !surface->memory && !surface->wrapped &&

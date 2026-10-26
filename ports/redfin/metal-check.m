@@ -330,6 +330,7 @@ int main(void)
         int paddingABI=gpu?registry_number(gpu,CFSTR("RedfinSurfacePaddingABI")):0;
         int physicalABI=gpu?registry_number(gpu,CFSTR("RedfinPhysicalSubmissionABI")):0;
         int surfaceCacheABI=gpu?registry_number(gpu,CFSTR("RedfinSurfaceCacheABI")):0;
+        int surfaceCachePolicy=gpu?registry_number(gpu,CFSTR("RedfinSurfaceCachePolicy")):0;
         if (gpu) IOObjectRelease(gpu);
         if (mode!=1 && mode!=2) return 0;
         printf("REDFIN METAL CHECK BOOT: %016llx mode=%d pid=%d\n",(unsigned long long)nonce,mode,getpid());
@@ -414,7 +415,7 @@ int main(void)
             BOOL uboExtents=short_bounds&&ubo_extents_native(device,library,nonce);
             BOOL resourceReferences=short_bounds&&redfin_metal_resource_check("/redfin/lib/redfin-resource-check.bc",nonce);
             BOOL retainedMemory=retained_memory_native(device,nonce);
-            BOOL surfaceCache=short_bounds&&surfaceCacheABI==1&&surface_cache_native(device,nonce);
+            BOOL surfaceCache=short_bounds&&surfaceCacheABI==1&&surfaceCachePolicy==2&&surface_cache_native(device,nonce);
             uint64_t routes[2]={0};BOOL gmem=dependencies&&native_gmem_statistics(device,routes);
             /* Run the bounded busy probe last. An actual GPU failure retires
              * the context; no later checker may create/use new native pipes. */

@@ -50,7 +50,9 @@ complete block gives fresh owned BGRA images consistent WC CPU mappings;
 V76 passes the full native contract and exercises WC CPU/GPU access, but
 system output remains on the cached route. Corrected selection separates
 cache attributes from GMEM padding and honors explicit WC requests. Its
-complete native system route and performance remain to verify.
+three-mode native contract passes in V77. Actual system buffers request
+Apple realtime cache0x700; that request is now adapted to Redfin's proven
+WC mappings. Its complete native system route and performance remain to verify.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).

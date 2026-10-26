@@ -9,15 +9,16 @@ diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
  struct gpu_queued_job;
  
  enum {
-@@ -153,6 +154,7 @@
+@@ -153,6 +154,8 @@
      setProperty("RedfinScopedWaitABI",RF_GW_ABI,32);
      setProperty("RedfinResourceAccessABI",RF_GA_ABI,32);
      setProperty("RedfinSurfacePaddingABI",RF_GP_ABI,32);
 +    setProperty("RedfinSurfaceCacheABI",RF_GS_ABI,32);
++    setProperty("RedfinSurfaceCachePolicy",RF_GS_POLICY,32);
      setProperty("RedfinRetainedMemoryABI",RF_GM_ABI,32);
      if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
      registerService();return true;
-@@ -202,6 +204,7 @@
+@@ -202,6 +205,7 @@
  };
  static struct {
      uint64_t since,allocating,cleaning,submitting,invalidating,cleaned,invalidated;
@@ -25,7 +26,7 @@ diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
      uint32_t allocations,submissions,skipped;
  } gTiming;
  static uint64_t gpuNow(void)
-@@ -217,6 +220,9 @@
+@@ -217,6 +221,9 @@
          gTiming.submissions,gTiming.allocations,gTiming.allocating/1000,
          gTiming.cleaning/1000/n,gTiming.submitting/1000/n,gTiming.invalidating/1000/n,
          gTiming.cleaned/1024/n,gTiming.invalidated/1024/n,gTiming.skipped);
@@ -121,7 +122,7 @@ diff --git a/iokit/Kernel/arm/RedfinSurfaceCache.h b/iokit/Kernel/arm/RedfinSurf
 new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/RedfinSurfaceCache.h
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,62 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Include after SweetSurface and IOBufferMemoryDescriptor declarations.
 + * Only the allocator may publish redfinWriteCombined, before the surface
@@ -136,15 +137,21 @@ new file mode 100644
 +#include <stdint.h>
 +
 +#define RF_GS_ABI 1u
++#define RF_GS_POLICY 2u
 +#define RF_GS_PAGE_BYTES UINT64_C(16384)
 +#define RF_GS_MAX_BYTES (UINT64_C(128) * 1024 * 1024)
 +
 +static inline bool redfin_surface_wc_hint(uint32_t hint)
-+{ return !hint || hint == kIOMapWriteCombineCache; }
++{
++    /* Actual20H392 CoreAnimation display buffers request0x700. Redfin uses
++     * its proven normal non-cacheable WC mapping for Apple's realtime mode;
++     * every CPU alias and actual GPU/CPU handoff still follows this policy. */
++    return !hint || hint == kIOMapWriteCombineCache || hint == kIOMapRealTimeCache;
++}
 +
 +/* Cache attributes describe allocated pages, independently of GMEM image
-+ * padding. An explicit WC request uses the IOSurface/IOKit shifted value.
-+ * Other explicit requests keep the existing cached path. */
++ * padding. Explicit WC/realtime requests use the IOSurface/IOKit shifted
++ * values. Other explicit requests keep the existing cached path. */
 +static inline bool redfin_surface_wc_allocation(const SweetSurface *surface, bool selected)
 +{
 +    return selected && surface && !surface->memory && !surface->wrapped &&
