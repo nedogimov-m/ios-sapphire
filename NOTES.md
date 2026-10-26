@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN upstream GLES GUI/app Metal native build/V91 verified; combined V85 starts — 2026-10-27
+
+GLES asynchronous CPU-worker/kernel publication sourcea7ddbe1, Mesa input323bf7ed../
+new native pair7e0f4a5c../compiler/shader cache496301fc.. retained.62combined host
+contracts and complete native20H392 imports/signatures/source markers PASS.
+Kernel unchanged Actions40372742634/run18/source0d3767d/kernel4fa88838..;
+complete image/loader/liveFDT/ADT/private source and all retained ABI proof PASS.
+Fresh V91 clean1604867/empty journal applied ONCE; all preimages backed up,
+signatures/readonly fsck/full ranges and whole files read back, clean Fastboot.
+Cached/file startup checks agree ON and backboardd alone requests GLES.
+Global native Metal stays system mode for apps. V91 STALE/never reuse.
+Next fresh V92/imageV86, actual postboot epoch pending collection.
+
+V85 image09b2e08b45c82ad9c6a5b89e2ced33b1ad0936f3adce65632ac565a06bbf8c83, freshd8230355f59d0f35; complete retained FIFO/CPU publication adaptation, one full native Metal/GPU contract plus
+actual upstream GLES FD620 frames/shared surfaces/zero GL errors/no backboardd
+Metal work must establish coexisting paths plus actual asynchronous publication/fallbacks, followed by animate-checked.
+Captures/automatic Phone/Photos opens OFF. No renderer/FPS success claim yet.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xd8230355f59d0f35 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal active/unfinished.
+
 ## REDFIN complete upstream GLES asynchronous handoff block;62host/native ABI PASS — 2026-10-27
 
 Following proven GLES GUI/app Metal V83 and ordinary43.151FPS V84, implement
