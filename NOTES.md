@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V75 producer-aware file update verified; combined V69 running — 2026-10-26
+
+Code844b125; native input6e6e432c../pair24dfc27b../UIpadding-contract-v1/
+cache496301fc../actual Actions40314982431/run10/kernel5f0d5f48.. exact.
+Fresh V75 snapshot clean1461644/empty journal, complete native signatures,
+old target preimages, readonly native fsck and full staged files PASS.
+Apply ONCE9859072bytes,0new/freed blocks; all live preimages/backups/transfers/
+full device files read back; clean root and verified Fastboot. V75 STALE,
+never reuse. Next fresh V76/imageV70; postboot epoch pending collection.
+
+V69 imagea10ecfa4271bcbf2d0b186a49283a876db8a9e197b569209156cc7cc553af613
+full native preflight PASS. Fresh a3795b47ec3fd7f3, exact prepared args below.
+Combined native cycle RUNNING: full prior Metal contract plus actual CPU/GPU
+producer route requirements,5snapshots/4GPU across overwrites and chunk
+rollover, both changed-colour raster producer modes and their repeated draws.
+animate-checked requires actual full current-nonce CHECK EXIT0. Captures and
+automatic Phone/Photos launch checks OFF. No other device commands until
+terminal collection. No recovered FPS or broad platform success claimed yet.
+
 ## REDFIN V68 ordinary31FPS; complete constant-ownership policy correction built — 2026-10-26
 
 V68 cycle21757 TERMINAL exit0: authenticated fresh617bcb6935a3f8b2, one
