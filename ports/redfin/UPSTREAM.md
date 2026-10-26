@@ -1,5 +1,25 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual frontend observation: buffer-tail constant uploads dominate — 2026-10-26
+
+V54/source0978e6e validates all15native phase partitions with one window server,
+no GPU fault/panic and a clean root. Its ordinary finite measurement is only
+12.3GPU FPS, not a speedup; sampled work now varies31..104draws. The new evidence
+separates14..23ms native waits from host gate outliers up to136.682ms. Immutable
+constant uploads request about9..23MB per sampled large command, almost entirely
+unknown-reflection buffer tails; the uploader phase can cost140..184ms.
+That phase includes allocation/map/copy/unmap. Explicit dependency preparation
+is much smaller, and redfinfb still accompanies actual GPU-only presentations.
+
+Re-review the pinned userland's load_ubo generation and current optimized NIR
+before reducing any upload. Prove all reads for a binding, including widths,
+offsets, dynamic binding and unsupported access forms. Keep unknown extents
+conservative; do not substitute air.buffer_size or a guessed short struct size.
+A runtime-only analysis may retain shader/serialization identities only when
+it changes neither NIR nor serialized metadata. Hardware improvement remains
+unimplemented/unproved at this milestone. MetalBuffer.contents is already an
+immediate pointer getter in the actual generated driver.
+
 ## Separate native waiting from host retirement and frontend preparation — 2026-10-26
 
 Keep preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland

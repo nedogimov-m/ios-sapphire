@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V54 locates large constant snapshots and host gate stalls;12.3FPS — 2026-10-26
+
+Source0978e6e. Unchanged kernel CI40256228186/run5/sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Native frontend/retirement bundle frontphase-v1, input3cde4c1b.., full
+pairing64b64c27..; retained shader cache496301fc..; UIaccess-v1 unchanged.
+Fresh V60 applies ONCE:23916544bytes/170ranges/zero new or freed blocks;
+all preimages/backups/full files/signatures/readback/readonly fsck PASS.
+V60 STALE, never reuse. Exact observed V54 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x6f11f3463ad2dffd redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no panic or GPU stop/fault, one backboardd61,
+clean unmounted consistent HFSX/write_count1318291; verified Fastboot. No app
+opens/captures/native startup jobs. Complete finite observation/idle restored:
+123actual GPU frames/10.000117physical seconds =12.299856FPS. Ten samples
+6.995..20.005FPS; callbacks58.7FPS/max231.909ms; actual90Hz panel/Mach ratio1.
+This is a poor result, not a speedup. Sampled command groups now vary31..104
+draws, versus predominantly37before; no controlled attribution of that FPS
+difference to observation overhead or any other single cause is established.
+
+All15new sampled native phase sets correlate by PID/nonce/sequence and satisfy
+their adjacent interval/legacy-rounding contracts; zero invalid partitions.
+Actual native waits are usually14..23ms while host gate acquisition can reach
+136.682ms. Most encoding cost is inside immutable constant uploads, whose timing
+includes the native uploader's allocation/map/copy/unmap, not memcpy alone.
+Observed31draws copy8.849MiB/88.402ms;70draws copy15.815MiB/140.545..142.639ms;
+87draws copy18.352MiB/183.616ms. At39draws it is9.012MiB/12.907ms with75.738ms
+retirement gate wait. Almost all copied bytes belong to resources with unknown
+reflected size, repeatedly taking the remaining ~256KiB source-buffer tail.
+Explicit constant CPU preparation itself takes only27..409us in those groups.
+
+Next complete speed block: prove actual per-UBO read extents from the optimized
+pipeline NIR without changing shader code or serialized metadata; use a smaller
+immutable upload only where EVERY relevant read is bounded. Unknown/dynamic
+access must retain a safe full extent; declared air.buffer_size alone is not
+proof. Preserve aliases, real GPU completion, stage state and cached programs.
+Readonly check also confirms MetalBuffer.contents already returns its pointer
+immediately: do not invent a missing contents-wait fix. Scheduled/completed
+API separation remains a separate candidate, not the observed dominant upload
+cost. Private evidence: logs/redfin/gui-platform-v54/frontend-latency.json and
+presentation-summary.json. No process remains live. Fresh updaterV61 at actual
+1318291/imageV55 next. The full user goal remains active.
+
 ## REDFIN complete frontend/retirement observation block built; V54 prepared — 2026-10-26
 
 Source basec362c05 plus this complete block. The old final-fence-us observation
