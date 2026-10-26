@@ -1,5 +1,42 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V64 ordinary capture incomplete; user-supplied sapphire reviewed; native journal recovery next — 2026-10-26
+
+V64/cycle88855 TERMINAL exit0, authenticated5813a5332605e6bb, one backboardd61,
+no runtime GPU fault/panic and verified Fastboot. Native GPU output continues
+past2220frames with CPU-pixel-copy0, and88contacts/releases are observed;
+user activity for this run is unconfirmed. Shutdown reaches root unmount but
+does not record completion before reset. HFSX1417850 is journaled and not
+inconsistent, but NOT clean. Collector correctly skips all user-file logs.
+No ordinary FPS result can be inferred. V63 remains the full native PASS.
+Do not stage/apply fresh V71 or alter the clean bit on this state.
+
+The existing GUI3 native HFS preflight/journal replay is already implemented
+and previously proven (see V12 recovery): retain the dirty journal and mount
+it normally with the actual native HFS driver, then cleanly shut down. Prepare
+V64-recovery with exact same run9/source5be3287/kernelc363bc80.. and installed
+native pair4447fa9d../UI/cache. Only optional ADSP node omitted, as in that
+proven recovery path; startup graphics checks/captures/app auto launches remain
+OFF. Fresh nonce04d232a31e05369b mismatches the old opt-in animation request,
+so no new animation is requested. Image4aac94a4f88ba6356d77a6677fb05ed4f13f5ccb3700072e46a368944ae04de1
+full loader/liveFDT/ADT/firmware/private inputs/native source ABI preflight PASS.
+Exact recovery boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x04d232a31e05369b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+A single temporary native journal-replay cycle follows, no raw root repair or
+new offline file update. After clean collection, attempt recovery of V64's
+original-nonce user logs rather than inventing a new ordinary measurement.
+
+User specifically requests Angelpro09xd/ios-sapphire sapphire. Exact reviewed
+commit344a8af2a9d5baf3597933a2e4601499ea0f623b: actual SapphireMetal is a
+protocol/logging stub, sweetgl1 selects EAGL and returns nil Metal devices;
+all17AIR compiler files match the preferred userland pin byte-for-byte.
+Useful async-ring/deferred-release, surface cache and MADVISE differences are
+reviewed in UPSTREAM. Preferred source pins stay unchanged. Next complete
+one CPU-preparation block (bounded dynamic UBO reads, capability-guarded BO
+retention reuse), then combined checks; no mini-task boots. Three UBO source/
+checker files currently contain unfinished, uncompiled/unverified changes.
+Broad GPU/Wi-Fi/identity/power/thermal/sensor goal remains active/unfinished.
+
 ## REDFIN V70 policy-only update verified; V64 ordinary measurement starting — 2026-10-26
 
 Code6ed25b7/results7d19b7d. V63 full native A620 correctness remains PASS.

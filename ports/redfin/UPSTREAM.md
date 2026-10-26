@@ -1,5 +1,39 @@
 # HackiOS upstream review — 2026-10-22
 
+## User-requested Angelpro09xd sapphire review — 2026-10-26
+
+Reviewed https://github.com/Angelpro09xd/ios-sapphire/tree/sapphire at exact
+344a8af2a9d5baf3597933a2e4601499ea0f623b (2026-10-26). This does not replace the
+user's preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 or previously reviewed updated main.
+
+Actual metal/SapphireMetal/SapphireMetal.m: lines140..145 describe its
+protocol objects as diagnostic stubs, with no drawing. Lines467..519 load the
+EAGL bridge in backboardd and return nil as the Metal device under sweetgl=1.
+The current source tree has no redwoodmetal.m/redwooddrawable.m implementation.
+All17userland/mesa/air files are byte-identical to the preferred userland pin;
+the AIR compiler is present, but this branch supplies no newer native system
+Metal implementation. NOTES describes the current GUI path as OpenGL ES,
+23..35FPS under its stated blur/clock settings, with sustained60FPS unfinished.
+
+Useful reviewed implementation differences:0151 hardware-ring asynchronous
+submits and deferred releases,0152 asynchronous physical output,0153/0154
+correct sequence fences,0165 cleaning imported surfaces only after CPU seed
+changes, and sapphire-drm's local retained MADVISE answer. Redfin already has
+retained asynchronous client queues, real fences, CPU range/alias ownership
+and cached shaders; compare actual physical publication/wait separately.
+Do not transplant A610/SM6225 registers, its unowned1GiB WC physical pool,
+clock/voltage experiments, nil Metal fallback or unguarded constant MADVISE
+reply. A retained-memory fast path must be explicitly supported by the native
+kernel and apply only to an existing retained BO; invalid raw ioctls and all
+CPU/fence checks keep their existing validation. Adapt useful CPU preparation
+changes as one complete block before the next combined native test.
+
+Private complete per-file comparison:
+research/redfin-gpu/angelpro-sapphire-source-comparison.json. No external
+repository code has been executed or installed. Current full native Metal
+correctness proof remains V63; the V64 filesystem state is recorded in NOTES.
+
 ## Complete native owned-padding/guard contract PASS on A620 — 2026-10-26
 
 V63/code6ed25b7 with actual Actions40300639111/run9/source5be3287 proves full
