@@ -13,7 +13,7 @@ int redfin_freedreno_publish_surfaces(struct pipe_fence_handle *fence,
    if(!fence->fence || !fence->fence->kfence)return -1;
    for(unsigned i=0;i<count;++i)
       if(!targets[i].handle || !targets[i].surface ||
-         redwood_drm_surface_announce(fence->fence->pipe->dev->fd,&targets[i],fence->fence->kfence))
+         redwood_drm_surface_announce(-1,&targets[i],fence->fence->kfence))
          return -1;
    return 0;
 }

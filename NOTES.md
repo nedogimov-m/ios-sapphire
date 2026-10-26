@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete direct GLES native build/CI20/image PASS; combined V88 next — 2026-10-27
+
+Kernel source5b063499a756c6503627184438c3f2dd1a2536ff,
+Actions40403226041/run20 TERMINAL SUCCESS. Actual arm64/non-PAC kernel
+01be808171f67582d9dc07213ef11bf31b3f127f68ddda3a1301262941944159,
+18742672bytes; complete run19 patch map plus native-surface-producer.patch,
+XNU/KDK/full previous/new ABI/source markers verified. Current exact V88 image
+b4d7b3659d14650ce64d08eeef74f783c23fd0813399e4f165a2b5823e36e7cf passes complete loader/liveFDT/ADT/private
+inputs/native contracts. No new phone boot yet.
+
+Native build build-20261027-022326.log/actual20H392 imports/signatures PASS.
+Mesa input1a4ad42cce3f1553483122340a958afb21c8564304b4ffe9e0510b69bba64f06, Metal pair17d0f01f5cde35212519736167e62d9a9daa62da2e8194a46d46de00b7c8c11f.
+Compiler/shader cache496301fc.. retained after reviewed runtime-only inputs.
+Use Mesa25's actual st_get_texobj_resource accessor; Darwin DRM owns a single
+process connection, so announcement needs no dereference of opaque fd_pipe/
+fd_device. Complete affected96host tests PASS after those compile corrections.
+All failures happened before device staging/apply; no test phone boots between
+mini-tasks. Existing current-root preimages read fresh at actual1634464/V94.
+
+Complete source block includes direct/mirror fallback, actual bound BO identity,
+full image/native padded extent, fence-bound seed-only producer announcements,
+unchanged real consumer completion and full-canvas framebuffer-fetch/tail check.
+Next: apply fresh V94 once then one combined V88 with full app Metal/native GPU
+checks and animate-checked. Captures/automatic Phone/Photos opens remain OFF.
+Current root/UI/binaries archived as V87 baseline. Exact V88 boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7480e63319f7a3e0 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal active; hardware direct correctness/FPS not yet established.
+
 ## REDFIN complete GLES direct-target/producer block;96common host/native kernel compile PASS — 2026-10-27
 
 V87 user-confirmed touch/GLES4800frames is the hardware baseline, clean1634464/

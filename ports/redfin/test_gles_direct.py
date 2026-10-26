@@ -82,7 +82,7 @@ struct fd_resource {struct pipe_resource base;struct fd_bo *bo;struct {unsigned 
 static struct fd_resource *fd_resource(struct pipe_resource *p){return (struct fd_resource *)p;}
 static uint32_t fd_bo_size(struct fd_bo *b){return b->size;}
 static unsigned calls;static bool capable;
-uint32_t redwood_drm_surface_producer(int fd,uint32_t handle){assert(fd==11&&handle==23);++calls;return capable?handle:0;}
+uint32_t redwood_drm_surface_producer(int fd,uint32_t handle){assert(fd==-1&&handle==23);++calls;return capable?handle:0;}
 #include "gles-resource-producer.inc"
 int main(void){
  for(unsigned fault=0;fault<17;++fault){
@@ -117,7 +117,7 @@ struct pipe_fence_handle {struct pipe_fence_handle *last_fence;struct native_fen
 static unsigned published,announced;static int failure;
 static int redfin_freedreno_fence_publish(struct pipe_fence_handle *f){assert(f);++published;return failure==1?-1:0;}
 static int redwood_drm_surface_announce(int fd,const struct rf_gu_target *t,unsigned fence){
- assert(published==1&&fd==13&&fence==37&&t->handle&&t->surface);++announced;return failure==2?-1:0;
+ assert(published==1&&fd==-1&&fence==37&&t->handle&&t->surface);++announced;return failure==2?-1:0;
 }
 #include "gles-fence-surfaces.inc"
 int main(void){

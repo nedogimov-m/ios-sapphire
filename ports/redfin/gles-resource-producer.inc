@@ -17,6 +17,6 @@ uint32_t redfin_freedreno_surface_producer(struct pipe_resource *prsc,uint32_t s
       rsc->layout.slices[0].offset,4,1,1,prsc->nr_samples};
    uint64_t extent=rf_gp_full_image_extent(&bo->redfin_padding,&view,fd_bo_size(bo));
    if(!extent || rsc->layout.slices[0].size0!=extent)return 0;
-   return redwood_drm_surface_producer(bo->dev->fd,bo->handle);
+   return redwood_drm_surface_producer(-1,bo->handle);
 }
 #endif

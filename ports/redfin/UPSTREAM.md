@@ -1,5 +1,15 @@
 # HackiOS upstream review — 2026-10-22
 
+## Whole direct-target native build and kernel CI20 pass — 2026-10-27
+
+Preferred source pins unchanged. Source5b06349/Actions40403226041/run20 kernel
+01be8081.. verifies full prior+producer ABI/source map. Full native20H392 build
+and96combined contracts PASS; actual Mesa25 texture accessor and Darwin-owned
+process DRM connection are used without dereferencing opaque pipe/device types.
+Native input1a4ad42c../pair17d0f01f../shader cache496301fc.. ready. Fresh V94/root
+1634464/imageV88 prepared for one combined native GLES/direct pixels/guards/app
+Metal/input run. No hardware direct rendering or FPS success claimed yet.
+
 ## Preferred GLES direct surface rendering adapted with native producer ownership — 2026-10-27
 
 Reviewed existing pinned preferred userland906425b7.. eagl.c and equivalent

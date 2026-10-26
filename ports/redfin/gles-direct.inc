@@ -17,7 +17,7 @@ redfin_gl_surface_producer(uint32_t surface)
    if(!name || !strstr(name,"FD620"))return 0;
    struct gl_context *ctx=osmesa->st->ctx;
    struct gl_texture_object *texture=ctx->Texture.Unit[ctx->Texture.CurrentUnit].CurrentTex[TEXTURE_2D_INDEX];
-   struct pipe_resource *resource=texture?st_texture_object(texture)->pt:NULL;
+   struct pipe_resource *resource=st_get_texobj_resource(texture);
    return resource ? redfin_freedreno_surface_producer(resource,surface) : 0;
 }
 

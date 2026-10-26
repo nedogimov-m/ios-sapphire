@@ -292,7 +292,7 @@ def main():
                     '-Dvalgrind=disabled','-Dlibunwind=disabled','-Dglvnd=disabled','-Dvideo-codecs=',
                     '-Dtools=','-Dgallium-vdpau=disabled','-Dgallium-va=disabled','-Dgallium-xa=disabled',
                     '-Dlmsensors=disabled','-Dbuild-tests=false'])
-            run(['ninja','-C',build])
+            run(['ninja','-C',build,'-k','0'])
             bundle=work/'bundle';(bundle/'lib').mkdir(parents=True,exist_ok=True)
             osmesa=build/'src/gallium/targets/osmesa/libOSMesa.8.dylib'
             glapis=list((build/'src/mapi').rglob('libglapi.0.dylib'))
