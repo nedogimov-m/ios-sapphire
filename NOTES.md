@@ -1,5 +1,22 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN realtime-cache kernel run15 compiling; fresh V84 snapshot complete — 2026-10-26
+
+Complete coded723d7a7a36b0569288ebc7a24883600b06e19e2 pushed only to owned
+redfin-ci. Actions40359286479/run15 compiles the actual0x700 realtime-cache
+adaptation/policy2.54combined host contracts and native actual20H392 ABI/
+signature build PASS; pair1bf36b6d../input6e6e432c../cache496301fc../UI retained.
+The compact-only KDK cache and optional ccache counters are included in this
+CI source; measured preparation/build effects await the actual result.
+
+Fresh V84 readonly snapshot completes at clean1541397 with empty journal and
+complete native target preimages. No root filesystem writes; recovery verified
+idle. V78 image recipe/final native source/ABI proof is prepared; stage/apply
+awaits the exact actual kernel artifact. Full4mode/policy2/current-nonce native
+checker then actual system-WC/output proof and animate-checked, captures and
+automatic app opens OFF. No new hardware success/FPS claim or boot args yet;
+last actual V77 profile is recorded below. Broad goal stays active/unfinished.
+
 ## REDFIN exact realtime-display cache policy implemented;54host/native build PASS — 2026-10-26
 
 Actual V77 metadata identifies Apple's realtime request0x700 on both full
