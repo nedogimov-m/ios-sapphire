@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Actual A620 scheduled/completed contract PASS; ordinary speed pending — 2026-10-26
+
+V58/source2325d8e passes actual native publication,4early scheduled returns,
+reentrant scheduled-handler submit/wait, repeated/late callbacks and cross-
+queue pixels/guards. All prior native GPU/AIR/resource cases pass, including
+partial-error retirement and preserved CPU consumers/epochs/lifetimes. One
+window server, no runtime GPU fault/panic and a clean root remain. Preferred
+source pins and compiler/cache identity are unchanged; runtime pairing2407206f..
+is verified. Keep these hardware results when changing only startup policy.
+
+The complete checks-gated animation observes27.399FPS, not an improvement over
+the previous ordinary52.699FPS. One system-window replacement is recovered
+before fresh warmup. Do not attribute the difference to one cause without
+the ordinary same-binary OFF run. New process samples show only5direct scheduled
+waits by3840completed sampled commands, versus9428scheduled handler deliveries;
+the callback phase is heavily used. No native correctness rollback is warranted
+by these counters alone; actual ordinary performance remains to be measured.
+
 ## Release scheduling at actual native FIFO publication — 2026-10-26
 
 Re-reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772

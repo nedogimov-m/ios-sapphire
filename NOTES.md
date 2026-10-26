@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V58 native scheduling and all previous GPU contracts PASS — 2026-10-26
+
+Source2325d8e; native pairing2407206f.., compiler input7548b9b0.. and retained
+shader cache496301fc.. . Unchanged kernel GitHub Actions40256228186/run5/
+sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Fresh V64 applies ONCE:671744bytes,0new blocks; full files/preimages/backups/
+signatures/readonly fsck/readback PASS. V64 STALE, never reuse. Observed args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xd9b357ed99666644 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no runtime GPU fault/stop or panic; one
+backboardd62, clean consistent unmounted HFSX/write_count1360424 and verified
+Fastboot. New actual A620 scheduling test PASS:4early returns, real publication,
+scheduled handler submits/waits reentrantly, repeated and late callbacks once,
+cross-queue pixels/guards and actual counters. ALL previous Metal/resource/GPU
+contracts PASS:192compute commands/two queues,70cache variants, half/MRT/
+varyings/samplers/blits/pitches/guards, binding reuse, partial-error full drain,
+empty ordering, UBO proof/fallback/GPU-writers, persistence, epochs/CPU consumers
+and deferred lifetime. The corrected aggregate checker-after status is0.
+
+Actual observer waits for both current-nonce native jobs. It recovers one
+window replacement before measurement, restarts warmup and completes a valid
+10.000200physical seconds:274GPU/274total frames =27.399452FPS. Ten samples,
+0missed, native-checks-completed1, idle restored, no timeout. Callbacks60Hz,
+panel90Hz. This checked-run result is NOT a speedup; ordinary same-binary OFF
+comparison is required before judging against V57's ordinary52.699FPS.
+All45phase partitions and45process-cumulative scheduling samples validate.
+At sequence3840:5scheduled API calls,4blocked,28704us total,5early returns;
+5completed calls/55610us;9428scheduled/4049completed handler deliveries. Direct
+scheduled waits are infrequent in these samples; callbacks use the phase much
+more. Counts include the whole process and possible newer publications, not
+one frame. Median native wait18.269ms/retirement gate1us is not GPU-only time.
+
+Cycle27688 TERMINAL exit0; no live device operation. Private evidence:
+logs/redfin/gui-platform-v58/{presentation-summary,frontend-latency,scheduling-summary}.json.
+Policy-only update switches jobs OFF with exact native bytes/pairing/cache and
+archived checks-on proof; no recompilation. Fresh V65/V59 at1360424 is prepared
+for the one ordinary comparison. App opens/captures remain OFF; no Phone/Photos
+checks. Full goal active; no completion or sustained60/90FPS claim.
+
 ## REDFIN complete native scheduling/completion separation built; V58 ready — 2026-10-26
 
 Base1d873ac. Successful commands release scheduling only after commands_submit
