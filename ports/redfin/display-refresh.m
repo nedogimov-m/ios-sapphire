@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
-/* Native20H392 display periods and app caps, bound to measured panel mode.
- * CADisplay refreshRate/hardwareRefreshRate are SECONDS PER FRAME. UIScreen
- * maximumFramesPerSecond is Hz; its private _refreshRate is also a period.
+/* Native20H392 heartbeat configuration and app caps, bound to measured mode.
+ * The native CLCD backend reads CA_HEARTBEAT_RATE in Hz before creating its
+ * timer. CADisplay's actual period getters and timestamps remain native.
  * No UIKit/QuartzCore ivar offsets or hardcoded method addresses are used. */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
@@ -9,19 +9,20 @@
 #include <IOKit/IOKitLib.h>
 #include <dlfcn.h>
 #include <mach-o/loader.h>
+#include <mach/mach_time.h>
 #include <sys/sysctl.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "gui-profile.h"
 #include "graphics-exec-scope.h"
+#include "display-mode.h"
 
-static double (*ca_period)(id,SEL),(*ca_hardware)(id,SEL),(*ca_heartbeat)(id,SEL),(*ui_period)(id,SEL);
+static double (*ui_period)(id,SEL);
 static NSInteger (*ui_maximum)(id,SEL),(*ui_private_maximum)(id,SEL);
-static Class display_class;
 static unsigned verified_hz,observations;
-static __thread bool in_refresh;
 static char boot_nonce[17];
 static bool refresh_policy_active;
 static __thread bool in_info_policy;
@@ -149,31 +150,47 @@ static id redfin_bundle_info_value(id object,SEL selector,NSString *key)
     }
     return value;
 }
-static BOOL main_display(id object)
-{
-    if (in_refresh || !physical_rate()) return NO;
-    in_refresh=true;
-    id main=((id (*)(id,SEL))objc_msgSend)(display_class,sel_registerName("mainDisplay"));
-    in_refresh=false;return object==main;
-}
 static BOOL main_screen(id object)
 {
     return physical_rate() && ((BOOL (*)(id,SEL))objc_msgSend)(object,sel_registerName("_isMainScreen"));
 }
-static double redfin_ca_period(id object,SEL selector)
+/* Publish this environment only in the window server, before its native
+ * heartbeat is cached. Both the actual20H392 reader and the physical/native
+ * kernel dictionary are audited; there is no synthetic callback clock. */
+static void configure_native_heartbeat(void)
 {
-    if (!main_display(object)) return ca_period(object,selector);
-    double period=1.0/90.0;refresh_log("CADisplay.refreshRate",period,90);return period;
-}
-static double redfin_ca_hardware(id object,SEL selector)
-{
-    if (!main_display(object)) return ca_hardware(object,selector);
-    double period=1.0/90.0;refresh_log("CADisplay.hardwareRefreshRate",period,90);return period;
-}
-static double redfin_ca_heartbeat(id object,SEL selector)
-{
-    if (!main_display(object)) return ca_heartbeat(object,selector);
-    refresh_log("CADisplay.heartbeatRate",1.0/90.0,90);return 1.0/90.0;
+    const char *process=getprogname();if(!process||strcmp(process,"backboardd"))return;
+    io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("AppleCLCD"));
+    CFTypeRef abi=service?IORegistryEntryCreateCFProperty(service,CFSTR("RedfinNativeCadenceABI"),NULL,0):NULL;
+    CFTypeRef clock=service?IORegistryEntryCreateCFProperty(service,CFSTR("RedfinCadenceClockHz"),NULL,0):NULL;
+    CFTypeRef refresh=service?IORegistryEntryCreateCFProperty(service,CFSTR("IOMFBDisplayRefresh"),NULL,0):NULL;
+    int version=0,minimum=0,step=0;int64_t reported_clock=0;
+    mach_timebase_info_data_t scale={0};
+    BOOL valid=physical_rate()==90&&abi&&CFGetTypeID(abi)==CFNumberGetTypeID()&&
+        CFNumberGetValue((CFNumberRef)abi,kCFNumberIntType,&version)&&version==1&&
+        clock&&CFGetTypeID(clock)==CFNumberGetTypeID()&&
+        CFNumberGetValue((CFNumberRef)clock,kCFNumberSInt64Type,&reported_clock)&&reported_clock>0&&
+        refresh&&CFGetTypeID(refresh)==CFDictionaryGetTypeID()&&
+        mach_timebase_info(&scale)==KERN_SUCCESS&&scale.numer&&scale.denom;
+    struct redfin_display_refresh_parameters wanted={0};
+    if(valid) {
+        uint64_t native_clock=(UINT64_C(1000000000)*scale.denom+scale.numer/2)/scale.numer;
+        CFTypeRef a=CFDictionaryGetValue((CFDictionaryRef)refresh,CFSTR("displayMinRefreshInterval"));
+        CFTypeRef b=CFDictionaryGetValue((CFDictionaryRef)refresh,CFSTR("displayRefreshStepMachTime"));
+        valid=native_clock==(uint64_t)reported_clock&&
+            redfin_display_refresh_parameters(90,native_clock,&wanted)&&
+            a&&b&&CFGetTypeID(a)==CFNumberGetTypeID()&&CFGetTypeID(b)==CFNumberGetTypeID()&&
+            CFNumberGetValue((CFNumberRef)a,kCFNumberIntType,&minimum)&&
+            CFNumberGetValue((CFNumberRef)b,kCFNumberIntType,&step)&&
+            minimum==(int)wanted.minimum_interval_32_32&&step==(int)wanted.step_mach_ticks;
+    }
+    BOOL installed=valid&&setenv("CA_HEARTBEAT_RATE","90",1)==0;
+    if(abi)CFRelease(abi);if(clock)CFRelease(clock);if(refresh)CFRelease(refresh);if(service)IOObjectRelease(service);
+    char line[384];int n=snprintf(line,sizeof(line),
+        "REDFIN NATIVE CADENCE SETUP: boot=%s pid=%d requested-hz=90 verified-kernel-contract=%u environment-installed=%u native-period-getters=1\n",
+        boot_nonce,getpid(),valid,installed);
+    int fd=open("/private/var/mobile/Library/Logs/redfin-refresh.log",O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW,0600);
+    if(fd>=0){if(n>0&&(size_t)n<sizeof(line))(void)write(fd,line,(size_t)n);close(fd);}
 }
 static double redfin_ui_period(id object,SEL selector)
 {return main_screen(object) ? 1.0/90.0 : ui_period(object,selector);}
@@ -203,7 +220,7 @@ __attribute__((constructor)) static void redfin_refresh_install(void)
             method_setImplementation(method,(IMP)redfin_bundle_info_value);
         }
     }
-    display_class=objc_getClass("CADisplay");
+    Class display_class=objc_getClass("CADisplay");
     if (!method_abi(display_class,"mainDisplay","@16@0:8",YES) ||
         !method_abi(display_class,"refreshRate","d16@0:8",NO) ||
         !method_abi(display_class,"hardwareRefreshRate","d16@0:8",NO) ||
@@ -213,11 +230,7 @@ __attribute__((constructor)) static void redfin_refresh_install(void)
     Method heartbeat=class_getInstanceMethod(display_class,sel_registerName("heartbeatRate"));
     if (!image_uuid(method_getImplementation(period),quartz) || !image_uuid(method_getImplementation(hardware),quartz) ||
         !image_uuid(method_getImplementation(heartbeat),quartz)) return;
-    ca_period=(double (*)(id,SEL))method_getImplementation(period);
-    ca_hardware=(double (*)(id,SEL))method_getImplementation(hardware);
-    ca_heartbeat=(double (*)(id,SEL))method_getImplementation(heartbeat);
-    method_setImplementation(period,(IMP)redfin_ca_period);method_setImplementation(hardware,(IMP)redfin_ca_hardware);
-    method_setImplementation(heartbeat,(IMP)redfin_ca_heartbeat);
+    configure_native_heartbeat();
     Class screen=objc_getClass("UIScreen");
     if (!screen || !method_abi(screen,"_isMainScreen","B16@0:8",NO) ||
         !method_abi(screen,"maximumFramesPerSecond","q16@0:8",NO) ||

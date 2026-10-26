@@ -30,6 +30,8 @@ METHODS={
 REFRESH_METHODS={'UIScreen':{'-maximumFramesPerSecond':'q16@0:8',
     '-_maximumFramesPerSecond':'q16@0:8','-_refreshRate':'d16@0:8','-_isMainScreen':'B16@0:8'},
     'CADisplay':{'+mainDisplay':'@16@0:8','-refreshRate':'d16@0:8','-hardwareRefreshRate':'d16@0:8','-heartbeatRate':'d16@0:8'}}
+REFRESH_METHODS['CADisplay']['-minimumFrameDuration']='q16@0:8'
+REFRESH_METHODS['CADisplayLink']={'-maximumRefreshRate':'d16@0:8'}
 
 
 def build(out,cache_path=None):
@@ -50,6 +52,8 @@ def build(out,cache_path=None):
             if any(key not in actual or actual[key]['types']!=types for key,types in wanted.items()):
                 raise ValueError('native display-period ABI differs: '+name)
         quartz_uuid=quartz.uuid
+        from ports.redfin.cadence_abi import derive as derive_cadence
+        cadence=derive_cadence(cache)
         foundation=cache.image('/System/Library/Frameworks/Foundation.framework/Foundation')
         bundle_methods=foundation.objc_methods('NSBundle')
         if bundle_methods.get('-objectForInfoDictionaryKey:',{}).get('types')!='@24@0:8@16':
@@ -92,11 +96,12 @@ def build(out,cache_path=None):
         refresh_sha256=hashlib.sha256(refresh.read_bytes()).hexdigest(),
         sha256=hashlib.sha256(library.read_bytes()).hexdigest(),full_panel=True,physical_refresh_claimed=False)
     report.update(probe_opt_in_only=True,probe_uses_native_completed_counts=True,probe_statistics_version=2,
+        native_cadence_abi=cadence,native_display_period_getters_preserved=True,
         high_refresh_main_bundle_opt_in=True,foundation_uuid=foundation_uuid,
         probe_request_path='/redfin/display-probe-request',
         source_sha256={name:hashlib.sha256((HERE/name).read_bytes()).hexdigest() for name in
             ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m',
-             'display-refresh.m','display-benchmark.h','display-statistics.h','gui-profile.h')})
+             'display-refresh.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')
     (out/'refresh-log-initial').write_bytes(b'REDFIN verified physical refresh adaptation; native periods are seconds.\n')
     (out/'build.json').write_text(json.dumps(report,indent=2)+'\n')

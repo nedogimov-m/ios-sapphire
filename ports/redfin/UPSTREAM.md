@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native20H392 CLCD cadence contract and owned execution budgets — 2026-10-26
+
+Keep preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland906425b75e02b4f99eb5d7bb1ef7c9583472d772;
+updated mainc84b4634277a70beac73921029b1fb6afc2530af remains reviewed below.
+Revisit MiniIOMobileFramebuffer mode publication and the actual20H392 CLCD
+backend: generic TimingElements are insufficient proof of the builtin panel's
+callback clock. The native AppleCLCDDisplay heartbeat supports
+CA_HEARTBEAT_RATE in Hz; it reads getenv/atof and caches1/rate before using
+its ordinary timer. Native IOMFBDisplayRefresh fields use signed32-bit
+32.32second minimum intervals and Mach-tick steps. Audit the exact original
+framework UUID/key/callees/units at build time; no private ivar write, patched
+timestamp or replacement callback source is introduced.
+
+Adapt the native setting only for backboardd, complete measured90Hz/native
+kernel ABI/Mach-clock agreement and the audited framework. Preserve native
+CADisplay period getters and record those original values. The new kernel
+publisher supplies the actual builtin-panel dictionary; sparse render/present
+owner phases retain all real FIFO/hazard/fence/resource paths and distinguish
+host waiting from owner execution.33affected host contracts and full native
+UI/import/signature/current-source/native-reader audit PASS. Existing Metal/
+compiler/cache binaries are reused. CI kernel and actual device90callbacks/FPS
+are pending; this source review alone establishes no runtime improvement.
+
 ## Ordinary scheduling-phase comparison:52.300FPS, correctness retained — 2026-10-26
 
 V59 reuses V58/source2325d8e native binaries, kernel, UI and compiler cache with

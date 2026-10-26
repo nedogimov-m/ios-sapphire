@@ -17,6 +17,8 @@
 #include "gui-profile.h"
 #include "display-statistics.h"
 #include "display-benchmark.h"
+#import <objc/runtime.h>
+#import <objc/message.h>
 
 @interface RedfinDisplayProbe : NSObject
 {
@@ -135,6 +137,27 @@ static BOOL sample_attempts(io_connect_t client,uint64_t nonce,struct redfin_dis
 }
 static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_statistics_v2 *out)
 {return sample_attempts(client,nonce,out,8);}
+static void probe_native_periods(uint64_t nonce,CADisplayLink *link)
+{
+    Class cls=objc_getClass("CADisplay");
+    const char *selectors[]={"refreshRate","hardwareRefreshRate","heartbeatRate","minimumFrameDuration"};
+    const char *types[]={"d16@0:8","d16@0:8","d16@0:8","q16@0:8"};
+    Method main=class_getClassMethod(cls,sel_registerName("mainDisplay"));
+    Method maximum=class_getInstanceMethod(link.class,sel_registerName("maximumRefreshRate"));
+    if(!main||strcmp(method_getTypeEncoding(main),"@16@0:8")||!maximum||strcmp(method_getTypeEncoding(maximum),"d16@0:8"))return;
+    for(unsigned i=0;i<4;++i) {
+        Method method=class_getInstanceMethod(cls,sel_registerName(selectors[i]));
+        if(!method||strcmp(method_getTypeEncoding(method),types[i]))return;
+    }
+    id display=((id (*)(id,SEL))objc_msgSend)(cls,sel_registerName("mainDisplay"));
+    if(!display)return;
+    double periods[3];
+    for(unsigned i=0;i<3;++i)periods[i]=((double (*)(id,SEL))objc_msgSend)(display,sel_registerName(selectors[i]));
+    NSInteger minimum=((NSInteger (*)(id,SEL))objc_msgSend)(display,sel_registerName(selectors[3]));
+    double maximum_period=((double (*)(id,SEL))objc_msgSend)(link,sel_registerName("maximumRefreshRate"));
+    probe_log(nonce,"native-periods refresh-seconds=%.9f hardware-seconds=%.9f heartbeat-seconds=%.9f minimum-frame-duration=%ld link-maximum-period-seconds=%.9f native-getters-preserved=1",
+        periods[0],periods[1],periods[2],(long)minimum,maximum_period);
+}
 @implementation RedfinDisplayProbe
 - (void)resetMeasurement
 {
@@ -305,6 +328,7 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
         probe.window=parent;probe.fallbackWindow=native_host;probe.mode=mode;probe.checksCompleted=checks_completed;active_probe=probe;
         CADisplayLink *link=[CADisplayLink displayLinkWithTarget:probe selector:@selector(tick:)];
         link.preferredFrameRateRange=CAFrameRateRangeMake(start.panel_hz,start.panel_hz,start.panel_hz);
+        probe_native_periods(nonce,link);
         probe.link=link;[link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
         probe_log(nonce,"start passive=%u animation=%s seconds=%u panel-hz=%u begin-presents=%llu begin-gpu=%llu",
             mode==RF_DISPLAY_PROBE_PASSIVE,mode==RF_DISPLAY_PROBE_ANIMATE?"system-window-subpixel":"none",

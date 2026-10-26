@@ -75,11 +75,18 @@ static void redfinGpuQueueWorker(void *,wait_result_t)
         if(job){gGPUQueue.head=job->next;if(!gGPUQueue.head)gGPUQueue.tail=NULL;}
         IOLockUnlock(gGPUQueue.lock);
         if(!job) {if(redfin_gpu_ready()){GPUTransaction hardware;(void)redfin_gpu_dvfs_idle();}continue;}
+        uint64_t dequeued=gpuNow(),locked=0,ran=0;
         IOReturn result=kIOReturnNotReady;
-        {GPUTransaction hardware;if(!cancelled&&redfin_gpu_ready())
-            result=job->kernel_execute?job->kernel_execute(job->kernel_argument):job->owner->executeQueued(job);}
+        {
+            GPUTransaction hardware;locked=gpuNow();
+            if(!cancelled&&redfin_gpu_ready())
+                result=job->kernel_execute?job->kernel_execute(job->kernel_argument):job->owner->executeQueued(job);
+            ran=gpuNow();
+        }
+        uint64_t released=gpuNow();
         /* Hardware is unlocked before any client waiter or object release. */
         if(job->owner)job->owner->retireQueued(job,result);
+        uint64_t client_retired=gpuNow();
         IOLockLock(gGPUQueue.lock);
         if(job->sequence!=gGPUQueue.retired+1)redfin_gpu_poison("global queued retirement order changed");
         gGPUQueue.retired=job->sequence;++gGPUQueue.executed;
@@ -91,6 +98,14 @@ static void redfinGpuQueueWorker(void *,wait_result_t)
             gGPUQueue.access.fine_queries,gGPUQueue.access.fallbacks,RF_GA_LINE_BYTES,
             gGPUQueue.surface_calls,gGPUQueue.surface_waits,gGPUQueue.surface_query_ns/1000,gGPUQueue.surface_wait_ns/1000);
         IOLockUnlock(gGPUQueue.lock);
+        if(job->sequence<=4||!(job->sequence&(job->sequence-1))||!(job->sequence%120)) {
+            uint64_t queue_retired=gpuNow();
+            IOLog("REDFIN GPU OWNER PHASE: sequence=%llu kind=%s name=%s pid=%d client-fence=%u physical-fence=%u result=%#x admission-queue-us=%llu hardware-lock-us=%llu owner-execute-us=%llu hardware-release-us=%llu client-retire-us=%llu queue-retire-us=%llu accepted-to-retired-us=%llu host-scopes=1\n",
+                job->sequence,job->owner?"render":"present",job->owner?job->process:"kernel",job->owner?job->pid:0,
+                job->fence,job->physical_fence,result,(dequeued-job->accepted)/1000,(locked-dequeued)/1000,
+                (ran-locked)/1000,(released-ran)/1000,(client_retired-released)/1000,
+                (queue_retired-client_retired)/1000,(queue_retired-job->accepted)/1000);
+        }
         if(job->kernel_complete)job->kernel_complete(job->kernel_argument,result);
         RedwoodGPUUserClient *owner=job->owner;uint64_t charge=job->charge;
         if(job->ranges)IODelete(job->ranges,rf_gw_submit_range,job->nr_ranges);

@@ -7,6 +7,21 @@
 #include <stddef.h>
 #include <string.h>
 
+struct redfin_display_refresh_parameters {
+    uint32_t minimum_interval_32_32,step_mach_ticks;
+};
+static inline bool redfin_display_refresh_parameters(uint32_t hz,uint64_t clock_hz,
+    struct redfin_display_refresh_parameters *out)
+{
+    if(!out||(hz!=60&&hz!=90)||clock_hz<1000000||clock_hz>1000000000)return false;
+    uint64_t interval=((UINT64_C(1)<<32)+hz/2)/hz,step=(clock_hz+hz/2)/hz;
+    /* Both20H392 dictionary fields are read through signed CA_CFIntValue.
+     * Minimum interval is32.32 seconds; the step is in real Mach ticks. */
+    if(!interval||interval>INT32_MAX||!step||step>INT32_MAX)return false;
+    struct redfin_display_refresh_parameters value={(uint32_t)interval,(uint32_t)step};
+    *out=value;return true;
+}
+
 static inline void redfin_display_notification(uint64_t now,uint64_t count,uint64_t values[6])
 {
     /* Native VsyncNotifyFunc decodes time, presentation-time, counter in this

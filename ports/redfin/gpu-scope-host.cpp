@@ -28,7 +28,7 @@ enum {THREAD_ABORTSAFE=0,THREAD_UNINT=1,THREAD_AWAKENED=0,THREAD_TIMED_OUT=1};
 #define IONew(T,n) ((T *)malloc(sizeof(T)*(n)))
 #define IONewZero(T,n) ((T *)calloc((n),sizeof(T)))
 #define IODelete(p,T,n) free(p)
-#define IOLog(...) ((void)0)
+static void IOLog(const char *format,...){(void)format;}
 struct IOLock {std::mutex mutex;std::condition_variable condition;};
 static std::atomic<unsigned> wait_events{0};
 static const void *retirement_event=nullptr;

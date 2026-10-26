@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native cadence/owner-budget block implemented; CI next — 2026-10-26
+
+Base7c8a1b7. Read-only actual20H392 QuartzCore audit identifies the real
+AppleCLCDDisplay heartbeat reader: getenv(CA_HEARTBEAT_RATE), atof,1/Hz and
+native timer initialization. Build-time review checks the exact image UUID,
+native key/callees/reciprocal and records its hash; no Apple code or generated
+artifact enters git. Configure only backboardd before its native heartbeat is
+cached, after measured90Hz panel, complete kernel cadence ABI1 dictionary and
+exact Mach-clock parameters match. Remove the former CADisplay period getter
+overrides; original native periods/timestamps stay intact. Keep the existing
+measured-panel public app opt-in/UIScreen maximum. Observer records actual
+unmodified native periods, minimum interval and CADisplayLink native maximum.
+
+Publish IOMFBDisplayRefresh with signed32-bit minimum interval in32.32seconds
+and step in actual Mach ticks, plus a last-published complete-ABI sentinel.
+Do not mistake a minimum interval of1 for a frame period:20H392 scales that
+field by2^-32 (or the native half-step policy), while its step reader converts
+Mach ticks. Restrict the owned publisher to60/90Hz and validated clock bounds.
+The native90Hz configuration never edits display-link timestamps or invents
+completed frames. Additional sparse kernel owner phases distinguish admission
+queue, hardware-lock wait, owner execution/release and retirement for both
+render and internal presentation. Owner execution includes CPU programming/
+GPU waiting and is not isolated GPU core time. FIFO/commands/fences/DMA/resource
+ownership stay unchanged. New overlay native-cadence.patch is last in all
+native build/source-replay lists, with exact owned-source matches.
+
+33affected host contracts PASS across the full run and repaired native-queue
+fixture rerun: numerical independent32.32/Mach units/bounds, actual selector/
+counter concurrency, window recovery, real presenter, FIFO/physical aliases/
+CPU consumers/lifetimes and typed accesses. Fixture logging now evaluates its
+arguments like the real logger. Full native UIcadence-v1 build, actual20H392
+imports/ABI/strict signatures/current sources and native-reader audit PASS.
+Existing graphics/Metal client binaries/pairing2407206f.. and compiler/cache
+496301fc.. remain exact; no GPU/compiler build is needed. Phone/Photos auto
+opens and heavy image capture remain OFF.
+
+New kernel not built/deployed yet. Last known kernel GitHub Actions40256228186/
+run5/sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Last exact observed V59 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7480050e0c6010e6 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Phone last verified Fastboot/clean root1370334. Next: one CI kernel build,
+actual source/ABI/artifact verification, fresh V66/V60 then one combined ordinary
+callback/GPU/output observation. Actual90callbacks and any FPS gain remain
+unproved; current ordinary baseline52.300FPS. Broad goal remains active.
+
 ## REDFIN V59 ordinary scheduling runtime:52.300GPU FPS, no material speedup — 2026-10-26
 
 Code2325d8e, documentationcbb8b90; exact V58 native binaries/pairing2407206f..

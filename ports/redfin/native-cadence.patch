@@ -1,0 +1,102 @@
+--- a/iokit/Kernel/arm/RedfinDisplayMode.h
++++ b/iokit/Kernel/arm/RedfinDisplayMode.h
+@@ -6,6 +6,21 @@
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include <string.h>
++
++struct redfin_display_refresh_parameters {
++    uint32_t minimum_interval_32_32,step_mach_ticks;
++};
++static inline bool redfin_display_refresh_parameters(uint32_t hz,uint64_t clock_hz,
++    struct redfin_display_refresh_parameters *out)
++{
++    if(!out||(hz!=60&&hz!=90)||clock_hz<1000000||clock_hz>1000000000)return false;
++    uint64_t interval=((UINT64_C(1)<<32)+hz/2)/hz,step=(clock_hz+hz/2)/hz;
++    /* Both20H392 dictionary fields are read through signed CA_CFIntValue.
++     * Minimum interval is32.32 seconds; the step is in real Mach ticks. */
++    if(!interval||interval>INT32_MAX||!step||step>INT32_MAX)return false;
++    struct redfin_display_refresh_parameters value={(uint32_t)interval,(uint32_t)step};
++    *out=value;return true;
++}
+ 
+ static inline void redfin_display_notification(uint64_t now,uint64_t count,uint64_t values[6])
+ {
+--- a/iokit/Kernel/arm/RedfinDisplayMode.inc
++++ b/iokit/Kernel/arm/RedfinDisplayMode.inc
+@@ -15,8 +15,12 @@
+ {
+     OSDictionary *timing=OSDictionary::withCapacity(8),*horizontal=OSDictionary::withCapacity(4);
+     OSDictionary *vertical=OSDictionary::withCapacity(4),*color=OSDictionary::withCapacity(8);
++    OSDictionary *refresh=OSDictionary::withCapacity(2);
+     OSArray *timings=OSArray::withCapacity(1),*colors=OSArray::withCapacity(1);
+-    bool success=timing && horizontal && vertical && color && timings && colors;
++    uint64_t clock_hz=0;nanoseconds_to_absolutetime(NSEC_PER_SEC,&clock_hz);
++    struct redfin_display_refresh_parameters parameters={};
++    bool success=timing && horizontal && vertical && color && timings && colors && refresh &&
++        redfin_display_refresh_parameters(hz,clock_hz,&parameters);
+     if (success) {
+         redfin_mode_number(color,"ID",1);redfin_mode_number(color,"PixelEncoding",0);
+         redfin_mode_number(color,"Depth",8);redfin_mode_number(color,"Colorimetry",1);
+@@ -32,15 +36,22 @@
+         timing->setObject("HorizontalAttributes",horizontal);timing->setObject("VerticalAttributes",vertical);
+         timing->setObject("ColorModes",colors);timings->setObject(timing);
+         success=fb->setProperty("TimingElements",timings) && fb->setProperty("ColorElements",colors);
++        redfin_mode_number(refresh,"displayMinRefreshInterval",parameters.minimum_interval_32_32);
++        redfin_mode_number(refresh,"displayRefreshStepMachTime",parameters.step_mach_ticks);
++        success=refresh->getCount()==2 && fb->setProperty("IOMFBDisplayRefresh",refresh) && success;
++        success=fb->setProperty("RedfinCadenceClockHz",clock_hz,64) && success;
+         /* hz90 can only reach this point after the panel's physical TE and
+          * independent INTF counter admitted the transaction. Userland may
+          * advertise it only with both of these measured-mode properties. */
+         success=fb->setProperty("RedfinVerifiedRefreshHz",hz,32) && success;
+         success=fb->setProperty("RedfinPhysicalRefreshVerified",hz==90) && success;
++        if(success)success=fb->setProperty("RedfinNativeCadenceABI",1,32);
+     }
+     OSSafeReleaseNULL(timings);OSSafeReleaseNULL(colors);OSSafeReleaseNULL(timing);
+-    OSSafeReleaseNULL(horizontal);OSSafeReleaseNULL(vertical);OSSafeReleaseNULL(color);
++    OSSafeReleaseNULL(horizontal);OSSafeReleaseNULL(vertical);OSSafeReleaseNULL(color);OSSafeReleaseNULL(refresh);
+     IOLog("REDFIN DISPLAY MODES: logical=%ux%u rate=%u current-color=1 current-timing=1 published=%u native20H392=1\n",
+         width,height,hz,success);
++    IOLog("REDFIN NATIVE CADENCE: rate=%u clock-hz=%llu minimum-32.32=%u step-Mach-ticks=%u published=%u native-ABI=1\n",
++        hz,clock_hz,parameters.minimum_interval_32_32,parameters.step_mach_ticks,success);
+     return success;
+ }
+--- a/iokit/Kernel/arm/RedfinGPUQueue.inc
++++ b/iokit/Kernel/arm/RedfinGPUQueue.inc
+@@ -75,11 +75,18 @@
+         if(job){gGPUQueue.head=job->next;if(!gGPUQueue.head)gGPUQueue.tail=NULL;}
+         IOLockUnlock(gGPUQueue.lock);
+         if(!job) {if(redfin_gpu_ready()){GPUTransaction hardware;(void)redfin_gpu_dvfs_idle();}continue;}
++        uint64_t dequeued=gpuNow(),locked=0,ran=0;
+         IOReturn result=kIOReturnNotReady;
+-        {GPUTransaction hardware;if(!cancelled&&redfin_gpu_ready())
+-            result=job->kernel_execute?job->kernel_execute(job->kernel_argument):job->owner->executeQueued(job);}
++        {
++            GPUTransaction hardware;locked=gpuNow();
++            if(!cancelled&&redfin_gpu_ready())
++                result=job->kernel_execute?job->kernel_execute(job->kernel_argument):job->owner->executeQueued(job);
++            ran=gpuNow();
++        }
++        uint64_t released=gpuNow();
+         /* Hardware is unlocked before any client waiter or object release. */
+         if(job->owner)job->owner->retireQueued(job,result);
++        uint64_t client_retired=gpuNow();
+         IOLockLock(gGPUQueue.lock);
+         if(job->sequence!=gGPUQueue.retired+1)redfin_gpu_poison("global queued retirement order changed");
+         gGPUQueue.retired=job->sequence;++gGPUQueue.executed;
+@@ -91,6 +98,14 @@
+             gGPUQueue.access.fine_queries,gGPUQueue.access.fallbacks,RF_GA_LINE_BYTES,
+             gGPUQueue.surface_calls,gGPUQueue.surface_waits,gGPUQueue.surface_query_ns/1000,gGPUQueue.surface_wait_ns/1000);
+         IOLockUnlock(gGPUQueue.lock);
++        if(job->sequence<=4||!(job->sequence&(job->sequence-1))||!(job->sequence%120)) {
++            uint64_t queue_retired=gpuNow();
++            IOLog("REDFIN GPU OWNER PHASE: sequence=%llu kind=%s name=%s pid=%d client-fence=%u physical-fence=%u result=%#x admission-queue-us=%llu hardware-lock-us=%llu owner-execute-us=%llu hardware-release-us=%llu client-retire-us=%llu queue-retire-us=%llu accepted-to-retired-us=%llu host-scopes=1\n",
++                job->sequence,job->owner?"render":"present",job->owner?job->process:"kernel",job->owner?job->pid:0,
++                job->fence,job->physical_fence,result,(dequeued-job->accepted)/1000,(locked-dequeued)/1000,
++                (ran-locked)/1000,(released-ran)/1000,(client_retired-released)/1000,
++                (queue_retired-client_retired)/1000,(queue_retired-job->accepted)/1000);
++        }
+         if(job->kernel_complete)job->kernel_complete(job->kernel_argument,result);
+         RedwoodGPUUserClient *owner=job->owner;uint64_t charge=job->charge;
+         if(job->ranges)IODelete(job->ranges,rf_gw_submit_range,job->nr_ranges);

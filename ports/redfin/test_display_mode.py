@@ -24,6 +24,7 @@ void notify(uint64_t now,uint64_t count,uint64_t out[6]){redfin_display_notifica
 int mode(uint64_t block,uint64_t offset,void *out,size_t bytes){return redfin_display_current_mode(block,offset,out,bytes);}
 int shift(struct redfin_ui_rect t,struct redfin_ui_rect c,struct redfin_ui_rect w,double *out){return redfin_ui_time_shift(t,c,w,out);}
 int scope(const char *path){return redfin_ui_executable(path);}
+int refresh(uint32_t hz,uint64_t clock_hz,struct redfin_display_refresh_parameters *p){return redfin_display_refresh_parameters(hz,clock_hz,p);}
 ''')
         r=subprocess.run(['cc','-std=c11','-O2','-shared','-fPIC','-Wall','-Wextra','-Werror','-I',str(HERE),
             str(root/'mode.c'),'-o',str(root/'mode.so')],capture_output=True,text=True)
@@ -32,6 +33,20 @@ int scope(const char *path){return redfin_ui_executable(path);}
         cls.lib.mode.argtypes=[C.c_uint64,C.c_uint64,C.c_void_p,C.c_size_t]
         cls.lib.shift.argtypes=[Rect,Rect,Rect,C.POINTER(C.c_double)]
         cls.lib.scope.argtypes=[C.c_char_p]
+        cls.lib.refresh.argtypes=[C.c_uint32,C.c_uint64,C.POINTER(C.c_uint32)]
+
+    def test_native_clcd_interval_is_fixed32_32_seconds_and_step_uses_actual_mach_clock(self):
+        for hz in (60,90):
+            for clock in (19200000,24000000,1000000000):
+                out=(C.c_uint32*2)()
+                self.assertTrue(self.lib.refresh(hz,clock,out))
+                self.assertLessEqual(abs(out[0]/2**32-1/hz),0.5/2**32)
+                self.assertLessEqual(abs(out[1]/clock-1/hz),0.5/clock+1e-15)
+                self.assertLess(out[0],2**31);self.assertLess(out[1],2**31)
+        for hz,clock in [(0,19200000),(30,19200000),(120,19200000),(90,0),(90,999999),(90,2**64-1)]:
+            out=(C.c_uint32*2)(0xabcdef01,0x12345678)
+            self.assertFalse(self.lib.refresh(hz,clock,out))
+            self.assertEqual(list(out),[0xabcdef01,0x12345678])
 
     def test_actual20H392_callback_receives_time_time_counter_as_six_native_halves(self):
         out=(C.c_uint64*6)();now=0x173a345678;counter=0x1234567890
