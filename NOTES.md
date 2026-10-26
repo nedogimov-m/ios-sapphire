@@ -1,5 +1,26 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN direct GLES/producer native kernel20/V94 verified; combined V88 starts — 2026-10-27
+
+Source5b063499a756c6503627184438c3f2dd1a2536ff/Actions40403226041/run20/kernel
+01be808171f67582d9dc07213ef11bf31b3f127f68ddda3a1301262941944159; complete
+old+new patch map/native ABI/arm64/non-PAC/XNU/KDK/source identity verified.
+Native actual20H392 input1a4ad42c../pair17d0f01f../compiler shader cache496301fc..
+complete build/signatures/96common contracts PASS. UI unchanged.
+Fresh V94 clean1634464/empty journal applied ONCE; full live preimages/backups,
+signatures/readonly native fsck/ranges and whole files read back, clean Fastboot.
+Cached/file diagnostic jobs agree ON; backboardd GLES/direct, global app Metal
+system; captures/automatic Phone/Photos opens OFF. V94 STALE/never reuse.
+Next fresh V95/imageV89; actual postboot epoch pending collection.
+
+V88 imageb4d7b3659d14650ce64d08eeef74f783c23fd0813399e4f165a2b5823e36e7cf, fresh7480e63319f7a3e0; full native app Metal/GPU contract plus new
+full-canvas odd-height framebuffer-fetch/pixels/seed/tail/CPU-first-reader check,
+actual direct shared GLES/native producer publications and continued touch,
+then animate-checked. No hardware direct/FPS claim until terminal evidence.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7480e63319f7a3e0 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal active; smooth60/90render and other platform items unfinished.
+
 ## REDFIN complete direct GLES native build/CI20/image PASS; combined V88 next — 2026-10-27
 
 Kernel source5b063499a756c6503627184438c3f2dd1a2536ff,
