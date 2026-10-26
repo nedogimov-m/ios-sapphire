@@ -1,0 +1,274 @@
+diff --git a/iokit/Kernel/arm/RedfinGPU.cpp b/iokit/Kernel/arm/RedfinGPU.cpp
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -35,6 +35,7 @@
+ #include "RedfinGPUQueue.h"
+ #include "RedfinGPUWaits.h"
+ #include "RedfinGPUAccess.h"
++#include "RedfinSurfaceCache.h"
+ struct gpu_queued_job;
+ 
+ enum {
+@@ -153,6 +154,7 @@
+     setProperty("RedfinScopedWaitABI",RF_GW_ABI,32);
+     setProperty("RedfinResourceAccessABI",RF_GA_ABI,32);
+     setProperty("RedfinSurfacePaddingABI",RF_GP_ABI,32);
++    setProperty("RedfinSurfaceCacheABI",RF_GS_ABI,32);
+     setProperty("RedfinRetainedMemoryABI",RF_GM_ABI,32);
+     if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
+     registerService();return true;
+@@ -202,6 +204,7 @@
+ };
+ static struct {
+     uint64_t since,allocating,cleaning,submitting,invalidating,cleaned,invalidated;
++    uint64_t wc_clean,wc_invalidate,wc_clean_bytes,wc_invalidate_bytes;
+     uint32_t allocations,submissions,skipped;
+ } gTiming;
+ static uint64_t gpuNow(void)
+@@ -217,6 +220,9 @@
+         gTiming.submissions,gTiming.allocations,gTiming.allocating/1000,
+         gTiming.cleaning/1000/n,gTiming.submitting/1000/n,gTiming.invalidating/1000/n,
+         gTiming.cleaned/1024/n,gTiming.invalidated/1024/n,gTiming.skipped);
++    IOLog("REDFIN GPU SURFACE CACHE: WC-clean=%llu WC-invalidate=%llu WC-BO-KiB=%llu,%llu cached-KiB=%llu,%llu actual-owned=1\n",
++        gTiming.wc_clean,gTiming.wc_invalidate,gTiming.wc_clean_bytes/1024,
++        gTiming.wc_invalidate_bytes/1024,gTiming.cleaned/1024,gTiming.invalidated/1024);
+     gTiming={};gTiming.since=now;
+ }
+ class RedwoodGPUUserClient:public IOUserClient {
+diff --git a/iokit/Kernel/arm/RedfinGPUDisplay.inc b/iokit/Kernel/arm/RedfinGPUDisplay.inc
+--- a/iokit/Kernel/arm/RedfinGPUDisplay.inc
++++ b/iokit/Kernel/arm/RedfinGPUDisplay.inc
+@@ -17,7 +17,7 @@
+ static struct {
+     gd_buffer stage, commands, panel, sources[GD_CACHE];
+     bool attempted, tested, disabled, uncertain;
+-    uint64_t frame, calls, elapsed, fallbacks;
++    uint64_t frame, calls, elapsed, fallbacks,wc_sources,cached_sources;
+ } gd;
+ 
+ bool RedfinGPUDisplayWritable(void)
+@@ -299,9 +299,13 @@
+     uint64_t prepared = gpuNow();
+     /* Surface BOs may also have native CPU writers. Push their actual pages;
+      * this is cache maintenance, with no CPU scaling or pixel copy. */
+-    for (unsigned i = 0; i < GD_CACHE; ++i)
+-        if (gd.sources[i].memory && gd.sources[i].seen == gd.frame)
+-            redfin_gpu_sync(gd.sources[i].kernel, gd.sources[i].size, false);
++    for (unsigned i = 0; i < GD_CACHE; ++i) {
++        gd_buffer *b = &gd.sources[i];
++        if (!b->memory || b->seen != gd.frame) continue;
++        if (redfin_surface_write_combined(b->surface,b->memory,b->size)) ++gd.wc_sources;
++        else {redfin_gpu_sync(b->kernel,b->size,false);++gd.cached_sources;}
++    }
++    redfin_surface_cache_barrier();
+     uint64_t synced = gpuNow();
+     uint32_t fence = 0; gd_submit_marks marks = {};
+     if (!gd_submit(layers, count, gd.panel.address, gd.panel.size, true, &fence, &marks)) {
+@@ -322,6 +326,8 @@
+         /* Adjacent host scopes in us: prepare, source sync, build, command
+          * sync, native submit/wait, readback, total. All values fit one line
+          * even at their type maxima. No extra pixel readback is introduced. */
++        IOLog("REDFIN GPU OUTPUT CACHE: f=%llu WC=%llu cached=%llu actual-owned-mappings=1\n",
++            gd.calls,gd.wc_sources,gd.cached_sources);
+         uint32_t cleared = RF_GD_PANEL_W * RF_GD_PANEL_H -
+             layers[0].destination.w * layers[0].destination.h;
+         IOLog("REDFIN GPU OUTPUT: f=%llu n=%u clear=%u us=%llu,%llu,%llu,%llu,%llu,%llu,%llu scope=1\n",
+diff --git a/iokit/Kernel/arm/RedfinGPUQueue.inc b/iokit/Kernel/arm/RedfinGPUQueue.inc
+--- a/iokit/Kernel/arm/RedfinGPUQueue.inc
++++ b/iokit/Kernel/arm/RedfinGPUQueue.inc
+@@ -263,6 +263,11 @@
+     uint64_t began=gpuNow(),again=4ULL*NSEC_PER_MSEC;
+     for(unsigned i=0;i<job->nr_bos;++i) {
+         gpu_buffer *b=job->bos[i].buffer;if(!b->surface)continue;
++        /* All CPU aliases of these exact owned pages are already WC.
++         * Keep the actual submitter/worker barriers and real GPU fences. */
++        if(redfin_surface_write_combined(b->surface,b->memory,b->size)) {
++            ++gTiming.wc_clean;gTiming.wc_clean_bytes+=b->size;continue;
++        }
+         uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
+         if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
+             int drained=redfin_gpu_quiesce();if(drained)return gpuError(drained);
+@@ -281,16 +286,23 @@
+     IOReturn result=gpuError(redfin_gpu_wait(job->physical_fence));
+     if(result!=kIOReturnSuccess)gpuQueueFault(job);
+     gTiming.submitting+=gpuNow()-began;began=gpuNow();
+-    /* A later writer may still be active. Imported CPU-cache ownership is
+-     * handed back only at actual idle; WC-only native BOs need no such drain. */
++    /* A later writer may still be active. Cached imported CPU ownership
++     * changes only at actual idle. Proven all-WC aliases need only their
++     * real per-job cache-flush fence and the CPU observation barrier. */
+     if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i)
+-        if(job->bos[i].buffer->surface&&(job->bos[i].access&RF_GA_WRITE)) {
++        if(job->bos[i].buffer->surface&&(job->bos[i].access&RF_GA_WRITE)&&
++           !redfin_surface_write_combined(job->bos[i].buffer->surface,
++                job->bos[i].buffer->memory,job->bos[i].buffer->size)) {
+             result=gpuError(redfin_gpu_quiesce());break;
+         }
+     if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i) {
+         gpu_buffer *b=job->bos[i].buffer;
+-        if(b->surface&&(job->bos[i].access&RF_GA_WRITE)&&!gpuQueuedSurfaceCache(job,i,true))result=kIOReturnIOError;
+-    }
++        if(!b->surface||!(job->bos[i].access&RF_GA_WRITE))continue;
++        if(redfin_surface_write_combined(b->surface,b->memory,b->size)) {
++            ++gTiming.wc_invalidate;gTiming.wc_invalidate_bytes+=b->size;
++        } else if(!gpuQueuedSurfaceCache(job,i,true))result=kIOReturnIOError;
++    }
++    if(result==kIOReturnSuccess)redfin_surface_cache_barrier();
+     gTiming.invalidating+=gpuNow()-began;gpuTiming();
+     if(job->fence<=8||!(job->fence%256)||result!=kIOReturnSuccess)
+         IOLog("REDFIN GPU QUEUED FINISH: name=%s pid=%d client-fence=%u physical-fence=%u IBs=%u actual-finish=%u result=%#x age-us=%llu\n",
+diff --git a/iokit/Kernel/arm/RedfinSurfaceCache.h b/iokit/Kernel/arm/RedfinSurfaceCache.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinSurfaceCache.h
+@@ -0,0 +1,35 @@
++/* SPDX-License-Identifier: MIT */
++/* Include after SweetSurface and IOBufferMemoryDescriptor declarations.
++ * Only the allocator may publish redfinWriteCombined, before the surface
++ * becomes visible. All kernel, IOSurface and GPU-client CPU mappings of
++ * those exact owned pages use the same actual Write Combine attribute.
++ * Wrapped, parent, explicit-cache and physical scanout memory keep their
++ * original cache ownership protocol, including unseeded CPU writers.
++ */
++#ifndef REDFIN_SURFACE_CACHE_H
++#define REDFIN_SURFACE_CACHE_H
++#include <stdint.h>
++
++#define RF_GS_ABI 1u
++
++static inline void redfin_surface_cache_barrier(void)
++{
++#if defined(__arm64__) || defined(__aarch64__)
++    __asm__ volatile("dsb sy" ::: "memory");
++#else
++    __atomic_thread_fence(__ATOMIC_SEQ_CST);
++#endif
++}
++
++static inline bool redfin_surface_write_combined(const SweetSurface *surface,
++    IOMemoryDescriptor *memory, uint64_t bytes)
++{
++    return surface && memory && bytes && surface->redfinWriteCombined &&
++        surface->memory == memory && surface->allocSize == bytes &&
++        memory->getLength() == bytes &&
++        OSDynamicCast(IOBufferMemoryDescriptor, memory) &&
++        surface->mapCache == kIOMapWriteCombineCache && !surface->cacheMode &&
++        surface->redfinRenderExtent && !surface->wrapped && !surface->wrapDelta &&
++        !surface->parentID && !surface->scanoutPhys && surface->scanoutSlot < 0;
++}
++#endif
+diff --git a/iokit/Kernel/arm/RedfinSurfaceCacheAllocator.inc b/iokit/Kernel/arm/RedfinSurfaceCacheAllocator.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinSurfaceCacheAllocator.inc
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: MIT */
++/* Fresh owned pixels only. The caller decides eligibility before allocation;
++ * a live cached allocation is never remapped with different attributes. */
++static IOBufferMemoryDescriptor *sweet_redfin_owned_memory(uint32_t bytes,
++    bool write_combined)
++{
++    IOBufferMemoryDescriptor *memory = NULL;
++    if ((uint64_t)OSAddAtomic64(bytes, (volatile SInt64 *)&sweet_surface_wired) +
++        bytes <= SWEET_SURFACE_WIRED_MAX) {
++        IOOptionBits options = kIODirectionInOut | kIOMemoryKernelUserShared;
++        if (write_combined) options |= kIOMapWriteCombineCache;
++        memory = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
++            options, bytes, page_size);
++    }
++    if (memory && memory->getLength() != bytes) OSSafeReleaseNULL(memory);
++    if (!memory) OSAddAtomic64(-(SInt64)bytes, (volatile SInt64 *)&sweet_surface_wired);
++    return memory;
++}
+diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.cpp
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -41,6 +41,7 @@
+ #include <IOKit/system.h>
+ #include <pexpert/pexpert.h>
+ #include <arm64/redfin_gui_profile.h>
++#include "RedfinSurfaceCache.h"
+ #include <libkern/c++/OSArray.h>
+ #include <libkern/c++/OSDictionary.h>
+ #include <libkern/c++/OSNumber.h>
+@@ -378,6 +379,8 @@
+     while(bytes<608 && args[bytes])++bytes;
+     return bytes<608 && redfin_gpu_gui_profile(args,bytes+1,NULL);
+ }
++
++#include "RedfinSurfaceCacheAllocator.inc"
+ 
+ /* Geometry from the creation properties (IOSurface.h keys). */
+ static IOReturn
+@@ -882,14 +885,11 @@
+ 		    !s->scanoutPhys && s->scanoutSlot < 0 &&
+ 		    rf_gp_storage_plan(&image,s->allocSize,&padding);
+ 		if (padded) s->allocSize = (uint32_t)padding.allocation;
+-		IOBufferMemoryDescriptor *mem = NULL;
+-		if ((uint64_t)OSAddAtomic64(s->allocSize, (volatile SInt64 *)&sweet_surface_wired) +
+-		    s->allocSize <= SWEET_SURFACE_WIRED_MAX) {
+-			mem = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
+-			    kIODirectionInOut | kIOMemoryKernelUserShared, s->allocSize, page_size);
+-		}
++		/* Default-cache fresh owned BGRA images choose WC at allocation.
++		 * Explicit cache hints and every pre-existing/wrapped alias stay as-is. */
++		bool write_combined = padded && !s->cacheMode;
++		IOBufferMemoryDescriptor *mem = sweet_redfin_owned_memory(s->allocSize, write_combined);
+ 		if (mem == NULL) {
+-			OSAddAtomic64(-(SInt64)s->allocSize, (volatile SInt64 *)&sweet_surface_wired);
+ 			ret = kIOReturnNoMemory;
+ 		} else {
+ 			bzero(mem->getBytesNoCopy(), s->allocSize);
+@@ -901,7 +901,14 @@
+ 					IOLog("REDFIN SURFACE PAD: width=%u height=%u pitch=%u allocation=%u extent=%llu owned=1 ABI=1\n",
+ 					    s->width,s->height,s->bytesPerRow,s->allocSize,s->redfinRenderExtent);
+ 			}
+-			s->mapCache = kIOMapDefaultCache;
++			s->redfinWriteCombined = write_combined;
++			s->mapCache = write_combined ? kIOMapWriteCombineCache : kIOMapDefaultCache;
++			if (write_combined) {
++				redfin_surface_cache_barrier(); /* complete zeroing before publication */
++				static uint32_t wc_notices;
++				if (__atomic_fetch_add(&wc_notices,1,__ATOMIC_RELAXED) < 8)
++					IOLog("REDFIN SURFACE CACHE: allocation=%u kernel=user=WC owned=1 ABI=1\n", s->allocSize);
++			}
+ 			if (!sweet_surface_publish(s)) {
+ 				ret = kIOReturnNoResources;
+ 			}
+@@ -1412,7 +1419,10 @@
+ 		return kIOReturnNotFound;
+ 	}
+ 	IOReturn ret = (IOReturn)redfin_gpu_queue_memory_barrier(s->memory);
+-	if (ret == kIOReturnSuccess) ret = sweet_surface_seed_out(s, seedOut, false);
++	if (ret == kIOReturnSuccess) {
++		if (redfin_surface_write_combined(s,s->memory,s->allocSize)) redfin_surface_cache_barrier();
++		ret = sweet_surface_seed_out(s, seedOut, false);
++	}
+ 	s->release();
+ 	return ret;
+ }
+@@ -1425,6 +1435,9 @@
+ 	if (s == NULL) {
+ 		return kIOReturnNotFound;
+ 	}
++	/* Publish CPU WC stores before the existing unlock/seed publication.
++	 * The matching lock still waits for actual physical GPU predecessors. */
++	if (redfin_surface_write_combined(s,s->memory,s->allocSize)) redfin_surface_cache_barrier();
+ 	IOReturn ret = sweet_surface_seed_out(s, seedOut,
+ 	    !((uintptr_t)options & kIOSurfaceLockReadOnly));
+ 	s->release();
+diff --git a/iokit/Kernel/arm/SweetSurface.h b/iokit/Kernel/arm/SweetSurface.h
+--- a/iokit/Kernel/arm/SweetSurface.h
++++ b/iokit/Kernel/arm/SweetSurface.h
+@@ -45,9 +45,10 @@
+ 	uint32_t                  purgeable;    /* IOSurfaceSetPurgeable state */
+ 	uint32_t                  wrapDelta;    /* wrapped client memory: where it starts in its first page */
+ 	uint64_t                  redfinRenderExtent; /* owned full-image transfer footprint, or0 */
++	bool                      redfinWriteCombined; /* actual fresh allocation, all CPU aliases WC */
+ 	bool                      wrapped;      /* memory is a prepared range of a task (IOSurfaceWrapClient*) */
+ 
+-	bool init() APPLE_KEXT_OVERRIDE { scanoutPhys = 0; scanoutSlot = -1; values = NULL; purgeable = 0; wrapDelta = 0; redfinRenderExtent = 0; wrapped = false; return OSObject::init(); }
++	bool init() APPLE_KEXT_OVERRIDE { scanoutPhys = 0; scanoutSlot = -1; values = NULL; purgeable = 0; wrapDelta = 0; redfinRenderExtent = 0; redfinWriteCombined = false; wrapped = false; return OSObject::init(); }
+ 	void free() APPLE_KEXT_OVERRIDE;
+ 
+ 	/* Kernel address of the pixels (mapped on first use), or 0. */

@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete owned WC surface block;53combined host contracts PASS — 2026-10-26
+
+Base1266ee9; reconstruct exact current SweetSurface source from12original DXB
+patches with actual run12 hashes, plus all3current surface overlays. Preserve
+run12's exact queue/service/display source as private preimages. Add one final
+native-surface-cache overlay to official prepare/build recipes and update final
+canonical queue/display fixtures together. No userland/compiler/cache rebuild.
+
+Fresh owned/default-cache BGRA surfaces select Write Combine before allocation;
+all controlled CPU mappings use the same attribute. Exact descriptor ownership,
+size/type/cache/parent/wrap/scanout checks gate the fast route. Wrapped, explicit-
+cache and other memory retain original per-submit clean/invalidate/quiescence.
+Actual CPU lock still waits for GPU predecessors; unlock publishes WC stores
+before seed changes. Zeroing precedes surface publication. Real cache-flush
+fences, typed dependencies, FIFO retention and full native audits remain.
+Native output shares the same attested policy; no cached allocation is retyped.
+
+53combined host contracts PASS: actual native allocator attributes/failure and
+wired accounting, foreign/stale mapping refusal, actual CPU lock/unlock methods,
+actual worker WC overlap with real retirement and cached fallback, every prior
+physical runtime/ring/fault/cache/stop/output/alias/padding/retained/source case.
+Actual matching kernel CI and the full native A620 contract remain required;
+no hardware speedup or new kernel artifact is claimed. V82 fresh readonly
+snapshot runs independently at clean1523803; no root writes before final proof.
+Next V76 combined correctness cycle, captures/app opens OFF. Broad goal active.
+
+## REDFIN V75 valid ordinary physical FIFO baseline:39.056FPS — 2026-10-26
+
+Code/docs1266ee9, exact unchanged Actions40334564897/run12/kernel8ea7b3b6..,
+native6e6e432c../pair1d031356../UI/cache. Cycle90675 TERMINAL exit0: authenticated
+fresh29f55a74a1196e81, one backboardd61,0fresh startup diagnostic records, no GPU
+runtime stop/owned fault/kernel panic, clean unmounted HFSX1523803 and verified
+Fastboot. V81 STALE/never reuse; next fresh V82/imageV76 at actual1523803.
+
+Valid ordinary animation391GPU frames/10.011177physical seconds =39.056347FPS;
+902callbacks/90Hz, complete interval/no missed sample/timeout/window replacement,
+idle restored.17frontend/24owner/10output partitions validate. Output median
+6.1355ms. Warm actual cache maintenance is3..4ms in each direction and about
+11MiB per native job. These are sampled host scopes, not isolated GPU time.
+No matched isolated speedup or sustained60/90FPS claim. Captures/app opens OFF.
+Exact observed args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x29f55a74a1196e81 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains active/unfinished.
+
 ## REDFIN V81 coherent ordinary policy read back; V75 starts — 2026-10-26
 
 Code/docs7bd4c8a; unchanged actual Actions40334564897/run12/kernel8ea7b3b6..,

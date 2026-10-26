@@ -17,7 +17,7 @@ struct gd_buffer {
 static struct {
     gd_buffer stage, commands, panel, sources[GD_CACHE];
     bool attempted, tested, disabled, uncertain;
-    uint64_t frame, calls, elapsed, fallbacks;
+    uint64_t frame, calls, elapsed, fallbacks,wc_sources,cached_sources;
 } gd;
 
 bool RedfinGPUDisplayWritable(void)
@@ -299,9 +299,13 @@ static int gd_present_locked(SweetSurface *panel, const redfin_display_geometry 
     uint64_t prepared = gpuNow();
     /* Surface BOs may also have native CPU writers. Push their actual pages;
      * this is cache maintenance, with no CPU scaling or pixel copy. */
-    for (unsigned i = 0; i < GD_CACHE; ++i)
-        if (gd.sources[i].memory && gd.sources[i].seen == gd.frame)
-            redfin_gpu_sync(gd.sources[i].kernel, gd.sources[i].size, false);
+    for (unsigned i = 0; i < GD_CACHE; ++i) {
+        gd_buffer *b = &gd.sources[i];
+        if (!b->memory || b->seen != gd.frame) continue;
+        if (redfin_surface_write_combined(b->surface,b->memory,b->size)) ++gd.wc_sources;
+        else {redfin_gpu_sync(b->kernel,b->size,false);++gd.cached_sources;}
+    }
+    redfin_surface_cache_barrier();
     uint64_t synced = gpuNow();
     uint32_t fence = 0; gd_submit_marks marks = {};
     if (!gd_submit(layers, count, gd.panel.address, gd.panel.size, true, &fence, &marks)) {
@@ -322,6 +326,8 @@ static int gd_present_locked(SweetSurface *panel, const redfin_display_geometry 
         /* Adjacent host scopes in us: prepare, source sync, build, command
          * sync, native submit/wait, readback, total. All values fit one line
          * even at their type maxima. No extra pixel readback is introduced. */
+        IOLog("REDFIN GPU OUTPUT CACHE: f=%llu WC=%llu cached=%llu actual-owned-mappings=1\n",
+            gd.calls,gd.wc_sources,gd.cached_sources);
         uint32_t cleared = RF_GD_PANEL_W * RF_GD_PANEL_H -
             layers[0].destination.w * layers[0].destination.h;
         IOLog("REDFIN GPU OUTPUT: f=%llu n=%u clear=%u us=%llu,%llu,%llu,%llu,%llu,%llu,%llu scope=1\n",

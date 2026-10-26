@@ -263,6 +263,11 @@ IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job)
     uint64_t began=gpuNow(),again=4ULL*NSEC_PER_MSEC;
     for(unsigned i=0;i<job->nr_bos;++i) {
         gpu_buffer *b=job->bos[i].buffer;if(!b->surface)continue;
+        /* All CPU aliases of these exact owned pages are already WC.
+         * Keep the actual submitter/worker barriers and real GPU fences. */
+        if(redfin_surface_write_combined(b->surface,b->memory,b->size)) {
+            ++gTiming.wc_clean;gTiming.wc_clean_bytes+=b->size;continue;
+        }
         uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
         if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
             int drained=redfin_gpu_quiesce();if(drained)return gpuError(drained);
@@ -281,16 +286,23 @@ IOReturn RedwoodGPUUserClient::finishQueued(gpu_queued_job *job)
     IOReturn result=gpuError(redfin_gpu_wait(job->physical_fence));
     if(result!=kIOReturnSuccess)gpuQueueFault(job);
     gTiming.submitting+=gpuNow()-began;began=gpuNow();
-    /* A later writer may still be active. Imported CPU-cache ownership is
-     * handed back only at actual idle; WC-only native BOs need no such drain. */
+    /* A later writer may still be active. Cached imported CPU ownership
+     * changes only at actual idle. Proven all-WC aliases need only their
+     * real per-job cache-flush fence and the CPU observation barrier. */
     if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i)
-        if(job->bos[i].buffer->surface&&(job->bos[i].access&RF_GA_WRITE)) {
+        if(job->bos[i].buffer->surface&&(job->bos[i].access&RF_GA_WRITE)&&
+           !redfin_surface_write_combined(job->bos[i].buffer->surface,
+                job->bos[i].buffer->memory,job->bos[i].buffer->size)) {
             result=gpuError(redfin_gpu_quiesce());break;
         }
     if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i) {
         gpu_buffer *b=job->bos[i].buffer;
-        if(b->surface&&(job->bos[i].access&RF_GA_WRITE)&&!gpuQueuedSurfaceCache(job,i,true))result=kIOReturnIOError;
+        if(!b->surface||!(job->bos[i].access&RF_GA_WRITE))continue;
+        if(redfin_surface_write_combined(b->surface,b->memory,b->size)) {
+            ++gTiming.wc_invalidate;gTiming.wc_invalidate_bytes+=b->size;
+        } else if(!gpuQueuedSurfaceCache(job,i,true))result=kIOReturnIOError;
     }
+    if(result==kIOReturnSuccess)redfin_surface_cache_barrier();
     gTiming.invalidating+=gpuNow()-began;gpuTiming();
     if(job->fence<=8||!(job->fence%256)||result!=kIOReturnSuccess)
         IOLog("REDFIN GPU QUEUED FINISH: name=%s pid=%d client-fence=%u physical-fence=%u IBs=%u actual-finish=%u result=%#x age-us=%llu\n",

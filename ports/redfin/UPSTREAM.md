@@ -1,5 +1,25 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete owned surface cache block; combined host contracts PASS — 2026-10-26
+
+Retain preferred kernel8e611870../userland906425b7.. and reviewed Angelpro344a8af.
+V75 is a valid ordinary run12 observation:391GPU frames/10.011177s =39.056347FPS,
+90Hz callbacks,0fresh startup checks, one server, no runtime stop/panic and
+clean1523803/Fastboot. Warm actual cached imports repeatedly maintain about
+11MiB before and after native jobs, costing roughly3..4ms per direction.
+This is not an isolated GPU execution time or proof of smooth60/90FPS.
+
+Adapt Redfin's already validated native WC allocation model to fresh owned,
+default-cache BGRA IOSurfaces, choosing the attribute before allocation and
+using it for kernel/IOSurface/GPU-client mappings. Keep real CPU lock/unlock
+barriers, scoped waits, cache-flush fences, FIFO lifetime and complete audits.
+Wrapped/parent/explicit-cache/scanout memory retains the existing cache path.
+Queue and native output skip cache-line walks only for the exact attested
+owned descriptor; no live cached allocation is retyped.53combined host
+allocator/alias/CPU handoff/worker/error/output/source contracts PASS.
+Matching native kernel CI and complete actual A620 proof are next. No new
+upstream import, userland/compiler rebuild, cache identity or voltage change.
+
 ## Actual A620 two-pending publication and full completion PASS — 2026-10-26
 
 V73 with unchanged actual Actions40334564897/run12/kernel8ea7b3b6.. and native

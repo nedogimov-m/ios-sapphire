@@ -43,7 +43,11 @@ and output contract. Its checked animation measures37.558FPS at90Hz callbacks;
 V73 also proves actual two-pending publication and successful completion of
 three bounded compute pairs, with every value/guard and the full native
 contract passing in the same boot. Its checked animation measures37.458FPS;
-ordinary performance of this kernel still needs measurement.
+V75's coherent diagnostics-OFF run measures391completed GPU frames in
+10.011177physical seconds:39.056FPS at90Hz callbacks. Full CPU-cache
+maintenance of imported display surfaces remains a measured cost. The next
+complete block gives fresh owned BGRA images consistent WC CPU mappings;
+its native hardware correctness and performance remain to verify.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).
