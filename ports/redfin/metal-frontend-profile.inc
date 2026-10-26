@@ -13,6 +13,8 @@ static void rwa_redfin_profile_elapsed(struct rwa_device *device,unsigned field,
    if(device&&now>=began)device->frontend_stats[field]+=now-began;
 }
 
+#include "redfin_metal_constant_snapshot.inc"
+
 int rwa_redfin_frontend_statistics(struct rwa_device *device,uint64_t *out,size_t words)
 {
    if(!device||!out||words!=REDFIN_METAL_FRONTEND_WORDS)return -1;
@@ -23,10 +25,18 @@ static int rwa_redfin_profile_constant_snapshot(struct rwa_device *device,
    const struct air_resource *r,struct rwa_buffer *buffer,size_t offset,size_t bytes,
    struct pipe_constant_buffer *out,char *why,size_t why_size)
 {
+   if(!buffer||buffer->device!=device||!buffer->res||buffer->res->target!=PIPE_BUFFER||
+      !bytes||offset>buffer->size||bytes>buffer->size-offset||
+      offset>buffer->res->width0||bytes>buffer->res->width0-offset) {
+      say(why,why_size,"constant snapshot exceeds its actual logical/native buffer");return -1;
+   }
    uint64_t *s=device->frontend_stats;
    ++s[RF_MFP_CONSTANT_UPLOADS];s[RF_MFP_CONSTANT_BYTES]+=bytes;
    s[RF_MFP_CONSTANT_MAX_BYTES]=MAX2(s[RF_MFP_CONSTANT_MAX_BYTES],bytes);
    if(!r->size){++s[RF_MFP_CONSTANT_UNKNOWN];s[RF_MFP_CONSTANT_UNKNOWN_BYTES]+=bytes;}
+   int selected=rwa_redfin_constant_gpu_snapshot(device,buffer,offset,bytes,out,why,why_size);
+   if(selected<=0)return selected;
+   if(!buffer->map){say(why,why_size,"constant snapshot has no CPU fallback mapping");return -1;}
    uint64_t began=rwa_redfin_profile_clock();
    int error=rwa_redfin_buffer_cpu_prepare(buffer,why,why_size);
    rwa_redfin_profile_elapsed(device,RF_MFP_CONSTANT_PREPARE_NS,began);

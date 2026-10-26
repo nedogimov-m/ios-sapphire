@@ -68,6 +68,7 @@ def analyze(lines,boot,process='backboardd'):
                 'stage-us','draw-us','framebuffer-us','draw-emit-us','snapshots','snapshot-bytes',
                 'unknown-snapshots','unknown-snapshot-bytes','constant-prepare-us','constant-copy-us',
                 'proven-snapshots','avoided-snapshot-bytes','full-snapshots',
+                'GPU-snapshots','GPU-snapshot-bytes','GPU-snapshot-chunks',
                 'submit-us','submit-clear-us','submit-resolve-us')},
             'commands':complete}
 

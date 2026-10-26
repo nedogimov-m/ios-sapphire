@@ -17,6 +17,7 @@ TRANSPORT_INPUTS=frozenset('ports/redfin/'+name for name in (
     'mesa-submit-merge.inc','include/redfin_gpu_access.h',
     'mesa-resource-access.patch','mesa-access-submit.inc',
     'metal-frontend-profile.patch','metal-frontend-profile.h','metal-frontend-profile.inc',
+    'metal-constant-snapshot.patch','metal-constant-snapshot.h','metal-constant-snapshot.inc',
     'metal-ubo-extents.patch','metal-ubo-extents.h','metal-ubo-extents.inc'))
 TRANSPORT_PATCH_TARGETS=frozenset((
     'src/freedreno/drm/freedreno_bo.c','src/freedreno/drm/freedreno_priv.h',
@@ -27,6 +28,9 @@ TRANSPORT_PATCH_TARGETS=frozenset((
     'src/gallium/drivers/freedreno/freedreno_resource.h',
     'src/gallium/drivers/freedreno/freedreno_batch.c'))
 RUNTIME_PATCH_TARGETS={
+    # Append-only runtime constant storage/copies reuse the existing row-copy
+    # shader unchanged; AIR/NIR translation and serialized programs stay exact.
+    'ports/redfin/metal-constant-snapshot.patch':frozenset(('src/compiler/air/air_metal.c',)),
     # Capability checks, BO residency answers and their counters touch no
     # shader, NIR/AIR serialization or compiled program/cache representation.
     'ports/redfin/mesa-retained-memory.patch':frozenset((

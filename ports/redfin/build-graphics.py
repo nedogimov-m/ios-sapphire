@@ -128,6 +128,8 @@ def main():
                            ('metal-frontend-profile.patch','metal-frontend-profile.h','metal-frontend-profile.inc')]
                 inputs += [ROOT/'ports/redfin'/name for name in
                            ('metal-ubo-extents.patch','metal-ubo-extents.h','metal-ubo-extents.inc')]
+                inputs += [ROOT/'ports/redfin'/name for name in
+                           ('metal-constant-snapshot.patch','metal-constant-snapshot.h','metal-constant-snapshot.inc')]
             if a.metal:
                 inputs += [ROOT/'ports/redfin/mesa-surface-padding.patch',ROOT/'ports/redfin/surface-padding.h']
                 inputs += [ROOT/'ports/redfin/mesa-retained-memory.patch',ROOT/'ports/redfin/retained-memory.h']
@@ -244,6 +246,10 @@ def main():
                     for directory in ('src/freedreno/drm','src/compiler/air'):
                         shutil.copy2(ROOT/'ports/redfin/retained-memory.h',source/directory/'redfin_retained_memory.h')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-retained-memory.patch'],source)
+                    for suffix in ('h','inc'):
+                        shutil.copy2(ROOT/'ports/redfin'/('metal-constant-snapshot.'+suffix),
+                                     source/'src/compiler/air'/('redfin_metal_constant_snapshot.'+suffix))
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-constant-snapshot.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             if (source/'src/util/redfin_mesa_cache_build.h').read_text()!=\
                     '#define REDFIN_MESA_CACHE_BUILD_ID '+json.dumps(cache_proof['cache_id'])+'\n':

@@ -1,0 +1,39 @@
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -82,6 +82,7 @@
+ #include "redfin_metal_ordering.h"
+ #include "redfin_metal_queued.h"
+ #include "redfin_metal_frontend_profile.h"
++#include "redfin_metal_constant_snapshot.h"
+ #include "redfin_metal_ubo_extents.h"
+ #include "redfin_retained_memory.h"
+ extern int redfin_freedreno_retained_statistics(struct pipe_context *,uint64_t[RF_GM_WORDS]);
+@@ -97,6 +98,7 @@
+ 
+ struct rwa_device {
+    uint64_t frontend_stats[REDFIN_METAL_FRONTEND_WORDS];
++   struct redfin_metal_constant_arena constant_arena;
+    struct redfin_air_translation_cache translation_cache;
+    struct redfin_air_stage_cache stage_cache;
+    struct pipe_resource *quad_vertices;
+@@ -687,6 +689,7 @@
+    redfin_air_stage_cache_finish(&device->stage_cache);
+    redfin_air_cache_finish(&device->translation_cache);
+    pipe_resource_reference(&device->quad_vertices, NULL);
++   pipe_resource_reference(&device->constant_arena.resource, NULL);
+    device->pipe->destroy(device->pipe);
+    device->screen->destroy(device->screen);
+    free(device);
+@@ -3925,9 +3928,9 @@
+             goto failed;
+          }
+          size_t left = b->size - MIN2(b->size, boffset);
+-         /* A misaligned Metal constant is a real CPU byte consumer. Drain
+-          * dependent writes and upload an immutable aligned copy before binding;
+-          * a stack/user pointer cannot outlive this deferred command. */
++         /* Misaligned constants need immutable aligned storage. Large reads
++          * snapshot on the GPU in queue order; small or unsupported reads use
++          * the real CPU preparation/uploader path. Neither uses a borrowed pointer. */
+          bool uploaded=false;
+          struct pipe_constant_buffer cb = {
+             .buffer_offset = (unsigned)boffset,

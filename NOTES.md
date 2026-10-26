@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete GPU-ordered constant snapshots built; combined V67 next — 2026-10-26
+
+Baseca8b7f0. Implement the whole related runtime block before combined tests:
+large misaligned constants use exact GPU byte/dword row copies into append-only
+1MiB native CONST/SSBO chunks, with aligned offsets. Never recycle a slice;
+Gallium batches retain old chunks and source references until actual retirement.
+Small, unsupported, oversized or allocation-refused requests retain CPU upload
+and its real dependency wait. Preserve the full conservative shader read extent,
+strict logical/native bounds and grid limits, argument/index CPU validation,
+compute/graphics rebinding, pending/error drains and final native fences.
+The current row-copy shader and all AIR/NIR/cache serialization stay unchanged.
+
+Add actual GPU snapshot/byte/chunk counters and native cases: all10prior UBO
+phases, four immutable byte-offset/tail snapshots across GPU overwrites and
+chunk rollover in one command, and two repeated raster draws with independent
+large unaligned vertex/fragment constants. Source/output guards stay mandatory.
+29combined host contracts PASS, including the actual snapshot and row helper
+with deferred execution/reference receivers, refusal fallback, invalid ranges,
+rollover and emitted-work draining after a later error. These host receivers
+do not claim real GPU pixels. Full native build and actual20H392 ABI/signature/
+pairing/current-marker proof PASS; compiler cache496301fc.. and UI are reused.
+Native input2f5fc0178cecb6c52b3617e431d6927fb64843c155496daeb2f87f4d9f642217;
+pair8fe49d7fe618fada9a37d3a349ee01b503d422c76edcde8cb6c1e3b5c5628f8c.
+Reuse exact Actions40314982431/run10/source1f0c0e8/kernel5f0d5f48..; no kernel
+source/ABI change. V67 image6576c1e5ce63bf0f55b855f5453f3889db44c45cfefb4baabe9a712a8eeae923
+passes actual loader/liveFDT/ADT/firmware/private input/source/ABI preflight.
+Fresh V73 readonly snapshot is running against observed clean1444923; no
+new root writes or native A620 success claimed yet. One combined checked run
+follows; startup diagnostics ON, request animate-checked, captures/app opens OFF.
+Exact prepared boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x66620caf9ce68f1c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Hardware correctness/performance and broader platform completion are pending.
+
 ## REDFIN V66 ordinary GPU measurement complete:35.561FPS — 2026-10-26
 
 Code1f0c0e8/docs6599d4c; exact Actions40314982431/run10/kernel5f0d5f48..,

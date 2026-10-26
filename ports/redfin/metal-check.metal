@@ -53,6 +53,17 @@ fragment float4 redfin_ubo_fragment(constant float &first [[buffer(1)]])
     constant float *values=&first;
     return float4(values[0],values[5],values[9],values[13]);
 }
+vertex float4 redfin_ubo_dynamic_vertex(uint index [[vertex_id]],constant float &first [[buffer(1)]])
+{
+    constant float *values=&first;
+    constexpr float2 positions[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};
+    return float4(positions[index]*float2(values[0],values[index+33]),0,1);
+}
+fragment float4 redfin_ubo_dynamic_fragment(float4 position [[position]],constant float &first [[buffer(1)]])
+{
+    constant float *values=&first;
+    return float4(values[uint(position.x)+33],values[0],values[5],values[9]);
+}
 
 kernel void redfin_affine(device uint *output [[buffer(0)]],
                           constant uint &seed [[buffer(1)]],

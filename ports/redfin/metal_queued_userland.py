@@ -120,7 +120,7 @@ static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats 
 #define RF_MFP_DELTA(f) ((unsigned long long)(b[f]-a[f]))
             /* These are nested scopes, not additive frame costs. The max is
              * cumulative for this device; all other fields are command deltas. */
-            rw_print("REDFIN METAL FRONTEND: boot=%s sequence=%llu actual-finish=1 stage-calls=%llu stage-us=%llu draw-calls=%llu draw-us=%llu framebuffer-us=%llu draw-emit-us=%llu direct-constants=%llu snapshots=%llu snapshot-bytes=%llu maximum-snapshot-bytes-ever=%llu unknown-snapshots=%llu unknown-snapshot-bytes=%llu constant-prepare-us=%llu constant-copy-us=%llu submit-calls=%llu submit-us=%llu submit-clear-us=%llu submit-resolve-us=%llu proven-snapshots=%llu avoided-snapshot-bytes=%llu full-snapshots=%llu nested-scopes=1\n",redfin_fence_boot,(unsigned long long)n,
+            rw_print("REDFIN METAL FRONTEND: boot=%s sequence=%llu actual-finish=1 stage-calls=%llu stage-us=%llu draw-calls=%llu draw-us=%llu framebuffer-us=%llu draw-emit-us=%llu direct-constants=%llu snapshots=%llu snapshot-bytes=%llu maximum-snapshot-bytes-ever=%llu unknown-snapshots=%llu unknown-snapshot-bytes=%llu constant-prepare-us=%llu constant-copy-us=%llu submit-calls=%llu submit-us=%llu submit-clear-us=%llu submit-resolve-us=%llu proven-snapshots=%llu avoided-snapshot-bytes=%llu full-snapshots=%llu GPU-snapshots=%llu GPU-snapshot-bytes=%llu GPU-snapshot-chunks=%llu nested-scopes=1\n",redfin_fence_boot,(unsigned long long)n,
                 RF_MFP_DELTA(RF_MFP_STAGE_CALLS),RF_MFP_DELTA(RF_MFP_STAGE_NS)/1000,
                 RF_MFP_DELTA(RF_MFP_DRAW_CALLS),RF_MFP_DELTA(RF_MFP_DRAW_NS)/1000,
                 RF_MFP_DELTA(RF_MFP_FRAMEBUFFER_NS)/1000,RF_MFP_DELTA(RF_MFP_DRAW_EMIT_NS)/1000,
@@ -131,7 +131,8 @@ static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats 
                 RF_MFP_DELTA(RF_MFP_SUBMIT_CALLS),RF_MFP_DELTA(RF_MFP_SUBMIT_NS)/1000,
                 RF_MFP_DELTA(RF_MFP_SUBMIT_CLEAR_NS)/1000,RF_MFP_DELTA(RF_MFP_SUBMIT_RESOLVE_NS)/1000,
                 RF_MFP_DELTA(RF_MFP_CONSTANT_PROVEN),RF_MFP_DELTA(RF_MFP_CONSTANT_AVOIDED_BYTES),
-                RF_MFP_DELTA(RF_MFP_CONSTANT_FALLBACK));
+                RF_MFP_DELTA(RF_MFP_CONSTANT_FALLBACK),RF_MFP_DELTA(RF_MFP_CONSTANT_GPU),
+                RF_MFP_DELTA(RF_MFP_CONSTANT_GPU_BYTES),RF_MFP_DELTA(RF_MFP_CONSTANT_GPU_CHUNKS));
 #undef RF_MFP_DELTA
         }
     }

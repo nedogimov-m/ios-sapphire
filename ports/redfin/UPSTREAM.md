@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Bounded GPU-ordered large constant snapshots — 2026-10-26
+
+Continue preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's actual
+Gallium buffers/binding domains with Redfin's previously hardware-validated
+GPU row-copy/queue/barrier infrastructure. Large unaligned constant reads
+retain their full conservative extent and copy into immutable append-only native
+storage; small/unsupported requests keep the real CPU upload. Preserve source/
+destination ownership, exact bytes, CPU argument/index reads, stage restoration,
+partial errors and final fences. This runtime-only storage change reuses the
+unchanged native row shader, AIR/NIR and compiler cache496301fc.. .
+
+29host contracts and complete native actual20H392 ABI/signatures/paired build
+PASS. Input2f5fc017../pair8fe49d7f.., same Actions40314982431/run10/kernel5f0d5f48..
+and UI. New actual native overwrite/byte-tail/rollover and vertex/fragment cases
+are built; real A620 success and FPS effect remain pending. Preferred kernel/
+userland pins and reviewed Angelpro344a8af remain unchanged. Physical-ring
+asynchronous publication remains separate unfinished work.
+
 ## Same-binary ordinary Redfin measurement complete — 2026-10-26
 
 V66/source1f0c0e8/run10 uses the exact full-V65-validated native pair and
