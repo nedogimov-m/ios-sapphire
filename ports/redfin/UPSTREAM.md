@@ -1,5 +1,29 @@
 # HackiOS upstream review — 2026-10-22
 
+## Owned native16x4 IOSurface transfer storage — 2026-10-26
+
+Reviewed preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab Surface/GPU import
+and userland906425b75e02b4f99eb5d7bb1ef7c9583472d772 Darwin BO handling, alongside
+actual Mesa25.0.7 fd6_layout.c/freedreno_resource.c. Keep the previously reviewed
+updated-mainc84b4634277a70beac73921029b1fb6afc2530af decision. FDL requires16x4
+linear transfer storage; page-rounded visible rows alone do not grant it.
+
+Adapt new ordinary kernel-owned BGRA allocations to provide actual padding,
+with a retained-descriptor/current-geometry extent query. Preserve the legacy
+surface/info wire sizes and publish owned ABI1. Cache attestation once per BO;
+only exact full-image imports may declare the larger slice. Wrapped, offset,
+smaller, array/mip/MSAA/depth/compressed/buffer views keep existing bounds and
+GPU sysmem where required. Do not derive permission from arbitrary GEM slack.
+Native memory dependency/FIFO/fence and CPU cache paths remain unchanged.
+
+53host contracts pass, including real patched kernel query and BO importer.
+New native pixel/guard/CPU-rewrite/GMEM and refusal cases are implemented but
+hardware/CI proof and any FPS gain remain pending. Sparse actual native route
+counts will identify the remaining batch mix. Reuse verified prior compiler/
+shader serialization inputs and cache496301fc..; the new footprint/descriptor
+policy touches reviewed runtime allocation/import files only. No whole upstream
+replacement or guessed DPU/panel-stride change is introduced.
+
 ## Actual A620 clear-free/margin output and complete budgets PASS — 2026-10-26
 
 V61/sourcefd21adf, Actions40286405146/run7/kernel58db3d94.. passes both poisoned

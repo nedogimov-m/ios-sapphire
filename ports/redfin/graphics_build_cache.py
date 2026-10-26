@@ -10,6 +10,7 @@ VERSION=1
 # Reviewed native transport/dependency bookkeeping and runtime observations never change serialized
 # AIR/NIR, Adreno programs or shader options. Every other input stays strict.
 TRANSPORT_INPUTS=frozenset('ports/redfin/'+name for name in (
+    'surface-padding.h','mesa-surface-padding.patch',
     'drm-profile.h','metal-scoped-submission.patch','include/redfin_gpu_scope.h',
     'mesa-scoped-submit.inc','mesa-submit-merge.patch','mesa-submit-merge.h',
     'mesa-submit-merge.inc','include/redfin_gpu_access.h',
@@ -25,6 +26,12 @@ TRANSPORT_PATCH_TARGETS=frozenset((
     'src/gallium/drivers/freedreno/freedreno_resource.h',
     'src/gallium/drivers/freedreno/freedreno_batch.c'))
 RUNTIME_PATCH_TARGETS={
+    # Attested full-image allocation metadata/routing changes neither AIR/NIR
+    # nor shader/program serialization. Compiler and options remain strict.
+    'ports/redfin/mesa-surface-padding.patch':frozenset((
+        'src/redwood-drm/redwood_drm.c','src/redwood-drm/xf86drm.h',
+        'src/freedreno/drm/freedreno_drmif.h','src/freedreno/drm/freedreno_bo.c',
+        'src/gallium/drivers/freedreno/freedreno_resource.c')),
     # This reviewed overlay only wraps existing runtime calls with counters.
     # Keep its exception separate from the general native-transport targets.
     'ports/redfin/metal-frontend-profile.patch':frozenset(('src/compiler/air/air_metal.c',)),

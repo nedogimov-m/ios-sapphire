@@ -1,0 +1,189 @@
+--- a/iokit/Kernel/arm/SweetSurface.h
++++ b/iokit/Kernel/arm/SweetSurface.h
+@@ -44,9 +44,10 @@
+ 	OSDictionary             *values;       /* IOSurfaceSetValue & co. */
+ 	uint32_t                  purgeable;    /* IOSurfaceSetPurgeable state */
+ 	uint32_t                  wrapDelta;    /* wrapped client memory: where it starts in its first page */
++	uint64_t                  redfinRenderExtent; /* owned full-image transfer footprint, or0 */
+ 	bool                      wrapped;      /* memory is a prepared range of a task (IOSurfaceWrapClient*) */
+ 
+-	bool init() APPLE_KEXT_OVERRIDE { scanoutPhys = 0; scanoutSlot = -1; values = NULL; purgeable = 0; wrapDelta = 0; wrapped = false; return OSObject::init(); }
++	bool init() APPLE_KEXT_OVERRIDE { scanoutPhys = 0; scanoutSlot = -1; values = NULL; purgeable = 0; wrapDelta = 0; redfinRenderExtent = 0; wrapped = false; return OSObject::init(); }
+ 	void free() APPLE_KEXT_OVERRIDE;
+ 
+ 	/* Kernel address of the pixels (mapped on first use), or 0. */
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -30,6 +30,7 @@
+  * ignored (logged once per selector).
+  */
+ #include "SweetSurface.h"
++#include "RedfinSurfacePadding.h"
+ 
+ #if defined(SWEET)
+ #include <IOKit/IOService.h>
+@@ -39,6 +40,7 @@
+ #include <IOKit/IOLocks.h>
+ #include <IOKit/system.h>
+ #include <pexpert/pexpert.h>
++#include <arm64/redfin_gui_profile.h>
+ #include <libkern/c++/OSArray.h>
+ #include <libkern/c++/OSDictionary.h>
+ #include <libkern/c++/OSNumber.h>
+@@ -366,6 +368,15 @@
+ {
+ 	uint64_t row = (uint64_t)sweet_div_up(width, ew) * bpe;
+ 	return (uint32_t)((row + SWEET_SURFACE_ROW_ALIGN - 1) & ~(uint64_t)(SWEET_SURFACE_ROW_ALIGN - 1));
++}
++
++/* Apply the same exact GUI3 profile that owns native A620 memory. */
++static bool sweet_redfin_padding_selected(void)
++{
++    const char *args=PE_boot_args();unsigned bytes=0;
++    if(!args)return false;
++    while(bytes<608 && args[bytes])++bytes;
++    return bytes<608 && redfin_gpu_gui_profile(args,bytes+1,NULL);
+ }
+ 
+ /* Geometry from the creation properties (IOSurface.h keys). */
+@@ -861,6 +872,16 @@
+ 		}
+ 	}
+ 	if (ret == kIOReturnSuccess && s->memory == NULL) {
++		/* This branch owns a new allocation; no client/parent/scanout memory
++		 * may obtain render padding. Report the actual larger allocSize and
++		 * account/zero/map all of it before publishing the permission. */
++		struct rf_gp_plan padding = {};
++		const struct rf_gp_image image = {s->width,s->height,s->bytesPerRow,s->offset,
++		    s->pixelFormat,s->planeCount,s->bytesPerElement,s->elementWidth,s->elementHeight};
++		bool padded = sweet_redfin_padding_selected() && !s->wrapped && !s->parentID &&
++		    !s->scanoutPhys && s->scanoutSlot < 0 &&
++		    rf_gp_storage_plan(&image,s->allocSize,&padding);
++		if (padded) s->allocSize = (uint32_t)padding.allocation;
+ 		IOBufferMemoryDescriptor *mem = NULL;
+ 		if ((uint64_t)OSAddAtomic64(s->allocSize, (volatile SInt64 *)&sweet_surface_wired) +
+ 		    s->allocSize <= SWEET_SURFACE_WIRED_MAX) {
+@@ -873,6 +894,13 @@
+ 		} else {
+ 			bzero(mem->getBytesNoCopy(), s->allocSize);
+ 			s->memory = mem;
++			if (padded && mem->getLength() == s->allocSize) {
++				s->redfinRenderExtent = padding.extent;
++				static uint32_t padded_notices;
++				if (__atomic_fetch_add(&padded_notices,1,__ATOMIC_RELAXED) < 8)
++					IOLog("REDFIN SURFACE PAD: width=%u height=%u pitch=%u allocation=%u extent=%llu owned=1 ABI=1\n",
++					    s->width,s->height,s->bytesPerRow,s->allocSize,s->redfinRenderExtent);
++			}
+ 			s->mapCache = kIOMapDefaultCache;
+ 			if (!sweet_surface_publish(s)) {
+ 				ret = kIOReturnNoResources;
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -13,6 +13,7 @@
+  * The code is provided AS IS, WITHOUT WARRANTY OF ANY KIND; see the License.
+  */
+ #include "SweetSurface.h"
++#include "RedfinSurfacePadding.h"
+ #if defined(SWEET)
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOUserClient.h>
+@@ -149,6 +150,7 @@
+     setProperty("RedfinQueuedSubmissionABI",RF_GQ_ABI,32);
+     setProperty("RedfinScopedWaitABI",RF_GW_ABI,32);
+     setProperty("RedfinResourceAccessABI",RF_GA_ABI,32);
++    setProperty("RedfinSurfacePaddingABI",RF_GP_ABI,32);
+     if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
+     registerService();return true;
+ }
+@@ -379,6 +381,22 @@
+     case 1:r->value=b->address;return kIOReturnSuccess;
+     case 2:return kIOReturnSuccess; /* debugger-only name */
+     case 5:r->value=b->flags;return kIOReturnSuccess;
++    case RF_GP_INFO_RENDER_EXTENT: {
++        r->value=0;
++        if(r->len || r->pad)return kIOReturnBadArgument;
++        SweetSurface *s=b->surface;
++        struct rf_gp_plan plan={};
++        if(s && redfin_gpu_ready() && s->redfinRenderExtent && !s->wrapped &&
++           !s->parentID && !s->scanoutPhys && s->scanoutSlot<0 &&
++           s->memory && s->memory==b->memory && s->allocSize==b->size &&
++           s->memory->getLength()==b->size && OSDynamicCast(IOBufferMemoryDescriptor,s->memory)) {
++            const struct rf_gp_image image={s->width,s->height,s->bytesPerRow,s->offset,
++                s->pixelFormat,s->planeCount,s->bytesPerElement,s->elementWidth,s->elementHeight};
++            if(rf_gp_storage_plan(&image,b->size,&plan) && plan.allocation==b->size &&
++               plan.extent==s->redfinRenderExtent) r->value=plan.extent;
++        }
++        return kIOReturnSuccess;
++    }
+     default:return kIOReturnUnsupported;
+     }
+ }
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinSurfacePadding.h
+@@ -0,0 +1,66 @@
++/* SPDX-License-Identifier: MIT */
++/* Mesa25.0.7 fd6_layout.c reserves a16x4 transfer footprint for linear
++ * images. Only newly allocated, single-plane kernel-owned BGRA images may
++ * reserve that extra storage. An actual kernel query attests the extent;
++ * wrapped memory and image subviews never acquire permission from BO slack. */
++#ifndef REDFIN_SURFACE_PADDING_H
++#define REDFIN_SURFACE_PADDING_H
++#include <stdint.h>
++#include <stdbool.h>
++
++#define RF_GP_INFO_RENDER_EXTENT UINT32_C(0x52465031)
++#define RF_GP_ABI 1u
++#define RF_GP_PAGE_BYTES UINT64_C(16384)
++#define RF_GP_MAX_BYTES (UINT64_C(128) * 1024 * 1024)
++#define RF_GP_BGRA UINT32_C(0x42475241)
++
++struct rf_gp_image {
++    uint32_t width, height, pitch, offset, format, planes;
++    uint32_t bytes_per_element, element_width, element_height;
++};
++struct rf_gp_plan {uint64_t allocation, extent;};
++struct rf_gp_import {struct rf_gp_image image; uint64_t extent;};
++struct rf_gp_view {
++    uint32_t width, height, pitch, offset, cpp, levels, layers, samples;
++};
++
++/* Pure geometry only: the allocator/query must independently prove actual
++ * IOBuffer ownership, no parent/wrap/physical scanout and the full descriptor.
++ * Failure leaves the output and original allocation unchanged. */
++static inline bool rf_gp_storage_plan(const struct rf_gp_image *s,
++    uint64_t allocation, struct rf_gp_plan *out)
++{
++    if (!s || !out || !allocation || allocation > RF_GP_MAX_BYTES ||
++        (allocation & (RF_GP_PAGE_BYTES - 1)) || !s->width || !s->height ||
++        s->width > 16384 || s->height > 16384 || s->offset || s->planes ||
++        s->format != RF_GP_BGRA || s->bytes_per_element != 4 ||
++        s->element_width != 1 || s->element_height != 1 ||
++        !s->pitch || (s->pitch & 63u) || s->pitch < (uint64_t)s->width * 4)
++        return false;
++    uint64_t visible = (uint64_t)s->pitch * s->height;
++    uint64_t extent = (uint64_t)s->pitch * (((uint64_t)s->height + 3) & ~UINT64_C(3));
++    if (visible > allocation || extent > RF_GP_MAX_BYTES) return false;
++    uint64_t needed = (extent + RF_GP_PAGE_BYTES - 1) & ~(RF_GP_PAGE_BYTES - 1);
++    struct rf_gp_plan value = {allocation > needed ? allocation : needed, extent};
++    *out = value;
++    return true;
++}
++
++/* The permission covers exactly the declared full image. It cannot migrate
++ * to a smaller texture, byte-offset/buffer alias, mip, array or MSAA image.
++ * The unchanged native GMEM bounds check still sees the checked extent. */
++static inline uint64_t rf_gp_full_image_extent(const struct rf_gp_import *owner,
++    const struct rf_gp_view *view, uint64_t allocation)
++{
++    if (!owner || !view || !owner->extent ||
++        view->width != owner->image.width || view->height != owner->image.height ||
++        view->pitch != owner->image.pitch || view->offset != owner->image.offset ||
++        view->cpp != 4 || view->levels != 1 || view->layers != 1 || view->samples > 1)
++        return 0;
++    struct rf_gp_plan plan = {0, 0};
++    if (!rf_gp_storage_plan(&owner->image, allocation, &plan) ||
++        plan.allocation != allocation || plan.extent != owner->extent)
++        return 0;
++    return plan.extent;
++}
++#endif

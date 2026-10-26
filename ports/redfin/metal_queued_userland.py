@@ -75,8 +75,9 @@ struct redfin_metal_encoded_stats {
     uint64_t frontend_start[REDFIN_METAL_FRONTEND_WORDS],frontend_end[REDFIN_METAL_FRONTEND_WORDS];
     uint64_t bindings_start[REDFIN_METAL_BINDING_WORDS],bindings_end[REDFIN_METAL_BINDING_WORDS];
     uint64_t order_start[REDFIN_METAL_ORDERING_WORDS],order_end[REDFIN_METAL_ORDERING_WORDS];
+    uint64_t routes_start[2],routes_end[2];
     unsigned draws,computes;
-    BOOL io_valid,frontend_valid,bindings_valid,order_valid;
+    BOOL io_valid,frontend_valid,bindings_valid,order_valid,routes_valid;
 };
 struct redfin_metal_retirement_stats {
     uint64_t worker,native_done,previous_done,gate,retired,resources,slot;
@@ -92,6 +93,11 @@ static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats 
     if(s->io_valid)redfin_metal_io_sequence(s->io_start,s->io_end,n);
     if(n>4&&(n&(n-1))&&(n%120))return;
     redfin_scheduling_report(n);
+    if(s->routes_valid && s->routes_end[0]>=s->routes_start[0] && s->routes_end[1]>=s->routes_start[1])
+        rw_print("REDFIN METAL ROUTES: boot=%s sequence=%llu actual-finish=1 gmem-batches=%llu sysmem-batches=%llu command-delta=1\n",
+            redfin_fence_boot,(unsigned long long)n,
+            (unsigned long long)(s->routes_end[0]-s->routes_start[0]),
+            (unsigned long long)(s->routes_end[1]-s->routes_start[1]));
     rw_print("REDFIN METAL RETIREMENT: boot=%s sequence=%llu actual-finish=1 native-ticket=%u completion-queue-us=%llu native-wait-us=%llu predecessor-us=%llu retire-gate-us=%llu bookkeeping-us=%llu resources-us=%llu slot-us=%llu submit-to-ready-us=%llu\n",redfin_fence_boot,(unsigned long long)n,p->native_ticket,
         (unsigned long long)redfin_phase_us(s->submitted,p->worker),
         (unsigned long long)redfin_phase_us(p->worker,p->native_done),
@@ -242,6 +248,7 @@ def adapt(text):
         stats.frontend_valid=mesa.frontend_statistics(device,stats.frontend_start,REDFIN_METAL_FRONTEND_WORDS)==0;
         stats.bindings_valid=mesa.binding_statistics(device,stats.bindings_start,REDFIN_METAL_BINDING_WORDS)==0;
         stats.order_valid=mesa.ordering_statistics(device,stats.order_start,REDFIN_METAL_ORDERING_WORDS)==0;
+        stats.routes_valid=mesa.raster_statistics(device,stats.routes_start,2)==0;
         BOOL began=NO;
         @try {
             if(mesa.commands_begin(device,why,sizeof(why))) [self failWith:why];
@@ -266,6 +273,7 @@ def adapt(text):
             stats.frontend_valid=stats.frontend_valid&&mesa.frontend_statistics(device,stats.frontend_end,REDFIN_METAL_FRONTEND_WORDS)==0;
             stats.bindings_valid=stats.bindings_valid&&mesa.binding_statistics(device,stats.bindings_end,REDFIN_METAL_BINDING_WORDS)==0;
             stats.order_valid=stats.order_valid&&mesa.ordering_statistics(device,stats.order_end,REDFIN_METAL_ORDERING_WORDS)==0;
+            stats.routes_valid=stats.routes_valid&&mesa.raster_statistics(device,stats.routes_end,2)==0;
         }
     } /* Release the Gallium gate before any actual GPU wait. */
     if(published)[self redfinPublishScheduled];

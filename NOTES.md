@@ -1,5 +1,59 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN owned IOSurface GMEM-padding block implemented;53host contracts PASS — 2026-10-26
+
+Base61fba75, current hardware V61/root1390436/Fastboot. Review actual Mesa25.0.7
+fd6_layout.c16x4 linear transfer footprint, original fd_resource_from_handle
+slice bounds and Redfin import/allocator. Observed1065x282/pitch4288 and
+281x609/pitch1152 legitimately lack four-row transfer storage. Implement actual
+new storage instead of relaxing the native GMEM guard. No claim these fallbacks
+alone dominate rendering or establish a speedup.
+
+Only exact GUI3 newly allocated ordinary IOBuffer BGRA surfaces, single plane,
+o offset/parent/wrap/physical scanout, receive checked4row backing within128MiB.
+Report the actual allocation, zero all bytes and preserve wired accounting.
+Private kernel-only transfer extent starts0; GEM-info RFP1 query overwrites the
+reply, validates zero len/pad, actual live descriptor/type/size/current geometry
+and retained surface, returns0for every unsupported source. Legacy40byte surface
+and24byte info wire ABIs remain exact. Publish RedfinSurfacePaddingABI1.
+
+Darwin BO import caches actual surface description and attested extent once
+under its handle-table mutex, release/acquire published and immutable while
+retained. Full-image equality only may extend the declared slice; offset,
+smaller, mip/array/MSAA/depth/compressed/buffer views retain prior bounds. Old
+kernels/failed queries grant no permission. The existing GMEM16x4 guard is
+unchanged. Warm resource wrapping adds no IPC. Kernel/Mesa overlays are last in
+native build/source replay lists, with current source reconstruction.
+
+The complete native checker now includes both actual odd-height geometries,
+smaller owned-view and separately wrapped-storage sysmem guards, plus repeated
+CPU pattern rewrites/GMEM tile restores/scissored draws/all visible pixels and
+post-transfer tail guards. Existing192compute/half/MRT/aliases/bindings/lifetime/
+error/cache cases remain. Add sparse actual command GMEM/sysmem route deltas,
+measured under the encoder gate and reported only at real retirement; these
+are native route counts, not frames or GPU durations. Strict analysis supports
+old logs without new route records and validates new command scope/identity.
+
+53combined host contracts PASS: every four-row footprint across widths/heights,
+max/overflow/format/plane/pitch/offset failures, exact full-image permission,
+actual reconstructed kernel ownership query with17refusal variants, actual
+patched BO import's once-only query/cache/fail-closed path, native source/queue/
+CPU-consumer/alias/bounds/fence contracts, compiler/cache scope and route analysis.
+Private research/redfin-gpu/render-padding-host-tests.log.
+
+V61 validated complete native work is preserved privately in
+research/redfin-metal-render-padding-v61-validated. Apply the exact audited
+runtime-only delta to the reusable source and verify all changed bytes against
+its native work preimage/result; retain all real compiler/IR3/AIR/serialization
+inputs and cache496301fc.. . New full inputb5de25fac88dbcf1e47164d3d44763b7fe715e1b79ac8a8f34b0cacce9f5b5a2.
+Native incremental build is running, session47266; kernel CI not dispatched yet.
+No phone boot occurred between mini tasks. Last actual kernel Actions40286405146/
+run7/sourcefd21adf,58db3d942910b30100cd1e3ce7b242a43953f78ac3d2f928fdbc26881141e6d3;
+last exact observed boot args are in the V61 entry immediately below. Next fresh
+updaterV68/imageV62 after complete native/CI proof. Hardware padding/correctness,
+ordinary FPS gain and broad remaining Wi-Fi/power/sensor/Apple-service work
+remain unproved/active. Phone/Photos automatic opens and captures stay OFF.
+
 ## REDFIN V61 native full/margin GPU output PASS; real29.966FPS,60/90 unfinished — 2026-10-26
 
 Codefd21adf, documentationb07d388; GitHub Actions40286405146/run7/source

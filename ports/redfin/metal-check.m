@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include "surface-padding.h"
 #include <string.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
@@ -174,25 +176,43 @@ static BOOL native_gmem_statistics(id device,uint64_t counts[2])
     if(plugin)dlclose(plugin);return valid;
 }
 
-static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL batch,BOOL short_storage)
+#include "surface-padding-check.inc"
+
+static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL batch,unsigned storage)
 {
+    BOOL short_storage=storage==1,padded_storage=storage==2||storage==4,wrapped_storage=storage==3,special=storage!=0;
     MTLPixelFormat format=mask ? MTLPixelFormatRG8Unorm : MTLPixelFormatBGRA8Unorm;
-    unsigned width=short_storage?1065:64,height=short_storage?282:64;
-    unsigned bpe=mask ? 2 : 4,stride_bytes=short_storage?4288:64*bpe;
-    unsigned allocation=short_storage?1212416:(batch ? 32768 : 16384),payload=height*stride_bytes;
-    NSDictionary *properties=@{(id)kIOSurfaceWidth:@(width),(id)kIOSurfaceHeight:@(height),
+    unsigned width=storage==4?281:special?1065:64,height=storage==4?609:special?282:64;
+    unsigned bpe=mask ? 2 : 4,stride_bytes=storage==4?1152:special?4288:64*bpe;
+    unsigned requested=storage==4?704512:special?1212416:(batch ? 32768 : 16384),payload=height*stride_bytes;
+    /* A full owned image may use its attested padded rows. A shorter view
+     * of that same allocation retains its declared guard and uses sysmem. */
+    unsigned surface_height=short_storage?height+1:height;
+    unsigned footprint=((surface_height+3u)&~3u)*stride_bytes;
+    unsigned allocation=special&&!wrapped_storage?MAX(requested,(footprint+16383u)&~16383u):requested;
+    unsigned guard=padded_storage?footprint:payload;
+    NSDictionary *properties=@{(id)kIOSurfaceWidth:@(width),(id)kIOSurfaceHeight:@(surface_height),
         (id)kIOSurfaceBytesPerElement:@(bpe),(id)kIOSurfaceBytesPerRow:@(stride_bytes),
-        (id)kIOSurfaceAllocSize:@(allocation),(id)kIOSurfacePixelFormat:@(mask ? 0x32433038 : 0x42475241),@"IOSurfaceIsGlobal":@YES};
+        (id)kIOSurfaceAllocSize:@(requested),(id)kIOSurfacePixelFormat:@(mask ? 0x32433038 : 0x42475241),@"IOSurfaceIsGlobal":@YES};
+    void *wrapped=NULL;
+    NSMutableDictionary *wrapped_properties=nil;
+    if(wrapped_storage) {
+        if(posix_memalign(&wrapped,16384,allocation))return NO;
+        wrapped_properties=[properties mutableCopy];
+        wrapped_properties[@"IOSurfaceAddress"]=@((uint64_t)(uintptr_t)wrapped);
+        properties=wrapped_properties;
+    }
     IOSurfaceRef surface=IOSurfaceCreate((CFDictionaryRef)properties);
-    if (!surface || !IOSurfaceGetID(surface)) {if(surface)CFRelease(surface);return NO;}
+    [wrapped_properties release];
+    if (!surface || !IOSurfaceGetID(surface)) {if(surface)CFRelease(surface);free(wrapped);return NO;}
     uint32_t initial_seed=0;
     if (IOSurfaceGetAllocSize(surface)!=allocation || IOSurfaceLock(surface,0,&initial_seed)!=KERN_SUCCESS) {
-        CFRelease(surface);return NO;
+        CFRelease(surface);free(wrapped);return NO;
     }
     void *initial=IOSurfaceGetBaseAddress(surface);
-    if (!initial) {IOSurfaceUnlock(surface,0,&initial_seed);CFRelease(surface);return NO;}
+    if (!initial) {IOSurfaceUnlock(surface,0,&initial_seed);CFRelease(surface);free(wrapped);return NO;}
     memset(initial,0xa5,allocation);
-    if (IOSurfaceUnlock(surface,0,&initial_seed)!=KERN_SUCCESS) {CFRelease(surface);return NO;}
+    if (IOSurfaceUnlock(surface,0,&initial_seed)!=KERN_SUCCESS) {CFRelease(surface);free(wrapped);return NO;}
     MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:width height:height mipmapped:NO];
     desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
     desc.storageMode=MTLStorageModeShared;
@@ -247,7 +267,7 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL ba
         if (valid) {
             const uint8_t *pixels=IOSurfaceGetBaseAddress(surface);
             size_t stride=IOSurfaceGetBytesPerRow(surface);
-            valid=pixels && stride==stride_bytes && IOSurfaceGetWidth(surface)==width && IOSurfaceGetHeight(surface)==height;
+            valid=pixels && stride==stride_bytes && IOSurfaceGetWidth(surface)==width && IOSurfaceGetHeight(surface)==surface_height;
             for (unsigned y=0;valid && y<height;++y) for (unsigned x=0;valid && x<width;++x) {
                 const uint8_t *p=pixels+y*stride+x*bpe;
                 valid=batch ? (p[0]>=127 && p[0]<=129 && p[1]>=63 && p[1]<=65 &&
@@ -256,13 +276,13 @@ static BOOL render(id<MTLDevice> device,id<MTLLibrary> library,BOOL mask,BOOL ba
                     (p[0]>=190 && p[0]<=192 && p[1]>=127 && p[1]<=129 &&
                      p[2]>=63 && p[2]<=65 && p[3]==255);
             }
-            for (unsigned at=payload;valid && at<allocation;++at) valid=pixels[at]==0xa5;
+            for (unsigned at=guard;valid && at<allocation;++at) valid=pixels[at]==0xa5;
             if (IOSurfaceUnlock(surface,kIOSurfaceLockReadOnly,&seed)!=KERN_SUCCESS) valid=NO;
         }
     }
     [queue release];[pipeline release];
     [shape.vertexFunction release];[shape.fragmentFunction release];
-    [shape release];[texture release];CFRelease(surface);
+    [shape release];[texture release];CFRelease(surface);free(wrapped);
     return valid;
 }
 
@@ -279,6 +299,7 @@ int main(void)
             if (!gpu) sleep(1);
         }
         int mode=gpu ? registry_number(gpu,CFSTR("RedfinMetalPolicy")) : 0;
+        int paddingABI=gpu?registry_number(gpu,CFSTR("RedfinSurfacePaddingABI")):0;
         if (gpu) IOObjectRelease(gpu);
         if (mode!=1 && mode!=2) return 0;
         printf("REDFIN METAL CHECK BOOT: %016llx mode=%d pid=%d\n",(unsigned long long)nonce,mode,getpid());
@@ -329,7 +350,21 @@ int main(void)
             BOOL short_bounds=dependencies&&native_gmem_statistics(device,before_short)&&
                 render(device,library,NO,NO,YES)&&native_gmem_statistics(device,after_short)&&
                 after_short[0]==before_short[0]&&after_short[1]>before_short[1];
-            BOOL raster=short_bounds&&render_raster_passes(device,library);
+            uint64_t before_wrapped[2]={0},after_wrapped[2]={0};
+            BOOL wrapped_bounds=short_bounds&&native_gmem_statistics(device,before_wrapped)&&
+                render(device,library,NO,NO,3)&&native_gmem_statistics(device,after_wrapped)&&
+                after_wrapped[0]==before_wrapped[0]&&after_wrapped[1]>before_wrapped[1];
+            uint64_t before_padded[2]={0},after_padded[2]={0};
+            BOOL padded_bounds=wrapped_bounds&&paddingABI==RF_GP_ABI&&native_gmem_statistics(device,before_padded)&&
+                render(device,library,NO,NO,2)&&render(device,library,NO,NO,4)&&native_gmem_statistics(device,after_padded)&&
+                after_padded[0]>before_padded[0]&&after_padded[1]==before_padded[1];
+            BOOL padded_restore=padded_bounds&&padding_restore_native(device,library,nonce,1065,282,4288)&&
+                padding_restore_native(device,library,nonce,281,609,1152);
+            printf("REDFIN METAL PADDED OUTPUT: boot=%016llx full-image-pixels-guards-GMEM=%u shorter-view-pixels-guards-sysmem=%u wrapped-pixels-guards-sysmem=%u gmem-before=%llu gmem-after=%llu sysmem-before=%llu sysmem-after=%llu owned-ABI=1\n",
+                (unsigned long long)nonce,padded_bounds,short_bounds,wrapped_bounds,
+                (unsigned long long)before_padded[0],(unsigned long long)after_padded[0],
+                (unsigned long long)before_padded[1],(unsigned long long)after_padded[1]);
+            BOOL raster=padded_bounds&&render_raster_passes(device,library);
             BOOL vertices=short_bounds&&render_vertex_streams(device,library);
             BOOL halfRaster=short_bounds&&half_raster_native(device,library,nonce);
             BOOL pitch480=short_bounds&&render_byte_pitch(device,library,(uint32_t)nonce,120,32,480,512,16384,32768);
@@ -355,7 +390,7 @@ int main(void)
             printf("REDFIN METAL COMPOSITION RESULT: boot=%016llx clear-only-mrt-scissor-viewport-fetch-pixels-guards=%u vertex-stream-varying-sample-pixels-guards=%u pitch480-two-seeds-pixels-guards=%u pitch4512-two-seeds-pixels-guards=%u resolve480-pixels-guards=%u resolve4512-pixels-guards=%u visible-overlay=0\n",
                 (unsigned long long)nonce,raster,vertices,pitch480,pitch4512,resolve480,resolve4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
-            int status=gmem&&short_bounds&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&scheduling&&uboExtents&&resourceReferences ? 0 : 1;
+            int status=gmem&&short_bounds&&wrapped_bounds&&padded_bounds&&padded_restore&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&scheduling&&uboExtents&&resourceReferences ? 0 : 1;
             redfin_graphics_memory_report("checker-after",status);
             return status;
         } @catch (NSException *exception) {

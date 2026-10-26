@@ -1,0 +1,159 @@
+--- a/src/redwood-drm/redwood_drm.c
++++ b/src/redwood-drm/redwood_drm.c
+@@ -15,6 +15,7 @@
+ #include <IOKit/IOKitLib.h>
+ 
+ #include "xf86drm.h"
++#include "redfin_surface_padding.h"
+ #include "redfin_drm_profile.h"
+ #include <time.h>
+ 
+@@ -229,6 +230,17 @@
+ 	redfin_drm_profile_map_record(started&&finished>=started?finished-started:0);
+ }
+ 
++uint64_t
++redwood_drm_render_extent(int fd,uint32_t handle)
++{
++    (void)fd;
++    struct {uint32_t handle,info;uint64_t value;uint32_t len,pad;} request =
++        {handle,RF_GP_INFO_RENDER_EXTENT,0,0,0};
++    _Static_assert(sizeof(request)==24,"native GemInfo extent query");
++    if(!handle || call(0x43,&request,sizeof(request)))return 0;
++    return request.value;
++}
++
+ int
+ redwood_drm_surface(int fd, struct redwood_drm_surface *surface)
+ {
+--- a/src/redwood-drm/xf86drm.h
++++ b/src/redwood-drm/xf86drm.h
+@@ -81,6 +81,8 @@
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
++/* Kernel-owned full-image transfer permission; zero means unavailable. */
++uint64_t redwood_drm_render_extent(int fd,uint32_t handle);
+ int redwood_drm_cpu_range(int,uint32_t,uint32_t,uint64_t,uint64_t,int64_t,int64_t);
+ int redwood_drm_submit_scoped(int,void *,size_t,const struct rf_gw_submit_range *,uint32_t);
+ int redwood_drm_submit_access(int,void *,size_t,const struct rf_gw_submit_range *,uint32_t);
+--- a/src/freedreno/drm/freedreno_drmif.h
++++ b/src/freedreno/drm/freedreno_drmif.h
+@@ -204,7 +204,15 @@
+ /* buffer-object functions:
+  */
+ 
++#ifdef __APPLE__
++#include "redfin_surface_padding.h"
++#endif
++
+ struct fd_bo {
++#ifdef __APPLE__
++   struct rf_gp_import redfin_padding;
++   bool redfin_padding_ready;
++#endif
+    struct fd_device *dev;
+    uint32_t size;
+    uint32_t handle;
+--- a/src/freedreno/drm/freedreno_bo.c
++++ b/src/freedreno/drm/freedreno_bo.c
+@@ -78,6 +78,10 @@
+    assert(bo->handle);
+    assert(bo->funcs);
+ 
++#ifdef __APPLE__
++   bo->redfin_padding=(struct rf_gp_import){0};
++   __atomic_store_n(&bo->redfin_padding_ready,false,__ATOMIC_RELAXED);
++#endif
+    bo->dev = dev;
+    bo->iova = bo->funcs->iova(bo);
+    bo->reloc_flags = FD_RELOC_FLAGS_INIT;
+@@ -232,8 +236,15 @@
+    int size;
+    uint32_t handle;
+    struct fd_bo *bo;
++#ifdef __APPLE__
++   struct redwood_drm_surface surface;
++   bool described;
++#endif
+ 
+ restart:
++#ifdef __APPLE__
++   surface=(struct redwood_drm_surface){.surface=fd};described=false;
++#endif
+    simple_mtx_lock(&table_lock);
+    handle = dev->funcs->handle_from_dmabuf(dev, fd);
+    if (!handle) {
+@@ -247,8 +258,8 @@
+ 
+ #ifdef __APPLE__
+    /* (what comes in here is an IOSurface, and the "file descriptor" its ID) */
+-   struct redwood_drm_surface surface = { .surface = fd };
+-   size = redwood_drm_surface(dev->fd, &surface) ? 0 : surface.size;
++   described=!redwood_drm_surface(dev->fd,&surface);
++   size=described?surface.size:0;
+ #else
+    /* lseek() to get bo size */
+    size = lseek(fd, 0, SEEK_END);
+@@ -260,6 +271,24 @@
+    VG_BO_ALLOC(bo);
+ 
+ out_unlock:
++#ifdef __APPLE__
++   /* Once per retained BO, under its handle-table lock. Publish immutable
++    * permission with release/acquire; warm wrappers issue no new IPC. */
++   if(bo && bo!=&zombie && !__atomic_load_n(&bo->redfin_padding_ready,__ATOMIC_ACQUIRE)) {
++      struct rf_gp_import owner={0};
++      if(!described)described=!redwood_drm_surface(dev->fd,&surface);
++      if(described && surface.size==bo->size) {
++         owner.image=(struct rf_gp_image){surface.width,surface.height,surface.row_bytes,
++            surface.offset,surface.pixel_format,surface.planes,4,1,1};
++         owner.extent=redwood_drm_render_extent(dev->fd,bo->handle);
++         struct rf_gp_plan plan={0};
++         if(!rf_gp_storage_plan(&owner.image,bo->size,&plan) || plan.allocation!=bo->size ||
++            plan.extent!=owner.extent)owner=(struct rf_gp_import){0};
++      }
++      bo->redfin_padding=owner;
++      __atomic_store_n(&bo->redfin_padding_ready,true,__ATOMIC_RELEASE);
++   }
++#endif
+    simple_mtx_unlock(&table_lock);
+ 
+    if (bo == &zombie)
+--- a/src/gallium/drivers/freedreno/freedreno_resource.c
++++ b/src/gallium/drivers/freedreno/freedreno_resource.c
+@@ -27,6 +27,7 @@
+ #include "freedreno_query_hw.h"
+ #include "freedreno_resource.h"
+ #include "redfin_metal_linear_import.h"
++#include "redfin_surface_padding.h"
+ #include "freedreno_screen.h"
+ #include "freedreno_surface.h"
+ #include "freedreno_util.h"
+@@ -1536,6 +1537,26 @@
+    rsc->layout.pitch0 = handle->stride;
+    slice->offset = handle->offset;
+    slice->size0 = handle->stride * prsc->height0;
++#ifdef __APPLE__
++   /* Permission belongs to the kernel-owned full image, not GEM slack.
++    * Offset, smaller, mip, array and buffer aliases retain declared bounds. */
++   if (is_a6xx(screen) && prsc->target==PIPE_TEXTURE_2D &&
++       !util_format_is_depth_or_stencil(prsc->format) &&
++       !util_format_is_compressed(prsc->format) &&
++       handle->type==WINSYS_HANDLE_TYPE_FD && handle->modifier==DRM_FORMAT_MOD_LINEAR &&
++       __atomic_load_n(&bo->redfin_padding_ready,__ATOMIC_ACQUIRE)) {
++      const struct rf_gp_view view={prsc->width0,prsc->height0,handle->stride,handle->offset,
++         util_format_get_blocksize(prsc->format),prsc->last_level+1,prsc->array_size,prsc->nr_samples};
++      uint64_t extent=rf_gp_full_image_extent(&bo->redfin_padding,&view,fd_bo_size(bo));
++      if (extent) {
++         slice->size0=(uint32_t)extent;
++         static unsigned notices;
++         if ((prsc->height0&3u) && __atomic_fetch_add(&notices,1,__ATOMIC_RELAXED)<8)
++            fprintf(stderr,"REDFIN FD620 PAD IMPORT: width=%u height=%u pitch=%u extent=%llu full-image=1 ABI=1\n",
++               prsc->width0,prsc->height0,handle->stride,(unsigned long long)extent);
++      }
++   }
++#endif
+ 
+    /* use a pitchalign of gmem_align_w pixels, because GMEM resolve for
+     * lower alignments is not implemented (but possible for a6xx at least)

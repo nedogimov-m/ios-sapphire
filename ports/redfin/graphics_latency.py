@@ -6,7 +6,7 @@ import re
 import statistics
 
 ROW=re.compile(r'\[(?P<process>[^\s\]]+) (?P<pid>\d+)\]: REDFIN METAL '
-               r'(?P<kind>FENCE|RETIREMENT|FRONTEND|IO): (?P<fields>.*)')
+               r'(?P<kind>FENCE|RETIREMENT|FRONTEND|IO|ROUTES): (?P<fields>.*)')
 PARTS=('completion-queue-us','native-wait-us','predecessor-us','retire-gate-us',
        'bookkeeping-us','resources-us','slot-us')
 
@@ -48,15 +48,22 @@ def analyze(lines,boot,process='backboardd'):
             invalid.append({'pid':row['pid'],'sequence':row['sequence'],'reason':'legacy interval does not match retirement'});continue
         if frontend.get('nested-scopes')!=1:
             invalid.append({'pid':row['pid'],'sequence':row['sequence'],'reason':'frontend scope contract missing'});continue
+        if 'routes' in observations:
+            routes=observations['routes']
+            if routes.get('command-delta')!=1 or not {'gmem-batches','sysmem-batches'}<=routes.keys():
+                invalid.append({'pid':row['pid'],'sequence':row['sequence'],'reason':'native raster-route scope missing'});continue
         row['partition-rounding-us']=residual;complete.append(row)
     complete.sort(key=lambda r:(r['pid'],r['sequence']))
     def metric(kind,key):
-        values=[r['observations'][kind][key] for r in complete if key in r['observations'][kind]]
+        values=[r['observations'][kind][key] for r in complete if key in r['observations'].get(kind,{})]
         return {'samples':len(values),'minimum':min(values),'median':statistics.median(values),'maximum':max(values)} if values else None
     return {'boot':boot,'process':process,'pids':sorted({r['pid'] for r in complete}),
             'complete_samples':len(complete),'incomplete_samples':incomplete,'invalid_samples':invalid,
             'sampled_only':True,'frontend_scopes_overlap':True,'gpu_execution_time_measured':False,
             'retirement_us':{k:metric('retirement',k) for k in PARTS},
+            # These are native route selections, possibly including helper
+            # batches. They are not whole frames or GPU execution durations.
+            'raster_routes':{k:metric('routes',k) for k in ('gmem-batches','sysmem-batches')},
             'frontend':{k:metric('frontend',k) for k in (
                 'stage-us','draw-us','framebuffer-us','draw-emit-us','snapshots','snapshot-bytes',
                 'unknown-snapshots','unknown-snapshot-bytes','constant-prepare-us','constant-copy-us',

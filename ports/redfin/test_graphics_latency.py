@@ -33,5 +33,14 @@ class GraphicsLatencyTests(unittest.TestCase):
         rows=self.rows();rows.append(rows[1].replace('native-wait-us=7','native-wait-us=8'))
         self.assertTrue(analyze(rows,self.boot)['invalid_samples'])
 
+    def test_native_raster_routes_are_per_command_counts_and_require_actual_retirement(self):
+        row=f'redwoodmetal[backboardd 61]: REDFIN METAL ROUTES: boot={self.boot} sequence=120 actual-finish=1 gmem-batches=3 sysmem-batches=2 command-delta=1'
+        result=analyze(self.rows()+[row],self.boot)
+        self.assertEqual(result['complete_samples'],1)
+        self.assertEqual(result['raster_routes']['gmem-batches']['median'],3)
+        self.assertEqual(result['raster_routes']['sysmem-batches']['median'],2)
+        self.assertTrue(analyze(self.rows()+[row.replace('command-delta=1','command-delta=0')],self.boot)['invalid_samples'])
+        self.assertFalse(analyze([row],self.boot)['complete_samples'])
+
 
 if __name__=='__main__':unittest.main()
