@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V70 policy-only update verified; V64 ordinary measurement starting — 2026-10-26
+
+Code6ed25b7/results7d19b7d. V63 full native A620 correctness remains PASS.
+Policy-only reuse retains every compiled binary, exact inputb5de25fa../native
+pair4447fa9d../UIpadding-contract-v1/cache496301fc../run9kernelc363bc80.. .
+Only both startup-job policies change OFF; captures and automatic Phone/Photos
+launches stay OFF. Fresh V70 snapshot clean1408152/empty journal; complete
+preimages/backups/retained allocations/native readonly fsck/signatures and
+full device file readback PASS. Applied ONCE266240bytes,0new/freed blocks;
+clean root and verified Fastboot. V70 STALE, never reuse. Next fresh V71/imageV65.
+
+V64 imageb1a4d85fe4c9107ba35cf9b3a0e62331e0f2f99e68e0179d9366439d36246c38
+full loader/liveFDT/ADT/private inputs/run9/native ABI/source preflight PASS.
+Fresh one-boot request animate; exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x5813a5332605e6bb redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+One temporary ordinary performance cycle follows; actual result/root epoch
+pending. No more device commands until terminal collection. Broad goal active;
+no smooth60/90FPS, Wi-Fi/Apple-services/power/sensor completion is claimed.
+
 ## REDFIN V63 complete native owned-GMEM/byte-pitch/guard contract PASS — 2026-10-26
 
 Code6ed25b7/docsfe9b3aa, same actual kernel Actions40300639111/run9/source5be3287/
