@@ -1,5 +1,19 @@
 # HackiOS upstream review — 2026-10-22
 
+## Corrected ordinary baseline and physical FIFO draft — 2026-10-26
+
+V70 exact V69-native diagnostics-OFF run completes329GPU/10.011390s:
+32.862570FPS,90Hz callbacks, one server,0contacts, no runtime fault/panic,
+clean root/Fastboot. This does not establish a smooth60/90FPS or isolated gain.
+Continue with actual physical publication/retirement, retaining preferred
+kernel8e611870../userland906425b7.. and reviewed Angelpro344a8af async-ring idea.
+The new Redfin draft keeps owned native A620 memory/registers, full audits,
+real generation-owned timestamps/fences and2physical render slots. Imported
+cache handoffs, TLB/unmap, changed HFI votes and mutable native output storage
+still quiesce; CPU/client lifetime success still requires actual retirement.
+The whole runtime/worker draft is authored but uncompiled/untested; it is not
+hardware acceleration/performance proof. Combined checks and matching CI next.
+
 ## Producer-aware snapshot policy passes actual A620 routes/pixels — 2026-10-26
 
 V69/code844b125 with actual run10/kernel5f0d5f48.., input6e6e432c../pair24dfc27b..

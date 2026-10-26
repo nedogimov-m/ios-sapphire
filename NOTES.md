@@ -1,5 +1,33 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V70 ordinary32.863FPS; physical FIFO block authored, unverified — 2026-10-26
+
+Code844b125/docs2fcea44. Exact run10/kernel5f0d5f48../native6e6e432c../
+pair24dfc27b../UI/cache retained. Cycle29458 TERMINAL exit0: authenticated
+fresh0d554b82d1203445, one backboardd61, no runtime GPU fault/panic,0contacts/
+releases, clean unmounted HFSX1478906 and verified Fastboot. Exact observed
+args are in the starting entry below. Startup checks/captures/app opens OFF;
+zero current-nonce checker records.329GPU/329total frames in10.011390physical
+seconds =32.862570FPS.902callbacks/90Hz, no misses/timeouts/window changes,
+idle restored.18frontend and24owner/9output partitions validate, zero invalid.
+This does not establish smooth60/90FPS, an isolated gain or full recovery of
+V66's35.561FPS. Producer-aware native correctness remains V69 PASS. V76 STALE,
+never reuse; next fresh V77/imageV71 at actual clean1478906.
+
+Physical native FIFO block now authored as one complete draft, still uncompiled/
+untested: exact packet publication is separate from audited real retirement;
+at most2physical render publications, generation-owned scratch timestamps,
+bounded ring space, monotonic real fences, FIFO client lifetime/error cleanup.
+Native output stays serialized with real idle before command/stage reuse.
+Imported CPU cache handoff, TLB/unmap and changed actual HFI votes retain real
+quiescence. Complete SMMU/foreign/power/firmware audits remain. No unowned WC
+pool, A610 register/clock transplant or early CPU-visible completion. New compact
+physical/pipe observations must prove actual overlap before claiming it.
+Source work is private physical-ring-{base,native}-v1; runtime/worker/header
+and native-physical-submission.patch are local drafts. Combined host/actual
+kernel CI/native proof is next; no device image includes this draft yet.
+The broad platform goal remains active and unfinished.
+
 ## REDFIN V76 same-binary policy verified; ordinary V70 running — 2026-10-26
 
 Code844b125/results73e649e; exact native input6e6e432c../pair24dfc27b../
