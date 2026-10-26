@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Separate native waiting from host retirement and frontend preparation — 2026-10-26
+
+Keep preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772; updated c84b463 review is below.
+Re-reviewed the existing paired command end, constants and native completion:
+Metal's previous final-fence-us also includes completion scheduling, prior-group
+waiting and frontend-gate acquisition. Observe each boundary without changing
+the real ticket/fence/resource contract. Runtime counters also retain actual
+constant-copy extent/unknown-size facts and nested stage/draw/submit timings.
+These observations never enter AIR/NIR/shader keys or serialization. Keep their
+cache exclusion restricted to this reviewed overlay and its runtime target;
+the complete binary pairing still changes. Native arm64/actual20H392 ABI and
+24 host contracts PASS; native exports/markers and the retained old compiler
+cache identity are verified. Actual device phase/performance evidence is pending.
+
 ## Updated main c84b463: consolidated HakiOS and modem work — 2026-10-26
 
 Reviewed the requested kernel repository's current `main`,

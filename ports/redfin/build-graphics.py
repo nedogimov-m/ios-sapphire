@@ -124,6 +124,8 @@ def main():
                            ('mesa-submit-merge.patch','mesa-submit-merge.h','mesa-submit-merge.inc')]
                 inputs += [ROOT/'ports/redfin'/name for name in
                            ('mesa-resource-access.patch','mesa-access-submit.inc','include/redfin_gpu_access.h')]
+                inputs += [ROOT/'ports/redfin'/name for name in
+                           ('metal-frontend-profile.patch','metal-frontend-profile.h','metal-frontend-profile.inc')]
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -222,6 +224,10 @@ def main():
                     shutil.copy2(ROOT/'ports/redfin/mesa-access-submit.inc',
                                  source/'src/freedreno/drm/msm/redfin_mesa_access_submit.inc')
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-resource-access.patch'],source)
+                    for suffix in ('h','inc'):
+                        shutil.copy2(ROOT/'ports/redfin'/('metal-frontend-profile.'+suffix),
+                                     source/'src/compiler/air'/('redfin_metal_frontend_profile.'+suffix))
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-frontend-profile.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             if (source/'src/util/redfin_mesa_cache_build.h').read_text()!=\
                     '#define REDFIN_MESA_CACHE_BUILD_ID '+json.dumps(cache_proof['cache_id'])+'\n':
@@ -318,7 +324,7 @@ def main():
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal-bindings.h','metal-bindings-check.inc')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in
-                                  ('metal_queued_userland.py','metal-queued.h','metal-queued-check.inc','metal-queued-resource-check.inc')]
+                                  ('metal_queued_userland.py','metal-queued.h','metal-queued-check.inc','metal-queued-resource-check.inc','metal-frontend-profile.h')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)

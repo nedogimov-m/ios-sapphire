@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete frontend/retirement observation block built; V54 prepared — 2026-10-26
+
+Source basec362c05 plus this complete block. The old final-fence-us observation
+includes completion-worker dispatch, native ticket waiting, prior command-group
+waiting and reacquiring the Gallium gate. It cannot identify GPU execution cost.
+Separate those seven adjacent host intervals through resource readiness/slot
+return. Use one command sequence for fence/IO/binding/order/frontend rows.
+Add runtime-only native counters for complete draw/stage work, framebuffer and
+draw emission, aligned constants versus actual immutable snapshots, copied bytes/
+unknown reflected sizes, real CPU preparation/upload and submit clear/resolve.
+The frontend scopes overlap; the analyzer explicitly keeps them non-additive,
+isolates PID/boot and rejects conflicting or inconsistent retirement partitions.
+Preserve all real copies, ownership, ordering, native fences, errors and cleanup.
+
+24 affected host contracts PASS, including the existing actual queued/failure/
+CPU-consumer/lifetime cases, stale/mixed PID/nonce and false completion rejection,
+plus compiler-cache boundaries. Full native graphics build20261026-081501 and
+actual20H392 ABI/signatures PASS. Native input
+3cde4c1b2c43411499f1e6a1920c57f6d40cf578f4c81ab28b79eef8c268b9f8,
+full AIR/plugin pairing64b64c27d04c06542397a63365257074203eee0738cd5a816fe8297a8c8d5588.
+The pure runtime observation overlay is a separately reviewed cache exclusion;
+all ordered shader/compiler/serialization inputs stay exact. Actual compiled
+AIR/plugin markers and new C export PASS; retain the proved old shader cache
+496301fc681ceacc1d1f230aa7f516999caf801f1d4109fd983ac5aa3cae411c.
+Reused archive/environment/unchanged compiled objects; no new kernel build.
+
+Kernel remains CI40256228186/run5/sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+V54 full Image/payload/live-FDT/ADT/firmware/private-source/actual-CI provenance
+and current native ABI/source preflight PASS. Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x6f11f3463ad2dffd redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Fresh V60 expects actual clean1308410 and binds its request to this new nonce;
+readonly recovery snapshot started, not applied. Native startup probes/captures/
+Phone and Photos opens remain OFF for the one ordinary complete system run.
+User-confirmed device is independently found as one redfin Fastboot device.
+No new FPS/cause claim:19.599632FPS remains the latest valid result. Next:
+finish fresh V60 verification/apply once, V54 combined run and correlate actual
+native wait versus host gate and copied bytes before choosing the speed fix.
+All broader goal items remain active and unfinished.
+
 ## REDFIN updated upstream main reviewed; keep validated graphics baseline — 2026-10-26
 
 Review base2b86ab1. Requested preferred kernel main is now

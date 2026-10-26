@@ -44,18 +44,54 @@ STATS=r'''
 struct redfin_metal_encoded_stats {
     uint64_t queued,worker,acquired,submitted;
     uint64_t io_start[10],io_end[10];
+    uint64_t frontend_start[REDFIN_METAL_FRONTEND_WORDS],frontend_end[REDFIN_METAL_FRONTEND_WORDS];
     uint64_t bindings_start[REDFIN_METAL_BINDING_WORDS],bindings_end[REDFIN_METAL_BINDING_WORDS];
     uint64_t order_start[REDFIN_METAL_ORDERING_WORDS],order_end[REDFIN_METAL_ORDERING_WORDS];
     unsigned draws,computes;
-    BOOL io_valid,bindings_valid,order_valid;
+    BOOL io_valid,frontend_valid,bindings_valid,order_valid;
 };
-static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats *s,uint64_t finished)
+struct redfin_metal_retirement_stats {
+    uint64_t worker,native_done,previous_done,gate,retired,resources,slot;
+    unsigned native_ticket;
+};
+static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats *s,
+    const struct redfin_metal_retirement_stats *p)
 {
-    redfin_metal_completed(s->draws,s->computes,s->queued,s->worker,s->acquired,s->submitted,finished);
-    if(!s->draws&&!s->computes)return;
-    if(s->io_valid)redfin_metal_io_completed(s->io_start,s->io_end);
-    static uint64_t sequence;uint64_t n=__atomic_add_fetch(&sequence,1,__ATOMIC_RELAXED);
+    /* Assign one sequence to every observation of this command. The legacy
+     * final-fence interval includes host retirement; the new row separates it. */
+    uint64_t n=redfin_metal_completed(s->draws,s->computes,s->queued,s->worker,s->acquired,s->submitted,p->retired);
+    if(!n)return;
+    if(s->io_valid)redfin_metal_io_sequence(s->io_start,s->io_end,n);
     if(n>4&&(n&(n-1))&&(n%120))return;
+    rw_print("REDFIN METAL RETIREMENT: boot=%s sequence=%llu actual-finish=1 native-ticket=%u completion-queue-us=%llu native-wait-us=%llu predecessor-us=%llu retire-gate-us=%llu bookkeeping-us=%llu resources-us=%llu slot-us=%llu submit-to-ready-us=%llu\n",redfin_fence_boot,(unsigned long long)n,p->native_ticket,
+        (unsigned long long)redfin_phase_us(s->submitted,p->worker),
+        (unsigned long long)redfin_phase_us(p->worker,p->native_done),
+        (unsigned long long)redfin_phase_us(p->native_done,p->previous_done),
+        (unsigned long long)redfin_phase_us(p->previous_done,p->gate),
+        (unsigned long long)redfin_phase_us(p->gate,p->retired),
+        (unsigned long long)redfin_phase_us(p->retired,p->resources),
+        (unsigned long long)redfin_phase_us(p->resources,p->slot),
+        (unsigned long long)redfin_phase_us(s->submitted,p->slot));
+    if(s->frontend_valid) {
+        const uint64_t *a=s->frontend_start,*b=s->frontend_end;BOOL valid=YES;
+        for(unsigned i=0;i<REDFIN_METAL_FRONTEND_WORDS;++i)if(b[i]<a[i])valid=NO;
+        if(valid) {
+#define RF_MFP_DELTA(f) ((unsigned long long)(b[f]-a[f]))
+            /* These are nested scopes, not additive frame costs. The max is
+             * cumulative for this device; all other fields are command deltas. */
+            rw_print("REDFIN METAL FRONTEND: boot=%s sequence=%llu actual-finish=1 stage-calls=%llu stage-us=%llu draw-calls=%llu draw-us=%llu framebuffer-us=%llu draw-emit-us=%llu direct-constants=%llu snapshots=%llu snapshot-bytes=%llu maximum-snapshot-bytes-ever=%llu unknown-snapshots=%llu unknown-snapshot-bytes=%llu constant-prepare-us=%llu constant-copy-us=%llu submit-calls=%llu submit-us=%llu submit-clear-us=%llu submit-resolve-us=%llu nested-scopes=1\n",redfin_fence_boot,(unsigned long long)n,
+                RF_MFP_DELTA(RF_MFP_STAGE_CALLS),RF_MFP_DELTA(RF_MFP_STAGE_NS)/1000,
+                RF_MFP_DELTA(RF_MFP_DRAW_CALLS),RF_MFP_DELTA(RF_MFP_DRAW_NS)/1000,
+                RF_MFP_DELTA(RF_MFP_FRAMEBUFFER_NS)/1000,RF_MFP_DELTA(RF_MFP_DRAW_EMIT_NS)/1000,
+                RF_MFP_DELTA(RF_MFP_CONSTANT_DIRECT),RF_MFP_DELTA(RF_MFP_CONSTANT_UPLOADS),
+                RF_MFP_DELTA(RF_MFP_CONSTANT_BYTES),(unsigned long long)b[RF_MFP_CONSTANT_MAX_BYTES],
+                RF_MFP_DELTA(RF_MFP_CONSTANT_UNKNOWN),RF_MFP_DELTA(RF_MFP_CONSTANT_UNKNOWN_BYTES),
+                RF_MFP_DELTA(RF_MFP_CONSTANT_PREPARE_NS)/1000,RF_MFP_DELTA(RF_MFP_CONSTANT_UPLOAD_NS)/1000,
+                RF_MFP_DELTA(RF_MFP_SUBMIT_CALLS),RF_MFP_DELTA(RF_MFP_SUBMIT_NS)/1000,
+                RF_MFP_DELTA(RF_MFP_SUBMIT_CLEAR_NS)/1000,RF_MFP_DELTA(RF_MFP_SUBMIT_RESOLVE_NS)/1000);
+#undef RF_MFP_DELTA
+        }
+    }
     if(s->bindings_valid) {
         const uint64_t *a=s->bindings_start,*b=s->bindings_end;
         rw_print("REDFIN METAL BINDINGS: boot=%s sequence=%llu stage-requests=%llu descriptor-calls=%llu descriptor-skips=%llu constant-refreshes=%llu stale-slots=%llu graphics-calls=%llu graphics-skips=%llu vertex-calls=%llu vertex-skips=%llu live-stage-slots=%llu live-vertex-refs=%llu\n",redfin_fence_boot,(unsigned long long)n,
@@ -74,21 +110,23 @@ static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats 
 
 
 def adapt(text):
-    text=replace_once(text,'#include "metal-ordering.h"','#include "metal-ordering.h"\n#include "metal-queued.h"')
+    text=replace_once(text,'#include "metal-ordering.h"','#include "metal-ordering.h"\n#include "metal-queued.h"\n#include "metal-frontend-profile.h"')
     point='\tint (*commands_end)(struct rwa_device *, char *, size_t);'
     text=replace_once(text,point,point+'''
     int (*commands_submit)(struct rwa_device *,struct rwa_redfin_completion **,char *,size_t);
+    int (*frontend_statistics)(struct rwa_device *,uint64_t *,size_t);
     int (*completion_wait)(struct rwa_redfin_completion *,char *,size_t);
     int (*completion_retire)(struct rwa_redfin_completion *,char *,size_t);
     void (*completion_destroy)(struct rwa_redfin_completion *);''')
     point='\t*(void **)&mesa.commands_end = dlsym(mesa.handle, "rwa_commands_end");'
     text=replace_once(text,point,point+'''
     *(void **)&mesa.commands_submit=dlsym(mesa.handle,"rwa_redfin_commands_submit");
+    *(void **)&mesa.frontend_statistics=dlsym(mesa.handle,"rwa_redfin_frontend_statistics");
     *(void **)&mesa.completion_wait=dlsym(mesa.handle,"rwa_redfin_completion_wait");
     *(void **)&mesa.completion_retire=dlsym(mesa.handle,"rwa_redfin_completion_retire");
     *(void **)&mesa.completion_destroy=dlsym(mesa.handle,"rwa_redfin_completion_destroy");''')
     text=replace_once(text,'if (mesa.redfin_compute_create == NULL ||',
-        'if (!mesa.commands_submit || !mesa.completion_wait || !mesa.completion_retire || !mesa.completion_destroy || mesa.redfin_compute_create == NULL ||')
+        'if (!mesa.commands_submit || !mesa.frontend_statistics || !mesa.completion_wait || !mesa.completion_retire || !mesa.completion_destroy || mesa.redfin_compute_create == NULL ||')
     first=text.index('/* A native -commit enqueues work;');last=text.index('/* Completion evidence',first)
     text=text[:first]+EXECUTION+'\n'+text[last:]
     # Reporting depends on the existing actual-fence timing helpers, so put
@@ -117,6 +155,7 @@ def adapt(text):
         struct rwa_device *device=[[_queue device] mesaDevice];
         stats.acquired=mach_absolute_time();
         stats.io_valid=mesa.submission_statistics(device,stats.io_start,10)==0;
+        stats.frontend_valid=mesa.frontend_statistics(device,stats.frontend_start,REDFIN_METAL_FRONTEND_WORDS)==0;
         stats.bindings_valid=mesa.binding_statistics(device,stats.bindings_start,REDFIN_METAL_BINDING_WORDS)==0;
         stats.order_valid=mesa.ordering_statistics(device,stats.order_start,REDFIN_METAL_ORDERING_WORDS)==0;
         BOOL began=NO;
@@ -136,6 +175,7 @@ def adapt(text):
                 if(work->render)++stats.draws;else ++stats.computes;
             }
             stats.io_valid=stats.io_valid&&mesa.submission_statistics(device,stats.io_end,10)==0;
+            stats.frontend_valid=stats.frontend_valid&&mesa.frontend_statistics(device,stats.frontend_end,REDFIN_METAL_FRONTEND_WORDS)==0;
             stats.bindings_valid=stats.bindings_valid&&mesa.binding_statistics(device,stats.bindings_end,REDFIN_METAL_BINDING_WORDS)==0;
             stats.order_valid=stats.order_valid&&mesa.ordering_statistics(device,stats.order_end,REDFIN_METAL_ORDERING_WORDS)==0;
         }
@@ -143,28 +183,37 @@ def adapt(text):
     if(previous)dispatch_retain(previous);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE,0),^{
         @autoreleasepool {
+            struct redfin_metal_retirement_stats phases={.worker=mach_absolute_time(),.native_ticket=ticket!=NULL};
+            BOOL report=NO;
             @try {
                 char completed_why[512]={0};
                 int error=ticket?mesa.completion_wait(ticket,completed_why,sizeof(completed_why)):0;
+                phases.native_done=mach_absolute_time();
                 if(previous)dispatch_group_wait(previous,DISPATCH_TIME_FOREVER);
+                phases.previous_done=mach_absolute_time();phases.gate=phases.previous_done;
                 if(ticket) {
                     REDFIN_MESA_SCOPE;
+                    phases.gate=mach_absolute_time();
                     if(mesa.completion_retire(ticket,completed_why,sizeof(completed_why)))error=-1;
                     mesa.completion_destroy(ticket);
                 }
+                phases.retired=mach_absolute_time();
                 if(error)[self failWith:completed_why];
                 if(_status!=RW_CB_ERROR) {
                     _status=RW_CB_SCHEDULED;
                     _status=RW_CB_COMPLETED;
-                    redfin_metal_encoded_report(&stats,mach_absolute_time());
+                    report=YES;
                 }
             } @catch(NSException *exception) {
                 [self failWith:exception.reason.UTF8String ?: "Metal completion raised an exception"];
             } @finally {
                 if(previous)dispatch_release(previous);
                 [self redfinFinishResources];
+                phases.resources=mach_absolute_time();
                 _redfinFinalized=YES;
                 [self redwoodReturnSlot];
+                phases.slot=mach_absolute_time();
+                if(report)redfin_metal_encoded_report(&stats,&phases);
                 finish(); /* group/slot only after actual native retirement */
                 [self redwoodDeliverHandlers];
                 [self release]; /* user deallocators run off serial encoder */

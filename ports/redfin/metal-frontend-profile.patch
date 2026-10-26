@@ -1,0 +1,110 @@
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -81,6 +81,7 @@
+ #include "redfin_metal_command_scope.h"
+ #include "redfin_metal_ordering.h"
+ #include "redfin_metal_queued.h"
++#include "redfin_metal_frontend_profile.h"
+ #include <pthread.h>
+ #define REDFIN_METAL_BINDINGS_RUNTIME 1
+ #include "redfin_metal_bindings.h"
+@@ -92,6 +93,7 @@
+ extern int redfin_drm_profile_read(uint64_t *,size_t);
+ 
+ struct rwa_device {
++   uint64_t frontend_stats[REDFIN_METAL_FRONTEND_WORDS];
+    struct redfin_air_translation_cache translation_cache;
+    struct redfin_air_stage_cache stage_cache;
+    struct pipe_resource *quad_vertices;
+@@ -3343,7 +3345,7 @@
+    return error;
+ }
+ 
+-#include "redfin_metal_queued.inc"
++#include "redfin_metal_frontend_profile.inc"
+ 
+ 
+ /* What the shader calls a texture slot, in the words a Metal programmer wrote it in,
+@@ -3783,6 +3785,8 @@
+            unsigned table_count, const char *name, struct rwa_bound *bound, char *why,
+            size_t why_size)
+ {
++   uint64_t profile_began=rwa_redfin_profile_clock();
++   ++device->frontend_stats[RF_MFP_STAGE_CALLS];
+    struct pipe_context *pipe = device->pipe;
+    struct pipe_constant_buffer constants[PIPE_MAX_CONSTANT_BUFFERS]={0};
+    unsigned constant_mask=0,owned_constants=0;
+@@ -3915,12 +3919,12 @@
+             .buffer_size = (unsigned)left,
+          };
+          if (boffset % device->ubo_offset_align == 0) {
++            ++device->frontend_stats[RF_MFP_CONSTANT_DIRECT];
+             cb.buffer = b->res;
+          } else {
+             size_t want = r->size && r->size <= left ? r->size : left;
+ 
+-            if(rwa_redfin_buffer_cpu_prepare(b,why,why_size)||
+-               rwa_redfin_constant_upload(device,(const char *)b->map+boffset,want,&cb,why,why_size))goto failed;
++            if(rwa_redfin_profile_constant_snapshot(device,r,b,boffset,want,&cb,why,why_size))goto failed;
+             uploaded=true;
+          }
+          if(owned_constants&(1u<<r->index))pipe_resource_reference(&constants[r->index].buffer,NULL);
+@@ -4053,10 +4057,12 @@
+    bound->num_views = num_views;
+    bound->num_images = num_images;
+    bound->num_samplers = num_samplers;
++   rwa_redfin_profile_elapsed(device,RF_MFP_STAGE_NS,profile_began);
+    return 0;
+ failed:
+    for(unsigned i=0;i<PIPE_MAX_CONSTANT_BUFFERS;++i)
+       if(owned_constants&(1u<<i))pipe_resource_reference(&constants[i].buffer,NULL);
++   rwa_redfin_profile_elapsed(device,RF_MFP_STAGE_NS,profile_began);
+    return -1;
+ }
+ 
+@@ -6691,8 +6697,8 @@
+ #include "redfin_metal_raster.inc"
+ #include "redfin_metal_composition_trace.inc"
+ 
+-int
+-rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
++static int
++rwa_redfin_profile_draw_impl(struct rwa_render *render, const struct rwa_draw *draw,
+                 char *why, size_t why_size)
+ {
+    struct rwa_device *device = render->device;
+@@ -7036,7 +7042,9 @@
+       }
+       fb.zsbuf = zsurf;
+    }
++   uint64_t profile_framebuffer=rwa_redfin_profile_clock();
+    pipe->set_framebuffer_state(pipe, &fb);
++   rwa_redfin_profile_elapsed(device,RF_MFP_FRAMEBUFFER_NS,profile_framebuffer);
+ 
+    if(rwa_redfin_apply_raster(render,draw,w,h,why,why_size)) {
+       for(unsigned i=0;i<draw->color_count;++i)pipe_surface_reference(&surf[i],NULL);
+@@ -7211,7 +7219,9 @@
+          .count = draw->vertex_count,
+          .index_bias = index_size ? draw->base_vertex : 0,
+       };
++      uint64_t profile_emit=rwa_redfin_profile_clock();
+       pipe->draw_vbo(pipe, &info, 0, NULL, &sc, 1);
++      rwa_redfin_profile_elapsed(device,RF_MFP_DRAW_EMIT_NS,profile_emit);
+       for(unsigned i=0;i<draw->color_count;++i)rwa_redfin_linear_written(draw->color[i]);
+       rwa_redfin_linear_written(draw->depth);
+    }
+@@ -7241,3 +7251,14 @@
+    pipe_surface_reference(&zsurf,NULL);
+    return rc;
+ }
++
++int
++rwa_render_draw(struct rwa_render *render,const struct rwa_draw *draw,char *why,size_t why_size)
++{
++   struct rwa_device *device=render?render->device:NULL;
++   uint64_t began=rwa_redfin_profile_clock();
++   int error=rwa_redfin_profile_draw_impl(render,draw,why,why_size);
++   if(device)++device->frontend_stats[RF_MFP_DRAW_CALLS];
++   rwa_redfin_profile_elapsed(device,RF_MFP_DRAW_NS,began);
++   return error;
++}

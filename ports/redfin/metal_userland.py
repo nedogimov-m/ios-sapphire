@@ -260,10 +260,10 @@ static uint64_t redfin_phase_us(uint64_t start,uint64_t end)
     if (!n || !d || end<start || end-start>UINT64_MAX/n) return 0;
     return (end-start)*n/d/1000;
 }
-static void redfin_metal_completed(unsigned draws,unsigned computes,uint64_t queued,
+static uint64_t redfin_metal_completed(unsigned draws,unsigned computes,uint64_t queued,
     uint64_t worker,uint64_t acquired,uint64_t finishing,uint64_t finished)
 {
-    if ((!draws && !computes) || pthread_once(&redfin_fence_once,redfin_fence_identity) || !redfin_fence_boot[0]) return;
+    if ((!draws && !computes) || pthread_once(&redfin_fence_once,redfin_fence_identity) || !redfin_fence_boot[0]) return 0;
     uint64_t count=__atomic_add_fetch(&redfin_fence_count,1,__ATOMIC_RELAXED);
     if (count<=4 || !(count&(count-1)) || !(count%120))
         rw_print("REDFIN METAL FENCE: boot=%s sequence=%llu draws=%u computes=%u actual-finish=1 queue-us=%llu gate-us=%llu encode-us=%llu final-fence-us=%llu total-us=%llu\n",
@@ -273,12 +273,12 @@ static void redfin_metal_completed(unsigned draws,unsigned computes,uint64_t que
             (unsigned long long)redfin_phase_us(acquired,finishing),
             (unsigned long long)redfin_phase_us(finishing,finished),
             (unsigned long long)redfin_phase_us(queued,finished));
+    return count;
 }
-static void redfin_metal_io_completed(const uint64_t before[10],const uint64_t after[10])
+static void redfin_metal_io_sequence(const uint64_t before[10],const uint64_t after[10],uint64_t count)
 {
     if(!before||!after||!redfin_fence_boot[0])return;
     for(unsigned i=0;i<10;++i)if(after[i]<before[i])return;
-    uint64_t count=__atomic_load_n(&redfin_fence_count,__ATOMIC_RELAXED);
     if(count && (count<=4 || !(count&(count-1)) || !(count%120)))
         rw_print("REDFIN METAL IO: boot=%s sequence=%llu actual-finish=1 io-scope=process submit-calls=%llu submit-io-us=%llu allocation-calls=%llu allocation-io-us=%llu other-calls=%llu other-io-us=%llu map-operations=%llu map-io-us=%llu variant-compiles=%llu variant-compile-us=%llu\n",
             redfin_fence_boot,(unsigned long long)count,
@@ -288,6 +288,8 @@ static void redfin_metal_io_completed(const uint64_t before[10],const uint64_t a
             (unsigned long long)(after[6]-before[6]),(unsigned long long)((after[7]-before[7])/1000),
             (unsigned long long)(after[8]-before[8]),(unsigned long long)((after[9]-before[9])/1000));
 }
+static void redfin_metal_io_completed(const uint64_t before[10],const uint64_t after[10])
+{redfin_metal_io_sequence(before,after,__atomic_load_n(&redfin_fence_count,__ATOMIC_RELAXED));}
 '''
 
 

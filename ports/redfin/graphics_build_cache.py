@@ -7,13 +7,14 @@ import re
 import time
 
 VERSION=1
-# Reviewed native transport/dependency bookkeeping never changes serialized
+# Reviewed native transport/dependency bookkeeping and runtime observations never change serialized
 # AIR/NIR, Adreno programs or shader options. Every other input stays strict.
 TRANSPORT_INPUTS=frozenset('ports/redfin/'+name for name in (
     'drm-profile.h','metal-scoped-submission.patch','include/redfin_gpu_scope.h',
     'mesa-scoped-submit.inc','mesa-submit-merge.patch','mesa-submit-merge.h',
     'mesa-submit-merge.inc','include/redfin_gpu_access.h',
-    'mesa-resource-access.patch','mesa-access-submit.inc'))
+    'mesa-resource-access.patch','mesa-access-submit.inc',
+    'metal-frontend-profile.patch','metal-frontend-profile.h','metal-frontend-profile.inc'))
 TRANSPORT_PATCH_TARGETS=frozenset((
     'src/freedreno/drm/freedreno_bo.c','src/freedreno/drm/freedreno_priv.h',
     'src/freedreno/drm/freedreno_ringbuffer.h','src/freedreno/drm/freedreno_ringbuffer_sp.h',
@@ -22,6 +23,11 @@ TRANSPORT_PATCH_TARGETS=frozenset((
     'src/redwood-drm/redwood_drm.c','src/redwood-drm/xf86drm.h',
     'src/gallium/drivers/freedreno/freedreno_resource.h',
     'src/gallium/drivers/freedreno/freedreno_batch.c'))
+RUNTIME_PATCH_TARGETS={
+    # This reviewed overlay only wraps existing runtime calls with counters.
+    # Keep its exception separate from the general native-transport targets.
+    'ports/redfin/metal-frontend-profile.patch':frozenset(('src/compiler/air/air_metal.c',)),
+}
 
 
 def require(ok,message):
@@ -40,7 +46,8 @@ def components(root,inputs):
         path=Path(path).resolve();name=path.relative_to(root).as_posix()
         if name in TRANSPORT_INPUTS and name.endswith('.patch'):
             targets=re.findall(r'^\+\+\+ b/([^\n]+)$',path.read_text(),re.M)
-            require(targets and set(targets)<=TRANSPORT_PATCH_TARGETS,
+            allowed=RUNTIME_PATCH_TARGETS.get(name,TRANSPORT_PATCH_TARGETS)
+            require(targets and set(targets)<=allowed,
                     'transport patch touches an unreviewed compiler input: '+name)
         records.append({'path':name,'sha256':digest(path.read_bytes())})
     require(len({r['path'] for r in records})==len(records),'duplicate graphics source input')
