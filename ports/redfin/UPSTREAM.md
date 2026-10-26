@@ -1,5 +1,17 @@
 # HackiOS upstream review — 2026-10-22
 
+## Direct GLES receives bounded real-fence producer pressure — 2026-10-27
+
+Same preferred88513176../906425b7.. bridge/pixel-fetch adaptation retained.
+Ordinary V89 confirms7.192FPS despite correct direct pixels in V88: removing
+upstream seed-only CPU barriers exposed the existing16-job queue. Own bounded
+2-frame context window waits only the oldest real GL fence before new encoding,
+keeps full Finish/CPU/failure barriers and has no effect on app Metal discovery.
+Native shared-helper checker covers12changed-pixel alternating-surface rounds
+and complete tails.99common host/native20H392 build/ABI/signature checks PASS;
+kernel CI20/input1a4ad42c../Metal pair17d0f01f../shader cache496301fc.. retained.
+This is a complete source/build block; real system throughput is still pending.
+
 ## Direct GLES native V88 correctness passes; throughput regresses — 2026-10-27
 
 Preferred pins88513176../906425b7.. unchanged; own direct/producer adaptation

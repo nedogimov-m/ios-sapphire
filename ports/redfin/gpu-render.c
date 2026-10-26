@@ -6,7 +6,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include "iosurface-abi.h"
-#include <OpenGLES/ES2/gl.h>
+#include <OpenGLES/ES3/gl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <sys/sysctl.h>
 #include "include/redfin_gpu_surface.h"
+#include "gles-frame-budget.h"
 #ifndef REDFIN_GLES_PUBLICATION
 #define REDFIN_GLES_PUBLICATION 0
 #endif
@@ -49,6 +50,7 @@ static int close_color(const unsigned char *pixel,const unsigned char *expected)
     return 1;
 }
 #include "gles-direct-check.inc"
+#include "gles-budget-check.inc"
 static int render(void)
 {
     io_service_t service=0;
@@ -67,7 +69,7 @@ static int render(void)
     if(kr || bytes!=sizeof(param) || param.value!=0x06020001) {
         printf("REDFIN GPU RENDER FAIL: actual A620 parameter=%#llx result=%#x\n",(unsigned long long)param.value,kr);return 4;
     }
-    const int attributes[]={0x22,GL_RGBA,0x30,0,0x31,0,0x33,0x38,0x36,2,0x37,0,0};
+    const int attributes[]={0x22,GL_RGBA,0x30,0,0x31,0,0x33,0x38,0x36,3,0x37,0,0};
     OSMesaContext context=OSMesaCreateContextAttribs(attributes,NULL);
     static unsigned char window[16*16*4];
     if(!context || !OSMesaMakeCurrent(context,window,GL_UNSIGNED_BYTE,16,16)) {
@@ -155,6 +157,7 @@ static int render(void)
     glDeleteBuffers(1,&vertexBuffer);glDeleteProgram(program);glDeleteShader(vs);glDeleteShader(fs);
     glDeleteFramebuffers(1,&framebuffer);glDeleteTextures(1,&texture);CFRelease(surface);
     int direct=redfin_gles_direct_check();
+    if(!direct)direct=redfin_gles_budget_check();
     OSMesaDestroyContext(context);return direct;
 }
 int main(void)

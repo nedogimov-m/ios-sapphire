@@ -145,8 +145,15 @@ int main(void){
 #include <string.h>
 #include "include/redfin_gpu_surface.h"
 typedef unsigned IOSurfaceRef;
+typedef unsigned GLenum;
+typedef struct fake_sync *GLsync;
+#define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117u
+static void glFinish(void);
+static void glDeleteSync(GLsync fence){assert(fence);}
+static GLenum glClientWaitSync(GLsync fence,unsigned flags,uint64_t timeout){assert(fence&&!flags&&timeout);return 0x911c;}
+#include "gles-frame-budget.h"
 struct image {bool target,drawn,shared;unsigned mirror,producer;IOSurfaceRef surface;};
-struct eagl {struct image images[4];unsigned image_count,frames;bool producer_transfer,in_frame;};
+struct eagl {struct image images[4];unsigned image_count,frames;bool producer_transfer,in_frame;struct rf_gl_frame_budget frame_budget;};
 static unsigned copied,seed_locks,finishes,flushes,published,phase,direct_count,mirror_count;
 static bool failed,wait_for_frames;static unsigned shown_texture;
 static unsigned IOSurfaceGetID(IOSurfaceRef s){return s;}
@@ -154,6 +161,8 @@ static int IOSurfaceLock(IOSurfaceRef s,unsigned flags,void *seed){assert(s&&!fl
 static void IOSurfaceUnlock(IOSurfaceRef s,unsigned flags,void *seed){assert(s&&!flags&&!seed);}
 static void glFlush(void){++flushes;phase=2;}
 static void glFinish(void){++finishes;phase=4;}
+static GLsync glFenceSync(GLenum condition,unsigned flags){assert(condition==GL_SYNC_GPU_COMMANDS_COMPLETE&&!flags);return (GLsync)(uintptr_t)17;}
+static int redfin_eagl_frame_budget_enabled(void){return 1;}
 static uint64_t now_us(void){return phase;}
 static void show_texture(struct eagl *e,struct image *i){(void)e;(void)i;}
 static void target_to_surface(struct eagl *e,struct image *i){
@@ -167,6 +176,9 @@ static int redfin_eagl_publish_surfaces(const struct rf_gu_target *t,unsigned n)
 }
 static void redfin_eagl_direct_frame(unsigned f,unsigned d,unsigned m,int notified){
  assert(f==2&&d==1&&m==1);direct_count=d;mirror_count=m;(void)notified;
+}
+static void redfin_eagl_frame_budget(unsigned f,unsigned p,unsigned maximum,unsigned w,unsigned a,unsigned c,unsigned failures){
+ assert(f==2&&p<=maximum&&maximum<=2&&w==a+c&&!failures);
 }
 #include "eagl-direct-frame.inc"
 int main(void){

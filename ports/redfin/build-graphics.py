@@ -481,9 +481,10 @@ def main():
                 compiler_cache=cache_proof,
                 gui_profile_sha256=hashlib.sha256((ROOT/'ports/redfin/gui-profile.h').read_bytes()).hexdigest(),
                 gui_sources_sha256={name:hashlib.sha256((ROOT/'ports/redfin'/name).read_bytes()).hexdigest()
-                    for name in ('graphics-loader.c','graphics-memory-report.h','eagl-guard.c',
+                    for name in ('graphics-loader.c','graphics-memory-report.h','gpu-render.c','eagl-guard.c',
                                  'eagl-guard.h','eagl_userland.py','gles-publication.inc',
-                                 'eagl-direct-frame.inc','gles-direct-check.inc','compositor-policy.h')},
+                                 'eagl-direct-frame.inc','gles-frame-budget.h','gles-direct-check.inc',
+                                 'gles-budget-check.inc','compositor-policy.h')},
                 artifacts={str(x.relative_to(bundle)):hashlib.sha256(x.read_bytes()).hexdigest()
                            for x in sorted(bundle.rglob('*')) if x.is_file()})
             (work/'compiler-inputs.json').write_text(json.dumps(cache_proof,indent=2)+'\n')

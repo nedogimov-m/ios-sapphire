@@ -79,7 +79,19 @@ def adapt_source(text, abi):
     text = replace_once(text,'\tGLuint mirror;',
         '\tuint32_t producer;             /* native full-image producer handle, or0 */\n\tGLuint mirror;')
     text = replace_once(text,'\tbool in_frame;',
-        '\tbool producer_transfer;       /* transfer only; metadata is announced after publication */\n\tbool in_frame;')
+        '\tbool producer_transfer;       /* transfer only; metadata is announced after publication */\n'
+        '\tstruct rf_gl_frame_budget frame_budget;\n\tbool in_frame;')
+    text = replace_once(text,'#define SLOTS',
+        '#include "gles-frame-budget.h"\n\n#define SLOTS')
+    text = replace_once(text,'\te->in_frame = true;\n',
+        '\tif (redfin_eagl_frame_budget_enabled() && sync_frames && !wait_for_frames)\n'
+        '\t\t(void)rf_gl_frame_begin(&e->frame_budget);\n\te->in_frame = true;\n')
+    text = replace_once(text,'\t\tsummary(e);\n\t\tfor (unsigned i = 0; i < sizeof(contexts)',
+        '\t\tsummary(e);\n'
+        '\t\tstruct eagl *previous=current;\n'
+        '\t\tif (redwood_gl_make_current(e->gl)) rf_gl_frame_clear(&e->frame_budget);\n'
+        '\t\t(void)redwood_gl_make_current(previous?previous->gl:NULL);\n'
+        '\t\tfor (unsigned i = 0; i < sizeof(contexts)')
     direct = '''static bool
 surface_direct(struct eagl *e,struct image *image)
 {

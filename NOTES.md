@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete two-frame GLES admission block/native build;99common contracts PASS — 2026-10-27
+
+V88 full direct correctness and ordinary V89 severe7.192FPS regression remain
+hardware evidence; clean1653419/Fastboot, next fresh V96/imageV90. Actual V89
+startup cause84 resync0/recovered1 plus77contacts/release proves startup recovery.
+Own complete related source block bounds the GUI's outstanding GL frame fences
+to2per context. Wait for the oldest real completed GPU fence before encoding the
+next frame; construct its fence after rendering/mirror transfers and before real
+CPU-worker/native-fence publication. No timer-based completion, CPU pixel copy,
+missed required CPU lock or permanent per-new-frame GPU wait. Native Finish/
+publication failure keeps full completion. A fence error switches that context
+to conservative full waits; object destruction uses its actual current context.
+Only explicitly GLES backboardd uses this admission policy; app Metal is exact.
+
+Actual shared helper/native ES3 checker alternates2owned odd61-row surfaces for
+12changing-pixel rounds, validates every prior image/tail on reuse and2-frame
+maximum/11real waits. Current-nonce evidence now distinguishes actual bounded
+frame records/full native checker result from installed policy.
+99combined actual helper/GL fallback/context/producer/Metal/queue/cache/output/
+touch host contracts PASS. Native20H392 build/signatures/complete ABI PASS at
+build-20261027-025001.log. Mesa input1a4ad42c../Metal pair17d0f01f../shader cache
+496301fc../UI retained; kernel unchanged Actions40403226041/run20/source5b06349/
+01be8081.. . No kernel CI or compiler cache invalidation required. Next one full
+combined V90 checks direct/fetch/seed/pixels/guards/app Metal plus budget and
+finite system animation. Captures/automatic Phone/Photos opens stay OFF.
+Broad goal remains unfinished; hardware frame-budget/FPS result pending.
+
 ## REDFIN V89 ordinary direct GLES7.192FPS regression; actual input recovery PASS — 2026-10-27
 
 Same V88 native input1a4ad42c../pair17d0f01f../UI/shader cache496301fc..,

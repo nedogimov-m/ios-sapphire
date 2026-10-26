@@ -85,6 +85,14 @@ int redfin_eagl_publish_frame(void)
     return result==0;
 }
 
+void redfin_eagl_frame_budget(unsigned frame,unsigned pending,unsigned maximum,
+    unsigned waits,unsigned already,unsigned completed,unsigned fallbacks)
+{
+    if(frame<=4 || !(frame%120) || fallbacks)
+        dprintf(2,"REDFIN EAGL BUDGET: boot=%016llx pid=%d frame=%u bound=2 pending=%u maximum=%u waits=%u already=%u completed=%u fallbacks=%u real-GL-fences=1\n",
+            boot_nonce,getpid(),frame,pending,maximum,waits,already,completed,fallbacks);
+}
+
 static pthread_once_t producer_once=PTHREAD_ONCE_INIT;
 static bool producer_ready;
 static void discover_producer(void)
@@ -103,6 +111,12 @@ int redfin_eagl_producer_ready(void)
     if(!REDFIN_GLES_PUBLICATION || !boot_nonce)return 0;
     pthread_once(&producer_once,discover_producer);
     return producer_ready;
+}
+int redfin_eagl_frame_budget_enabled(void)
+{
+    const char *program=getprogname(),*choice=getenv(REDFIN_COMPOSITOR_ENV);
+    return program && !strcmp(program,"backboardd") && choice && !strcmp(choice,"gles") &&
+        redfin_eagl_producer_ready();
 }
 int redfin_eagl_direct_requested(void)
 {
