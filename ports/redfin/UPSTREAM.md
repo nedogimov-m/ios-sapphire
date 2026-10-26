@@ -1,5 +1,41 @@
 # HackiOS upstream review — 2026-10-22
 
+## Current preferred heads and native ordinary result — 2026-10-26
+
+Reviewed kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3 README and GPU/surface/
+framebuffer diff from8e611870..; userland2573c4a8d80ed143e534d16b5a386efa5b06ccbb
+is a relocation README after a forced main update. It moves user space into
+the main kernel repository's userland/. The advertised future hakios-os URL
+currently returns repository-not-found; the original kernel URL works. Current
+README lists Metal as unfinished (shader compiler only). Full relocated
+backend comparison remains pending; this is the reviewed scope, not adoption.
+
+The new MiniIOMobileFramebuffer removes old Metal/EAGL driver properties and
+the renamed HakiosGPU surface ABI lacks Redfin's tested padding/cache/retained
+extensions. Preserve the proven A620/20H392 bridge and native correctness
+while adapting useful changes. Active source bases remain8e611870../906425b7...
+
+V81 ordinary diagnostics-OFF exact V80 binaries/kernel complete345GPU frames/
+10.011147physical seconds =34.461586FPS at90Hz callbacks. Zero contacts, one
+backboardd61, no fault/panic, clean1576745/Fastboot. Native100us per-wait maximum
+pauses median126us/max270us; actual18-IB+WFI groups median14.908ms, output1-IB
+groups3.3165ms, both before the final cache-flush fence. No material FPS gain.
+V80's13contacts/different draw counts also prevent calling its checked run a
+matched quiet comparison. Full V80 native correctness proof stays valid.
+
+## Native precise-deadline/hardware-span contract PASS — 2026-10-26
+
+Actual source0d3767d/Actions40372742634/run18/kernel4fa88838.. passes the full
+native contract in V80: explicit CHECK EXIT0, all4cache modes/pixels/guards,
+prior Metal/output/lifetime/error cases and actual2pending completion. One
+server, no fault/panic, clean1568574/Fastboot. Preferred pins unchanged.
+30CLOCK/26WAIT/14CACHE partitions validate. Native100us polls have per-wait
+maximum pause median119.5us/max192us. Sampled9-IB+WFI hardware span is17.1305ms
+median/17.293ms max; final CACHE_FLUSH_TS is after the end marker. Per-job host
+cache averages separate actual CPU work24.5us from predecessor wait1.4335ms.
+Checked32.564306FPS at90Hz callbacks does not demonstrate a throughput gain;
+one exact-binary ordinary measurement follows. No shader/compiler rebuild.
+
 ## Native short GPU waits and ordinary realtime-cache result — 2026-10-26
 
 V79/Actions40359286479/run15 with exact V78 binaries and diagnostic jobs OFF

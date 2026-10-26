@@ -57,9 +57,16 @@ actual system output selects WC600/cached0. Source synchronization falls to
 1us median; its checked animation is34.262FPS, so a whole-frame speedup is
 not established. Ordinary V79 with the same binaries and startup checks OFF
 measures335GPU frames/10.011182s:33.463FPS at90Hz callbacks, below V75's39.056FPS.
-The next complete block replaces coalescible short GPU waits with explicit
-critical native deadlines and separates hardware timestamps from host waits.
-Its effect on the device remains unmeasured.
+V80 passes the complete native contract with explicit critical GPU deadlines
+and separate hardware/host/cache partitions. Actual100us polls have sampled
+per-wait maximum pauses of120us median/192us maximum. Sampled9-IB+WFI GPU
+groups cost17.13ms median, excluding the final cache-flush fence. Its checked
+animation is32.564FPS. Exact-binary ordinary V81 measures345GPU frames in
+10.011147physical seconds:34.462FPS,90Hz callbacks, zero contacts and one server.
+Actual18-IB+WFI groups cost14.908ms median; output1-IB groups3.3165ms. These
+sampled spans exclude the final fence and are not an additive full-frame budget.
+Smooth60/90render FPS remains unfinished; precise timer correctness is proved,
+but a material whole-frame gain is not.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).

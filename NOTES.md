@@ -1,5 +1,49 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V81 ordinary terminal34.462FPS; precise waits work, smooth FPS unfinished — 2026-10-26
+
+Exact Actions40372742634/run18/kernel4fa88838../native6e6e432c../pair1bf36b6d../
+UI/cache, policy-only OFF after verified V80 ON archive. Cycle22001 TERMINAL
+exit0: fresh authenticated84f79bebece8c5b5,345GPU frames/10.011147physical seconds
+=34.461586FPS,902callbacks/90Hz. Current-nonce startup diagnostic records0,
+one backboardd61,0touch contacts, no GPU runtime stop/kernel panic, clean
+unmounted HFSX1576745/verified Fastboot. V87 STALE/never reuse; next fresh V88/
+imageV82 at actual1576745. Full V80 native4mode/Metal/physical/output proof retained.
+
+20CLOCK/20WAIT/8CACHE records valid. Actual18-IB+WFI groups median14.908ms,
+maximum15.177ms; output1-IB groups median3.3165ms. Hardware end markers exclude
+the final cache-flush fence. Native100us poll per-wait maximum pause median126us,
+max270us. Per-job CPU-cache average median26us, predecessor2.377ms. Output
+complete host budget median5.454ms;18frontend/25owner/9output partitions valid.
+These independently sampled scopes are not an additive full-frame breakdown.
+
+This is close to V79's33.462582FPS and below V75's39.056347FPS. No material
+throughput gain or smooth60/90FPS claim. V80 recorded13contacts and changed
+draw workloads; its checked32.564FPS is not a matched quiet comparison. V81
+returns to37-draw late groups with no contacts, as the ordinary baselines.
+Next: review relocated preferred upstream and implement one cohesive rendering/
+encoding/completion throughput block. Retain bounded ownership, actual fences,
+cache policy/guards and full native proof; no automatic Phone/Photos launches.
+Exact V81 boot args remain in its starting entry below. Broad goal active.
+
+## REDFIN preferred sources re-reviewed: monorepo relocation, Metal still marked unfinished — 2026-10-26
+
+Fetched/reviewed preferred kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3
+README, framebuffer publication and GPU/surface ABI diff against8e611870..;
+userland main force-updated to2573c4a8d80ed143e534d16b5a386efa5b06ccbb and
+contains only a relocation README. It points to userland/ in the main kernel
+repository, with a future hakios-os name. That separate URL currently returns
+repository-not-found; the original preferred kernel URL remains accessible.
+Latest kernel README explicitly marks Metal unfinished (shader compiler only).
+
+Latest MiniIOMobileFramebuffer removes the old Metal/EAGL accelerator properties;
+the renamed HakiosGPU surface ABI also omits Redfin's padding/cache/retained
+extensions. Whole-tree substitution is not compatible with the proven A620/
+20H392 bridge. Current tested source bases stay8e611870../906425b7..; full
+relocated Metal/backend comparison remains next. New scope and commits are
+recorded in ports/redfin/UPSTREAM.md. No native rebuild or device operation
+was done for this review. Broad goal remains active/unfinished.
+
 ## REDFIN V87 ordinary policy verified; V81 starts — 2026-10-26
 
 Exact validated Actions40372742634/run18/kernel4fa88838a6c24fc87017aca5e33b48ed27110b2bb4015876341b88e23a963922,
