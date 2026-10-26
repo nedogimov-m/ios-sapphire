@@ -139,7 +139,11 @@ native A620 contract: two commands before waiting, shared writes and snapshots,
 reentrant callbacks, partial errors, CPU dependencies, per-write epochs and
 deferred device lifetime. V44 preserves one backboardd and a clean shutdown;
 all earlier pixels/guards and192compute commands pass. Ordinary warm UI latency
-and sustained system60/90FPS remain unmeasured.
+remains substantial. A later ordinary animation with the identical native
+binaries and persisted caches measures173actual GPU presentations in10.000194
+physical seconds (17.3FPS), with one backboardd and no panic. The independently
+verified panel runs at90Hz; CADisplayLink callbacks remain60Hz. Smooth system
+60/90render FPS remains unfinished.
 
 Kernel logs are collected automatically through temporary Linux recovery and
 authenticated host decryption. The original Android userdata and metadata

@@ -1,5 +1,19 @@
 # HackiOS upstream review — 2026-10-22
 
+## Bounded native shared-surface batch publication — 2026-10-26
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 stay pinned. Reuse the already proved
+Redfin queue/scoped-wait kernel and adapt Mesa25.0.7's existing explicit-sync
+merge mode after both native ABI checks. Preserve fd_pipe_sp_flush at CPU prep
+and final fence publication; kernel success still means real retirement at
+WaitFence. Bound cumulative primary-IB/backing-BO/suballocation inventories
+before another deferred batch is accepted, rather than relying on Linux's
+post-admission threshold or30-BO heuristic. Keep all real references and each
+queue/priority boundary. Eight actual Mesa host admission/publication cases,
+ten existing alias/FIFO/lifetime cases, full paired arm64 build and actual
+20H392 ABI/signatures PASS. Matching multi-IB hardware and FPS evidence pending.
+
 ## Scoped native throughput hardware outcome — 2026-10-26
 
 V49 repeats the identical native binaries/compiler identity with startup jobs

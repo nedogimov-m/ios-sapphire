@@ -1,0 +1,66 @@
+--- a/src/freedreno/drm/msm/msm_pipe.c
++++ b/src/freedreno/drm/msm/msm_pipe.c
+@@ -272,6 +272,10 @@
+    if(query_param(pipe,RF_GW_PARAM,&scoped_abi)||scoped_abi!=RF_GW_ABI) {
+       ERROR_MSG("native physical range dependency ABI 1 required");goto fail;
+    }
++   /* Retained global FIFO, physical-alias CPU barriers and explicit final
++    * publication provide native synchronization. Shared IOSurface batches
++    * can use Mesa's ordinary deferred merge until that publication. */
++   pipe->no_implicit_sync = true;
+ #endif
+ 
+ 
+--- a/src/freedreno/drm/freedreno_ringbuffer_sp.c
++++ b/src/freedreno/drm/freedreno_ringbuffer_sp.c
+@@ -319,10 +319,18 @@
+    }
+ }
+ 
++#ifdef __APPLE__
++#include "redfin_mesa_submit_merge.inc"
++#endif
++
+ static bool
+ should_defer(struct fd_submit *submit)
+ {
+    struct fd_submit_sp *fd_submit = to_fd_submit_sp(submit);
++#ifdef __APPLE__
++   if(submit->pipe->no_implicit_sync)
++      return redfin_msm_merge_fits(submit->pipe->dev,NULL);
++#endif
+ 
+    /* if too many bo's, it may not be worth the CPU cost of submit merging: */
+    if (fd_submit->nr_bos > 30)
+@@ -360,6 +368,15 @@
+        (last_submit(&dev->deferred_submits)->pipe != submit->pipe)) {
+       flush_deferred_submits(dev);
+    }
++
++#ifdef __APPLE__
++   /* Flush the old group BEFORE accepting a candidate that would exceed
++    * the real native IB/BO/range bounds. Queue/priority changes above keep
++    * their original ordering. CPU prep and final fence publication still
++    * flush through fd_pipe_sp_flush before asking the kernel to wait. */
++   if(pipe->no_implicit_sync && !redfin_msm_merge_fits(dev,submit))
++      flush_deferred_submits(dev);
++#endif
+ 
+    list_addtail(&fd_submit_ref(submit)->node, &dev->deferred_submits);
+ 
+--- a/src/freedreno/drm/msm/msm_ringbuffer_sp.c
++++ b/src/freedreno/drm/msm/msm_ringbuffer_sp.c
+@@ -140,6 +140,13 @@
+ 
+ #ifdef __APPLE__
+    ret=redfin_msm_submit_scoped(fd_submit,pipe,&req);
++   if(!ret) {
++      static uint64_t observations;
++      uint64_t ordinal=__atomic_add_fetch(&observations,1,__ATOMIC_RELAXED);
++      if(ordinal<=8 || !(ordinal&(ordinal-1)))
++         fprintf(stderr,"REDFIN MESA SUBMIT MERGE: ordinal=%llu commands=%u BOs=%u explicit-native-queue=%u actual-retained-submit=1\n",
++            (unsigned long long)ordinal,req.nr_cmds,req.nr_bos,pipe->no_implicit_sync);
++   }
+ #else
+    ret = drmCommandWriteRead(pipe->dev->fd, DRM_MSM_GEM_SUBMIT, &req,
+                              sizeof(req));

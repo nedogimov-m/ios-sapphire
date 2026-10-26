@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN bounded native shared-batch merge implemented; native build PASS — 2026-10-26
+
+Source base9f7723f plus this block; preferred kernel8e611870/userland906425b7
+remain pinned. Enable Mesa's native no_implicit_sync mode only after the exact
+retained-queue1 and scoped-physical-wait1 ABI queries pass. This backend already
+uses a single retained hardware FIFO; CPU prep and Metal final-fence publication
+still explicitly flush pending batches and wait for actual native retirement.
+Preserve original shared BO/view/fence references and queue/priority boundaries.
+
+Use Mesa's existing deferred shared-batch merge with conservative aggregate
+pre-admission limits:128primary IBs,1024backing BOs,8192ranges, including extra
+ring BOs. Flush predecessors BEFORE the next batch would exceed a bound; native
+single-request validation remains authoritative. The old30-BO Linux heuristic
+no longer prevents an otherwise bounded Redfin merge. Other platforms retain
+their original path. Bounded atomic native admission logs expose actual IB count,
+separately from the existing real completion/pixel/FPS observations.
+
+18affected host contracts PASS, including8executing the actual patched Mesa
+admission/publication/CPU-flush functions:7shared passes publish as one group,
+unopted shared work stays immediate, queue changes preserve order, the129th IB
+flushes predecessors, exact128IB groups and BO/range/overflow bounds hold.
+Existing physical-alias/scoped wait/late-callback/FIFO/queued lifetime contracts
+also PASS. Final native graphics local20261026-060006/NO NEW CI build, complete
+actual20H392 imports/ABI/signatures PASS. Exact compiled three patched Mesa files
+and owned helper sources match the reviewed overlay. Native input496301fc681ceacc1d1f230aa7f516999caf801f1d4109fd983ac5aa3cae411c,
+pairinge576384272f1ece1915e4d1525c4fac3db1a355781aa5a6c8aabd53116da2ed9. Startup native correctness jobs ON; app opens/captures OFF.
+
+Reuse the complete CI40249668400/run4/sourceeb4d1dc kernel
+08dab9cd4d50c2223a68ea2d6ffc5080bafd9f583fde1429b553a16436507fb0
+and UIthroughput-v2; no kernel/UI compilation, dependency install or download.
+Fresh V50 image700f04c39d953cb790a6e3fdfbeda46b6a2d342c0684f1d4eb44dff799a87f7d, complete payload/ADT/FDT/firmware/return/current
+ABI source preflight PASS. Its root-owned49-byte checked-animation request
+matches this boot; measure only after both current correctness jobs PASS.
+Exact planned args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x25f6198e40bc79da redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Fresh V56/root1270359 readonly snapshot is running; not applied. Next: complete
+staged file/signature/fsck check, apply V56 once, then one combined hardware
+cycle. Actual multi-IB merging, correctness and FPS improvement remain pending;
+60/90render and90callback requirements are not claimed. Full goal stays active.
+
 ## REDFIN V49 exact warm ordinary comparison:17.3 GPU FPS — 2026-10-26
 
 Source5b2073b; identical V48 native kernel CI40249668400/run4/sourceeb4d1dc,
