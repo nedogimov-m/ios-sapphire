@@ -1,5 +1,24 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V97 identical bounded GLES policy OFF verified; ordinary V91 starts — 2026-10-27
+
+V90 full native bounded/direct/fetch/pixels/guards/app Metal PASS, checked
+50.942FPS/90Hz, is the exact source/binary baseline. Full ON native/source/build
+inventory archived and verified at research/redfin-gles-budget-v90-validated
+before policy-only OFF. Sourceaddde14, Mesa1a4ad42c../Metal pair17d0f01f../cache
+496301fc../UI/kernel Actions40403226041/run20/source5b06349/kernel01be8081..
+retained. No native/compiler/kernel rebuild; complete current patch map PASS.
+Fresh V97 actual clean1662493/empty journal applied ONCE; live preimages/backups,
+signatures/readonly fsck/ranges and whole-file readback/clean Fastboot PASS.
+Cached/file startup jobs agree OFF; GUI GLES/direct/two-frame bound, app Metal
+system, captures/automatic Phone/Photos opens OFF. V97 STALE/never reuse;
+next fresh V98/imageV92, actual postboot generation pending collection.
+
+V91 imagef4508db3ed49777a6b12f9db5f59c074b3087c823a63bda1fc6f7ce550431d70, freshc1c8e757ff142706, ordinary animate. No ordinary performance or
+stable60/90FPS claim before terminal evidence. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xc1c8e757ff142706 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad platform goal remains unfinished.
+
 ## REDFIN V90 full native bounded direct GLES/app Metal PASS;50.942FPS — 2026-10-27
 
 Sourceaddde14/start2e5c19d; actual20H392 build025001/Mesa input1a4ad42c../
