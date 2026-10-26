@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V63 complete native owned-GMEM/byte-pitch/guard contract PASS — 2026-10-26
+
+Code6ed25b7/docsfe9b3aa, same actual kernel Actions40300639111/run9/source5be3287/
+c363bc80.. . Native pair4447fa9d.., UIpadding-contract-v1 and cache496301fc..
+exact. Cycle85088 TERMINAL exit0: authenticated current8a230a34954764e8,
+one backboardd62, no runtime GPU fault/panic, clean unmounted HFSX1408152,
+verified Fastboot. Exact observed boot args are in the V63 starting entry below.
+
+Actual full native CHECK EXIT result0/full-contract1. Both odd-height full
+images use GMEM, smaller buffer-view and wrapped memory use sysmem. Both
+repeated CPU patterns/LoadActionLoad/scissored restores complete2 with0pixel
+mismatches/0true tail guard errors. All8byte-pitch/alias rounds pass pixels,
+source row padding, the entire readonly source tail, unaligned output tails
+and every byte after owned output extent54528. No PITCH GUARD/PIXEL failures.
+All prior192compute/half/MRT/blit/buffer/resource/cache/ordering/binding/
+scheduling/lifetime/error cases PASS. The native fullscreen+margin physical
+output checks also pass5,054,400pixels and all guards before panel mapping.
+
+The repaired actual observer waits for explicit successful current-nonce Metal
+and GPU jobs, then completes a stable8second warmup/10.011377second animation:
+332GPU/332total frames,33.162271FPS,902callbacks/90Hz, max11.111ms callback
+interval,0missed samples/timeouts/window replacements, idle restored. This is
+a valid checks-gated result, not an ordinary diagnostics-OFF measurement or a
+demonstrated speedup.0contacts/releases are logged.18frontend/scheduling and
+28owner/9output partitions validate,0invalid. Native route counts remain
+batches, not FPS. Smooth60/90rendering is unfinished.
+
+Private logs/redfin/gui-platform-v63/{native-padding-evidence,presentation-summary,
+frontend-latency,gpu-output-budget,scheduling-summary}.json. Change only startup
+job policy OFF with verified native reuse; exact input/pair/kernel/cache/UI
+stay unchanged. Fresh V70 snapshot at1408152 and V64 image preparation are
+running; no ordinary boot yet. V69 STALE, never reuse. Broad goal active.
+
 ## REDFIN V69 applied once; corrected V63 combined hardware cycle starting — 2026-10-26
 
 Code6ed25b7; native pair4447fa9d.., UIpadding-contract-v1, reused run9/source5be3287/

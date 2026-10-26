@@ -1,5 +1,21 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete native owned-padding/guard contract PASS on A620 — 2026-10-26
+
+V63/code6ed25b7 with actual Actions40300639111/run9/source5be3287 proves full
+owned odd-height GMEM, smaller/wrapped sysmem, both CPU-rewrite/GMEM restores
+and all8byte-pitch/alias source and post-footprint guard rounds. Complete
+explicit CHECK EXIT0 includes all previous native Metal checks. Retain the
+preferred pins and reviewed updated-main decision below; no additional kernel,
+shader or cache-format change is needed. New pair4447fa9d.. preserves the
+actual compiler identity/cache496301fc.. and original90Hz periods.
+
+The exact current-nonce exit gate also works on hardware. Its post-check
+animation measures332GPU frames/10.011377s =33.162271FPS with90Hz callbacks,
+one server,0contacts, no runtime fault/panic and clean HFSX/Fastboot. This is
+a checks-gated result; ordinary same-binary OFF performance is pending and
+smooth60/90rendering remains unproved.
+
 ## Owned-padding hardware result and complete-check exit contract — 2026-10-26
 
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland906425b75e02b4f99eb5d7bb1ef7c9583472d772

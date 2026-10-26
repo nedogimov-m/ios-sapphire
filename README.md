@@ -21,6 +21,10 @@ full/margin native pixel and guard checks. Complete owner/output budgets now
 validate; output costs5.699ms median. Its observed300GPU frames/10.011191s are
 29.966FPS at90Hz callbacks, with51logged contacts. This is not a controlled quiet
 comparison or a measured FPS gain; render execution and queue latency remain.
+Owned odd-height IOSurfaces now provide the actual GMEM transfer footprint.
+V63 passes the complete native Metal pixel, source/tail guard, alias and
+CPU-rewrite restoration checks. Its checks-gated animation measures33.162FPS;
+ordinary performance with the same binaries is pending.
 Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md).
