@@ -1,5 +1,21 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native immutable GPU snapshots and raster cases PASS — 2026-10-26
+
+V67/code2132029 with unchanged Actions40314982431/run10/kernel5f0d5f48..,
+input2f5fc017../pair8fe49d7f.. passes the explicit full native A620 CHECK EXIT0.
+All10UBO cases, four byte-tail/argument/overwrite/rollover snapshots totaling
+1310901bytes, independent large vertex/fragment constants in2repeated draws,
+and every prior pixel/guard/alias/fence/lifetime/error case PASS. Actual warm
+compositor sequence720 uses2GPU snapshots/514432bytes. The reduced CPU encoding
+scope does not eliminate deferred GPU work or establish a rendering speedup.
+
+Checked animation31.963718FPS/90Hz callbacks is valid; ordinary OFF performance
+is pending. Preferred source pins and reviewed Angelpro344a8af stay unchanged.
+The physical-ring review records required native ring/fence/timestamp/output/
+DVFS/TLB/retirement changes; it remains review only, without an async-hardware
+completion claim. Reuse exact current compiled artifacts for the ordinary run.
+
 ## Bounded GPU-ordered large constant snapshots — 2026-10-26
 
 Continue preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772's actual

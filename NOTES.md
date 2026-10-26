@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V67 full GPU snapshot/raster contract PASS; no FPS gain established — 2026-10-26
+
+Code2132029/docs777dad1, same actual Actions40314982431/run10/kernel5f0d5f48..
+and native input2f5fc017../pair8fe49d7f../UIpadding-contract-v1/cache496301fc..
+exact. Cycle3854 TERMINAL exit0: authenticated fresh66620caf9ce68f1c, one
+backboardd62, no runtime GPU fault/panic,0contacts/releases, clean unmounted
+HFSX1453508 and verified Fastboot. V73 stays STALE/never reuse. Next fresh
+V74/imageV68 at actual clean1453508. Exact observed args are in V67's prepared
+entry below; no capture or automatic Phone/Photos launch occurred.
+
+Explicit full CHECK EXIT result0/full-contract1. All10prior UBO cases pass,
+including260/196/260/196byte bounded CPU uploads. All3unknown large direct/
+argument CPU/GPU-writer cases require actual GPU snapshot counter increments.
+Four byte-offset/tail snapshots across GPU source overwrites copy1310901bytes,
+roll over the append-only chunk and preserve source/output guards. Independent
+large unaligned vertex/fragment constants pass2repeated draws and64pixels.
+All prior192compute/half/MRT/blit/buffer/cache/resource/binding/ordering/
+scheduling/lifetime/error and owned-GMEM/byte-pitch cases PASS. Native RFM
+ABI1/query1/764fast/0fallback PASS. Full+margin native output passes5054400pixels
+and guards. Private native-constant-snapshot-evidence.json records exact cases.
+
+Checked animation completes320GPU frames/10.011351physical seconds =31.963718FPS,
+902callbacks/90Hz, no missed samples/timeouts/window replacements, idle restored.
+No ordinary speedup is established. Actual warm37draw sequence720 uses2GPU
+snapshots/514432bytes and149us in the CPU snapshot/uploader/encoding scope;
+the deferred GPU copy cost belongs to native execution and must not disappear
+from the total. Native output median5901us and queue/render time remain.
+18frontend and27owner/9output sample partitions validate, zero invalid.
+
+Preserve current validated native work as constant-snapshot-v67-validated;
+ordinary V68 changes only startup-job policy OFF and request animate. Compiled
+native/kernel/UI bytes and compiler cache stay exact. Fresh V74 readonly
+snapshot is running. Captures/app opens stay OFF. Assess the ordinary result
+before claiming a performance benefit or choosing the next complete queue block.
+Physical-ring review is private research/redfin-gpu/physical-ring-review-v1.json:
+current ring-idle waits, shared timestamps/output storage, real DVFS/TLB quiescence
+and retained retirement all need actual adaptation; no such code is implemented.
+Broad GPU/Wi-Fi/identity/power/thermal/sensor goal remains active/unfinished.
+
 ## REDFIN V73 file update verified; combined V67 running — 2026-10-26
 
 Code2132029. Complete native input2f5fc017../pair8fe49d7f../cache496301fc..,
