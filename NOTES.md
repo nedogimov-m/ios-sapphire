@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN updated upstream main reviewed; keep validated graphics baseline — 2026-10-26
+
+Review base2b86ab1. Requested preferred kernel main is now
+c84b4634277a70beac73921029b1fb6afc2530af (remote head rechecked); fetch reported
+a forced update. Consolidated HakiOS tree includes userland/tools and targets
+POCO X5 Pro/SM7325/A642L/iOS16.5. Normalize renames before comparing with pinned
+kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and separate userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772. Both working checkouts are preserved.
+Detailed reviewed commits, paths and adoption decisions: ports/redfin/UPSTREAM.md.
+
+Observed: new main's DRM/EAGL path is effectively unchanged; kernel GPU/display
+changes mostly remove optional recovery/VA diagnostics/Metal publication.
+Main lacks the separate userland's Metal runtime and several AIR/IR3 features.
+It still globally waits at CPU prep. No ready fix for our19.6FPS, charging,
+90callback cadence or sensors was found. Battery/cpufreq and station/WLAN are
+unchanged after names; password/archive helpers have no functional update.
+New shared ADSP/MPSS RSC lock addresses concurrent TCS access; Redfin already
+keeps these votes on its single CPU0 power owner. Preserve that discipline.
+
+Useful cellular work: native MPSS/IPA/GSI/QMAP/en1, DPM/WDA/WDS ordering,
+03a098b slots-1 admission/priming and ordered completions, SoC/PAS/stream/firmware
+generation through c84b463. Upstream still documents its latest data-session
+order as hardware-unverified. Actual source/porting-checklist review and one
+combined offline tool check complete: POCO16/16matches; archived Redfin emits
+12/16, missing AOSS/CMD-DB/MPSS/IPA reservation fields. IPA streams and raw
+hardware version differ; no POCO defaults may stand in for those missing facts.
+Source review alone provides no new Redfin hardware/performance result.
+
+No new CI build, root write or boot. Last validated kernel remains GitHub
+Actions40256228186/run5/sourcec0d129b, SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Last observed exact V53 args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x7c6255f4219e3a0f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+V53 ordinary196GPU frames/10.000188seconds =19.599632FPS remains the latest
+valid result; frontend/final-fence outliers remain, while sampled CPU-prep/
+surface waits are negligible. Hypothesis only: unknown-size unaligned uniforms
+can snapshot buffer tails and drain work; measure sizes/drain ownership before
+choosing a complete frontend optimization block. Reuse the exact artifacts and
+verified compiler cache. Broad goal active. Last verified Fastboot/clean root
+1308410; V58/V59 stay STALE. Next fresh updaterV60/imageV54. No Phone/Photos opens.
+
 ## REDFIN V53 ordinary typed runtime:19.6FPS; updated upstream review requested — 2026-10-26
 
 Sourcedccfee3/access codec0d129b, unchanged complete kernel GitHub Actions

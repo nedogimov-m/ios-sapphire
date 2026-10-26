@@ -1,12 +1,64 @@
 # HackiOS upstream review — 2026-10-22
 
+## Updated main c84b463: consolidated HakiOS and modem work — 2026-10-26
+
+Reviewed the requested kernel repository's current `main`,
+[`c84b4634277a70beac73921029b1fb6afc2530af`](https://github.com/oosexgang/hackios-xnu-kernel/commit/c84b4634277a70beac73921029b1fb6afc2530af).
+Fetch reported a forced update. This tree consolidates the kernel, loader,
+userland and tools as HakiOS, targeting POCO X5 Pro/SM7325/Adreno642L and
+iOS16.5. Renames from `redwood_*`/`Redwood*` to `hakios.*`/`Hakios*` account
+for much of the raw diff. Compared normalized source with the existing kernel
+`8e61187098f2c26c5daee8f9f72b6416aa64b9ab` and separate userland
+`906425b75e02b4f99eb5d7bb1ef7c9583472d772`; both build checkouts stay pinned.
+
+| Area | Observed source changes | Redfin consequence |
+| --- | --- | --- |
+| GPU kernel | `hakios.gpu.cpp`/`hakios.adreno.c` remove optional reset/retry recovery, VA guards/accounting and a timing selector. `kMsmGemCpuPrep` still waits on `hakios_gpu_last()`. | No replacement for Redfin's retained submissions or scoped resource hazards, and no demonstrated fix for the ordinary19.6FPS result. Keep the current A620 backend. |
+| Display | `MiniIOMobileFramebuffer.cpp` removes the `metal=1` plugin-property publication gate. `MiniIOSurface.h` changes comments. | No new fullscreen/cutout, physical90Hz or GPU presentation implementation to import. Preserve Redfin's working Metal discovery and panel path. |
+| Mesa/AIR | `hakios-drm/hakios.drm.c` is identical to the pinned userland adapter after renaming; `eagl.c` changes names/paths. Main lacks `air-metal.patch`, `air_metal.*`, `ir3-shift-split.patch` and `ir3-ssbo-subdword.patch`. AIR also loses argument-buffer and decoded sampler interfaces. | This main tree does not include the separate userland's complete Metal work. Replacing our compiler/runtime would discard required features rather than establish a speedup. |
+| Wi-Fi/persistence | Normalized station, Apple80211 and WLAN code is unchanged; `var_store.c` and `wifipw_test.c` only change names/comments. Networking gains per-interface state for en0/en1. | No new fix for startup delay or credential persistence. Consider multiple-interface support with a future modem port. |
+| Power/sensors | Battery reporting and cpufreq are unchanged after renaming. ADSP and MPSS serialize shared RPMh TCS use through `hakios_rsc_lock`, declared beside Wi-Fi's shared locks. | Preserve that shared-owner requirement. Redfin already routes WLAN and ADSP votes through the same checked CPU0 worker in `wifi_native_probe.cpp:redfin_sensor_power_start`; it needs no second independent RSC writer. No new completed charging, thermal or sensor implementation was found. |
+| Cellular | New MPSS/IPA/GSI, NAS/SIM, QMAP and en1 paths; explicit QRTR transport selection and readonly partition reads. DPM Open Port precedes WDA, WDS mux binding, IP family and session start. | Useful source for a separate native Redfin cellular block, with actual SM7250 addresses, reservations, channels, streams and firmware. Upstream's cellular document still lists the latest session order as hardware-unverified and calls/SMS/IPv6 unfinished. |
+
+The recent commits are predominantly cellular/portability work: `03a098b`
+leaves one GSI ring slot free and tracks ordered completions; `94d950d`,
+`2fb9623`, `0cf6d69`, `1887658`, `d26f264`, `9976259` and `fd74375`
+expose/generate SoC addresses, memory, IPA streams, PAS IDs and firmware names.
+`c84b463` adds the16-value POCO generator regression check. Reviewed the actual
+ring admission/priming/completion paths and `soc_override`, not just commit titles.
+The IPA4.11 SRAM layout, programming values and channel/endpoint inventory
+remain specific to that hardware; changing register bases alone is insufficient.
+
+Offline checks of the unchanged new-main tools PASS for its public POCO DTB:
+all16generated fields equal its checked-in `soc.args`. Against Redfin's archived
+DTB, the same script emits only12fields, omitting `soc_aoss`, `soc_cmd_db`,
+`soc_mpss_mem` and `modem_ipa_fw_at`. It correctly exposes different IPA streams
+0x520/0x522 and firmware name `ipa_fws`. The actual DT's raw `qcom,ipa-hw-ver`
+is0x12, versus the POCO fixture's0x14. Do not pass this incomplete output with
+POCO fallback defaults. The parser assumes specific node names, compatibles,
+cell widths and reg ordering; adapt it to the actual Redfin inventory first.
+
+Main's README explicitly lists Metal and charging under XNU as unfinished and
+excludes Apple-account authentication from its goals. Its serial/identity
+generation is not an Apple-services authentication implementation. New cellular
+SpringBoard hooks target16.5 and can force a visible bar without a signal
+reading; they are neither20H392 ABI validation nor proof of working telephony.
+
+Review evidence/diffs and offline outputs are private under
+`research/redfin-upstream-main-20261026`. No native build, root update or device
+boot was needed for this source review. Keep the validated kernel/graphics and
+persisted compiler cache. The next graphics block should distinguish actual
+frontend encoding/queue drains and final GPU retirement, including the sizes
+and ordering of unaligned uniform snapshots; V53 does not support more blind
+page-wait tuning or a claim that rendering remains entirely on the CPU.
+
 ## Ordinary typed runtime evidence before updated main review — 2026-10-26
 
 V53 uses the exact V52 binaries/cache with probes OFF and completes196GPU
 frames/10.000188physical seconds =19.599632FPS, effectively unchanged from20FPS.
 No panic/GPU stop, one window server and a clean root persist. Preparation waits
 are negligible in these sampled counters; frontend/final-fence outliers remain.
-Cached pipeline32 has36AIR/38IR3hits and no misses/variant compiles. The resource
+Cached pipeline32 has36AIR/338IR3hits and no misses/variant compiles. The resource
 and cache-compatibility block is validated for correctness; it does not establish
 smooth60/90FPS. User explicitly requests reviewing the updated preferred kernel
 main next. Preserve pinned8e611870/userland906425b7 while fetching/reviewing deltas.
