@@ -1,5 +1,30 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native resource intent, cache-line hazards and build-cache compatibility — 2026-10-26
+
+Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain pinned and locally re-verified.
+Mesa25.0.7 FD_RELOC_FLAGS_INIT marks all BOs READ|WRITE. Reuse its real
+fd_batch_resource_read/write graph to add per-submit/per-view intent without
+weakening original backing flags, ownership, shader resources or SMMU bounds.
+Unknown merged references dominate known reads; direct backing scopes union all
+view writes. Preserve both existing ABIs and separately negotiate typed ABI1.
+
+Redfin's owned2GiB physical RAM supports a bounded<20MiB hybrid history with
+64-byte partial-page dependencies, whole-page baselines and conservative pool
+exhaustion. Cache maintenance uses the same retained spans; old unknown accesses
+retain their stronger synchronization. Internal presentation reads retain their
+native holds; no earlier ufence observation becomes actual retirement.
+
+Retain shader caches across reviewed transport-only changes only with identical
+compiler/ordered shader/serialization sources and verified old native artifacts.
+Keep full plugin/compiler binary pairing strict. Preserve exact binaries for
+startup policy-only changes. Public UIApplication idle getter/setter are verified
+against actual20H392; only exact one-boot observations borrow a bounded request
+and restore it. All52combined host cases and complete native graphics/UI ABI/signatures PASS;
+matching kernel/real A620
+verification and improved FPS are pending. No new device cycle yet.
+
 ## Warm ordinary merged performance is now measured — 2026-10-26
 
 V51 reuses V50's exact native kernel/graphics/UI/compiler identities and saved

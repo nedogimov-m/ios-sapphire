@@ -8,6 +8,11 @@
 #include <stdio.h>
 #define REDFIN_DISPLAY_PROBE_REQUEST "/redfin/display-probe-request"
 enum {RF_DISPLAY_PROBE_NONE,RF_DISPLAY_PROBE_PASSIVE,RF_DISPLAY_PROBE_ANIMATE,RF_DISPLAY_PROBE_CHECKED};
+#define RF_DISPLAY_PROBE_WARMUP_SECONDS 8u
+#define RF_DISPLAY_PROBE_MEASURE_SECONDS 10u
+#define RF_DISPLAY_PROBE_ANIMATION_SECONDS 40u
+#define RF_DISPLAY_PROBE_DEADLINE_SECONDS 45u
+#define RF_DISPLAY_PROBE_IDLE_LIMIT_SECONDS 150u
 /* A root-owned regular control file selects one boot only. No persistent
  * animation is enabled by installing the adapter or by reading statistics. */
 static inline unsigned redfin_display_probe_request(const char *data,size_t bytes,uint64_t nonce)

@@ -1,0 +1,152 @@
+--- a/src/freedreno/drm/freedreno_priv.h
++++ b/src/freedreno/drm/freedreno_priv.h
+@@ -1,5 +1,6 @@
+ #ifdef __APPLE__
+ #include "redfin_gpu_scope.h"
++#include "redfin_gpu_access.h"
+ #endif
+ /*
+  * Copyright © 2012-2018 Rob Clark <robclark@freedesktop.org>
+--- a/src/freedreno/drm/freedreno_ringbuffer.h
++++ b/src/freedreno/drm/freedreno_ringbuffer.h
+@@ -24,6 +24,9 @@
+ 
+ struct fd_submit;
+ struct fd_ringbuffer;
++#ifdef __APPLE__
++void fd_submit_redfin_resource_use(struct fd_submit *,struct fd_bo *,uint32_t);
++#endif
+ 
+ enum fd_ringbuffer_flags {
+ 
+--- a/src/freedreno/drm/freedreno_ringbuffer_sp.h
++++ b/src/freedreno/drm/freedreno_ringbuffer_sp.h
+@@ -33,6 +33,7 @@
+    DECLARE_ARRAY(struct fd_bo *, bos);
+ #ifdef __APPLE__
+    uint64_t redfin_direct_bos[RF_GW_MAX_BOS/64];
++   uint8_t redfin_bo_access[RF_GW_MAX_BOS],redfin_view_access[RF_GW_MAX_RANGES];
+ #endif
+ 
+    /* Keep a separate table of sub-alloc BOs.. the backing objects are
+--- a/src/freedreno/drm/freedreno_ringbuffer_sp.c
++++ b/src/freedreno/drm/freedreno_ringbuffer_sp.c
+@@ -126,6 +126,20 @@
+ #ifdef __APPLE__
+ uint32_t fd_submit_append_bo_backing(struct fd_submit_sp *submit,struct fd_bo *bo)
+ {return check_append_bo(submit,bo,false,false);}
++void fd_submit_redfin_resource_use(struct fd_submit *base,struct fd_bo *bo,uint32_t access)
++{
++   if(!base||!bo)return;
++   struct fd_submit_sp *submit=to_fd_submit_sp(base);
++   bool view=suballoc_bo(bo);uint32_t native=fd_submit_append_bo(submit,bo);
++   /* Unknown references are explicit when merging. A normal batch's
++    * resource graph may refine its initially unclassified references. */
++   if(!access||(access&~7u))access=4u;
++   if(view) {
++      uint32_t index=READ_ONCE(bo->idx);
++      if(index<submit->nr_suballoc_bos&&index<RF_GW_MAX_RANGES&&submit->suballoc_bos[index]==bo)
++         submit->redfin_view_access[index]|=(uint8_t)access;
++   } else if(native<RF_GW_MAX_BOS)submit->redfin_bo_access[native]|=(uint8_t)access;
++}
+ #endif
+ 
+ static void
+--- a/src/gallium/drivers/freedreno/freedreno_resource.h
++++ b/src/gallium/drivers/freedreno/freedreno_resource.h
+@@ -358,10 +358,23 @@
+    }
+ }
+ 
++#ifdef __APPLE__
++/* Record intent before resource-graph early-outs, including each real plane.
++ * The DRM submit owns every noted BO/view through its original references. */
++static inline void fd_batch_redfin_access(struct fd_batch *batch,struct fd_resource *rsc,unsigned access)
++{
++   for(struct fd_resource *plane=rsc;plane;plane=plane->b.b.next?fd_resource(plane->b.b.next):NULL)
++      fd_submit_redfin_resource_use(batch->submit,plane->bo,access);
++}
++#endif
++
+ static inline void
+ fd_batch_resource_read(struct fd_batch *batch,
+                        struct fd_resource *rsc) assert_dt
+ {
++#ifdef __APPLE__
++   fd_batch_redfin_access(batch,rsc,FD_RELOC_READ);
++#endif
+    /* Fast path: if we hit this then we know we don't have anyone else
+     * writing to it (since both _write and _read flush other writers), and
+     * that we've already recursed for stencil.
+--- a/src/gallium/drivers/freedreno/freedreno_batch.c
++++ b/src/gallium/drivers/freedreno/freedreno_batch.c
+@@ -497,6 +497,9 @@
+ void
+ fd_batch_resource_write(struct fd_batch *batch, struct fd_resource *rsc)
+ {
++#ifdef __APPLE__
++   fd_batch_redfin_access(batch,rsc,FD_RELOC_WRITE);
++#endif
+    struct fd_resource_tracking *track = rsc->track;
+ 
+    fd_screen_assert_locked(batch->ctx->screen);
+--- a/src/freedreno/drm/msm/msm_ringbuffer_sp.c
++++ b/src/freedreno/drm/msm/msm_ringbuffer_sp.c
+@@ -17,7 +17,7 @@
+ #include "msm_priv.h"
+ 
+ #ifdef __APPLE__
+-#include "redfin_mesa_scoped_submit.inc"
++#include "redfin_mesa_access_submit.inc"
+ #endif
+ 
+ static int
+--- a/src/freedreno/drm/msm/msm_pipe.c
++++ b/src/freedreno/drm/msm/msm_pipe.c
+@@ -272,6 +272,10 @@
+    if(query_param(pipe,RF_GW_PARAM,&scoped_abi)||scoped_abi!=RF_GW_ABI) {
+       ERROR_MSG("native physical range dependency ABI 1 required");goto fail;
+    }
++   uint64_t access_abi=0;
++   if(query_param(pipe,RF_GA_PARAM,&access_abi)||access_abi!=RF_GA_ABI) {
++      ERROR_MSG("native typed resource-access ABI 1 required");goto fail;
++   }
+    /* Retained global FIFO, physical-alias CPU barriers and explicit final
+     * publication provide native synchronization. Shared IOSurface batches
+     * can use Mesa's ordinary deferred merge until that publication. */
+--- a/src/redwood-drm/xf86drm.h
++++ b/src/redwood-drm/xf86drm.h
+@@ -77,11 +77,13 @@
+ 
+ #ifdef __APPLE__
+ #include "redfin_gpu_scope.h"
++#include "redfin_gpu_access.h"
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ int redwood_drm_cpu_range(int,uint32_t,uint32_t,uint64_t,uint64_t,int64_t,int64_t);
+ int redwood_drm_submit_scoped(int,void *,size_t,const struct rf_gw_submit_range *,uint32_t);
++int redwood_drm_submit_access(int,void *,size_t,const struct rf_gw_submit_range *,uint32_t);
+ #ifdef __cplusplus
+ }
+ #endif
+--- a/src/redwood-drm/redwood_drm.c
++++ b/src/redwood-drm/redwood_drm.c
+@@ -116,6 +116,17 @@
+    if(error){errno=error;return -1;}memcpy(request,wire.native,72);return 0;
+ }
+ 
++int redwood_drm_submit_access(int fd,void *request,size_t bytes,const struct rf_gw_submit_range *ranges,uint32_t count)
++{
++   (void)fd;
++   if(!request||bytes!=72||!ranges||!count||count>RF_GW_MAX_RANGES){errno=EINVAL;return -1;}
++   struct {uint8_t native[72];struct rf_gw_submit_extension scope;} wire={0};
++   _Static_assert(sizeof(wire)==88,"typed retained submit ABI");
++   memcpy(wire.native,request,72);wire.scope.ranges=(uint64_t)(uintptr_t)ranges;wire.scope.count=count;
++   int error=call(RF_GA_SUBMIT,&wire,sizeof(wire));
++   if(error){errno=error;return -1;}memcpy(request,wire.native,72);return 0;
++}
++
+ int
+ drmIoctl(int fd, unsigned long request, void *arg)
+ {

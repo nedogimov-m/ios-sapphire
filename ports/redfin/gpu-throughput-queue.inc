@@ -5,7 +5,7 @@
  * client -> queue (short admission), client -> hardware (map/release only).
  * The worker never acquires a client/queue lock while holding hardware.
  */
-struct gpu_queued_bo {gpu_buffer *buffer;uint32_t handle,flags;};
+struct gpu_queued_bo {gpu_buffer *buffer;uint32_t handle,flags,access;};
 struct gpu_queued_job {
     gpu_queued_job *next;
     RedwoodGPUUserClient *owner;
@@ -14,6 +14,7 @@ struct gpu_queued_job {
     void *kernel_argument;
     const uint32_t *scope_pages;uint32_t scope_count;
     gpu_queued_bo *bos;
+    rf_gw_submit_range *ranges;uint32_t nr_ranges;bool typed;
     uint64_t addresses[RF_GR_COMMANDS],sequence,charge,accepted;
     uint32_t words[RF_GR_COMMANDS],count,nr_bos,fence,physical_fence;
     char process[20];int pid;
@@ -22,7 +23,9 @@ static struct {
     IOLock *lock;
     gpu_queued_job *head,*tail;
     rf_gq_budget budget;
-    uint64_t *page_use;
+    rf_ga_history access;
+    uint64_t cpu_calls,cpu_waits,cpu_read_calls,cpu_wait_ns;
+    uint64_t surface_calls,surface_waits,surface_query_ns,surface_wait_ns;
     uint64_t issued,retired,first_failed,executed;
     bool stopping;
 } gGPUQueue;
@@ -81,9 +84,16 @@ static void redfinGpuQueueWorker(void *,wait_result_t)
         if(job->sequence!=gGPUQueue.retired+1)redfin_gpu_poison("global queued retirement order changed");
         gGPUQueue.retired=job->sequence;++gGPUQueue.executed;
         if(result!=kIOReturnSuccess&&!gGPUQueue.first_failed)gGPUQueue.first_failed=job->sequence;
-        IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);IOLockUnlock(gGPUQueue.lock);
+        IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);
+        if(!(job->sequence%256))IOLog("REDFIN GPU ACCESS: jobs=%llu CPU-calls=%llu CPU-waits=%llu CPU-read=%llu CPU-wait-us=%llu fine-pages=%u partial-marks=%llu fine-queries=%llu coarse-fallbacks=%llu line-bytes=%u surface-calls=%llu surface-waits=%llu surface-query-us=%llu surface-wait-us=%llu\n",
+            job->sequence,gGPUQueue.cpu_calls,gGPUQueue.cpu_waits,gGPUQueue.cpu_read_calls,
+            gGPUQueue.cpu_wait_ns/1000,gGPUQueue.access.allocated,gGPUQueue.access.partial_marks,
+            gGPUQueue.access.fine_queries,gGPUQueue.access.fallbacks,RF_GA_LINE_BYTES,
+            gGPUQueue.surface_calls,gGPUQueue.surface_waits,gGPUQueue.surface_query_ns/1000,gGPUQueue.surface_wait_ns/1000);
+        IOLockUnlock(gGPUQueue.lock);
         if(job->kernel_complete)job->kernel_complete(job->kernel_argument,result);
         RedwoodGPUUserClient *owner=job->owner;uint64_t charge=job->charge;
+        if(job->ranges)IODelete(job->ranges,rf_gw_submit_range,job->nr_ranges);
         if(job->bos)IODelete(job->bos,gpu_queued_bo,job->nr_bos);IODelete(job,gpu_queued_job,1);
         gpuQueueUnreserve(charge);if(owner)owner->release();
     }
@@ -94,7 +104,12 @@ static void redfinGpuQueueWorker(void *,wait_result_t)
 static bool redfinGpuQueueStart(void)
 {
     gGPUQueue.lock=IOLockAlloc();if(!gGPUQueue.lock)return false;
-    gGPUQueue.page_use=IONewZero(uint64_t,RF_GW_PAGES);if(!gGPUQueue.page_use)return false;
+    rf_ga_history *history=&gGPUQueue.access;
+    history->use=IONewZero(uint64_t,RF_GW_PAGES);
+    history->write=IONewZero(uint64_t,RF_GW_PAGES);
+    history->fine_index=IONewZero(uint32_t,RF_GW_PAGES);
+    history->fine=IONewZero(rf_ga_fine,RF_GA_FINE_PAGES);history->capacity=RF_GA_FINE_PAGES;
+    if(!rf_ga_valid(history))return false;
     thread_t worker=THREAD_NULL;
     kern_return_t result=kernel_thread_start(redfinGpuQueueWorker,NULL,&worker);
     if(result!=KERN_SUCCESS){gGPUQueue.stopping=true;return false;}
@@ -107,12 +122,12 @@ static void redfinGpuQueueStop(void)
     IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);IOLockWakeup(gGPUQueue.lock,&gGPUQueue.budget,false);
     IOLockUnlock(gGPUQueue.lock);
 }
-IOReturn RedwoodGPUUserClient::submit(msm_submit *r,const rf_gw_submit_extension *scope)
+IOReturn RedwoodGPUUserClient::submit(msm_submit *r,const rf_gw_submit_extension *scope,bool typed)
 {
     if(!r->nr_cmds||r->nr_cmds>RF_GR_COMMANDS||!r->nr_bos||r->nr_bos>RF_GR_OBJECTS||
        (r->flags&~0x80000010u)||(r->flags&0xffu)!=0x10u||r->nr_in||r->nr_out||r->in_syncobjs||r->out_syncobjs||r->pad)
         return kIOReturnBadArgument;
-    if(scope&&(!scope->ranges||!scope->count||scope->count>RF_GW_MAX_RANGES||scope->reserved))return kIOReturnBadArgument;
+    if((typed&&!scope)||(scope&&(!scope->ranges||!scope->count||scope->count>RF_GW_MAX_RANGES||scope->reserved)))return kIOReturnBadArgument;
     uint32_t nr_ranges=scope?scope->count:0;
     uint64_t charge=sizeof(gpu_queued_job)+(uint64_t)r->nr_bos*sizeof(gpu_queued_bo)+
         (uint64_t)r->nr_cmds*sizeof(msm_cmd)+(uint64_t)nr_ranges*sizeof(rf_gw_submit_range);
@@ -135,15 +150,18 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r,const rf_gw_submit_extension
         gpu_buffer *b=buffer(bos[i].handle);
         if(!b||!b->pages||b->page_count!=b->size/RF_GW_PAGE_BYTES||
            !rf_gr_submit_bo(bos[i].flags,bos[i].presumed,b?b->address:0)||b->pending==UINT32_MAX){result=kIOReturnBadArgument;goto unlock;}
-        job->bos[i]={b,bos[i].handle,bos[i].flags};
+        job->bos[i]={b,bos[i].handle,bos[i].flags,nr_ranges?0:rf_ga_access(bos[i].flags,0,false)};
     }
     for(unsigned i=0;i<nr_ranges;++i) {
         const rf_gw_submit_range *range=&ranges[i];
         gpu_buffer *b=range->bo<r->nr_bos?job->bos[range->bo].buffer:NULL;
-        if(!b||range->reserved||!range->bytes||range->offset>b->size||range->bytes>b->size-range->offset) {
+        if(!b||(!typed&&range->reserved)||(typed&&((range->reserved&~RF_GA_RW)||
+           (range->reserved&~(job->bos[range->bo].flags&RF_GA_RW))))||
+           !range->bytes||range->offset>b->size||range->bytes>b->size-range->offset) {
             result=kIOReturnBadArgument;goto unlock;
         }
         covered[range->bo]=true;
+        job->bos[range->bo].access|=rf_ga_access(job->bos[range->bo].flags,range->reserved,typed);
     }
     if(nr_ranges)for(unsigned i=0;i<r->nr_bos;++i)
         if(!covered[i]){result=kIOReturnBadArgument;goto unlock;}
@@ -172,19 +190,21 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r,const rf_gw_submit_extension
     else result=gpuError(rf_gq_accept(&queue,&job->fence));
     if(result==kIOReturnSuccess) {
         job->owner=this;retain();job->nr_bos=r->nr_bos;job->charge=charge;job->accepted=gpuNow();
+        job->nr_ranges=nr_ranges;job->typed=typed;
         job->sequence=++gGPUQueue.issued;proc_selfname(job->process,sizeof(job->process));job->pid=proc_selfpid();
         for(unsigned i=0;i<r->nr_bos;++i){
             gpu_buffer *b=job->bos[i].buffer;++b->pending;b->fence=job->fence;
-            if(!nr_ranges&&rf_gw_mark(gGPUQueue.page_use,b->pages,b->page_count,job->sequence))
+            if(!nr_ranges&&rf_ga_mark_pages(&gGPUQueue.access,b->pages,b->page_count,job->sequence,job->bos[i].access))
                 redfin_gpu_poison("physical GPU dependency metadata changed");
         }
         for(unsigned i=0;i<nr_ranges;++i) {
             const rf_gw_submit_range *range=&ranges[i];gpu_buffer *b=job->bos[range->bo].buffer;
-            if(rf_gw_mark_span(gGPUQueue.page_use,b->pages,b->page_count,range->offset,range->bytes,b->size,job->sequence))
+            unsigned access=rf_ga_access(job->bos[range->bo].flags,range->reserved,typed);
+            if(rf_ga_mark_span(&gGPUQueue.access,b->pages,b->page_count,range->offset,range->bytes,b->size,job->sequence,access))
                 redfin_gpu_poison("scoped GPU dependency metadata changed");
         }
         if(gGPUQueue.tail)gGPUQueue.tail->next=job;else gGPUQueue.head=job;gGPUQueue.tail=job;
-        r->fence=job->fence;job=NULL;IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);
+        r->fence=job->fence;job->ranges=ranges;ranges=NULL;job=NULL;IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);
     }
     IOLockUnlock(gGPUQueue.lock);
 unlock:
@@ -213,6 +233,29 @@ static void gpuQueueFault(const gpu_queued_job *job)
         previous->address,previous->size,end,address-end,previous->surface!=NULL,
         __atomic_load_n(&previous->clientMapped,__ATOMIC_ACQUIRE));
 }
+/* Scope cache maintenance to the same validated physical cache-line spans
+ * as CPU retirement. The original retained backing and SMMU map stay whole. */
+static bool gpuQueuedSurfaceCache(gpu_queued_job *job,unsigned index,bool invalidate)
+{
+    gpu_buffer *b=job->bos[index].buffer;
+    if(!job->nr_ranges) {
+        if(invalidate){redfin_gpu_invalidate(b->kernel,b->size);gTiming.invalidated+=b->size;}
+        else {redfin_gpu_sync(b->kernel,b->size,true);gTiming.cleaned+=b->size;}
+        return true;
+    }
+    for(unsigned n=0;n<job->nr_ranges;++n) {
+        const rf_gw_submit_range *range=&job->ranges[n];if(range->bo!=index)continue;
+        unsigned access=rf_ga_access(job->bos[index].flags,range->reserved,job->typed);
+        if(invalidate&&!(access&RF_GA_WRITE))continue;
+        uint64_t first=range->offset&~UINT64_C(63);
+        uint64_t end=(range->offset+range->bytes+63)&~UINT64_C(63);
+        if(end>b->size||first>=end){redfin_gpu_poison("retained cache scope changed");return false;}
+        void *address=(uint8_t *)b->kernel+first;uint64_t bytes=end-first;
+        if(invalidate){redfin_gpu_invalidate(address,bytes);gTiming.invalidated+=bytes;}
+        else {redfin_gpu_sync(address,bytes,true);gTiming.cleaned+=bytes;}
+    }
+    return true;
+}
 IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job)
 {
     uint64_t began=gpuNow(),again=4ULL*NSEC_PER_MSEC;
@@ -220,7 +263,7 @@ IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job)
         gpu_buffer *b=job->bos[i].buffer;if(!b->surface)continue;
         uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
         if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
-            redfin_gpu_sync(b->kernel,b->size,true);gTiming.cleaned+=b->size;
+            if(!gpuQueuedSurfaceCache(job,i,false))return kIOReturnIOError;
         } else ++gTiming.skipped;
     }
     redfin_gpu_sync(NULL,0,false);gTiming.cleaning+=gpuNow()-began;began=gpuNow();
@@ -229,7 +272,7 @@ IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job)
     gTiming.submitting+=gpuNow()-began;began=gpuNow();++gTiming.submissions;
     if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i) {
         gpu_buffer *b=job->bos[i].buffer;
-        if(b->surface&&(job->bos[i].flags&2u)){redfin_gpu_invalidate(b->kernel,b->size);gTiming.invalidated+=b->size;}
+        if(b->surface&&(job->bos[i].access&RF_GA_WRITE)&&!gpuQueuedSurfaceCache(job,i,true))result=kIOReturnIOError;
     }
     gTiming.invalidating+=gpuNow()-began;gpuTiming();
     if(job->fence<=8||!(job->fence%256)||result!=kIOReturnSuccess)
@@ -272,18 +315,21 @@ IOReturn RedwoodGPUUserClient::prepareRange(rf_gw_cpu_range *r,bool whole)
 {
     if(r->op&~7u)return kIOReturnBadArgument;
     IOLockLock(clientLock);gpu_buffer *b=buffer(r->handle);
-    if(!b||closed||queue.closing){IOLockUnlock(clientLock);return kIOReturnBadArgument;}
+    if(!b||closed||queue.closing||queue.failed||!redfin_gpu_ready()){IOLockUnlock(clientLock);return kIOReturnBadArgument;}
     uint64_t generation=b->generation;
     msm_timespec timeout={r->seconds,r->nanoseconds};
     IOLockLock(gGPUQueue.lock);
     uint64_t target=0;
-    IOReturn result=gpuError(rf_gw_target(gGPUQueue.page_use,b->pages,b->page_count,
-        r->offset,whole?b->size:r->bytes,b->size,&target));
+    IOReturn result=gpuError(rf_ga_target(&gGPUQueue.access,b->pages,b->page_count,
+        r->offset,whole?b->size:r->bytes,b->size,r->op,&target));
+    ++gGPUQueue.cpu_calls;if((r->op&RF_GA_RW)==RF_GA_READ)++gGPUQueue.cpu_read_calls;
+    if(gGPUQueue.retired<target)++gGPUQueue.cpu_waits;
+    uint64_t began=gpuNow();
     IOLockUnlock(clientLock);
     if(result==kIOReturnSuccess)result=gpuQueueWaitTargetLocked(target,&timeout,(r->op&4u)!=0);
-    IOLockUnlock(gGPUQueue.lock);
+    gGPUQueue.cpu_wait_ns+=gpuNow()-began;IOLockUnlock(gGPUQueue.lock);
     IOLockLock(clientLock);b=buffer(r->handle);
-    if(!b||b->generation!=generation)result=kIOReturnBadArgument;
+    if(!b||b->generation!=generation||queue.failed||!redfin_gpu_ready())result=kIOReturnBadArgument;
     IOLockUnlock(clientLock);return result;
 }
 IOReturn RedwoodGPUUserClient::prepareQueued(msm_cpu_prep *r)
@@ -295,8 +341,12 @@ extern "C" int redfin_gpu_queue_memory_barrier(void *descriptor)
 {
     if(!gGPUQueue.lock)return (int)kIOReturnSuccess;
     IOLockLock(gGPUQueue.lock);
+    uint64_t began=gpuNow();
     uint64_t target=gpuQueueMemoryTargetLocked((IOMemoryDescriptor *)descriptor);
+    uint64_t resolved=gpuNow();++gGPUQueue.surface_calls;
+    gGPUQueue.surface_query_ns+=resolved-began;if(gGPUQueue.retired<target)++gGPUQueue.surface_waits;
     IOReturn result=gpuQueueWaitTargetLocked(target,NULL,false);
+    gGPUQueue.surface_wait_ns+=gpuNow()-resolved;
     IOLockUnlock(gGPUQueue.lock);return (int)result;
 }
 

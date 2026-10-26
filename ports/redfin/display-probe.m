@@ -29,6 +29,7 @@
 @property(nonatomic) unsigned callbacks,under12,under18,under35;
 @property(nonatomic) BOOL finished;
 @property(nonatomic) BOOL checksCompleted;
+@property(nonatomic) const char *finishReason;
 @property(nonatomic) unsigned mode,samples,missed;
 @property(nonatomic) double minimumFPS,maximumFPS;
 @property(nonatomic) struct redfin_display_statistics_v2 lastNative;
@@ -38,6 +39,7 @@
 @end
 
 static RedfinDisplayProbe *active_probe;
+static BOOL probe_ended,idle_guard_active,idle_guard_changed;
 static NSString *const animation_key=@"com.redfin.presentation.measure";
 static kern_return_t last_sample_status;
 static size_t last_sample_bytes;
@@ -79,6 +81,37 @@ static void probe_log(uint64_t nonce,const char *format,...)
     int fd=open("/private/var/mobile/Library/Logs/redfin-ui.log",O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW,0600);
     if (fd>=0) {(void)write(fd,line,bytes);close(fd);}
 }
+/* Borrow only this process's public idle request, for this exact one-boot
+ * observation. All success/refusal paths and an independent finite deadline
+ * release our request. No lock/unlock/passcode policy is changed. */
+static BOOL probe_idle_release(void)
+{
+    BOOL restored=YES;
+    if(idle_guard_active&&idle_guard_changed) {
+        UIApplication.sharedApplication.idleTimerDisabled=NO;
+        restored=!UIApplication.sharedApplication.idleTimerDisabled;
+    }
+    idle_guard_active=NO;idle_guard_changed=NO;probe_ended=YES;return restored;
+}
+static void probe_idle_begin(uint64_t nonce)
+{
+    if(idle_guard_active)return;
+    idle_guard_changed=!UIApplication.sharedApplication.idleTimerDisabled;
+    idle_guard_active=YES;
+    if(idle_guard_changed)UIApplication.sharedApplication.idleTimerDisabled=YES;
+    probe_log(nonce,"finite-idle-guard borrowed=%u maximum-seconds=%u",idle_guard_changed,
+        RF_DISPLAY_PROBE_IDLE_LIMIT_SECONDS);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)RF_DISPLAY_PROBE_IDLE_LIMIT_SECONDS*NSEC_PER_SEC),
+        dispatch_get_main_queue(),^{
+            if(!idle_guard_active)return;
+            if(active_probe) {
+                active_probe.finishReason="idle-deadline";[active_probe finish:YES];
+            } else {
+                BOOL restored=probe_idle_release();
+                probe_log(nonce,"refused bounded-idle-deadline idle-restored=%u",restored);
+            }
+        });
+}
 static BOOL sample_attempts(io_connect_t client,uint64_t nonce,struct redfin_display_statistics_v2 *out,unsigned attempts)
 {
     if (!client) return NO;
@@ -99,15 +132,15 @@ static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_stat
 - (void)tick:(CADisplayLink *)link
 {
     if (self.finished) return;
-    if(self.mode==RF_DISPLAY_PROBE_ANIMATE&&!fullscreen_window(self.window)) {[self finish:YES];return;}
+    if(self.mode==RF_DISPLAY_PROBE_ANIMATE&&!fullscreen_window(self.window)) {self.finishReason="window-lost";[self finish:YES];return;}
     double now=link.timestamp;
     if (!self.origin) self.origin=now;
-    if (!self.began && now-self.origin>=2*self.clockRatio) {
+    if (!self.began && now-self.origin>=RF_DISPLAY_PROBE_WARMUP_SECONDS*self.clockRatio) {
         struct redfin_display_statistics_v2 start={0};
-        if (!sample(self.framebuffer,self.nonce,&start)) {[self finish:YES];return;}
+        if (!sample(self.framebuffer,self.nonce,&start)) {self.finishReason="initial-counters";[self finish:YES];return;}
         self.first=start;self.lastNative=start;self.began=now;self.last=now;
-        probe_log(self.nonce,"measure-start warmup-seconds=2 ticks=%llu completed-presents=%llu gpu-presents=%llu",
-            (unsigned long long)start.ticks,(unsigned long long)start.presents,(unsigned long long)start.gpu_presents);
+        probe_log(self.nonce,"measure-start warmup-seconds=%u ticks=%llu completed-presents=%llu gpu-presents=%llu",
+            RF_DISPLAY_PROBE_WARMUP_SECONDS,(unsigned long long)start.ticks,(unsigned long long)start.presents,(unsigned long long)start.gpu_presents);
     } else if (self.began) {
         double interval=(now-self.last)/self.clockRatio;self.last=now;
         if (interval>self.maximum) self.maximum=interval;
@@ -128,7 +161,7 @@ static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_stat
         } else ++self.missed;
     }
     if (self.began) self.callbacks++;
-    if (self.began && (now-self.began)/self.clockRatio>=10) [self finish:NO];
+    if (self.began && (now-self.began)/self.clockRatio>=RF_DISPLAY_PROBE_MEASURE_SECONDS) [self finish:NO];
 }
 - (void)finish:(BOOL)timedOut
 {
@@ -143,12 +176,15 @@ static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_stat
     uint64_t presents=valid ? final.presents-self.first.presents : 0;
     uint64_t gpu=valid ? final.gpu_presents-self.first.gpu_presents : 0;
     double elapsed=(self.last-self.began)/self.clockRatio;
-    probe_log(self.nonce,"result passive=%u animation=%s stats-valid=%u timed-out=%u panel-hz=%u seconds=%.6f completed-presents=%llu gpu-presents=%llu observed-present-fps=%.3f callbacks=%u callback-fps=%.3f under12=%u under18=%u under35=%u max-interval-ms=%.3f sample-count=%u sample-missed=%u minimum-present-fps=%.3f maximum-present-fps=%.3f hardware-counter-hz=%llu mach-to-physical-ratio=%.9f native-checks-completed=%u",
+    BOOL idle_restored=probe_idle_release();
+    const char *reason=timedOut?(self.finishReason?self.finishReason:"unspecified-abort"):
+        valid?"complete":"final-counters";
+    probe_log(self.nonce,"result passive=%u animation=%s stats-valid=%u timed-out=%u panel-hz=%u seconds=%.6f completed-presents=%llu gpu-presents=%llu observed-present-fps=%.3f callbacks=%u callback-fps=%.3f under12=%u under18=%u under35=%u max-interval-ms=%.3f sample-count=%u sample-missed=%u minimum-present-fps=%.3f maximum-present-fps=%.3f hardware-counter-hz=%llu mach-to-physical-ratio=%.9f native-checks-completed=%u finish-reason=%s idle-restored=%u",
         self.mode==RF_DISPLAY_PROBE_PASSIVE,self.mode==RF_DISPLAY_PROBE_ANIMATE?"system-window-subpixel":"none",
         valid,timedOut,valid ? final.panel_hz : 0,seconds,(unsigned long long)presents,(unsigned long long)gpu,
         seconds>0 ? presents/seconds : 0,self.callbacks,elapsed>0 ? (self.callbacks-1)/elapsed : 0,
         self.under12,self.under18,self.under35,self.maximum*1000,self.samples,self.missed,self.minimumFPS,self.maximumFPS,
-        (unsigned long long)(valid?final.counter_hz:0),self.clockRatio,self.checksCompleted);
+        (unsigned long long)(valid?final.counter_hz:0),self.clockRatio,self.checksCompleted,reason,idle_restored);
     if (self.framebuffer) IOServiceClose(self.framebuffer);
     self.framebuffer=0;self.window=nil;
     active_probe=nil;
@@ -182,6 +218,7 @@ static unsigned probe_checks(uint64_t nonce)
 }
 static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,unsigned waits)
 {
+    if(probe_ended)return;
     BOOL checks_completed=NO;unsigned mode=requested;
     if(requested==RF_DISPLAY_PROBE_CHECKED) {
         unsigned state=probe_checks(nonce);
@@ -192,15 +229,15 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
             });
             return;
         }
-        if(state!=1){probe_log(nonce,"refused current-native-checks state=%u remaining=%u",state,waits);return;}
+        if(state!=1){probe_log(nonce,"refused current-native-checks state=%u remaining=%u",state,waits);(void)probe_idle_release();return;}
         checks_completed=YES;mode=RF_DISPLAY_PROBE_ANIMATE;
         probe_log(nonce,"current-native-checks-complete ordinary-animation-measurement-starts=1");
     }
         UIWindow *parent=native_host;
-        if (!parent || parent.screen!=UIScreen.mainScreen) return;
+        if (!parent || parent.screen!=UIScreen.mainScreen) {(void)probe_idle_release();probe_log(nonce,"refused no native main-screen host");return;}
         if(mode==RF_DISPLAY_PROBE_ANIMATE) {
             parent=animation_host(parent);
-            if(!parent){probe_log(nonce,"refused no existing visible fullscreen animation host");return;}
+            if(!parent){probe_log(nonce,"refused no existing visible fullscreen animation host");(void)probe_idle_release();return;}
         }
         io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("AppleCLCD"));
         io_connect_t client=0;
@@ -212,32 +249,34 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
                 opened,last_sample_status,last_sample_bytes,last_sample_value.version,last_sample_value.panel_hz,
                 (unsigned long long)last_sample_value.counter_hz);
             if (client) IOServiceClose(client);
-            return;
+            (void)probe_idle_release();return;
         }
         RedfinDisplayProbe *probe=[RedfinDisplayProbe new];
         probe.framebuffer=client;probe.nonce=nonce;probe.first=start;
         mach_timebase_info_data_t scale={0};mach_timebase_info(&scale);
         double ratio=scale.denom?(double)start.counter_hz*scale.numer/scale.denom/1e9:0;
         if(!isfinite(ratio)||ratio<0.25||ratio>4) {
-            probe_log(nonce,"refused invalid physical/mach counter ratio");IOServiceClose(client);return;
+            probe_log(nonce,"refused invalid physical/mach counter ratio");IOServiceClose(client);(void)probe_idle_release();return;
         }
         probe.clockRatio=ratio;
         probe.window=parent;probe.mode=mode;probe.checksCompleted=checks_completed;active_probe=probe;
         if(mode==RF_DISPLAY_PROBE_ANIMATE) {
             CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"sublayerTransform.translation.x"];
             animation.fromValue=@0;animation.toValue=@2;animation.duration=0.25*ratio;
-            animation.autoreverses=YES;animation.additive=YES;animation.repeatDuration=15*ratio;
+            animation.autoreverses=YES;animation.additive=YES;animation.repeatDuration=RF_DISPLAY_PROBE_ANIMATION_SECONDS*ratio;
             animation.removedOnCompletion=YES;
             probe.animatedLayer=parent.layer;[parent.layer addAnimation:animation forKey:animation_key];
         }
         CADisplayLink *link=[CADisplayLink displayLinkWithTarget:probe selector:@selector(tick:)];
         link.preferredFrameRateRange=CAFrameRateRangeMake(start.panel_hz,start.panel_hz,start.panel_hz);
         probe.link=link;[link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
-        probe_log(nonce,"start passive=%u animation=%s seconds=10 panel-hz=%u begin-presents=%llu begin-gpu=%llu",
+        probe_log(nonce,"start passive=%u animation=%s seconds=%u panel-hz=%u begin-presents=%llu begin-gpu=%llu",
             mode==RF_DISPLAY_PROBE_PASSIVE,mode==RF_DISPLAY_PROBE_ANIMATE?"system-window-subpixel":"none",
-            start.panel_hz,(unsigned long long)start.presents,(unsigned long long)start.gpu_presents);
+            RF_DISPLAY_PROBE_MEASURE_SECONDS,start.panel_hz,(unsigned long long)start.presents,(unsigned long long)start.gpu_presents);
         __weak RedfinDisplayProbe *weak=probe;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(25*ratio*NSEC_PER_SEC)),dispatch_get_main_queue(),^{[weak finish:YES];});
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(RF_DISPLAY_PROBE_DEADLINE_SECONDS*ratio*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+            RedfinDisplayProbe *held=weak;if(held&&!held.finished){held.finishReason="wall-clock-deadline";[held finish:YES];}
+        });
 }
 
 void redfin_display_probe_schedule(UIWindow *host,uint64_t nonce)
@@ -247,6 +286,7 @@ void redfin_display_probe_schedule(UIWindow *host,uint64_t nonce)
         strcmp(NSProcessInfo.processInfo.processName.UTF8String,"SpringBoard")) return;
     scheduled=YES;
     unsigned mode=request_mode(nonce);if(mode==RF_DISPLAY_PROBE_NONE)return;
+    probe_idle_begin(nonce);
     UIWindow *native_host=host;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,40*NSEC_PER_SEC),dispatch_get_main_queue(),^{
         probe_begin(native_host,nonce,mode,60);

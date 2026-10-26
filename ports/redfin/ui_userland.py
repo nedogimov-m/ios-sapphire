@@ -16,6 +16,8 @@ REFRESH_LOG='/private/var/mobile/Library/Logs/redfin-refresh.log'
 LOG='/private/var/mobile/Library/Logs/redfin-ui.log'
 UIKIT='/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore'
 METHODS={
+    'UIApplication': {'-isIdleTimerDisabled':'B16@0:8',
+        '-setIdleTimerDisabled:':'v20@0:8B16'},
     '_UIStatusBar': {'-layoutSubviews':'v16@0:8',
         '-setAvoidanceFrame:':'v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16',
         '-avoidanceFrame':'{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8',

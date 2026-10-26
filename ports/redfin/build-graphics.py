@@ -19,6 +19,7 @@ import time
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from ports.redfin.eagl_userland import prepare as prepare_eagl
 from ports.redfin.graphics_abi import Cache,DEFAULT_CACHE,audit_bundle
+from ports.redfin.graphics_build_cache import compiler_cache,startup_policy
 
 ROOT=Path(__file__).resolve().parents[2]
 VERSION='25.0.7'
@@ -42,7 +43,17 @@ def main():
     p.add_argument('--metal',action='store_true',help='also build the paired native Metal/AIR driver in this private work tree')
     p.add_argument('--startup-checks',choices=('on','off'),default='on',
                    help='automatic offscreen graphics correctness probes; ordinary GUI performance uses off')
-    a=p.parse_args();work=a.work_dir.resolve();work.mkdir(parents=True,exist_ok=True)
+    p.add_argument('--policy-only',action='store_true',
+                   help='reuse exact verified native artifacts and change only startup-check policy; no build or setup')
+    p.add_argument('--reuse-compiler-cache',type=Path,
+                   help='retain a verified prior shader-cache identity only when compiler and shader/serialization inputs match')
+    a=p.parse_args();work=a.work_dir.resolve()
+    if a.policy_only:
+        result=startup_policy(work,a.startup_checks=='on')
+        print(json.dumps(dict(success=True,startup_checks_enabled=result['startup_checks_enabled'],
+                              native_recompiled=False,input_sha256=result['input_sha256'])))
+        return 0
+    work.mkdir(parents=True,exist_ok=True)
     upstream=a.upstream.resolve()
     actual=subprocess.check_output(['git','-C',upstream,'rev-parse','HEAD'],text=True).strip()
     if actual!=PIN:raise ValueError('preferred graphics source must match reviewed pin '+PIN)
@@ -111,6 +122,8 @@ def main():
                            ROOT/'ports/redfin/mesa-scoped-submit.inc']
                 inputs += [ROOT/'ports/redfin'/name for name in
                            ('mesa-submit-merge.patch','mesa-submit-merge.h','mesa-submit-merge.inc')]
+                inputs += [ROOT/'ports/redfin'/name for name in
+                           ('mesa-resource-access.patch','mesa-access-submit.inc','include/redfin_gpu_access.h')]
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -119,6 +132,7 @@ def main():
                 flags={k:env.get(k,'') for k in ('CFLAGS','CPPFLAGS','CXXFLAGS','LDFLAGS')}),
                 sort_keys=True,separators=(',',':')).encode()
             fingerprint=hashlib.sha256(compiler_identity+b''.join(x.read_bytes() for x in inputs)).hexdigest()
+            cache_proof=compiler_cache(ROOT,inputs,json.loads(compiler_identity),fingerprint,a.reuse_compiler_cache)
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
             if source.exists() and (not stamp.exists() or stamp.read_text().strip()!=fingerprint):
@@ -134,7 +148,7 @@ def main():
                     shutil.copy2(ROOT/'ports/redfin'/('mesa-disk-cache.'+suffix),
                                  source/'src/util'/('redfin_mesa_disk_cache.'+suffix))
                 (source/'src/util/redfin_mesa_cache_build.h').write_text(
-                    '#define REDFIN_MESA_CACHE_BUILD_ID "redfin-ios16-arm64-'+fingerprint+'"\n')
+                    '#define REDFIN_MESA_CACHE_BUILD_ID '+json.dumps(cache_proof['cache_id'])+'\n')
                 run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-disk-cache.patch'],source)
                 run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/graphics-io-profile.patch'],source)
                 if a.metal:
@@ -202,7 +216,16 @@ def main():
                         shutil.copy2(ROOT/'ports/redfin'/('mesa-submit-merge.'+suffix),
                                      source/'src/freedreno/drm'/('redfin_mesa_submit_merge.'+suffix))
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-submit-merge.patch'],source)
+                    for directory in ('src/freedreno/drm','src/redwood-drm'):
+                        shutil.copy2(ROOT/'ports/redfin/include/redfin_gpu_access.h',
+                                     source/directory/'redfin_gpu_access.h')
+                    shutil.copy2(ROOT/'ports/redfin/mesa-access-submit.inc',
+                                 source/'src/freedreno/drm/msm/redfin_mesa_access_submit.inc')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/mesa-resource-access.patch'],source)
                 stamp.write_text(fingerprint+'\n')
+            if (source/'src/util/redfin_mesa_cache_build.h').read_text()!=\
+                    '#define REDFIN_MESA_CACHE_BUILD_ID '+json.dumps(cache_proof['cache_id'])+'\n':
+                raise ValueError('native shader-cache identity changed; reuse its prior compiler proof or use a fresh work directory')
             cross=work/'ios.ini'
             c=[clang,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
             cxx=[clangxx,'-target','arm64-apple-ios16.0','-isysroot',str(sdk)]
@@ -401,11 +424,13 @@ def main():
             result['actual_abi_compatible']=True
             result.update(success=True,sdk=str(sdk),input_sha256=fingerprint,bundle=str(bundle),
                 startup_checks_enabled=a.startup_checks=='on',
+                compiler_cache=cache_proof,
                 gui_profile_sha256=hashlib.sha256((ROOT/'ports/redfin/gui-profile.h').read_bytes()).hexdigest(),
                 gui_sources_sha256={name:hashlib.sha256((ROOT/'ports/redfin'/name).read_bytes()).hexdigest()
                     for name in ('graphics-loader.c','graphics-memory-report.h','eagl-guard.c','eagl_userland.py')},
                 artifacts={str(x.relative_to(bundle)):hashlib.sha256(x.read_bytes()).hexdigest()
                            for x in sorted(bundle.rglob('*')) if x.is_file()})
+            (work/'compiler-inputs.json').write_text(json.dumps(cache_proof,indent=2)+'\n')
         except (subprocess.CalledProcessError,ValueError,OSError) as e:
             result['error']=str(e);log.write('\nFAILED '+str(e)+'\n')
     (work/'result.json').write_text(json.dumps(result,indent=2)+'\n')

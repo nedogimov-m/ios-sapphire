@@ -14,7 +14,7 @@ static IOReturn gpuQueueWaitTargetLocked(uint64_t target,const msm_timespec *tim
         if(waited==THREAD_TIMED_OUT){result=kIOReturnTimeout;break;}
         if(waited!=THREAD_AWAKENED){result=kIOReturnAborted;break;}
     }
-    if(result==kIOReturnSuccess&&gGPUQueue.first_failed&&gGPUQueue.first_failed<=target)result=kIOReturnIOError;
+    if(result==kIOReturnSuccess&&(gGPUQueue.first_failed||!redfin_gpu_ready()))result=kIOReturnIOError;
     return result;
 }
 /* A prepared descriptor remains pinned by its retained IOSurface. Its physical
@@ -22,7 +22,7 @@ static IOReturn gpuQueueWaitTargetLocked(uint64_t target,const msm_timespec *tim
  * Foreign/physical-panel descriptors retain the previous full barrier. */
 static uint64_t gpuQueueMemoryTargetLocked(IOMemoryDescriptor *memory)
 {
-    if(!memory||!gGPUQueue.page_use)return gGPUQueue.issued;
+    if(!memory||!rf_ga_valid(&gGPUQueue.access))return gGPUQueue.issued;
     uint64_t size=memory->getLength(),target=0;
     if(!size||size>RF_GR_BUFFER_MAX)return gGPUQueue.issued;
     for(uint64_t offset=0;offset<size;offset+=RF_GW_PAGE_BYTES) {
@@ -31,7 +31,7 @@ static uint64_t gpuQueueMemoryTargetLocked(IOMemoryDescriptor *memory)
         uint32_t page=0;
         if(!physical||contiguous<((size-offset)<RF_GW_PAGE_BYTES?size-offset:RF_GW_PAGE_BYTES)||
            rf_gw_index(physical,&page))return gGPUQueue.issued;
-        if(gGPUQueue.page_use[page]>target)target=gGPUQueue.page_use[page];
+        if(gGPUQueue.access.use[page]>target)target=gGPUQueue.access.use[page];
     }
     return target;
 }

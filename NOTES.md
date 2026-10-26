@@ -1,5 +1,63 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete resource-access/cache/observer block implemented;52host cases/native builds PASS — 2026-10-26
+
+Source base25d6516 plus this complete block. Re-review preferred kernel
+8e61187098f2c26c5daee8f9f72b6416aa64b9ab native BO/CpuPrep and userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 paired Mesa25.0.7 resource tracking.
+Mesa initializes every BO's relocation flags as READ|WRITE. Preserve those
+backing/ownership flags; separately pass actual per-batch/per-view resource
+read/write intent before graph early-outs, including planes. Unknown use wins
+across merged batches; a whole backing access includes every subview's writes.
+Negotiate new resource-access ABI1/selector0x52465333/88bytes separately from
+unchanged scoped ABI1, selector0x52465352 and legacy retained-fence ABI1.
+
+The native queue retains copied validated ranges through real completion.
+A bounded hybrid physical history distinguishes reads/writes and64-byte lines;
+whole-page operations stay O(pages). Fine slots are allocated only for partial
+pages, never evicted/reused; exhausted capacity keeps conservative page waits.
+Two coarse arrays, physical slot map and8192fine entries use<20MiB. Aliases share
+history; full-page baselines preserve prior hazards. CPU reads wait for real GPU
+writers; CPU writes wait for any conflicting use. Internal output reads its
+retained sources. Scope native IOSurface cache maintenance to those same rounded
+64-byte ranges, invalidating actual writes; preserve full backing/SMMU bounds,
+legacy unknown accesses, actual fence retirement and all unknown-DMA holds.
+Any prior native failure prevents successful scoped CPU access. Bounded native
+counters report actual CPU waits/fine queries/fallbacks.
+
+Add a verified native --policy-only path: only diagnostic jobs/manifests change,
+all native hashes/ABI evidence and compiler identity remain. Add
+--reuse-compiler-cache after explicit proof of identical compiler, ordered
+shader/serialization inputs and prior native bytes/cache marker. Only reviewed
+transport inputs are excluded; unknown/new semantic inputs or reordered compiler
+patches reject reuse. Full plugin/compiler pairing still uses ALL source inputs.
+The old V51 complete ordered fingerprint496301fc681ceacc1d1f230aa7f516999caf801f1d4109fd983ac5aa3cae411c
+was re-proved before adopting its cache provenance; no guess-based cache reuse.
+
+The exact-request observer now borrows only its public native UIApplication
+idle request for<=150seconds, restores it on completion/refusal/deadline, logs
+explicit abort reasons, warms for8seconds and measures10seconds with a45second
+watchdog/finite40second animation. Actual20H392 idle getter/setter ABI verified;
+no lock/passcode policy changes or automatic Phone/Photos opens are added.
+
+52combined host cases PASS: actual queue/admission/retirement/generation/unknown
+completion/real2s late callback, physical read/read/write/64-byte/alias/fallback/
+overflow cases, exact cache-maintenance spans, actual Mesa view/whole/unknown
+merge cases, compiler-cache refusal/tamper/order and exact-artifact policy flips,
+plus existing runtime/dependency/display-request contracts. Full native paired
+graphics local20261026-064456 and UIaccess-v1 actual20H392 ABI/signatures PASS.
+Native input741e17a268907fe4a1263bd0c4397e07429487a708771782a8449fc0d1a84db2,
+full pairing5f5aa2615ca9ab5b16016595b5a3ad8f39413e6d87f3d51c23b875afda6b7358;
+shader cache ID remains the verified prior496301fc.., without changing shader
+semantics or skipping full native pairing. Final actual queue cases also PASS
+after separating their retirement event from the idle worker event. Native
+surface barrier counters separate physical-page resolution from real waiting.
+Matching new complete kernel CI is next.
+No phone commands, root write or boot since V51; last observed clean1288851 and
+Fastboot. Previous exact observed boot args remain in the V51 entry. Next fresh
+V58/imageV52 only after complete matching artifacts; no miniature device tests.
+Actual new A620 correctness/performance and all broader goal items remain pending.
+
 ## REDFIN V51 valid warm merged system result:20 GPU FPS — 2026-10-26
 
 Source14f47ac/merge implementation798c7f0. Kernel unchanged GitHub Actions

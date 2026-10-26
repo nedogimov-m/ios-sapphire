@@ -1,0 +1,440 @@
+--- a/iokit/Kernel/arm/RedfinGPU.cpp
++++ b/iokit/Kernel/arm/RedfinGPU.cpp
+@@ -32,6 +32,7 @@
+ #include "RedfinGPURuntime.h"
+ #include "RedfinGPUQueue.h"
+ #include "RedfinGPUWaits.h"
++#include "RedfinGPUAccess.h"
+ struct gpu_queued_job;
+ 
+ enum {
+@@ -147,6 +148,7 @@
+     setProperty("chip-id",0x06020001,32);setProperty("RedfinRuntimeABI",1,32);
+     setProperty("RedfinQueuedSubmissionABI",RF_GQ_ABI,32);
+     setProperty("RedfinScopedWaitABI",RF_GW_ABI,32);
++    setProperty("RedfinResourceAccessABI",RF_GA_ABI,32);
+     if (unsigned mode=redfin_metal_mode()) setProperty("RedfinMetalPolicy",mode,32);
+     registerService();return true;
+ }
+@@ -223,7 +225,7 @@
+     IOReturn create(msm_gem_new *request);
+     IOReturn importSurface(redwood_surface *request);
+     IOReturn info(msm_gem_info *request);
+-    IOReturn submit(msm_submit *request,const rf_gw_submit_extension *scope=NULL);
++    IOReturn submit(msm_submit *request,const rf_gw_submit_extension *scope=NULL,bool typed=false);
+     IOReturn drop(uint32_t handle);
+     IOReturn mapDescriptor(IOMemoryDescriptor *,uint8_t *,SweetSurface *,uint64_t,uint32_t,uint32_t *);
+ public:
+@@ -402,6 +404,7 @@
+     case 0x10:*value=14;return true;
+     case RF_GQ_PARAM:*value=RF_GQ_ABI;return true;
+     case RF_GW_PARAM:*value=RF_GW_ABI;return true;
++    case RF_GA_PARAM:*value=RF_GA_ABI;return true;
+     /* A620 uses native UBWC3. Do not advertise A642L UBWC4 parameters. */
+     default:return false;
+     }
+@@ -426,7 +429,7 @@
+     case RF_GW_CPU_RANGE:expected=sizeof(rf_gw_cpu_range);break;
+     case CpuFini:expected=4;break;
+     case Submit:expected=sizeof(msm_submit);break;
+-    case RF_GW_SUBMIT:expected=sizeof(msm_scoped_submit);break;
++    case RF_GW_SUBMIT:case RF_GA_SUBMIT:expected=sizeof(msm_scoped_submit);break;
+     case WaitFence:expected=sizeof(msm_wait);break;
+     case Madvise:expected=sizeof(msm_madvise);break;
+     case QueueNew:expected=sizeof(msm_queue);break;
+@@ -442,7 +445,7 @@
+     bzero(&r,sizeof(r));memcpy(&r,args->structureInput,expected);
+     IOReturn result=kIOReturnSuccess;
+     if(selector==Submit)result=submit(&r.submit);
+-    else if(selector==RF_GW_SUBMIT)result=submit(&r.scoped.submit,&r.scoped.scope);
++    else if(selector==RF_GW_SUBMIT||selector==RF_GA_SUBMIT)result=submit(&r.scoped.submit,&r.scoped.scope,selector==RF_GA_SUBMIT);
+     else if(selector==WaitFence)result=waitQueued(&r.wait);
+     else if(selector==CpuPrep)result=prepareQueued(&r.prep);
+     else if(selector==RF_GW_CPU_RANGE)result=prepareRange(&r.range);
+--- a/iokit/Kernel/arm/RedfinGPUQueue.inc
++++ b/iokit/Kernel/arm/RedfinGPUQueue.inc
+@@ -5,7 +5,7 @@
+  * client -> queue (short admission), client -> hardware (map/release only).
+  * The worker never acquires a client/queue lock while holding hardware.
+  */
+-struct gpu_queued_bo {gpu_buffer *buffer;uint32_t handle,flags;};
++struct gpu_queued_bo {gpu_buffer *buffer;uint32_t handle,flags,access;};
+ struct gpu_queued_job {
+     gpu_queued_job *next;
+     RedwoodGPUUserClient *owner;
+@@ -14,6 +14,7 @@
+     void *kernel_argument;
+     const uint32_t *scope_pages;uint32_t scope_count;
+     gpu_queued_bo *bos;
++    rf_gw_submit_range *ranges;uint32_t nr_ranges;bool typed;
+     uint64_t addresses[RF_GR_COMMANDS],sequence,charge,accepted;
+     uint32_t words[RF_GR_COMMANDS],count,nr_bos,fence,physical_fence;
+     char process[20];int pid;
+@@ -22,7 +23,9 @@
+     IOLock *lock;
+     gpu_queued_job *head,*tail;
+     rf_gq_budget budget;
+-    uint64_t *page_use;
++    rf_ga_history access;
++    uint64_t cpu_calls,cpu_waits,cpu_read_calls,cpu_wait_ns;
++    uint64_t surface_calls,surface_waits,surface_query_ns,surface_wait_ns;
+     uint64_t issued,retired,first_failed,executed;
+     bool stopping;
+ } gGPUQueue;
+@@ -81,9 +84,16 @@
+         if(job->sequence!=gGPUQueue.retired+1)redfin_gpu_poison("global queued retirement order changed");
+         gGPUQueue.retired=job->sequence;++gGPUQueue.executed;
+         if(result!=kIOReturnSuccess&&!gGPUQueue.first_failed)gGPUQueue.first_failed=job->sequence;
+-        IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);IOLockUnlock(gGPUQueue.lock);
++        IOLockWakeup(gGPUQueue.lock,&gGPUQueue.retired,false);
++        if(!(job->sequence%256))IOLog("REDFIN GPU ACCESS: jobs=%llu CPU-calls=%llu CPU-waits=%llu CPU-read=%llu CPU-wait-us=%llu fine-pages=%u partial-marks=%llu fine-queries=%llu coarse-fallbacks=%llu line-bytes=%u surface-calls=%llu surface-waits=%llu surface-query-us=%llu surface-wait-us=%llu\n",
++            job->sequence,gGPUQueue.cpu_calls,gGPUQueue.cpu_waits,gGPUQueue.cpu_read_calls,
++            gGPUQueue.cpu_wait_ns/1000,gGPUQueue.access.allocated,gGPUQueue.access.partial_marks,
++            gGPUQueue.access.fine_queries,gGPUQueue.access.fallbacks,RF_GA_LINE_BYTES,
++            gGPUQueue.surface_calls,gGPUQueue.surface_waits,gGPUQueue.surface_query_ns/1000,gGPUQueue.surface_wait_ns/1000);
++        IOLockUnlock(gGPUQueue.lock);
+         if(job->kernel_complete)job->kernel_complete(job->kernel_argument,result);
+         RedwoodGPUUserClient *owner=job->owner;uint64_t charge=job->charge;
++        if(job->ranges)IODelete(job->ranges,rf_gw_submit_range,job->nr_ranges);
+         if(job->bos)IODelete(job->bos,gpu_queued_bo,job->nr_bos);IODelete(job,gpu_queued_job,1);
+         gpuQueueUnreserve(charge);if(owner)owner->release();
+     }
+@@ -94,7 +104,12 @@
+ static bool redfinGpuQueueStart(void)
+ {
+     gGPUQueue.lock=IOLockAlloc();if(!gGPUQueue.lock)return false;
+-    gGPUQueue.page_use=IONewZero(uint64_t,RF_GW_PAGES);if(!gGPUQueue.page_use)return false;
++    rf_ga_history *history=&gGPUQueue.access;
++    history->use=IONewZero(uint64_t,RF_GW_PAGES);
++    history->write=IONewZero(uint64_t,RF_GW_PAGES);
++    history->fine_index=IONewZero(uint32_t,RF_GW_PAGES);
++    history->fine=IONewZero(rf_ga_fine,RF_GA_FINE_PAGES);history->capacity=RF_GA_FINE_PAGES;
++    if(!rf_ga_valid(history))return false;
+     thread_t worker=THREAD_NULL;
+     kern_return_t result=kernel_thread_start(redfinGpuQueueWorker,NULL,&worker);
+     if(result!=KERN_SUCCESS){gGPUQueue.stopping=true;return false;}
+@@ -107,12 +122,12 @@
+     IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);IOLockWakeup(gGPUQueue.lock,&gGPUQueue.budget,false);
+     IOLockUnlock(gGPUQueue.lock);
+ }
+-IOReturn RedwoodGPUUserClient::submit(msm_submit *r,const rf_gw_submit_extension *scope)
++IOReturn RedwoodGPUUserClient::submit(msm_submit *r,const rf_gw_submit_extension *scope,bool typed)
+ {
+     if(!r->nr_cmds||r->nr_cmds>RF_GR_COMMANDS||!r->nr_bos||r->nr_bos>RF_GR_OBJECTS||
+        (r->flags&~0x80000010u)||(r->flags&0xffu)!=0x10u||r->nr_in||r->nr_out||r->in_syncobjs||r->out_syncobjs||r->pad)
+         return kIOReturnBadArgument;
+-    if(scope&&(!scope->ranges||!scope->count||scope->count>RF_GW_MAX_RANGES||scope->reserved))return kIOReturnBadArgument;
++    if((typed&&!scope)||(scope&&(!scope->ranges||!scope->count||scope->count>RF_GW_MAX_RANGES||scope->reserved)))return kIOReturnBadArgument;
+     uint32_t nr_ranges=scope?scope->count:0;
+     uint64_t charge=sizeof(gpu_queued_job)+(uint64_t)r->nr_bos*sizeof(gpu_queued_bo)+
+         (uint64_t)r->nr_cmds*sizeof(msm_cmd)+(uint64_t)nr_ranges*sizeof(rf_gw_submit_range);
+@@ -135,15 +150,18 @@
+         gpu_buffer *b=buffer(bos[i].handle);
+         if(!b||!b->pages||b->page_count!=b->size/RF_GW_PAGE_BYTES||
+            !rf_gr_submit_bo(bos[i].flags,bos[i].presumed,b?b->address:0)||b->pending==UINT32_MAX){result=kIOReturnBadArgument;goto unlock;}
+-        job->bos[i]={b,bos[i].handle,bos[i].flags};
++        job->bos[i]={b,bos[i].handle,bos[i].flags,nr_ranges?0:rf_ga_access(bos[i].flags,0,false)};
+     }
+     for(unsigned i=0;i<nr_ranges;++i) {
+         const rf_gw_submit_range *range=&ranges[i];
+         gpu_buffer *b=range->bo<r->nr_bos?job->bos[range->bo].buffer:NULL;
+-        if(!b||range->reserved||!range->bytes||range->offset>b->size||range->bytes>b->size-range->offset) {
++        if(!b||(!typed&&range->reserved)||(typed&&((range->reserved&~RF_GA_RW)||
++           (range->reserved&~(job->bos[range->bo].flags&RF_GA_RW))))||
++           !range->bytes||range->offset>b->size||range->bytes>b->size-range->offset) {
+             result=kIOReturnBadArgument;goto unlock;
+         }
+         covered[range->bo]=true;
++        job->bos[range->bo].access|=rf_ga_access(job->bos[range->bo].flags,range->reserved,typed);
+     }
+     if(nr_ranges)for(unsigned i=0;i<r->nr_bos;++i)
+         if(!covered[i]){result=kIOReturnBadArgument;goto unlock;}
+@@ -172,19 +190,21 @@
+     else result=gpuError(rf_gq_accept(&queue,&job->fence));
+     if(result==kIOReturnSuccess) {
+         job->owner=this;retain();job->nr_bos=r->nr_bos;job->charge=charge;job->accepted=gpuNow();
++        job->nr_ranges=nr_ranges;job->typed=typed;
+         job->sequence=++gGPUQueue.issued;proc_selfname(job->process,sizeof(job->process));job->pid=proc_selfpid();
+         for(unsigned i=0;i<r->nr_bos;++i){
+             gpu_buffer *b=job->bos[i].buffer;++b->pending;b->fence=job->fence;
+-            if(!nr_ranges&&rf_gw_mark(gGPUQueue.page_use,b->pages,b->page_count,job->sequence))
++            if(!nr_ranges&&rf_ga_mark_pages(&gGPUQueue.access,b->pages,b->page_count,job->sequence,job->bos[i].access))
+                 redfin_gpu_poison("physical GPU dependency metadata changed");
+         }
+         for(unsigned i=0;i<nr_ranges;++i) {
+             const rf_gw_submit_range *range=&ranges[i];gpu_buffer *b=job->bos[range->bo].buffer;
+-            if(rf_gw_mark_span(gGPUQueue.page_use,b->pages,b->page_count,range->offset,range->bytes,b->size,job->sequence))
++            unsigned access=rf_ga_access(job->bos[range->bo].flags,range->reserved,typed);
++            if(rf_ga_mark_span(&gGPUQueue.access,b->pages,b->page_count,range->offset,range->bytes,b->size,job->sequence,access))
+                 redfin_gpu_poison("scoped GPU dependency metadata changed");
+         }
+         if(gGPUQueue.tail)gGPUQueue.tail->next=job;else gGPUQueue.head=job;gGPUQueue.tail=job;
+-        r->fence=job->fence;job=NULL;IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);
++        r->fence=job->fence;job->ranges=ranges;ranges=NULL;job=NULL;IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);
+     }
+     IOLockUnlock(gGPUQueue.lock);
+ unlock:
+@@ -213,6 +233,29 @@
+         previous->address,previous->size,end,address-end,previous->surface!=NULL,
+         __atomic_load_n(&previous->clientMapped,__ATOMIC_ACQUIRE));
+ }
++/* Scope cache maintenance to the same validated physical cache-line spans
++ * as CPU retirement. The original retained backing and SMMU map stay whole. */
++static bool gpuQueuedSurfaceCache(gpu_queued_job *job,unsigned index,bool invalidate)
++{
++    gpu_buffer *b=job->bos[index].buffer;
++    if(!job->nr_ranges) {
++        if(invalidate){redfin_gpu_invalidate(b->kernel,b->size);gTiming.invalidated+=b->size;}
++        else {redfin_gpu_sync(b->kernel,b->size,true);gTiming.cleaned+=b->size;}
++        return true;
++    }
++    for(unsigned n=0;n<job->nr_ranges;++n) {
++        const rf_gw_submit_range *range=&job->ranges[n];if(range->bo!=index)continue;
++        unsigned access=rf_ga_access(job->bos[index].flags,range->reserved,job->typed);
++        if(invalidate&&!(access&RF_GA_WRITE))continue;
++        uint64_t first=range->offset&~UINT64_C(63);
++        uint64_t end=(range->offset+range->bytes+63)&~UINT64_C(63);
++        if(end>b->size||first>=end){redfin_gpu_poison("retained cache scope changed");return false;}
++        void *address=(uint8_t *)b->kernel+first;uint64_t bytes=end-first;
++        if(invalidate){redfin_gpu_invalidate(address,bytes);gTiming.invalidated+=bytes;}
++        else {redfin_gpu_sync(address,bytes,true);gTiming.cleaned+=bytes;}
++    }
++    return true;
++}
+ IOReturn RedwoodGPUUserClient::executeQueued(gpu_queued_job *job)
+ {
+     uint64_t began=gpuNow(),again=4ULL*NSEC_PER_MSEC;
+@@ -220,7 +263,7 @@
+         gpu_buffer *b=job->bos[i].buffer;if(!b->surface)continue;
+         uint32_t seed=__atomic_load_n((uint32_t *)((uint8_t *)b->surface->state->getBytesNoCopy()+12),__ATOMIC_ACQUIRE);
+         if(rf_gr_surface_push(&b->cache,seed,began,again,__atomic_load_n(&b->clientMapped,__ATOMIC_ACQUIRE))) {
+-            redfin_gpu_sync(b->kernel,b->size,true);gTiming.cleaned+=b->size;
++            if(!gpuQueuedSurfaceCache(job,i,false))return kIOReturnIOError;
+         } else ++gTiming.skipped;
+     }
+     redfin_gpu_sync(NULL,0,false);gTiming.cleaning+=gpuNow()-began;began=gpuNow();
+@@ -229,7 +272,7 @@
+     gTiming.submitting+=gpuNow()-began;began=gpuNow();++gTiming.submissions;
+     if(result==kIOReturnSuccess)for(unsigned i=0;i<job->nr_bos;++i) {
+         gpu_buffer *b=job->bos[i].buffer;
+-        if(b->surface&&(job->bos[i].flags&2u)){redfin_gpu_invalidate(b->kernel,b->size);gTiming.invalidated+=b->size;}
++        if(b->surface&&(job->bos[i].access&RF_GA_WRITE)&&!gpuQueuedSurfaceCache(job,i,true))result=kIOReturnIOError;
+     }
+     gTiming.invalidating+=gpuNow()-began;gpuTiming();
+     if(job->fence<=8||!(job->fence%256)||result!=kIOReturnSuccess)
+@@ -272,18 +315,21 @@
+ {
+     if(r->op&~7u)return kIOReturnBadArgument;
+     IOLockLock(clientLock);gpu_buffer *b=buffer(r->handle);
+-    if(!b||closed||queue.closing){IOLockUnlock(clientLock);return kIOReturnBadArgument;}
++    if(!b||closed||queue.closing||queue.failed||!redfin_gpu_ready()){IOLockUnlock(clientLock);return kIOReturnBadArgument;}
+     uint64_t generation=b->generation;
+     msm_timespec timeout={r->seconds,r->nanoseconds};
+     IOLockLock(gGPUQueue.lock);
+     uint64_t target=0;
+-    IOReturn result=gpuError(rf_gw_target(gGPUQueue.page_use,b->pages,b->page_count,
+-        r->offset,whole?b->size:r->bytes,b->size,&target));
++    IOReturn result=gpuError(rf_ga_target(&gGPUQueue.access,b->pages,b->page_count,
++        r->offset,whole?b->size:r->bytes,b->size,r->op,&target));
++    ++gGPUQueue.cpu_calls;if((r->op&RF_GA_RW)==RF_GA_READ)++gGPUQueue.cpu_read_calls;
++    if(gGPUQueue.retired<target)++gGPUQueue.cpu_waits;
++    uint64_t began=gpuNow();
+     IOLockUnlock(clientLock);
+     if(result==kIOReturnSuccess)result=gpuQueueWaitTargetLocked(target,&timeout,(r->op&4u)!=0);
+-    IOLockUnlock(gGPUQueue.lock);
++    gGPUQueue.cpu_wait_ns+=gpuNow()-began;IOLockUnlock(gGPUQueue.lock);
+     IOLockLock(clientLock);b=buffer(r->handle);
+-    if(!b||b->generation!=generation)result=kIOReturnBadArgument;
++    if(!b||b->generation!=generation||queue.failed||!redfin_gpu_ready())result=kIOReturnBadArgument;
+     IOLockUnlock(clientLock);return result;
+ }
+ IOReturn RedwoodGPUUserClient::prepareQueued(msm_cpu_prep *r)
+@@ -295,8 +341,12 @@
+ {
+     if(!gGPUQueue.lock)return (int)kIOReturnSuccess;
+     IOLockLock(gGPUQueue.lock);
++    uint64_t began=gpuNow();
+     uint64_t target=gpuQueueMemoryTargetLocked((IOMemoryDescriptor *)descriptor);
++    uint64_t resolved=gpuNow();++gGPUQueue.surface_calls;
++    gGPUQueue.surface_query_ns+=resolved-began;if(gGPUQueue.retired<target)++gGPUQueue.surface_waits;
+     IOReturn result=gpuQueueWaitTargetLocked(target,NULL,false);
++    gGPUQueue.surface_wait_ns+=gpuNow()-resolved;
+     IOLockUnlock(gGPUQueue.lock);return (int)result;
+ }
+ 
+--- a/iokit/Kernel/arm/RedfinGPUScopedWaits.inc
++++ b/iokit/Kernel/arm/RedfinGPUScopedWaits.inc
+@@ -14,7 +14,7 @@
+         if(waited==THREAD_TIMED_OUT){result=kIOReturnTimeout;break;}
+         if(waited!=THREAD_AWAKENED){result=kIOReturnAborted;break;}
+     }
+-    if(result==kIOReturnSuccess&&gGPUQueue.first_failed&&gGPUQueue.first_failed<=target)result=kIOReturnIOError;
++    if(result==kIOReturnSuccess&&(gGPUQueue.first_failed||!redfin_gpu_ready()))result=kIOReturnIOError;
+     return result;
+ }
+ /* A prepared descriptor remains pinned by its retained IOSurface. Its physical
+@@ -22,7 +22,7 @@
+  * Foreign/physical-panel descriptors retain the previous full barrier. */
+ static uint64_t gpuQueueMemoryTargetLocked(IOMemoryDescriptor *memory)
+ {
+-    if(!memory||!gGPUQueue.page_use)return gGPUQueue.issued;
++    if(!memory||!rf_ga_valid(&gGPUQueue.access))return gGPUQueue.issued;
+     uint64_t size=memory->getLength(),target=0;
+     if(!size||size>RF_GR_BUFFER_MAX)return gGPUQueue.issued;
+     for(uint64_t offset=0;offset<size;offset+=RF_GW_PAGE_BYTES) {
+@@ -31,7 +31,7 @@
+         uint32_t page=0;
+         if(!physical||contiguous<((size-offset)<RF_GW_PAGE_BYTES?size-offset:RF_GW_PAGE_BYTES)||
+            rf_gw_index(physical,&page))return gGPUQueue.issued;
+-        if(gGPUQueue.page_use[page]>target)target=gGPUQueue.page_use[page];
++        if(gGPUQueue.access.use[page]>target)target=gGPUQueue.access.use[page];
+     }
+     return target;
+ }
+--- a/iokit/Kernel/arm/RedfinGPUQueuedPresent.inc
++++ b/iokit/Kernel/arm/RedfinGPUQueuedPresent.inc
+@@ -54,7 +54,7 @@
+     if(gGPUQueue.stopping||!redfin_gpu_ready()||gGPUQueue.issued==UINT64_MAX)result=kIOReturnNotReady;
+     else {
+         job->sequence=++gGPUQueue.issued;job->accepted=gpuNow();
+-        if(job->scope_count&&rf_gw_mark(gGPUQueue.page_use,job->scope_pages,job->scope_count,job->sequence))
++        if(job->scope_count&&rf_ga_mark_pages(&gGPUQueue.access,job->scope_pages,job->scope_count,job->sequence,RF_GA_READ))
+             redfin_gpu_poison("internal presentation dependency metadata changed");
+         if(gGPUQueue.tail)gGPUQueue.tail->next=job;else gGPUQueue.head=job;gGPUQueue.tail=job;
+         IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinGPUAccess.h
+@@ -0,0 +1,133 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_GPU_ACCESS_H
++#define REDFIN_GPU_ACCESS_H
++#include <stdbool.h>
++#ifndef REDFIN_GPU_SCOPE_H
++#include "redfin_gpu_scope.h"
++#endif
++
++/* Keep scoped ABI1 intact. Only this separately negotiated selector gives
++ * the old range.reserved word its READ/WRITE meaning; zero means unknown. */
++#define RF_GA_ABI 1u
++#define RF_GA_PARAM 0x52465133u
++#define RF_GA_SUBMIT 0x52465333u
++#define RF_GA_READ 1u
++#define RF_GA_WRITE 2u
++#define RF_GA_RW (RF_GA_READ|RF_GA_WRITE)
++#define RF_GA_LINE_BYTES 64u
++#define RF_GA_LINES (RF_GW_PAGE_BYTES/RF_GA_LINE_BYTES)
++#define RF_GA_FINE_PAGES 8192u
++
++/* Full-page operations stay O(pages). Only partially accessed pages consume
++ * a fine slot. Exhausting this fixed pool keeps the conservative page wait.
++ * The same physical aliases share both read/write histories and fine slots. */
++struct rf_ga_fine {
++    uint64_t base_use,base_write;
++    uint64_t use[RF_GA_LINES],write[RF_GA_LINES];
++};
++struct rf_ga_history {
++    uint64_t *use,*write;
++    uint32_t *fine_index;
++    struct rf_ga_fine *fine;
++    uint32_t capacity,allocated;
++    uint64_t partial_marks,fine_queries,fallbacks;
++};
++static inline bool rf_ga_valid(const struct rf_ga_history *h)
++{
++    return h&&h->use&&h->write&&h->fine_index&&h->capacity<=RF_GA_FINE_PAGES&&
++        h->allocated<=h->capacity&&(!h->capacity||h->fine);
++}
++static inline int rf_ga_validate(const struct rf_ga_history *h,const uint32_t *pages,
++    uint32_t count,uint64_t offset,uint64_t bytes,uint64_t size,uint32_t *first,uint32_t *needed)
++{
++    if(!rf_ga_valid(h)||!pages||rf_gw_span(offset,bytes,size,first,needed)||
++       *first>count||*needed>count-*first)return EINVAL;
++    for(uint32_t i=*first;i<*first+*needed;++i)
++        if(pages[i]>=RF_GW_PAGES||h->fine_index[pages[i]]>h->allocated)return EINVAL;
++    return 0;
++}
++static inline void rf_ga_max(uint64_t *value,uint64_t sequence)
++{if(*value<sequence)*value=sequence;}
++static inline void rf_ga_mark_page(struct rf_ga_history *h,uint32_t page,
++    unsigned begin,unsigned end,uint64_t sequence,unsigned access)
++{
++    uint32_t slot=h->fine_index[page];
++    bool partial=begin||end!=RF_GW_PAGE_BYTES;
++    if(partial&&!slot&&h->allocated<h->capacity) {
++        slot=++h->allocated;h->fine_index[page]=slot;
++        /* The pre-zeroed slot has never been used. Earlier coarse history
++         * becomes a baseline; never reinterpret it as a narrower access. */
++        h->fine[slot-1].base_use=h->use[page];
++        h->fine[slot-1].base_write=h->write[page];
++    }
++    rf_ga_max(&h->use[page],sequence);
++    if(access&RF_GA_WRITE)rf_ga_max(&h->write[page],sequence);
++    if(!partial) {
++        if(slot) {
++            rf_ga_max(&h->fine[slot-1].base_use,sequence);
++            if(access&RF_GA_WRITE)rf_ga_max(&h->fine[slot-1].base_write,sequence);
++        }
++        return;
++    }
++    ++h->partial_marks;
++    if(!slot){++h->fallbacks;return;}
++    struct rf_ga_fine *fine=&h->fine[slot-1];
++    unsigned first=begin/RF_GA_LINE_BYTES,last=(end-1)/RF_GA_LINE_BYTES;
++    for(unsigned i=first;i<=last;++i) {
++        rf_ga_max(&fine->use[i],sequence);
++        if(access&RF_GA_WRITE)rf_ga_max(&fine->write[i],sequence);
++    }
++}
++static inline int rf_ga_mark_span(struct rf_ga_history *h,const uint32_t *pages,uint32_t count,
++    uint64_t offset,uint64_t bytes,uint64_t size,uint64_t sequence,unsigned access)
++{
++    uint32_t first=0,needed=0;
++    if(!sequence||!access||(access&~RF_GA_RW)||
++       rf_ga_validate(h,pages,count,offset,bytes,size,&first,&needed))return EINVAL;
++    uint64_t end=offset+bytes;
++    for(uint32_t i=first;i<first+needed;++i) {
++        uint64_t base=(uint64_t)i*RF_GW_PAGE_BYTES;
++        unsigned begin=offset>base?(unsigned)(offset-base):0;
++        unsigned limit=end-base<RF_GW_PAGE_BYTES?(unsigned)(end-base):RF_GW_PAGE_BYTES;
++        rf_ga_mark_page(h,pages[i],begin,limit,sequence,access);
++    }
++    return 0;
++}
++static inline int rf_ga_mark_pages(struct rf_ga_history *h,const uint32_t *pages,
++    uint32_t count,uint64_t sequence,unsigned access)
++{
++    if(!rf_ga_valid(h)||!pages||!count||!sequence||!access||(access&~RF_GA_RW))return EINVAL;
++    for(uint32_t i=0;i<count;++i)
++        if(pages[i]>=RF_GW_PAGES||h->fine_index[pages[i]]>h->allocated)return EINVAL;
++    for(uint32_t i=0;i<count;++i)rf_ga_mark_page(h,pages[i],0,RF_GW_PAGE_BYTES,sequence,access);
++    return 0;
++}
++static inline int rf_ga_target(struct rf_ga_history *h,const uint32_t *pages,uint32_t count,
++    uint64_t offset,uint64_t bytes,uint64_t size,unsigned op,uint64_t *target)
++{
++    uint32_t first=0,needed=0;
++    if(!target||(op&~7u)||rf_ga_validate(h,pages,count,offset,bytes,size,&first,&needed))return EINVAL;
++    bool read_only=(op&RF_GA_RW)==RF_GA_READ;
++    uint64_t last=0,end=offset+bytes;
++    for(uint32_t i=first;i<first+needed;++i) {
++        uint32_t page=pages[i],slot=h->fine_index[page];
++        uint64_t base=(uint64_t)i*RF_GW_PAGE_BYTES;
++        unsigned begin=offset>base?(unsigned)(offset-base):0;
++        unsigned limit=end-base<RF_GW_PAGE_BYTES?(unsigned)(end-base):RF_GW_PAGE_BYTES;
++        if(!slot||(!begin&&limit==RF_GW_PAGE_BYTES)) {
++            rf_ga_max(&last,read_only?h->write[page]:h->use[page]);continue;
++        }
++        ++h->fine_queries;
++        const struct rf_ga_fine *fine=&h->fine[slot-1];
++        rf_ga_max(&last,read_only?fine->base_write:fine->base_use);
++        unsigned lo=begin/RF_GA_LINE_BYTES,hi=(limit-1)/RF_GA_LINE_BYTES;
++        for(unsigned n=lo;n<=hi;++n)rf_ga_max(&last,read_only?fine->write[n]:fine->use[n]);
++    }
++    *target=last;return 0;
++}
++static inline unsigned rf_ga_access(unsigned bo_flags,unsigned range_flags,bool typed)
++{
++    unsigned access=typed&&range_flags?range_flags:bo_flags&RF_GA_RW;
++    return access?access:RF_GA_RW;
++}
++#endif

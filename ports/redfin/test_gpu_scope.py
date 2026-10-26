@@ -28,6 +28,7 @@ class PhysicalScopeTests(unittest.TestCase):
         from test_smp_gui import patched_source
         for target,owned in (
             ('RedfinGPUWaits.h','include/redfin_gpu_scope.h'),
+            ('RedfinGPUAccess.h','include/redfin_gpu_access.h'),
             ('RedfinGPUScopedWaits.inc','gpu-scoped-waits.inc'),
             ('RedfinGPUQueuedPresent.inc','gpu-queued-present.inc'),
             ('RedfinGPUQueue.inc','gpu-throughput-queue.inc')):
@@ -92,6 +93,7 @@ int run(void) {
         prefix=queue[:queue.index('static void redfinGpuQueueWorker(')]
         worker=function(queue,'static void redfinGpuQueueWorker(')
         methods=''.join(function(queue,s) for s in (
+            'IOReturn RedwoodGPUUserClient::submit(',
             'void RedwoodGPUUserClient::retireQueued(',
             'IOReturn RedwoodGPUUserClient::prepareRange(',
             'IOReturn RedwoodGPUUserClient::prepareQueued(',
@@ -105,6 +107,8 @@ int run(void) {
             (root/'RedfinGPUScopedWaits.inc').write_bytes((HERE/'gpu-scoped-waits.inc').read_bytes())
             library=compile_host(root,'native',text,True)
             self.assertEqual(library.queue_contract(),0)
+            self.assertEqual(library.read_only_contract(),0)
+            self.assertEqual(library.typed_submit_contract(),0)
 
     def test_actual_mesa_merge_preserves_view_refs_and_explicit_whole_backing_use(self):
         # Execute the same final append functions as the real patched Mesa.

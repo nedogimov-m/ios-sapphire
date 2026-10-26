@@ -54,7 +54,7 @@ static IOReturn gpuQueueSubmitKernel(gpu_queued_job *job)
     if(gGPUQueue.stopping||!redfin_gpu_ready()||gGPUQueue.issued==UINT64_MAX)result=kIOReturnNotReady;
     else {
         job->sequence=++gGPUQueue.issued;job->accepted=gpuNow();
-        if(job->scope_count&&rf_gw_mark(gGPUQueue.page_use,job->scope_pages,job->scope_count,job->sequence))
+        if(job->scope_count&&rf_ga_mark_pages(&gGPUQueue.access,job->scope_pages,job->scope_count,job->sequence,RF_GA_READ))
             redfin_gpu_poison("internal presentation dependency metadata changed");
         if(gGPUQueue.tail)gGPUQueue.tail->next=job;else gGPUQueue.head=job;gGPUQueue.tail=job;
         IOLockWakeup(gGPUQueue.lock,&gGPUQueue.head,false);
