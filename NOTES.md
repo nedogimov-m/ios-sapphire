@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V74 clean/full native PASS, ordinary policy mismatch — 2026-10-26
+
+Code/docs1aebd4d; exact unchanged run12/kernel8ea7b3b6../native1d031356../cache/UI.
+Cycle93004 TERMINAL exit0, authenticated fresha8da32cd3833c72e, one backboardd62,
+no GPU runtime stop/kernel panic, clean unmounted HFSX1515534, verified Fastboot.
+V80 STALE/never reuse; next fresh V81/imageV75 at actual1515534. Exact boot
+args are in the V80/V74 prepared entry below; no captures/automatic app opens.
+
+The intended ordinary policy was not actually installed consistently: both
+standalone diagnostic plists are OFF, but the private updater inherited
+startup_checks=True for both cached launchd jobs. Fresh native checker runs
+and passes full CHECK EXIT0 plus all4physical cases/actual post-doorbell2pending.
+The finite animation363GPU frames/10.011002s is observed, but it is NOT a valid
+startup-diagnostics-OFF measurement. presentation-summary correctly rejects it.
+Do not promote it as ordinary FPS. Cause is the private staging recipe, not
+an observed launchd failure. Correct all cached policy flags and require exact
+cached/standalone job equality before staging. Reuse exact compiled artifacts;
+continue the full related surface-cache block while the corrected baseline runs.
+Broad goal remains active/unfinished; smooth60/90FPS is not established.
+
 ## REDFIN V80 ordinary policy update verified; V74 starts — 2026-10-26
 
 Code/docs6a191c0; unchanged exact Actions40334564897/run12/kernel8ea7b3b6..,
