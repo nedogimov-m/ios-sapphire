@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN fused output kernel CI21/V98 verified; combined V92 starts — 2026-10-27
+
+Full fused output sourceee02c23,102common host/whole native TU compile PASS.
+Actions40410544328/run21 TERMINAL SUCCESS, exact old+native-output-direct.patch
+map/arm64/non-PAC/XNU/KDK/native markers and kernel SHA verified. Actual kernel
+6cb553e619dba1a49d1032464825a37c2881da5bc45253b6cb0bbad74e7e82c7. Same native20H392 Mesa1a4ad42c../app Metal
+pair17d0f01f../compiler cache496301fc../UI, no userland/compiler rebuild.
+Fresh V98 actual clean1670847/empty journal applied ONCE; full live preimages/
+backups/signatures/readonly fsck/ranges and whole-file readback, clean Fastboot
+PASS. Cached/file startup jobs agree ON; GUI GLES/direct/bound2/app Metal system,
+captures/automatic Phone/Photos opens OFF. V98 STALE/never reuse; next fresh
+V99/imageV93 at actual postboot epoch pending collection.
+
+V92 image6673f278328e007421728e642470228d2aaf444704e9cb6be15b702b1a83577d, fresh26cdcec9f572083a: four complete native fused/reference output
+cases and every pixel/input/tail/intermediate-untouched check, actual output
+route counters, whole app Metal/GPU/direct/fetch/budget proof, continued input
+and finite animate-checked. Failure of private pixel admission keeps legacy
+output; do not infer fast output from userspace-alive or a source marker.
+No hardware speedup claim before terminal current-nonce evidence.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x26cdcec9f572083a redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal remains unfinished.
+
 ## REDFIN fused output kernel CI21 builds; fresh V98 readonly preparation complete — 2026-10-27
 
 Committedee02c23cfdb462f8c34d37a45ba8504aa1755616,102common contracts/actual full
