@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN physical FIFO run12 artifact/V77 update verified; combined V71 running — 2026-10-26
+
+Final codedf38a253a6ba67a1a186856fd971fa324ef1ed32. Actions40334564897/run12
+TERMINAL SUCCESS; actual18709392byte native arm64/non-PAC kernel,
+SHA2568ea7b3b65c5a6d5d0440a79ea4a26c4f976086ef603765dd42590e2e42b3feb1.
+Full builder/XNU/KDK/current ordered patch map, retained ABIs and new physical
+FIFO/post-doorbell markers PASS. Run11/40332791296 also compiled successfully
+but is superseded and has never been booted. Preserve native6e6e432c../
+pair24dfc27b../UIpadding-contract-v1/cache496301fc..; no userland recompile.
+
+Fresh V77 snapshot actual clean1478906/empty journal; staged signatures/native
+readonly fsck/full file/preimage proof PASS. Apply ONCE266240bytes,0new/freed
+blocks; all live preimages/backups/transfers/whole files read back; clean root
+and verified Fastboot. V77 STALE/never reuse. Next fresh V78/imageV72; actual
+postboot epoch unknown until collection.
+
+V71 image2b94dd4f06c39eb8729eb25374ce51747887dea0b98c1f7b0dfa592bc54e9ba0,
+130592336decompressed bytes; actual loader/liveFDT/ADT/firmware/private inputs/
+complete old/new CI source/ABI preflight PASS. Fresh427d6f0959b81acb; exact args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x427d6f0959b81acb redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+One combined native cycle RUNNING: full prior Metal/alias/pixel/byte-tail/
+callback/lifetime/error/output contract and actual physical pending/fence
+evidence. animate-checked requires actual current-nonce full CHECK EXIT0.
+Captures and automatic Phone/Photos opens OFF. No other device command until
+terminal collection. Native overlap, new correctness and any FPS gain remain
+unproved before this actual result. Broad platform goal stays active.
+
 ## REDFIN physical FIFO CI/run11 compiling; strengthen post-doorbell evidence — 2026-10-26
 
 Code3961c81d385ab6c7bf376b9ffbdb4a34c1c56ece pushed only to owned redfin-ci.

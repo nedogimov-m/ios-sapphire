@@ -1,5 +1,18 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete physical FIFO native CI/run12 artifact PASS — 2026-10-26
+
+Final sourcedf38a253a6ba67a1a186856fd971fa324ef1ed32, actual Actions40334564897/
+run12 kernel8ea7b3b65c5a6d5d0440a79ea4a26c4f976086ef603765dd42590e2e42b3feb1,
+18709392bytes, terminal success. Complete ordered source/builder/XNU/KDK and
+retained/new native ABIs, actual post-doorbell physical/pipe markers verified.
+103host contracts plus5affected post-counter contracts pass. V71 full loader/
+image/private pairing and fresh V77 file update pass; complete A620 hardware
+proof is running, with no FPS/overlap claim yet. Same native userland/UI/cache.
+Preferred pins stay unchanged. Read-only branch-tip recheck still resolves the
+user-supplied Angelpro sapphire branch to reviewed344a8af2a9d5baf3597933a2e4601499ea0f623b.
+Run11 is superseded and has never been booted.
+
 ## Require actual fence observation after physical publication — 2026-10-26
 
 Strengthen the reviewed async-ring adaptation's evidence: a guarded native
