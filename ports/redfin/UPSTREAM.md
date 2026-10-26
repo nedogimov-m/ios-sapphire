@@ -1,5 +1,21 @@
 # HackiOS upstream review — 2026-10-22
 
+## Preserve validated GPU path; recover the existing-window observer — 2026-10-26
+
+Keep reviewed kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772; updated kernel mainc84b4634277a70beac73921029b1fb6afc2530af
+remains reviewed below. V56's GPU-only presentations continue with no native
+fault, but its ordinary counter cannot validate FPS after a system host window
+disappears. This is a Redfin measurement-adapter issue, not new upstream GPU
+evidence. Retain exact native binaries/cache and all V55 correctness results.
+
+The20H392 adapter now waits for a stable existing fullscreen window, recovers
+bounded replacements, discards old intervals and warms up afresh. Public idle
+state and finite watchdog remain; no extra system window or app launch. Ten
+combined host contracts and the complete native UI build/import/signature audit
+pass. Native ordinary measurement remains pending; do not infer zero GPU FPS
+from the refused V56 observation or substitute its result for a valid interval.
+
 ## Actual A620 bounded-constant integration PASS — 2026-10-26
 
 V55/source1c2a15b passes the six native fixed/dynamic/direct/argument/GPU-writer

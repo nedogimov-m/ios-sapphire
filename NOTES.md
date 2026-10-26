@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V56 clean; recover measurement after system-window replacement — 2026-10-26
+
+Basecebb81a; unchanged GPU fix1c2a15b, native input7548b9b0..,
+pairingce3ff07e.. and compiler cache496301fc.. . Kernel remains GitHub Actions
+40256228186/run5/sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Fresh V62 applied ONCE with full preimages/backups/readonly fsck/signatures/
+readback PASS; it is STALE, never reuse. Actual observed V56 args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xf3f3d3f114002994 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no panic or GPU fault/stop; one backboardd61;
+both correctness jobs OFF with zero current-nonce startup lines, no app opens
+or captures. Actual GPU output continues beyond2160presentations, CPU-pixel-copy0,
+roughly5.8..6ms output. Observer loses the selected system window before its
+baseline: stats-valid0/timed-out1/window-lost/callbacks0. This is an INVALID
+measurement, not zero GUI FPS. Clean consistent unmounted HFSX/write_count1340702
+and verified Fastboot. Private evidence: logs/redfin/gui-platform-v56.
+
+Complete observer recovery block now waits2physical seconds for an existing
+fullscreen host, replaces only its own animation on window loss, discards the
+entire prior interval and restarts warmup. A missing window consumes one
+transition; allow at most3recoveries and sticky window-churn refusal. Existing
+45second watchdog and150second finite idle guard remain; no new windows,
+app launches or unlock/passcode behavior.10combined observer/latency/statistics
+host tests PASS. Full native UI build redfin-ui-stable-window-v1, actual20H392
+ABI/imports, strict signatures, exact current sources and compiled marker PASS.
+No graphics/compiler/kernel rebuild or cache invalidation. UI not yet deployed;
+next fresh updaterV63/imageV57 at actual1340702. Need one ordinary complete
+10second GPU measurement. Phone/Photos checks remain retired; broad goal active.
+
 ## REDFIN V55 actual constant-extent correctness PASS; system copies now ~3KiB — 2026-10-26
 
 Source1c2a15b; unchanged kernel CI40256228186/run5/sourcec0d129b SUCCESS,

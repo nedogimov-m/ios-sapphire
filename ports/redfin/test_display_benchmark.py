@@ -7,6 +7,39 @@ import unittest
 
 
 class DisplayBenchmarkTests(unittest.TestCase):
+    def test_transient_windows_restart_a_fresh_interval_with_bounded_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);here=Path(__file__).resolve().parent
+            source=root/'windows.c'
+            source.write_text('''
+#include <assert.h>
+#include "display-benchmark.h"
+int main(void) {
+ struct redfin_display_window_state s={0};bool reset=false;
+ assert(redfin_display_probe_window(&s,11,0,&reset)==RF_DISPLAY_WINDOW_PENDING&&!reset);
+ assert(redfin_display_probe_window(&s,11,1,&reset)==RF_DISPLAY_WINDOW_PENDING);
+ assert(redfin_display_probe_window(&s,11,2,&reset)==RF_DISPLAY_WINDOW_READY);
+ assert(redfin_display_probe_window(&s,11,2.1,&reset)==RF_DISPLAY_WINDOW_ACTIVE&&!reset);
+ assert(redfin_display_probe_window(&s,0,2.2,&reset)==RF_DISPLAY_WINDOW_PENDING&&reset&&s.restarts==1);
+ for(unsigned i=0;i<100;++i)assert(redfin_display_probe_window(&s,0,2.3+i/100.,&reset)==RF_DISPLAY_WINDOW_PENDING&&!reset&&s.restarts==1);
+ assert(redfin_display_probe_window(&s,22,4,&reset)==RF_DISPLAY_WINDOW_PENDING);
+ assert(redfin_display_probe_window(&s,33,5,&reset)==RF_DISPLAY_WINDOW_PENDING);
+ assert(redfin_display_probe_window(&s,33,6,&reset)==RF_DISPLAY_WINDOW_PENDING);
+ assert(redfin_display_probe_window(&s,33,7,&reset)==RF_DISPLAY_WINDOW_READY&&!reset);
+ for(unsigned restart=2;restart<=RF_DISPLAY_PROBE_WINDOW_RESTARTS;++restart) {
+  double now=restart*10;
+  assert(redfin_display_probe_window(&s,0,now,&reset)==RF_DISPLAY_WINDOW_PENDING&&reset&&s.restarts==restart);
+  assert(redfin_display_probe_window(&s,restart+100,now+1,&reset)==RF_DISPLAY_WINDOW_PENDING&&!reset);
+  assert(redfin_display_probe_window(&s,restart+100,now+3,&reset)==RF_DISPLAY_WINDOW_READY);
+ }
+ assert(redfin_display_probe_window(&s,0,100,&reset)==RF_DISPLAY_WINDOW_REFUSED&&reset);
+ assert(redfin_display_probe_window(&s,99,200,&reset)==RF_DISPLAY_WINDOW_REFUSED&&!reset);
+ return 0;
+}
+''')
+            subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-I'+str(here),str(source),'-o',str(root/'windows')],capture_output=True,check=True)
+            subprocess.run([str(root/'windows')],capture_output=True,check=True)
+
     def test_bounded_request_modes_require_a_complete_matching_boot_nonce(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);here=Path(__file__).resolve().parent

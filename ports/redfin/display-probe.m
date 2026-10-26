@@ -19,7 +19,12 @@
 #include "display-benchmark.h"
 
 @interface RedfinDisplayProbe : NSObject
+{
+    struct redfin_display_window_state _hostState;
+}
 @property(nonatomic,strong) UIWindow *window;
+@property(nonatomic,strong) UIWindow *fallbackWindow;
+@property(nonatomic,strong) UIWindow *candidateWindow;
 @property(nonatomic,strong) CADisplayLink *link;
 @property(nonatomic) io_connect_t framebuffer;
 @property(nonatomic) uint64_t nonce;
@@ -36,6 +41,8 @@
 @property(nonatomic,strong) CALayer *animatedLayer;
 - (void)tick:(CADisplayLink *)link;
 - (void)finish:(BOOL)timedOut;
+- (void)attachWindow:(UIWindow *)window;
+- (void)resetMeasurement;
 @end
 
 static RedfinDisplayProbe *active_probe;
@@ -129,11 +136,47 @@ static BOOL sample_attempts(io_connect_t client,uint64_t nonce,struct redfin_dis
 static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_statistics_v2 *out)
 {return sample_attempts(client,nonce,out,8);}
 @implementation RedfinDisplayProbe
+- (void)resetMeasurement
+{
+    self.origin=0;self.began=0;self.last=0;self.maximum=0;
+    self.callbacks=0;self.under12=0;self.under18=0;self.under35=0;
+    self.samples=0;self.missed=0;self.minimumFPS=0;self.maximumFPS=0;
+    self.first=(struct redfin_display_statistics_v2){0};
+    self.lastNative=(struct redfin_display_statistics_v2){0};
+}
+- (void)attachWindow:(UIWindow *)window
+{
+    [self.animatedLayer removeAnimationForKey:animation_key];self.animatedLayer=nil;
+    self.window=window;
+    if(self.mode!=RF_DISPLAY_PROBE_ANIMATE||!window)return;
+    CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"sublayerTransform.translation.x"];
+    animation.fromValue=@0;animation.toValue=@2;animation.duration=0.25*self.clockRatio;
+    animation.autoreverses=YES;animation.additive=YES;animation.repeatDuration=RF_DISPLAY_PROBE_ANIMATION_SECONDS*self.clockRatio;
+    animation.removedOnCompletion=YES;
+    self.animatedLayer=window.layer;[self.animatedLayer addAnimation:animation forKey:animation_key];
+}
 - (void)tick:(CADisplayLink *)link
 {
     if (self.finished) return;
-    if(self.mode==RF_DISPLAY_PROBE_ANIMATE&&!fullscreen_window(self.window)) {self.finishReason="window-lost";[self finish:YES];return;}
     double now=link.timestamp;
+    if(self.mode==RF_DISPLAY_PROBE_ANIMATE) {
+        UIWindow *candidate=animation_host(self.fallbackWindow);
+        self.candidateWindow=candidate; /* Hold identity stable across callbacks. */
+        bool reset=false;
+        unsigned state=redfin_display_probe_window(&_hostState,(uintptr_t)(__bridge void *)candidate,
+            now/self.clockRatio,&reset);
+        if(reset) {
+            BOOL discarded=self.began!=0;
+            [self attachWindow:nil];[self resetMeasurement];
+            probe_log(self.nonce,"window-transition restart=%u discarded-measurement=%u",_hostState.restarts,discarded);
+        }
+        if(state==RF_DISPLAY_WINDOW_REFUSED) {self.finishReason="window-churn";[self finish:YES];return;}
+        if(state==RF_DISPLAY_WINDOW_PENDING)return;
+        if(state==RF_DISPLAY_WINDOW_READY) {
+            [self attachWindow:candidate];self.origin=now;
+            probe_log(self.nonce,"window-stable seconds=%u restarts=%u fresh-warmup=1",RF_DISPLAY_PROBE_WINDOW_STABLE_SECONDS,_hostState.restarts);
+        }
+    }
     if (!self.origin) self.origin=now;
     if (!self.began && now-self.origin>=RF_DISPLAY_PROBE_WARMUP_SECONDS*self.clockRatio) {
         struct redfin_display_statistics_v2 start={0};
@@ -186,7 +229,7 @@ static BOOL sample(io_connect_t client,uint64_t nonce,struct redfin_display_stat
         self.under12,self.under18,self.under35,self.maximum*1000,self.samples,self.missed,self.minimumFPS,self.maximumFPS,
         (unsigned long long)(valid?final.counter_hz:0),self.clockRatio,self.checksCompleted,reason,idle_restored);
     if (self.framebuffer) IOServiceClose(self.framebuffer);
-    self.framebuffer=0;self.window=nil;
+    self.framebuffer=0;self.window=nil;self.fallbackWindow=nil;self.candidateWindow=nil;
     active_probe=nil;
 }
 @end
@@ -259,14 +302,7 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
             probe_log(nonce,"refused invalid physical/mach counter ratio");IOServiceClose(client);(void)probe_idle_release();return;
         }
         probe.clockRatio=ratio;
-        probe.window=parent;probe.mode=mode;probe.checksCompleted=checks_completed;active_probe=probe;
-        if(mode==RF_DISPLAY_PROBE_ANIMATE) {
-            CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"sublayerTransform.translation.x"];
-            animation.fromValue=@0;animation.toValue=@2;animation.duration=0.25*ratio;
-            animation.autoreverses=YES;animation.additive=YES;animation.repeatDuration=RF_DISPLAY_PROBE_ANIMATION_SECONDS*ratio;
-            animation.removedOnCompletion=YES;
-            probe.animatedLayer=parent.layer;[parent.layer addAnimation:animation forKey:animation_key];
-        }
+        probe.window=parent;probe.fallbackWindow=native_host;probe.mode=mode;probe.checksCompleted=checks_completed;active_probe=probe;
         CADisplayLink *link=[CADisplayLink displayLinkWithTarget:probe selector:@selector(tick:)];
         link.preferredFrameRateRange=CAFrameRateRangeMake(start.panel_hz,start.panel_hz,start.panel_hz);
         probe.link=link;[link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];

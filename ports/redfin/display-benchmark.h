@@ -13,6 +13,37 @@ enum {RF_DISPLAY_PROBE_NONE,RF_DISPLAY_PROBE_PASSIVE,RF_DISPLAY_PROBE_ANIMATE,RF
 #define RF_DISPLAY_PROBE_ANIMATION_SECONDS 40u
 #define RF_DISPLAY_PROBE_DEADLINE_SECONDS 45u
 #define RF_DISPLAY_PROBE_IDLE_LIMIT_SECONDS 150u
+#define RF_DISPLAY_PROBE_WINDOW_STABLE_SECONDS 2u
+#define RF_DISPLAY_PROBE_WINDOW_RESTARTS 3u
+enum {RF_DISPLAY_WINDOW_PENDING,RF_DISPLAY_WINDOW_READY,RF_DISPLAY_WINDOW_ACTIVE,RF_DISPLAY_WINDOW_REFUSED};
+struct redfin_display_window_state {
+    uintptr_t active,candidate;
+    double since;
+    unsigned restarts;
+    bool refused;
+};
+/* Window replacement discards the old interval. A missing window consumes
+ * one transition, not one retry per display callback. The caller's existing
+ * finite wall/idle deadlines also cover waiting for a stable replacement. */
+static inline unsigned redfin_display_probe_window(struct redfin_display_window_state *s,
+    uintptr_t candidate,double now,bool *reset)
+{
+    if(!s||!reset)return RF_DISPLAY_WINDOW_REFUSED;
+    *reset=false;
+    if(s->refused)return RF_DISPLAY_WINDOW_REFUSED;
+    if(s->active&&s->active==candidate)return RF_DISPLAY_WINDOW_ACTIVE;
+    if(s->active) {
+        s->active=0;s->candidate=0;s->since=now;*reset=true;
+        if(++s->restarts>RF_DISPLAY_PROBE_WINDOW_RESTARTS) {
+            s->refused=true;return RF_DISPLAY_WINDOW_REFUSED;
+        }
+    }
+    if(candidate!=s->candidate||now<s->since) {
+        s->candidate=candidate;s->since=now;return RF_DISPLAY_WINDOW_PENDING;
+    }
+    if(!candidate||now-s->since<RF_DISPLAY_PROBE_WINDOW_STABLE_SECONDS)return RF_DISPLAY_WINDOW_PENDING;
+    s->active=candidate;return RF_DISPLAY_WINDOW_READY;
+}
 /* A root-owned regular control file selects one boot only. No persistent
  * animation is enabled by installing the adapter or by reading statistics. */
 static inline unsigned redfin_display_probe_request(const char *data,size_t bytes,uint64_t nonce)
