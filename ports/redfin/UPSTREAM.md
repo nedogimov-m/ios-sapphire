@@ -1,5 +1,16 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native V90 two-frame direct pipeline passes at50.942FPS — 2026-10-27
+
+Own sourceaddde14, unchanged preferred88513176../906425b7.., actual20H392 native
+input1a4ad42c../pair17d0f01f../cache496301fc../kernel CI20. V90 passes full app
+Metal, direct/fetch/seed/CPU-first/full pixels/tails and the actual shared
+12-round frame-budget checker. GUI reaches1020direct frames/no GL errors,
+real956old-frame waits/max2/zero fallbacks. One server/clean1662493/Fastboot.
+Checked510GPU frames/10.011338s=50.942FPS at90Hz callbacks restores the severe
+V88/V89 direct regression. This is below ordinary mirror V86's54.738FPS, so
+no new speedup or stable60/90claim. Exact-binary ordinary V91 follows.
+
 ## Direct GLES receives bounded real-fence producer pressure — 2026-10-27
 
 Same preferred88513176../906425b7.. bridge/pixel-fetch adaptation retained.

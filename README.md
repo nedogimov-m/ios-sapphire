@@ -84,8 +84,11 @@ Phone and Photos work according to the
 user, and their automatic launch checks are retired. Current evidence and next
 work are recorded at the top of [NOTES.md](NOTES.md). V88 also passes the full
 direct-to-IOSurface GLES, framebuffer-fetch/pixel/tail and app Metal contract,
-but its checked animation regresses to5.294FPS. Direct-path backpressure is
-under investigation; it is not a performance milestone.
+but unbounded frame admission initially regresses to5..7FPS. V90 corrects
+that queue pressure with a two-frame real-fence limit, passing the full native
+direct/budget/app Metal contract and measuring50.942FPS at90Hz callbacks.
+That restores throughput; an improvement over the54.738FPS mirror baseline
+and sustained60/90render FPS are not established.
 
 Pixel 5 boots XNU 8796 and Apple's iOS 16.7.16 launchd, backboardd and
 SpringBoard from a journaled HFSX root in the approved first 16 GiB of

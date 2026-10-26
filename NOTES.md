@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V90 full native bounded direct GLES/app Metal PASS;50.942FPS — 2026-10-27
+
+Sourceaddde14/start2e5c19d; actual20H392 build025001/Mesa input1a4ad42c../
+Metal pair17d0f01f../shader cache496301fc../UI/kernel Actions40403226041/run20/
+source5b06349/kernel01be8081.. retained. Cycle53362 TERMINAL exit0,
+authenticateda1286e4931e74c54, one backboardd62/no crash/panic/GPU fault,
+clean unmounted HFSX1662493/verified Fastboot. V96 STALE/never reuse;
+next fresh V97/imageV91 at actual1662493.
+
+Full Metal CHECK EXIT0/offscreen GPU result0/all4cache modes/physical2pending/
+output/pixel/guard contracts PASS. Direct1125x2435 framebuffer-fetch/seed/
+CPU-first/all10957500pixels/57344tail bytes PASS. Actual shared frame-budget
+checker12rounds/2surfaces/maximum2/waits11/58560pixels/147456tail bytes PASS.
+System GLES1020frames/21direct samples/mirrored0/copied0/errors0; real
+seed/native producer/publication960/fallback0.12actual budget records reach
+frame960/max2/waits956(already46/completed910), zero fallback. Completion is
+real; full waits and native CPU ownership remain. SEC driver stops error0/
+batches0/no contacts; no new manual touch claim. V89 actual startup recovery
+and77contacts remain validated. Automatic captures/Phone/Photos opens OFF.
+
+Finite checked510GPU frames/10.011338physical seconds=50.942242FPS,90Hz
+callbacks, samples47.996..52.995FPS/max callback11.111ms, no missed samples/
+timeout/idle restored. Severe5..7FPS direct regression is corrected, but no
+improvement over ordinary mirror V86's54.738FPS or stable60/90is established.
+Sampled render admission maximum falls from prior203ms to16.068ms; native
+output median5.153ms, sampled18-IB+WFI12.062ms before final fence. Separate
+samples are not an additive full-frame budget. Same-binary ordinary V91 next.
+Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xa1286e4931e74c54 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad Wi-Fi/power/thermald/sensor/Apple-services goal remains unfinished.
+
 ## REDFIN V96 bounded GLES/native pairing verified; combined V90 starts — 2026-10-27
 
 Complete two-frame real GL fence sourceaddde14;99common host/native20H392
