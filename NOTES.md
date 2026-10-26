@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V92 strict fused filter check rejects291pixels; legacy51.742FPS preserved — 2026-10-27
+
+Sourceee02c23/startb800516; Actions40410544328/run21 SUCCESS, kernel
+6cb553e619dba1a49d1032464825a37c2881da5bc45253b6cb0bbad74e7e82c7,
+18742800bytes/arm64 non-PAC; exact old+new patch map/KDK/XNU/native proof.
+No userland/compiler rebuild:1a4ad42c../17d0f01f../cache496301fc../UI exact.
+Cycle39311 TERMINAL exit0, authenticated26cdcec9f572083a, one backboardd62,
+no panic/GL error/GPU stop, clean unmounted HFSX1679744/verified Fastboot.
+V98 STALE/never reuse; next fresh V99/imageV94. Prepared unused CI21 V93
+image is superseded/never booted; retain it for provenance.
+
+Full existing app Metal CHECK EXIT0/GPU result0/direct/fetch/CPU-first/pixels/
+tails/actual2pending/all4cache modes/shared frame-budget/native output PASS.
+Actual GLES1020direct composition frames, bound2/real waits/zero fallbacks.
+SEC stopped error0/batches0/no contacts; no new manual input claim.
+New fused native check passes its first1080x2340case, then1125x2436 comparison
+finds291pixels outside1LSB (first4logged mismatches differ by2in green).
+5054400pixels checked, zero input/output guard errors or intermediate writes.
+Cases2/3 did not execute because the original loop stopped on first pixel
+failure. Full maximum/error distribution is not yet observed; fixed-point
+filter rounding is a source-supported hypothesis, not an established bound.
+The native gate correctly keeps legacy output: actualdirect0/staged960.
+Checked518GPU frames/10.011117s=51.742478FPS at90Hz callbacks; no fast-output
+admission or throughput gain claimed. Automatic Phone/Photos/captures OFF.
+
+Next complete precision contract: require exact1:1pixels, explicitly bound
+fractional8-bit filter precision, report every case/maximum distribution, and
+retain strict input/output/tail/intermediate/CPU ownership/real GPU completion.
+No unconditional fast-path enable or success-by-marker. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x26cdcec9f572083a redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Broad goal remains unfinished; real fused output and smooth60/90are open.
+
 ## REDFIN fused output kernel CI21/V98 verified; combined V92 starts — 2026-10-27
 
 Full fused output sourceee02c23,102common host/whole native TU compile PASS.
