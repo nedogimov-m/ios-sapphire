@@ -46,7 +46,7 @@ diff --git a/bsd/dev/redfin_gpu_precise_pause.inc b/bsd/dev/redfin_gpu_precise_p
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/redfin_gpu_precise_pause.inc
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,32 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Native short device waits. SYS_CRITICAL suppresses intentional timer
 + * coalescing; it does not change thread priority or fabricate completion.
@@ -54,7 +54,6 @@ new file mode 100644
 + * Internal callers request100us polls or1000us late-admission intervals. */
 +#include <kern/clock.h>
 +#include <kern/sched_prim.h>
-+#include <kern/spl.h>
 +#include <kern/thread.h>
 +#include <machine/machine_routines.h>
 +#if defined(MACH_KERNEL_PRIVATE)

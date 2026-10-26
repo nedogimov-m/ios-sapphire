@@ -5,7 +5,6 @@
  * Internal callers request100us polls or1000us late-admission intervals. */
 #include <kern/clock.h>
 #include <kern/sched_prim.h>
-#include <kern/spl.h>
 #include <kern/thread.h>
 #include <machine/machine_routines.h>
 #if defined(MACH_KERNEL_PRIVATE)

@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN run17 compile failure fixed; both complete native units compile — 2026-10-26
+
+Actions40370957731/run17 TERMINAL FAILURE, sourcea3a7759; actual build error
+is unused kern/spl.h, not exported to BSD. Remove that include. Both complete
+final translation units bsd/dev/redfin_gmu_probe.c and iokit/Kernel/arm/RedfinGPU.cpp
+now compile locally against real generated XNU export headers/configuration,
+with actual run17 CI flags (local Xcode27 compiler; CI uses Xcode16). All45
+transitive owned quote-source paths are reconstructed; unchanged foundation
+headers come from verified realtime native fixtures/local XNU tree. This is
+compile preflight, not native kernel link or hardware success. Four final
+latency/overlay/FIFO/cache contracts PASS; prior58combined contracts retained.
+
+Run17 build elapsed311.911s before failure; native logs/artifacts remain local.
+No phone image from the failed run. Next full corrected CI includes the remote
+KDK-cache removal. Fresh V86 stays valid at clean1558759/empty journal/recovery
+idle; no root writes or new boot args. V80 installation/combined boot awaits
+exact actual successful kernel. Broad platform goal active/unfinished.
+
 ## REDFIN corrected run17 compiling; avoid slow remote kit restore next time — 2026-10-26
 
 Corrected sourcea3a7759da752889ff31eae0726005af423d8a1bb in actual
