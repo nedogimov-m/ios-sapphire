@@ -1,5 +1,30 @@
 # HackiOS upstream review — 2026-10-22
 
+## Preferred GLES GUI and retained app Metal pass together — 2026-10-27
+
+V83/source53ed249/kernel Actions40372742634/run18/4fa88838.., native input6e6e432c../
+pair5fcef77e.. proves actual FD620 GLES composition and full native app Metal in
+one authenticated boot.780maximum GLES frames/17samples, shared surfaces,
+copied0/errors0, no backboardd Metal command records; explicit app Metal CHECK
+EXIT0/offscreen GPU result0. One window server, no crash/panic, clean1596356/
+Fastboot. The bridge remains the5-file namespace-adapted equivalent of the
+reviewed preferred kernel88513176.. source, with actual20H392 ABI adaptation.
+
+The initial own-driver refusal had invoked private superclass dealloc before
+init; raw object_dispose now avoids that invalid teardown. This preserves the
+native superclass/device path for admitted app devices. Checked42.353FPS is
+followed by ordinary V84:432completed GPU frames/10.011347physical seconds =
+43.151FPS at90Hz callbacks, one server/zero contacts/crashes/errors, clean1604867/
+Fastboot. Full same-binary native Metal proof stays V83. Smooth60/90render FPS
+remains unfinished. Full source selection/global app Metal stay intact.
+
+The reviewed bridge already provides the nonblocking display path: a real
+GL fence with FLUSH_COMMANDS_BIT and zero wait publishes deferred Mesa work,
+while the driver waits before reading the surface. Current Redfin does not
+advertise RedwoodWaitsForGPU, so V84 uses the blocking fallback. Adapt that
+existing contract against our actual retained FIFO and CPU fallback barrier;
+never replace real completion or explicit glFinish with a synthetic signal.
+
 ## Ready preferred GLES bridge retained; GUI selection separated from app Metal — 2026-10-27
 
 User explicitly requests upstream GLES composition. Exact5-file comparison of

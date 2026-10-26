@@ -1,5 +1,56 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V84 ordinary upstream GLES terminal43.151FPS; safe asynchronous path next — 2026-10-27
+
+Exact source53ed249/native input6e6e432c../pair5fcef77e../unchanged kernel
+Actions40372742634/run18/source0d3767d/kernel4fa88838.., same UI/compiler cache.
+Cycle93645 TERMINAL exit0; authenticated9c6b1b7b95b7d431, ordinary432completed
+GPU frames/10.011347physical seconds =43.1510365FPS,902callbacks/90Hz. Startup
+correctness/captures/app opens OFF. Actual FD620 GLES780maximum frames/17shared
+samples, copied0/errors0, no backboardd Metal work, one backboardd61/no crashes
+or panic. SEC0contacts/stop error0; clean unmounted HFSX1604867/Fastboot.
+Full same-binary app Metal/native coexistence proof retained in V83; absence
+of fresh native CHECK in this ordinary run is intentional. V90 STALE/never
+reuse; next fresh V91/imageV85 at actual1604867. Exact boot args are in V84's
+starting entry below; no kernel/native/compiler rebuild for this measurement.
+
+20CLOCK/20WAIT/8CACHE partitions valid, invalid0. Actual18-IB+WFI hardware
+median11.427ms/output1-IB3.272ms, before final cache-flush fence. All sampled
+ordinary physical publications show1pending; no current2pending proof. V81
+ordinary Metal34.461586FPS; this GLES scenario improves about25.2%, but is
+still below smooth60/90FPS. Full GUI/app policy request is implemented/proved.
+
+Source confirms upstream EAGL currently waits here using glFinish because
+our display service does not advertise RedwoodWaitsForGPU. Existing preferred
+nonblocking path flushes a real GL fence with zero wait before submission to
+the retained FIFO presenter. Next complete adaptation must verify Redfin's
+GPU ABI, FIFO and CPU-fallback barriers, preserve all real publication/lifetime
+and explicit glFinish semantics, then run common checks and one combined boot.
+Broad platform goal remains active; Wi-Fi/power/thermal/sensors unfinished.
+
+## REDFIN V83 upstream GLES GUI + native app Metal coexistence PASS; checked42.353FPS — 2026-10-27
+
+Source53ed249/docsb63b18c, unchanged kernel Actions40372742634/run18/4fa88838..,
+Mesa input6e6e432c../native pair5fcef77e../compiler cache/UI. Cycle48412 TERMINAL
+exit0, fresh authenticated4078df9486a0bc61, one backboardd62/no crash or panic,
+clean unmounted HFSX1596356/verified Fastboot. V89 STALE/never reuse.
+
+Actual GLES FD620 composition is proved:780frames maximum,17nonce-bound
+samples with shared IOSurfaces, copied0/errors0; no backboardd Metal command
+records. Explicit app Metal CHECK EXIT0 and offscreen GPU result0 pass in the
+same boot. Complete independent GLES GUI/native app Metal proof true. The
+pre-init raw-object disposal fixes the observed event-server startup crash.
+Zero touch contacts, SEC stop error0; Phone/Photos not automatically opened.
+
+Checked424GPU frames/10.011165physical seconds =42.353FPS,902callbacks/90Hz,
+complete stable interval/no missed samples/timeout/window replacement, idle
+restored. This is a checked observation; exact-binary ordinary performance is
+next. Full ON native inventory archived/verified at
+research/redfin-gles-compositor-v83-validated before policy-only OFF. No native/
+compiler/kernel rebuild for that measurement. Fresh V90/imageV84 at actual
+1596356, captures/app opens OFF. Exact V83 boot args are in its starting entry
+below. Broad goal active; smooth60/90render FPS remains unfinished.
+
 ## REDFIN V90 ordinary GLES policy verified; V84 starts — 2026-10-27
 
 Exact full-coexistence-validated V83 source53ed249/native input6e6e432c../
