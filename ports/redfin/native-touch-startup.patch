@@ -1,0 +1,18 @@
+--- a/bsd/dev/redfin_touch_events.c
++++ b/bsd/dev/redfin_touch_events.c
+@@ -137,6 +137,15 @@
+ 	for (unsigned i = 0; i < 4 && !state.synchronized; i++) {
+ 		if (mach_absolute_time() >= deadline) { error = ETIMEDOUT; goto done; }
+ 		error = redfin_events_batch(&state,&ops,false);
++		if (error == EOVERFLOW || error == EILSEQ) {
++			/* The pre-consumer queue can fill across a warm boot too.
++			 * Use the same owned, bounded clear/validated-empty recovery
++			 * as a live session; never replay discarded contacts. */
++			int cause = error;
++			error = redfin_events_resynchronize(&state,&ops);
++			printf("REDFIN TOUCH STARTUP QUEUE: cause=%d resync=%d recovered=%u\n",
++			    cause,error,state.recoveries);
++		}
+ 		if (error) goto done;
+ 	}
+ 	if (!state.synchronized) { error = EBUSY; goto done; }

@@ -1,5 +1,21 @@
 # HackiOS upstream review — 2026-10-22
 
+## Redfin GLES publication proves54.639FPS; startup input recovery completes existing contract — 2026-10-27
+
+V85/sourcea7ddbe1/kernel Actions40372742634/run18/4fa88838.. proves actual FD620
+GLES1020frames, shared/copy0/errors0,12real kernel-publication samples/fallback0
+and full app Metal CHECK EXIT0 in one authenticated clean boot. New offscreen
+publication->CPU-lock pixel test and all native4cache-mode/physical2pending/
+output/guard contracts PASS. Checked54.639FPS at90Hz callbacks; exact-binary
+ordinary follows. Preferred source selection88513176../906425b7.. unchanged.
+
+SEC initial discard stopped on EOVERFLOW before its existing live recovery.
+Own Redfin overlay reuses the same bounded, owned resynchronizer at startup,
+without hardware reset, unbounded retry or stale input replay.58combined touch/
+SMP/GPU-latency host contracts and actual native TU compile PASS. Fresh CI and
+hardware input verification pending; no claim that faster rendering caused
+this preexisting uncovered branch. GPU native source and app Metal stay exact.
+
 ## Preferred asynchronous GLES display contract adapted without early completion — 2026-10-27
 
 Same reviewed kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3/userland906425b7..

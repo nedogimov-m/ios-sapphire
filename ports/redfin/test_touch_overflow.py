@@ -207,6 +207,23 @@ int redfin_touch_spi_events_sense_init(void){return 0;}
                 }''')
                 text = text.replace('redfin_events_attempted=false;',
                     'redfin_events_attempted=false;test_clears=0;test_clear_error=(fault==20||fault==23)?EIO:fault==21?EBUSY:0;')
+                # Real V85 failure: a full queue during initial synchronization
+                # used to stop before the live-session recovery could run.
+                text = text.replace('read60++;', '''read60++;
+                    if(fault>=29 && fault<=36 && read60==1){
+                        if(fault==31)return EILSEQ;
+                        if(fault==30){out[0]=5;out[1]=1;return 0;}
+                        contact(out,0,1,32);return 0;
+                    }
+                    if(fault==32){contact(out,0,1,32);return 0;}
+                    if(fault==36 && read60==2){out[0]=9;out[2]=0x10;return 0;}
+                    if(fault==37 && read60==1){out[0]=5;out[1]=2;return 0;}
+                ''')
+                text = text.replace('fault==20||fault==23','fault==20||fault==23||fault==33')
+                text = text.replace('(fault==5 && read60>=3)',
+                                    '((fault==5 && read60>=3)||(fault==34 && read60>=1))')
+                text = text.replace('!(fault==19 && emits>=1)',
+                                    '!(fault==19 && emits>=1) && !(fault==35 && read60>=1)')
                 text += '\nunsigned clear_calls(void){return test_clears;}\n'
                 source.write_text(text)
             return old_run(command, *args, **kwargs)
@@ -229,6 +246,28 @@ int redfin_touch_spi_events_sense_init(void){return 0;}
         self.assertEqual(self.lib.stat(9), 0)
         self.assertEqual(self.lib.stat(7), 1)
         self.assertGreaterEqual(self.lib.stat(4), 5)
+
+    def test_initial_queue_count_status_and_corrupt_reply_recover_before_accepting_fresh_input(self):
+        for issue in (29,30,31):
+            self.assertEqual(self.lib.run(issue,1,1),0)
+            self.assertEqual(self.lib.stat(10),0,issue)
+            self.assertEqual(self.lib.clear_calls(),1,issue)
+            self.assertEqual(self.lib.stat(6),1)
+            self.assertEqual(self.lib.stat(7),1)
+            self.assertEqual(self.lib.stat(8),3)  # Only the new DOWN/MOVE/UP.
+            self.assertEqual(self.lib.stat(9),0)
+
+    def test_initial_queue_recovery_preserves_transport_ownership_consumer_reset_and_retry_limits(self):
+        for issue,error in ((32,errno.EOVERFLOW),(33,errno.EIO),(34,errno.EBUSY),
+                            (35,errno.EPIPE),(36,errno.EIO),(37,errno.EIO)):
+            self.assertEqual(self.lib.run(issue,1,1),0)
+            self.assertEqual(self.lib.stat(10),error,issue)
+            self.assertEqual(self.lib.clear_calls(),int(issue not in (34,35,37)),issue)
+            self.assertEqual(self.lib.stat(6),1)
+            self.assertEqual(self.lib.stat(7),1)
+            self.assertEqual(self.lib.stat(8),0)  # No stale or partial contact.
+            self.assertEqual(self.lib.stat(9),0)
+            self.assertLessEqual(self.lib.stat(4),2)
 
     def test_clear_failure_is_final_and_never_reopens_spi(self):
         for issue, error in ((20, errno.EIO), (21, errno.EBUSY)):

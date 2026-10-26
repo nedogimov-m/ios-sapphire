@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V85 GLES publication/native Metal PASS54.639FPS; startup touch overflow fixed in source — 2026-10-27
+
+Sourcea7ddbe1/start821bf41, Mesa input323bf7ed../native pair7e0f4a5c../same
+kernel Actions40372742634/run18/source0d3767d/kernel4fa88838.. and UI/cache.
+Cycle71134 TERMINAL exit0, authenticatedd8230355f59d0f35, one backboardd62,
+no crash/panic, clean unmounted HFSX1614111/verified Fastboot. V91 STALE/
+never reuse. Exact boot args in the V85 starting entry below.
+
+GLES FD6201020maximum frames/21shared samples, copied0/errors0, no backboardd
+Metal records. Actual driver-waits1 and12publication samples reach960frames,
+fallbacks0/GPU-wait0: asynchronous handoff proved. Full app Metal CHECK EXIT0,
+offscreen GPU result0 and new actual publication->CPU IOSurfaceLock/readback
+PASS, before any GL readback. All4cache-mode pixels/guards and actual2pending
+physical publication PASS. GPU/cache/output budgets valid, invalid0.
+Checked547GPU frames/10.011086physical seconds =54.6394267FPS at90Hz callbacks,
+stable/no timeout/missed samples/idle restored. This is above V84's43.151FPS;
+exact-binary ordinary V86 with startup diagnostics OFF follows. Smooth60/90
+render remains unfinished.18-IB+WFI median11.324ms/output1-IB3.167ms, excluding
+final cache-flush fence; independent samples are not an additive frame budget.
+
+Observed SEC startup error84, overflows1/recovered0/batches0/contacts0. Code
+inspection proves initial discard exits immediately on queue-full, whereas the
+live loop already invokes bounded resynchronization. No new GPU-caused touch
+regression is established. Add the same owned resynchronizer to startup's
+EOVERFLOW/EILSEQ only; retain8-clear session cap, validated empty queue,
+no replay of stale contacts, and fatal ownership/transport/reset/other faults.
+58combined touch/response/sensing/event/SMP/GPU-latency host contracts PASS,
+including fresh startup queue count/status/corrupt reply success plus persistent
+overflow/clear failure/ownership loss/consumer loss/IC-reset/no partial input.
+Complete actual native touch TU with run18 flags/headers compiles PASS.
+Actual iOS arm64 non-Metal publication-OFF branch also compiles with no optional
+helper import. Source implementation complete; fresh kernel CI and device
+startup recovery verification remain. Keep native GPU/Metal/compiler unchanged.
+V92/imageV86 ordinary uses old run18 GPU baseline during that CI. Broad goal active.
+
 ## REDFIN upstream GLES GUI/app Metal native build/V91 verified; combined V85 starts — 2026-10-27
 
 GLES asynchronous CPU-worker/kernel publication sourcea7ddbe1, Mesa input323bf7ed../
