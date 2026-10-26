@@ -17,9 +17,13 @@ enum redfin_metal_frontend_field {
    RF_MFP_CONSTANT_PREPARE_NS, RF_MFP_CONSTANT_UPLOAD_NS,
    RF_MFP_SUBMIT_CALLS, RF_MFP_SUBMIT_NS,
    RF_MFP_SUBMIT_CLEAR_NS, RF_MFP_SUBMIT_RESOLVE_NS,
+   RF_MFP_CONSTANT_PROVEN, RF_MFP_CONSTANT_AVOIDED_BYTES, RF_MFP_CONSTANT_FALLBACK,
    REDFIN_METAL_FRONTEND_WORDS
 };
 
 struct rwa_device;
 int rwa_redfin_frontend_statistics(struct rwa_device *,uint64_t *,size_t);
+#ifdef __OBJC__
+int redfin_metal_frontend_statistics(id,uint64_t *,size_t);
+#endif
 #endif

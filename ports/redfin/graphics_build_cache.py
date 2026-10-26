@@ -14,7 +14,8 @@ TRANSPORT_INPUTS=frozenset('ports/redfin/'+name for name in (
     'mesa-scoped-submit.inc','mesa-submit-merge.patch','mesa-submit-merge.h',
     'mesa-submit-merge.inc','include/redfin_gpu_access.h',
     'mesa-resource-access.patch','mesa-access-submit.inc',
-    'metal-frontend-profile.patch','metal-frontend-profile.h','metal-frontend-profile.inc'))
+    'metal-frontend-profile.patch','metal-frontend-profile.h','metal-frontend-profile.inc',
+    'metal-ubo-extents.patch','metal-ubo-extents.h','metal-ubo-extents.inc'))
 TRANSPORT_PATCH_TARGETS=frozenset((
     'src/freedreno/drm/freedreno_bo.c','src/freedreno/drm/freedreno_priv.h',
     'src/freedreno/drm/freedreno_ringbuffer.h','src/freedreno/drm/freedreno_ringbuffer_sp.h',
@@ -27,6 +28,9 @@ RUNTIME_PATCH_TARGETS={
     # This reviewed overlay only wraps existing runtime calls with counters.
     # Keep its exception separate from the general native-transport targets.
     'ports/redfin/metal-frontend-profile.patch':frozenset(('src/compiler/air/air_metal.c',)),
+    # Read-only NIR inspection changes only transient runtime upload lengths.
+    # It never changes the shader, AIR metadata or persistent cache formats.
+    'ports/redfin/metal-ubo-extents.patch':frozenset(('src/compiler/air/air_metal.c',)),
 }
 
 

@@ -35,6 +35,7 @@
 #include "metal-ordering-check.inc"
 #include "metal-bindings-check.inc"
 #include "metal-queued-check.inc"
+#include "metal-ubo-extents-check.inc"
 
 int redfin_metal_resource_check(const char *path,uint64_t nonce);
 
@@ -343,6 +344,7 @@ int main(void)
             BOOL ordering=short_bounds&&ordering_native(device,library,nonce);
             BOOL bindingReuse=short_bounds&&bindings_native(device,library,nonce);
             BOOL queued=short_bounds&&queued_native(device,library,nonce);
+            BOOL uboExtents=short_bounds&&ubo_extents_native(device,library,nonce);
             BOOL resourceReferences=short_bounds&&redfin_metal_resource_check("/redfin/lib/redfin-resource-check.bc",nonce);
             uint64_t routes[2]={0};BOOL gmem=dependencies&&native_gmem_statistics(device,routes);
             printf("REDFIN METAL CHECK RESULT: boot=%016llx mode=%d compute-queues=%u rounds-per-queue=96 actual-output=%u guards=%u iosurface-pixels=%u rg8-pixels-and-guards=%u batch-pixels-and-guards=%u dependency-pixels-and-guards=%u short-surface-pixels-guards-and-sysmem=%u actual-gmem=%u gmem-batches=%llu sysmem-batches=%llu\n",
@@ -352,7 +354,7 @@ int main(void)
                 (unsigned long long)nonce,raster,vertices,pitch480,pitch4512,resolve480,resolve4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
             redfin_graphics_memory_report("checker-after",0);
-            return gmem&&short_bounds&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&resourceReferences ? 0 : 1;
+            return gmem&&short_bounds&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&uboExtents&&resourceReferences ? 0 : 1;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
             return 1;

@@ -70,13 +70,14 @@ class GraphicsBuildReuseTests(unittest.TestCase):
             self.inputs[index].write_bytes(original)
 
     def test_reviewed_runtime_observation_preserves_cache_but_cannot_patch_the_compiler(self):
-        overlay=self.root/'ports/redfin/metal-frontend-profile.patch'
-        overlay.write_bytes(Path(__file__).with_name('metal-frontend-profile.patch').read_bytes())
-        proof=self.reuse(self.inputs+[overlay])
-        self.assertEqual(proof['cache_id'],self.cache_id)
-        overlay.write_text(overlay.read_text()+'\n+++ b/src/compiler/air/air_to_nir.c\n')
-        with self.assertRaisesRegex(ValueError,'unreviewed compiler input'):
-            self.reuse(self.inputs+[overlay])
+        for name in ('metal-frontend-profile.patch','metal-ubo-extents.patch'):
+            overlay=self.root/'ports/redfin'/name
+            overlay.write_bytes(Path(__file__).with_name(name).read_bytes())
+            proof=self.reuse(self.inputs+[overlay])
+            self.assertEqual(proof['cache_id'],self.cache_id)
+            overlay.write_text(overlay.read_text()+'\n+++ b/src/compiler/air/air_to_nir.c\n')
+            with self.assertRaisesRegex(ValueError,'unreviewed compiler input'):
+                self.reuse(self.inputs+[overlay])
 
     def test_compiler_options_and_semantic_patch_order_are_strict(self):
         changed=copy.deepcopy(self.identity);changed['flags']['CFLAGS']='-ffast-math'

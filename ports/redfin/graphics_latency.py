@@ -60,6 +60,7 @@ def analyze(lines,boot,process='backboardd'):
             'frontend':{k:metric('frontend',k) for k in (
                 'stage-us','draw-us','framebuffer-us','draw-emit-us','snapshots','snapshot-bytes',
                 'unknown-snapshots','unknown-snapshot-bytes','constant-prepare-us','constant-copy-us',
+                'proven-snapshots','avoided-snapshot-bytes','full-snapshots',
                 'submit-us','submit-clear-us','submit-resolve-us')},
             'commands':complete}
 

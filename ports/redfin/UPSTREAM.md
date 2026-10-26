@@ -1,5 +1,25 @@
 # HackiOS upstream review — 2026-10-22
 
+## Runtime proof of constant-buffer read extents — 2026-10-26
+
+Re-reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+`air_to_nir.c:air_load_ptr` and the current paired optimized pipeline creation.
+Constant pointers lower to load_ubo with a byte offset; air.buffer_size describes
+a type/minimum and cannot justify truncating a dynamically indexed pointer.
+Observe every relevant NIR read before the fixed stages are released, keeping
+only transient per-pipeline extents. Literal offsets and widths can establish
+a smaller immutable upload; unsupported/dynamic access and size queries retain
+the full view. Never rewrite NIR, resource indices, metadata or serialized keys.
+The unchanged queued upload/completion path keeps real CPU preparation and GPU
+retirement, including aliased GPU-written inputs. The preferred kernel stays
+8e611870; updated c84b463 remains reviewed separately, not substituted wholesale.
+
+25host tests pass, including9real-NIR cases with unchanged serialized bytes;
+full native/actual20H392 ABI/signatures and new proof/fallback/kernel markers
+pass. Preserve the verified old shader cache with the separately reviewed
+runtime-only exclusion and keep full binary pairing strict. Native combined
+pixel/guard/proof/fallback cases and actual FPS improvement remain pending.
+
 ## Actual frontend observation: buffer-tail constant uploads dominate — 2026-10-26
 
 V54/source0978e6e validates all15native phase partitions with one window server,

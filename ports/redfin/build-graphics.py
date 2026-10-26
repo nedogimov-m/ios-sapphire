@@ -126,6 +126,8 @@ def main():
                            ('mesa-resource-access.patch','mesa-access-submit.inc','include/redfin_gpu_access.h')]
                 inputs += [ROOT/'ports/redfin'/name for name in
                            ('metal-frontend-profile.patch','metal-frontend-profile.h','metal-frontend-profile.inc')]
+                inputs += [ROOT/'ports/redfin'/name for name in
+                           ('metal-ubo-extents.patch','metal-ubo-extents.h','metal-ubo-extents.inc')]
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -228,6 +230,10 @@ def main():
                         shutil.copy2(ROOT/'ports/redfin'/('metal-frontend-profile.'+suffix),
                                      source/'src/compiler/air'/('redfin_metal_frontend_profile.'+suffix))
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-frontend-profile.patch'],source)
+                    for suffix in ('h','inc'):
+                        shutil.copy2(ROOT/'ports/redfin'/('metal-ubo-extents.'+suffix),
+                                     source/'src/compiler/air'/('redfin_metal_ubo_extents.'+suffix))
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-ubo-extents.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             if (source/'src/util/redfin_mesa_cache_build.h').read_text()!=\
                     '#define REDFIN_MESA_CACHE_BUILD_ID '+json.dumps(cache_proof['cache_id'])+'\n':
@@ -325,6 +331,7 @@ def main():
                                   ('metal-bindings.h','metal-bindings-check.inc')]
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal_queued_userland.py','metal-queued.h','metal-queued-check.inc','metal-queued-resource-check.inc','metal-frontend-profile.h')]
+                metal_sources += [ROOT/'ports/redfin/metal-ubo-extents-check.inc']
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)

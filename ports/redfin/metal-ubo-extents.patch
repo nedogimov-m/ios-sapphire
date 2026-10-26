@@ -1,0 +1,103 @@
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -82,6 +82,7 @@
+ #include "redfin_metal_ordering.h"
+ #include "redfin_metal_queued.h"
+ #include "redfin_metal_frontend_profile.h"
++#include "redfin_metal_ubo_extents.h"
+ #include <pthread.h>
+ #define REDFIN_METAL_BINDINGS_RUNTIME 1
+ #include "redfin_metal_bindings.h"
+@@ -342,6 +343,7 @@
+    struct rwa_device *device;
+    void *mem_ctx;                 /* the translation: NIR, info, and the strings in it */
+    nir_shader *nir;               /* untouched; a dispatch compiles a clone */
++   struct redfin_metal_ubo_extents ubo_extents;
+    struct air_shader_info info;
+    struct rwa_compute_info caps;
+ 
+@@ -2961,6 +2963,7 @@
+ }
+ 
+ #include "redfin_metal_function_constants.inc"
++#include "redfin_metal_ubo_extents.inc"
+ #include "redfin_metal_translation_cache.inc"
+ 
+ static struct rwa_compute *
+@@ -3007,6 +3010,7 @@
+    }
+ 
+    redfin_pipeline_requirements(compute->nir, &compute->info);
++   redfin_metal_ubo_read_extents(compute->nir,&compute->ubo_extents);
+ 
+    /* What the shader expects to be bound, counted the way Metal counts it: by the
+     * highest index plus one, because the indices are the binding numbers and a kernel
+@@ -3779,7 +3783,8 @@
+  */
+ static int
+ bind_stage(struct rwa_device *device, enum pipe_shader_type stage,
+-           const struct air_shader_info *info, void **own_sampler,
++           const struct air_shader_info *info, const struct redfin_metal_ubo_extents *extents,
++           void **own_sampler,
+            const bool *compare_sampler,
+            const struct rwa_bindings *bindings, const struct rwa_buffer_bind *table,
+            unsigned table_count, const char *name, struct rwa_bound *bound, char *why,
+@@ -3922,7 +3927,15 @@
+             ++device->frontend_stats[RF_MFP_CONSTANT_DIRECT];
+             cb.buffer = b->res;
+          } else {
+-            size_t want = r->size && r->size <= left ? r->size : left;
++            /* Type metadata is not an upper bound on a Metal pointer. Only
++             * an exhaustive read proof may shorten this immutable snapshot. */
++            bool proven=false;
++            size_t want=redfin_metal_ubo_snapshot_bytes(extents,r->index,left,&proven);
++            if(proven) {
++               ++device->frontend_stats[RF_MFP_CONSTANT_PROVEN];
++               size_t previous=r->size&&r->size<=left?r->size:left;
++               if(previous>want)device->frontend_stats[RF_MFP_CONSTANT_AVOIDED_BYTES]+=previous-want;
++            } else ++device->frontend_stats[RF_MFP_CONSTANT_FALLBACK];
+ 
+             if(rwa_redfin_profile_constant_snapshot(device,r,b,boffset,want,&cb,why,why_size))goto failed;
+             uploaded=true;
+@@ -4174,7 +4187,7 @@
+     * the next dispatch or dropped at delete, as before.
+     */
+    struct rwa_bound bound = { 0 };
+-   if (bind_stage(device, PIPE_SHADER_COMPUTE, &compute->info, compute->own_sampler,
++   if (bind_stage(device, PIPE_SHADER_COMPUTE, &compute->info, &compute->ubo_extents, compute->own_sampler,
+                   compute->compare_sampler,
+                   bindings, table, table_count, name, &bound, why, why_size) != 0)
+       return -1;
+@@ -5345,6 +5358,7 @@
+    struct rwa_device *device;
+    void *mem_ctx;
+ 
++   struct redfin_metal_ubo_extents fragment_extents,vertex_extents;
+    struct air_shader_info finfo;
+    struct air_shader_info vinfo;      /* valid only when a vertex module was supplied */
+    bool generated_vertex;
+@@ -6380,6 +6394,8 @@
+    nir_shader_gather_info(fs,nir_shader_get_entrypoint(fs));
+    nir_shader_gather_info(vs,nir_shader_get_entrypoint(vs));
+    render->raster_only=!fs->info.writes_memory && !vs->info.writes_memory;
++   redfin_metal_ubo_read_extents(fs,&render->fragment_extents);
++   redfin_metal_ubo_read_extents(vs,&render->vertex_extents);
+    render->fs_stage = redfin_air_stage_create(device, fs, why, why_size);
+    if (!render->fs_stage)
+       goto fail;
+@@ -7142,13 +7158,13 @@
+ 
+    struct rwa_bound fbound = { 0 }, vbound = { 0 };
+    int rc = -1;
+-   if (bind_stage(device, PIPE_SHADER_FRAGMENT, &render->finfo, render->frag_own_sampler,
++   if (bind_stage(device, PIPE_SHADER_FRAGMENT, &render->finfo, &render->fragment_extents, render->frag_own_sampler,
+                   render->frag_compare_sampler,
+                   &draw->fragment, draw->fragment_buffer_table, draw->fragment_buffer_table_count,
+                   fname, &fbound, why, why_size) != 0)
+       goto unbind;
+    if (!render->generated_vertex &&
+-       bind_stage(device, PIPE_SHADER_VERTEX, &render->vinfo, render->vert_own_sampler,
++       bind_stage(device, PIPE_SHADER_VERTEX, &render->vinfo, &render->vertex_extents, render->vert_own_sampler,
+                   render->vert_compare_sampler,
+                   &draw->vertex, draw->vertex_buffer_table, draw->vertex_buffer_table_count, vname,
+                   &vbound, why, why_size) != 0)

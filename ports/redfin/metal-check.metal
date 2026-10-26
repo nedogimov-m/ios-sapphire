@@ -2,6 +2,40 @@
 #include <metal_stdlib>
 using namespace metal;
 
+kernel void redfin_ubo_fixed(device uint *output [[buffer(0)]],
+    constant uint &first [[buffer(1)]],uint index [[thread_position_in_grid]])
+{
+    constant uint *values=&first;
+    output[index]=values[13]+values[0]*17u+index;
+}
+kernel void redfin_ubo_dynamic(device uint *output [[buffer(0)]],
+    constant uint &first [[buffer(1)]],uint index [[thread_position_in_grid]])
+{
+    constant uint *values=&first;
+    output[index]=values[index+33]+values[0]*17u+index;
+}
+struct RedfinUBOArguments {
+    constant uint *values [[id(0)]];
+    device uint *output [[id(1)]];
+};
+kernel void redfin_ubo_argument_fixed(constant RedfinUBOArguments &args [[buffer(0)]],
+    uint index [[thread_position_in_grid]])
+{ args.output[index]=args.values[13]+args.values[0]*17u+index; }
+kernel void redfin_ubo_argument_dynamic(constant RedfinUBOArguments &args [[buffer(0)]],
+    uint index [[thread_position_in_grid]])
+{ args.output[index]=args.values[index+33]+args.values[0]*17u+index; }
+vertex float4 redfin_ubo_vertex(uint index [[vertex_id]],constant float &first [[buffer(1)]])
+{
+    constant float *values=&first;
+    constexpr float2 positions[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};
+    return float4(positions[index]*float2(values[0],values[13]),0,1);
+}
+fragment float4 redfin_ubo_fragment(constant float &first [[buffer(1)]])
+{
+    constant float *values=&first;
+    return float4(values[0],values[5],values[9],values[13]);
+}
+
 kernel void redfin_affine(device uint *output [[buffer(0)]],
                           constant uint &seed [[buffer(1)]],
                           uint index [[thread_position_in_grid]])
