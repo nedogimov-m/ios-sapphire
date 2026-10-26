@@ -1,5 +1,23 @@
 # HackiOS upstream review — 2026-10-22
 
+## Ordinary A620 system animation after bounded constants:52.699FPS — 2026-10-26
+
+V57/source3a0b503 preserves the exact V55/source1c2a15b graphics binaries,
+kernel and cache. Preferred source pins remain kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab/
+userland906425b75e02b4f99eb5d7bb1ef7c9583472d772; updated mainc84b4634277a70beac73921029b1fb6afc2530af
+remains reviewed below. The recovered ordinary observer validates527actual
+GPU presentations/10.000267physical seconds (52.698593FPS), ten samples,
+zero missed, native correctness jobs/captures/app opens OFF. One backboardd,
+no runtime fault/panic, idle restored and clean root/Fastboot. V55's complete
+native correctness evidence is retained; no rerun or compiler rebuild needed.
+
+Median sampled snapshot3314bytes/106us and9446520avoided bytes confirm the
+runtime bounded-upload effect. Native waits still have a22.6ms median; their
+queueing component is not isolated GPU execution. Panel90Hz and callbacks60Hz
+remain distinct from this finite52.699FPS animation. `redfinfb=1` accompanies
+real GPU composition and GPU-only scale/row-pack; all527observed frames use
+the GPU. Broad sustained60/90render FPS and remaining platform work are open.
+
 ## Preserve validated GPU path; recover the existing-window observer — 2026-10-26
 
 Keep reviewed kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and userland

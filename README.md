@@ -4,6 +4,16 @@ Primary stable upstream sources, selected by the user:
 [oosexgang/hackios-xnu-kernel](https://github.com/oosexgang/hackios-xnu-kernel) and
 [oosexgang/hackios-xnu-userland](https://github.com/oosexgang/hackios-xnu-userland).
 
+Current Redfin GUI composition and panel scaling/packing run on Adreno620.
+`redfinfb=1` publishes the framebuffer interface used by that GPU display path.
+After bounding immutable Metal constant uploads by their actual shader reads,
+V57 measures527completed GPU frames in10.000267physical seconds:52.699FPS in
+a finite ordinary system animation, with startup diagnostics and captures OFF.
+The panel is independently verified at90Hz; display callbacks remain60Hz and
+sustained60/90render FPS is unfinished. Phone and Photos work according to the
+user, and their automatic launch checks are retired. Current evidence and next
+work are recorded at the top of [NOTES.md](NOTES.md).
+
 Pixel 5 boots XNU 8796 and Apple's iOS 16.7.16 launchd, backboardd and
 SpringBoard from a journaled HFSX root in the approved first 16 GiB of
 userdata. CPU0, IRQ/SGI, BSD, static Darwin PID1 heartbeats, bounded

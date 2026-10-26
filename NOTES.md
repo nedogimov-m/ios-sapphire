@@ -1,5 +1,53 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V57 valid ordinary animation:52.699GPU FPS — 2026-10-26
+
+Source3a0b503; GPU fix1c2a15b and native binaries unchanged. Preferred source
+pins remain kernel8e611870/userland906425b7; updated kernel mainc84b463 review
+is recorded in UPSTREAM.md. Exact kernel GitHub Actions40256228186/run5/
+sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+Full image/loader/firmware/current-source/native-ABI preflight PASS. Fresh V63
+at1340702 applies ONCE:98304bytes,0new blocks; complete preimages/backups/
+files/signatures/readonly fsck/readback PASS. V63 STALE, never reuse. New UI
+stable-window-v1 is deployed; graphics/compiler/kernel/cache are reused.
+Exact observed V57 args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x6f99cc8165a7160d redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Authenticated fresh/userspace-alive/no runtime GPU fault/stop or panic; one
+backboardd61, both native correctness jobs truly OFF, no app opens/captures.
+Stable existing window after2seconds, zero replacements, full8second warmup,
+complete10.000267physical seconds:527completed presentations, ALL527GPU,
+52.698593FPS. Ten samples50.999..54.032FPS,0missed. Observer stats-valid1/
+timed-out0/finish-reason complete/idle-restored1. CADisplayLink601callbacks/
+60FPS/max16.667ms; independently measured panel90Hz,19.2MHz physical counter,
+Mach ratio1.0. This validates a finite ordinary system animation, not universal
+manual scrolling or sustained60/90render FPS. V56 remains invalid, not zeroFPS.
+V55's full native correctness still applies to these exact GPU binaries.
+
+All24frontend/retirement partitions validate,0incomplete/invalid. Median39draw
+group uploads3314bytes in106us; median avoided bytes9446520, full fallbacks0.
+Median full draw encoding3338.5us. Median native ticket wait22596.5us and
+retire-gate wait0.5us; native wait includes queued work and is not isolated GPU
+execution time. First sampled command has409ms draw emission and419ms native
+allocation I/O, no shader compile: a startup allocation stall, not proof of
+remaining per-frame constant-copy cost. GPU panel output approaches5.8ms;
+two startup fallbacks precede the all-GPU observation. `redfinfb=1` publishes
+the display interface and accompanies actual GPU composition/scale/row-pack;
+its name is not evidence of CPU rendering in the current GUI.
+
+Clean consistent unmounted HFSX/write_count1349255; verified Fastboot. Cycle
+session51776 TERMINAL exit0; no device/build operation remains live. Private
+evidence: logs/redfin/gui-platform-v57/{presentation-summary,frontend-latency}.json.
+Next fresh updaterV64/imageV58. Remaining graphics work includes real native
+waiting, the scheduled/completed API contract (waitUntilScheduled still waits
+for completion; ordinary caller frequency is unmeasured), first allocation
+outliers and60Hz callback cadence. Preserve actual FIFO publication, CPU
+consumers, aliases, real retirement/lifetimes and verified compiler cache when
+implementing the next complete performance block. Phone/Photos auto launches
+stay retired. Wi-Fi/power/sensors/Apple-services/fullscreen requirements remain
+under the active broad goal; this milestone does not complete it.
+
 ## REDFIN V56 clean; recover measurement after system-window replacement — 2026-10-26
 
 Basecebb81a; unchanged GPU fix1c2a15b, native input7548b9b0..,
