@@ -4,16 +4,18 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdbool.h>
+#include <stdio.h>
 #define REDFIN_DISPLAY_PROBE_REQUEST "/redfin/display-probe-request"
-enum {RF_DISPLAY_PROBE_NONE,RF_DISPLAY_PROBE_PASSIVE,RF_DISPLAY_PROBE_ANIMATE};
+enum {RF_DISPLAY_PROBE_NONE,RF_DISPLAY_PROBE_PASSIVE,RF_DISPLAY_PROBE_ANIMATE,RF_DISPLAY_PROBE_CHECKED};
 /* A root-owned regular control file selects one boot only. No persistent
  * animation is enabled by installing the adapter or by reading statistics. */
 static inline unsigned redfin_display_probe_request(const char *data,size_t bytes,uint64_t nonce)
 {
     static const char prefix[]="redfin-probe-v1:";
-    static const char suffix[2][10]={":passive\n",":animate\n"};
-    const size_t head=sizeof(prefix)-1,tail=sizeof(suffix[0])-1;
-    if(!data||!nonce||bytes!=head+16+tail||memcmp(data,prefix,head))return RF_DISPLAY_PROBE_NONE;
+    static const char *const suffix[]={":passive\n",":animate\n",":animate-checked\n"};
+    const size_t head=sizeof(prefix)-1;
+    if(!data||!nonce||bytes<head+16+9||bytes>head+16+17||memcmp(data,prefix,head))return RF_DISPLAY_PROBE_NONE;
     uint64_t found=0;
     for(unsigned i=0;i<16;++i) {
         unsigned c=(unsigned char)data[head+i],digit;
@@ -23,7 +25,48 @@ static inline unsigned redfin_display_probe_request(const char *data,size_t byte
         found=(found<<4)|digit;
     }
     if(found!=nonce)return RF_DISPLAY_PROBE_NONE;
-    for(unsigned i=0;i<2;++i)if(!memcmp(data+head+16,suffix[i],tail))return i+1;
+    for(unsigned i=0;i<3;++i) {
+        size_t tail=strlen(suffix[i]);
+        if(bytes==head+16+tail&&!memcmp(data+head+16,suffix[i],tail))return i+1;
+    }
     return RF_DISPLAY_PROBE_NONE;
+}
+static inline const char *redfin_display_probe_find(const char *data,size_t bytes,const char *tag)
+{
+    size_t length=strlen(tag);
+    if(!data||length>bytes)return NULL;
+    for(size_t i=0;i<=bytes-length;++i)if(!memcmp(data+i,tag,length))return data+i;
+    return NULL;
+}
+/* 0: pending/missing, 1: both real jobs succeeded in this boot, 2: failure.
+ * A rolling log from another nonce cannot authorize a measurement. */
+static inline unsigned redfin_display_probe_checks(const char *metal,size_t metal_bytes,
+    const char *gpu,size_t gpu_bytes,uint64_t nonce)
+{
+    if(!nonce)return 0;
+    char boot[32],gpu_boot[64];
+    snprintf(boot,sizeof(boot),"boot=%016llx ",(unsigned long long)nonce);
+    snprintf(gpu_boot,sizeof(gpu_boot),"REDFIN GPU RENDER BOOT: %016llx\n",(unsigned long long)nonce);
+    bool metal_done=false;
+    for(size_t at=0;metal&&at<metal_bytes;) {
+        const char *line=metal+at,*end=memchr(line,'\n',metal_bytes-at);
+        size_t bytes=end?(size_t)(end-line):metal_bytes-at;
+        if(redfin_display_probe_find(line,bytes,boot)&&
+           redfin_display_probe_find(line,bytes,"REDFIN GRAPHICS MEMORY:")&&
+           redfin_display_probe_find(line,bytes,"phase=checker-after ") ) {
+            if(!redfin_display_probe_find(line,bytes,"status=0 "))return 2;
+            metal_done=true;
+        }
+        at+=bytes+(end?1:0);
+    }
+    const char *begin=redfin_display_probe_find(gpu,gpu_bytes,gpu_boot);
+    if(!begin)return 0;
+    size_t remaining=gpu_bytes-(size_t)(begin-gpu);
+    if(redfin_display_probe_find(begin,remaining,"REDFIN GPU RENDER FAIL:"))return 2;
+    const char *result=redfin_display_probe_find(begin,remaining,"REDFIN GPU RENDER RESULT:");
+    if(!result)return 0;
+    size_t tail=gpu_bytes-(size_t)(result-gpu);
+    if(!redfin_display_probe_find(result,tail,"REDFIN GPU RENDER RESULT: result=0 hardware=1 draws=2\n"))return 2;
+    return metal_done?1:0;
 }
 #endif

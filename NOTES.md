@@ -1,5 +1,29 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN one-cycle correctness-then-FPS gate ready; throughput CI running — 2026-10-26
+
+Complete native block sourceeb4d1dc is building in GitHub Actions40249668400/run4.
+Paired graphics local native/ABI/signatures PASS, input
+8bd468b86d75b0e095908dd6d9029588c6f27c6a508c6efaabf42f4a5ca2caa8,
+pairingf4e437ea7f24005f8bc4a4e2f531d935e2b260504655f4b7f3591794c271047f.
+Correctness probes ON, heavy captures/app opens OFF. Final UIthroughput-v2
+native/actual20H392 ABI/signatures/current source hashes PASS.
+
+Add an explicit nonce-bound49-byte animate-checked request. Its bounded readonly
+64KiB log tails must contain BOTH current-boot success records before starting
+the same finite existing-window animation. Missing work waits at most60seconds;
+a failure/refusal cannot become a performance result. Ordinary prior passive/
+animate modes remain compatible.2host parser/gate cases PASS, plus actual V44
+success logs accepted and another nonce rejected.91scope/runtime/contracts PASS,
+including actual2s late callback source retention. No intermediate device boot.
+
+Fresh V54 read complete at actual clean1253412, with the complete new bundle/UI
+inventory. Phone is idle in temporary Linux recovery, no root write since V47.
+V54 not staged/applied yet. Apply guard requires the exact matching throughput
+CI source and ScopedWait ABI. Next: matching kernel delivery, V48 image/one-boot
+request, complete V54 staged audit/fsck/apply, one combined native-and-FPS cycle.
+Full goal remains active; stable60/90render and90callbacks are not yet observed.
+
 ## REDFIN complete scoped-wait/FIFO/cadence block implemented; native builds PASS — 2026-10-26
 
 Source base3633c0c plus this block. Re-review preferred kernel8e611870's
