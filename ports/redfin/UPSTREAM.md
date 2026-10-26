@@ -2,6 +2,18 @@
 
 ## Scoped native throughput hardware outcome — 2026-10-26
 
+V49 repeats the identical native binaries/compiler identity with startup jobs
+OFF and persisted caches:173actual GPU presentations/10.000194physical seconds,
+17.299664FPS, still60callbacks/panel90Hz. This rules out cold pipeline creation
+as the sole cause of the observed sustained lag. Review Mesa25.0.7
+freedreno_ringbuffer_sp.c: shared BOs force immediate Linux implicit-sync
+publication, and its128 deferred-command threshold is not a pre-admission
+native128-IB bound. The Redfin backend already supplies retained global FIFO,
+scoped physical CPU waits and explicit final-fence publication. Adapt Mesa's
+existing no_implicit_sync mode after both verified native ABIs; preserve CPU
+flushes, priority/queue boundaries, BO/view/fence lifetimes and actual completion.
+Bound aggregate IB/BO/range inventories before accepting another deferred batch.
+
 Preferred kernel8e61187098f2c26c5daee8f9f72b6416aa64b9ab and userland
 906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain pinned. V48 now passes the
 complete actual A620 scoped-dependency/FIFO/queued-Metal correctness block,

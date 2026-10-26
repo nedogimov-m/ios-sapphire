@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V49 exact warm ordinary comparison:17.3 GPU FPS — 2026-10-26
+
+Source5b2073b; identical V48 native kernel CI40249668400/run4/sourceeb4d1dc,
+08dab9cd4d50c2223a68ea2d6ffc5080bafd9f583fde1429b553a16436507fb0.
+Identical native graphics input8bd468b86d75b0e095908dd6d9029588c6f27c6a508c6efaabf42f4a5ca2caa8,
+pairingf4e437ea7f24005f8bc4a4e2f531d935e2b260504655f4b7f3591794c271047f,
+all binaries/UI and persisted compiler caches unchanged. Preserve original
+checks-on result/ABI/job evidence privately, change only two launchd jobs and
+their manifest hashes to checks OFF. No native rebuild/dependency preparation.
+Fresh V55/root1262147 stages266240bytes, zero new/freed blocks; full files,
+signatures, readonly fsck/preimages/backups/readback PASS. Apply ONCE; now STALE.
+V49 image3beae06e36d43dfc49de11f81cfd74207474b589cbaae254b3d5fb6a6ee15f1c.
+Exact observed args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x0c15e6d9f5daac6f redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Authenticated fresh/userspace-alive/no panic, one backboardd61; clean unmounted
+consistent HFSX/write_count1270359, verified Fastboot. No captures, graphics
+startup jobs or Phone/Photos opens. Ordinary observer stats-valid1/timed-out0:
+173actual completed GPU presents/10.000194physical seconds =17.299664FPS;
+ten samples15.000..19.002, none missed. Separate callbacks60FPS/panel90Hz/
+counter19200000Hz/Mach ratio1.0. Warm result confirms no material throughput
+gain; cold compilation alone does not explain the remaining latency.
+
+Source review finds native Mesa still flushes each shared-IOSurface batch at
+Linux's implicit-sync boundary, despite this backend's retained global FIFO,
+physical CPU barriers and explicit Metal final-fence publication. Next complete
+block enables native shared-batch merging only after BOTH current ABIs pass,
+retains explicit CPU/final publication and queue/priority boundaries, and adds
+pre-admission IB/BO/range bounds. Reuse the existing kernel. Implement the whole
+block before combined host/native checks and the next device cycle. Next fresh
+V56/root1270359, imageV50. The broad goal remains active.
+
 ## REDFIN V48 complete native throughput correctness PASS;17.6 GPU FPS — 2026-10-26
 
 Source004d17a; kernel sourceeb4d1dc, GitHub Actions40249668400/run4 SUCCESS,
