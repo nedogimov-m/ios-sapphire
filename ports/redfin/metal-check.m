@@ -35,6 +35,7 @@
 #include "metal-ordering-check.inc"
 #include "metal-bindings-check.inc"
 #include "metal-queued-check.inc"
+#include "metal-scheduling-check.inc"
 #include "metal-ubo-extents-check.inc"
 
 int redfin_metal_resource_check(const char *path,uint64_t nonce);
@@ -344,6 +345,7 @@ int main(void)
             BOOL ordering=short_bounds&&ordering_native(device,library,nonce);
             BOOL bindingReuse=short_bounds&&bindings_native(device,library,nonce);
             BOOL queued=short_bounds&&queued_native(device,library,nonce);
+            BOOL scheduling=short_bounds&&scheduling_native(device,nonce);
             BOOL uboExtents=short_bounds&&ubo_extents_native(device,library,nonce);
             BOOL resourceReferences=short_bounds&&redfin_metal_resource_check("/redfin/lib/redfin-resource-check.bc",nonce);
             uint64_t routes[2]={0};BOOL gmem=dependencies&&native_gmem_statistics(device,routes);
@@ -353,8 +355,9 @@ int main(void)
             printf("REDFIN METAL COMPOSITION RESULT: boot=%016llx clear-only-mrt-scissor-viewport-fetch-pixels-guards=%u vertex-stream-varying-sample-pixels-guards=%u pitch480-two-seeds-pixels-guards=%u pitch4512-two-seeds-pixels-guards=%u resolve480-pixels-guards=%u resolve4512-pixels-guards=%u visible-overlay=0\n",
                 (unsigned long long)nonce,raster,vertices,pitch480,pitch4512,resolve480,resolve4512);
             [pipeline release];[function release];[library release];dispatch_release(group);[device release];
-            redfin_graphics_memory_report("checker-after",0);
-            return gmem&&short_bounds&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&uboExtents&&resourceReferences ? 0 : 1;
+            int status=gmem&&short_bounds&&raster&&vertices&&halfRaster&&pitch480&&pitch4512&&resolve480&&resolve4512&&blits&&buffers&&bufferTextures&&alpha&&constants&&preparation&&ordering&&bindingReuse&&queued&&scheduling&&uboExtents&&resourceReferences ? 0 : 1;
+            redfin_graphics_memory_report("checker-after",status);
+            return status;
         } @catch (NSException *exception) {
             printf("REDFIN METAL CHECK: exception=%s reason=%s\n",exception.name.UTF8String,exception.reason.UTF8String);
             return 1;

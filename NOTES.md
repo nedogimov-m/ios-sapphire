@@ -1,5 +1,43 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native scheduling/completion separation built; V58 ready — 2026-10-26
+
+Base1d873ac. Successful commands release scheduling only after commands_submit
+returns an actual fully published FIFO ticket, including IOSurface resolves.
+Publish outside the Gallium gate. Scheduled status/waiters/early and late
+handlers now use their own group; actual completion, CPU resource readiness,
+queue slots, error visibility and command lifetimes keep real native retirement.
+Encoding/submit refusals retain their full drain and do not report successful
+scheduling. No new command dropping, queue bypass or fake GPU completion.
+Sparse completion-sampled process counters distinguish scheduled/completed
+API calls, waits, early returns, publication and handler delivery, including
+zero-use cases. New native probes cover cross-queue guards, repeated/late
+handlers and a scheduled handler that submits and waits for actual GPU work.
+The checker's final memory/result marker now carries the real aggregate status.
+
+28combined host contracts PASS, including actual adapted ObjC methods against
+independently gated native publication/completion, early success, later GPU
+failure, partial-submit errors, begin/allocation refusals, two commands in
+flight, callback submit/wait, deallocation reentry, resource gates, actual NIR
+extents, cache and observer contracts. Full native build20261026-101949,
+actual20H392 ABI/imports/strict signatures/current generated sources and actual
+AIR/plugin pairing2407206f7dccd00a046045d4112b687f9a89378116325cd9f3dd8dcc1c3411bf
+PASS. Runtime-only source changes retain exact compiler input7548b9b0.. and
+shader cache496301fc..; no shader/compiler/serialization change. Existing
+environment and compiled objects reused; prior full validated V57 work is
+preserved by APFS clone at research/redfin-metal-ubo-extent-v57-validated.
+
+Kernel unchanged GitHub Actions40256228186/run5/sourcec0d129b SUCCESS,
+739f1e53e3c6535353b42f2d2f49bcf9862de5690155f42be4650c83105f8315.
+V58 full kernel/loader/firmware/source/ABI image preflight PASS. Exact planned
+args: `debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xd9b357ed99666644 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Fresh V64 expects actual clean1349255; not applied. Checks ON, one-boot request
+animate-checked matches V58; observer must await the current native results
+before warmup/measurement. App opens and captures remain OFF; UIstable-window-v1
+reused. Next: V64 full fresh stage/apply/readback, then one combined native and
+checked-animation cycle. New hardware correctness and speedup remain unproved;
+V57's52.699FPS remains the latest valid ordinary baseline. Broad goal active.
+
 ## REDFIN V57 valid ordinary animation:52.699GPU FPS — 2026-10-26
 
 Source3a0b503; GPU fix1c2a15b and native binaries unchanged. Preferred source

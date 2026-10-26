@@ -41,6 +41,34 @@ static void redfin_metal_schedule(dispatch_group_t group,
 '''
 
 STATS=r'''
+static uint64_t redfin_scheduling[REDFIN_METAL_SCHEDULING_WORDS];
+static void redfin_scheduling_add(unsigned field,uint64_t count)
+{__atomic_fetch_add(&redfin_scheduling[field],count,__ATOMIC_RELAXED);}
+static void redfin_scheduling_read(uint64_t *counts)
+{
+    for(unsigned i=0;i<REDFIN_METAL_SCHEDULING_WORDS;++i)
+        counts[i]=__atomic_load_n(&redfin_scheduling[i],__ATOMIC_RELAXED);
+}
+static void redfin_scheduling_wait(BOOL scheduled,BOOL blocked,BOOL early,uint64_t start)
+{
+    redfin_scheduling_add(scheduled?RF_MS_SCHEDULED_CALLS:RF_MS_COMPLETED_CALLS,1);
+    redfin_scheduling_add(scheduled?RF_MS_SCHEDULED_BLOCKS:RF_MS_COMPLETED_BLOCKS,blocked);
+    redfin_scheduling_add(scheduled?RF_MS_SCHEDULED_US:RF_MS_COMPLETED_US,
+        redfin_phase_us(start,mach_absolute_time()));
+    if(scheduled&&early)redfin_scheduling_add(RF_MS_EARLY_RETURNS,1);
+}
+static void redfin_scheduling_report(uint64_t sequence)
+{
+    uint64_t c[REDFIN_METAL_SCHEDULING_WORDS];redfin_scheduling_read(c);
+    uint64_t n=c[RF_MS_SCHEDULED_CALLS]+c[RF_MS_COMPLETED_CALLS];
+    rw_print("REDFIN METAL SCHEDULING: boot=%s sequence=%llu calls=%llu publications=%llu scheduled-calls=%llu scheduled-blocks=%llu scheduled-wait-us=%llu scheduled-before-completion=%llu completed-calls=%llu completed-blocks=%llu completed-wait-us=%llu scheduled-handlers=%llu completed-handlers=%llu real-retirement-required=1 process-cumulative=1\n",redfin_fence_boot,
+        (unsigned long long)sequence,(unsigned long long)n,(unsigned long long)c[RF_MS_PUBLICATIONS],
+        (unsigned long long)c[RF_MS_SCHEDULED_CALLS],(unsigned long long)c[RF_MS_SCHEDULED_BLOCKS],
+        (unsigned long long)c[RF_MS_SCHEDULED_US],(unsigned long long)c[RF_MS_EARLY_RETURNS],
+        (unsigned long long)c[RF_MS_COMPLETED_CALLS],(unsigned long long)c[RF_MS_COMPLETED_BLOCKS],
+        (unsigned long long)c[RF_MS_COMPLETED_US],(unsigned long long)c[RF_MS_SCHEDULED_HANDLERS],
+        (unsigned long long)c[RF_MS_COMPLETED_HANDLERS]);
+}
 struct redfin_metal_encoded_stats {
     uint64_t queued,worker,acquired,submitted;
     uint64_t io_start[10],io_end[10];
@@ -63,6 +91,7 @@ static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats 
     if(!n)return;
     if(s->io_valid)redfin_metal_io_sequence(s->io_start,s->io_end,n);
     if(n>4&&(n&(n-1))&&(n%120))return;
+    redfin_scheduling_report(n);
     rw_print("REDFIN METAL RETIREMENT: boot=%s sequence=%llu actual-finish=1 native-ticket=%u completion-queue-us=%llu native-wait-us=%llu predecessor-us=%llu retire-gate-us=%llu bookkeeping-us=%llu resources-us=%llu slot-us=%llu submit-to-ready-us=%llu\n",redfin_fence_boot,(unsigned long long)n,p->native_ticket,
         (unsigned long long)redfin_phase_us(s->submitted,p->worker),
         (unsigned long long)redfin_phase_us(p->worker,p->native_done),
@@ -110,9 +139,62 @@ static void redfin_metal_encoded_report(const struct redfin_metal_encoded_stats 
 }
 '''
 
+SCHEDULING=r'''
+/* Only native FIFO publication releases scheduling waiters. GPU completion,
+ * CPU-visible resources, queue slots and errors keep their real retirement. */
+- (void)redfinDeliverScheduled
+{
+    @synchronized(self) {
+        if(!_redfinScheduled&&!_redfinFinalized)return;
+        if(_redfinSchedulingPending) {
+            _redfinSchedulingPending=NO;dispatch_group_leave(_redfinScheduling);
+        }
+        NSArray *scheduled=_scheduled;_scheduled=nil;
+        redfin_scheduling_add(RF_MS_SCHEDULED_HANDLERS,scheduled.count);
+        for(id handler in scheduled)[self redwoodDeliver:(void (^)(id))handler];
+        [scheduled release];
+    }
+}
+- (void)redfinPublishScheduled
+{
+    @synchronized(self) {
+        if(_redfinScheduled||_redfinFinalized||_status==RW_CB_ERROR)return;
+        _status=RW_CB_SCHEDULED;_redfinScheduled=YES;
+        redfin_scheduling_add(RF_MS_PUBLICATIONS,1);
+        [self redfinDeliverScheduled];
+    }
+}
+- (void)waitUntilScheduled
+{
+    uint64_t start=mach_absolute_time();
+    BOOL blocked=!_redfinFinalized&&!_redfinScheduled&&_status>=RW_CB_COMMITTED;
+    if(blocked)dispatch_group_wait(_redfinScheduling,DISPATCH_TIME_FOREVER);
+    redfin_scheduling_wait(YES,blocked,_redfinScheduled&&!_redfinFinalized,start);
+}
+- (void)waitUntilCompleted
+{
+    uint64_t start=mach_absolute_time();
+    BOOL blocked=!_redfinFinalized&&_status>=RW_CB_COMMITTED;
+    if(blocked)dispatch_group_wait(_redfinExecution,DISPATCH_TIME_FOREVER);
+    redfin_scheduling_wait(NO,blocked,NO,start);
+}
+'''
+
 
 def adapt(text):
-    text=replace_once(text,'#include "metal-ordering.h"','#include "metal-ordering.h"\n#include "metal-queued.h"\n#include "metal-frontend-profile.h"')
+    text=replace_once(text,'#include "metal-ordering.h"','#include "metal-ordering.h"\n#include "metal-queued.h"\n#include "metal-frontend-profile.h"\n#include "metal-scheduling.h"')
+    text=replace_once(text,'\t_Atomic(BOOL) _redfinFinalized;',
+        '\t_Atomic(BOOL) _redfinFinalized;\n\t_Atomic(BOOL) _redfinScheduled;\n'
+        '\tdispatch_group_t _redfinScheduling;\n\tBOOL _redfinSchedulingPending;')
+    text=replace_once(text,'\t_redfinExecution=dispatch_group_create();\n\tif (!_redfinExecution)',
+        '\t_redfinExecution=dispatch_group_create();\n\t_redfinScheduling=dispatch_group_create();\n'
+        '\tif (!_redfinExecution||!_redfinScheduling)')
+    text=replace_once(text,'\tif (_redfinExecution) dispatch_release(_redfinExecution);',
+        '\tif (_redfinExecution) dispatch_release(_redfinExecution);\n'
+        '\tif (_redfinScheduling) dispatch_release(_redfinScheduling);')
+    text=replace_once(text,'\t\tdispatch_group_enter(_redfinExecution);',
+        '\t\tdispatch_group_enter(_redfinExecution);\n'
+        '\t\tdispatch_group_enter(_redfinScheduling);_redfinSchedulingPending=YES;')
     point='\tint (*commands_end)(struct rwa_device *, char *, size_t);'
     text=replace_once(text,point,point+'''
     int (*commands_submit)(struct rwa_device *,struct rwa_redfin_completion **,char *,size_t);
@@ -150,7 +232,7 @@ def adapt(text):
     execute=r'''- (void)redfinEncodeAfter:(dispatch_group_t)previous finish:(dispatch_block_t)finish
 {
     struct redfin_metal_encoded_stats stats={.queued=_redfinQueuedTicks,.worker=mach_absolute_time()};
-    struct rwa_redfin_completion *ticket=NULL;
+    struct rwa_redfin_completion *ticket=NULL;BOOL published=NO;
     char why[512]={0};
     {
         REDFIN_MESA_SCOPE;
@@ -170,7 +252,11 @@ def adapt(text):
         } @catch(NSException *exception) {
             [self failWith:exception.reason.UTF8String ?: "Metal encoding raised an exception"];
         } @finally {
-            if(began&&mesa.commands_submit(device,&ticket,why,sizeof(why))) [self failWith:why];
+            if(began) {
+                int error=mesa.commands_submit(device,&ticket,why,sizeof(why));
+                if(error)[self failWith:why];
+                published=!error&&ticket&&_status!=RW_CB_ERROR;
+            }
             stats.submitted=mach_absolute_time();
             for(RedwoodMetalWork *work in _work) {
                 if(work->redfinClearOnly||work->redfinBlit.operation)continue;
@@ -182,6 +268,7 @@ def adapt(text):
             stats.order_valid=stats.order_valid&&mesa.ordering_statistics(device,stats.order_end,REDFIN_METAL_ORDERING_WORDS)==0;
         }
     } /* Release the Gallium gate before any actual GPU wait. */
+    if(published)[self redfinPublishScheduled];
     if(previous)dispatch_retain(previous);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE,0),^{
         @autoreleasepool {
@@ -202,7 +289,6 @@ def adapt(text):
                 phases.retired=mach_absolute_time();
                 if(error)[self failWith:completed_why];
                 if(_status!=RW_CB_ERROR) {
-                    _status=RW_CB_SCHEDULED;
                     _status=RW_CB_COMPLETED;
                     report=YES;
                 }
@@ -226,19 +312,50 @@ def adapt(text):
 }
 '''
     text=text[:first]+execute+text[last:]
-    # An encoding refusal can be recorded before previously emitted GPU work
-    # retires. Public Error/Completed status and scheduled waiters must cover
-    # that real fence and resource cleanup too.
+    # A native ticket covers actual flushed FIFO admission, including resolves.
+    # An encoding refusal retains its full drain; it is not a scheduling success.
     text=replace_once(text,'- (NSUInteger)status { return _status; }',
-        '- (NSUInteger)status {NSUInteger status=_status;return !_redfinFinalized&&status>=RW_CB_SCHEDULED?RW_CB_COMMITTED:status;}')
-    text=replace_once(text,
-        '- (void)waitUntilScheduled {if (_status<RW_CB_SCHEDULED && _status>=RW_CB_COMMITTED) [self waitUntilCompleted];}',
-        '- (void)waitUntilScheduled {[self waitUntilCompleted];}')
-    # Failed encoding can set Error before its emitted work has retired.
+        '- (NSUInteger)status {NSUInteger status=_status;return !_redfinFinalized&&status>=RW_CB_SCHEDULED?(_redfinScheduled?RW_CB_SCHEDULED:RW_CB_COMMITTED):status;}')
+    first=text.index('- (void)waitUntilCompleted\n{')
+    last=text.index('\n/*\n * HANDLERS,',first)
+    text=text[:first]+SCHEDULING+text[last:]
+    first=text.index('/*\n * HANDLERS, AND WHERE THEY RUN.')
+    last=text.index('- (void)redwoodDeliver:(void (^)(id))handler',first)
+    text=text[:first]+'''/* Scheduled handlers follow actual native FIFO publication. Completed handlers
+ * follow actual fence retirement and resource readiness, including failures.
+ * Both use the caller's completion queue or an off-encoder default, so callbacks
+ * may submit and wait reentrantly. Late handlers are delivered exactly once. */
+'''+text[last:]
     first=text.index('- (void)addScheduledHandler:');last=text.index('\n}\n',first)+3
     part=text[first:last]
-    part=replace_once(part,'if (_status >= RW_CB_SCHEDULED)', 'if (_redfinFinalized)')
+    part=replace_once(part,'if (_status >= RW_CB_SCHEDULED)', 'if (_redfinScheduled||_redfinFinalized)')
+    first_comment=part.index('\t/* scheduled or further,')
+    last_comment=part.index('\tif (_redfinScheduled||_redfinFinalized)',first_comment)
+    part=part[:first_comment]+'\t/* Native publication or final error cleanup releases scheduling. */\n'+part[last_comment:]
+    part=replace_once(part,'[self redwoodDeliver:handler];',
+        'redfin_scheduling_add(RF_MS_SCHEDULED_HANDLERS,1);[self redwoodDeliver:handler];')
     text=text[:first]+part+text[last:]
+    first=text.index('- (void)addCompletedHandler:');last=text.index('\n}\n',first)+3
+    part=text[first:last]
+    part=replace_once(part,'[self redwoodDeliver:handler];',
+        'redfin_scheduling_add(RF_MS_COMPLETED_HANDLERS,1);[self redwoodDeliver:handler];')
+    text=text[:first]+part+text[last:]
+    first=text.index('- (void)redwoodDeliverHandlers\n{');last=text.index('\n}\n',first)+3
+    first=text.rfind('/* Called from the one place',0,first)
+    if first<0:raise ValueError('unreviewed native handler completion block')
+    text=text[:first]+r'''/* Called only after real retirement, or refusal before native work began. */
+- (void)redwoodDeliverHandlers
+{
+    @synchronized(self) {
+        if(!_redfinFinalized)return;
+        [self redfinDeliverScheduled]; /* Failed/empty commands also release waiters. */
+        NSArray *completed=_completed;_completed=nil;
+        redfin_scheduling_add(RF_MS_COMPLETED_HANDLERS,completed.count);
+        for(id handler in completed)[self redwoodDeliver:(void (^)(id))handler];
+        [completed release];
+    }
+}
+'''+text[last:]
     text+=r'''
 int redfin_metal_frontend_statistics(id device,uint64_t *counts,size_t words)
 {
@@ -246,6 +363,12 @@ int redfin_metal_frontend_statistics(id device,uint64_t *counts,size_t words)
     if(!device||![device isKindOfClass:[RedwoodMetalDevice class]]||!mesa_available()||
        !mesa.frontend_statistics)return -1;
     return mesa.frontend_statistics([(RedwoodMetalDevice *)device mesaDevice],counts,words);
+}
+int redfin_metal_scheduling_statistics(id device,uint64_t *counts,size_t words)
+{
+    if(!device||![device isKindOfClass:[RedwoodMetalDevice class]]||!counts||
+       words!=REDFIN_METAL_SCHEDULING_WORDS)return -1;
+    redfin_scheduling_read(counts);return 0;
 }
 '''
     return text

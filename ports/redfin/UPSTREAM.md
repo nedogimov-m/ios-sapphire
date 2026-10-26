@@ -1,5 +1,26 @@
 # HackiOS upstream review — 2026-10-22
 
+## Release scheduling at actual native FIFO publication — 2026-10-26
+
+Re-reviewed preferred userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+redwoodmetal.m command state/handlers and the current paired command-submit
+implementation. The retained Redfin adapter already publishes every native
+batch and IOSurface resolve before returning its ticket; internal display
+jobs share that same FIFO and retain the actual source surfaces. This gives
+an actual scheduling point before fence retirement. Keep kernel pin8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+and the reviewed-mainc84b4634277a70beac73921029b1fb6afc2530af decision below.
+
+Adapt20H392 command status, scheduled waits and both early/late handler paths
+to that publication. Keep completed waits, CPU-visible resources, partial
+errors, slots and owned command lifetime tied to real completion. Callbacks
+remain off the encoder and may submit/wait reentrantly. Runtime counters are
+process-cumulative observations, sampled at actual command completion; they
+never change AIR/NIR, programs or serialized caches. Aggregate checker status
+now also covers every new native result.28host contracts and the complete
+native ABI/signature/current-source/pairing audit PASS; exact prior compiler
+input/cache retained, old validated work preserved. V58 native correctness
+and any ordinary FPS improvement remain pending; no performance claim yet.
+
 ## Ordinary A620 system animation after bounded constants:52.699FPS — 2026-10-26
 
 V57/source3a0b503 preserves the exact V55/source1c2a15b graphics binaries,

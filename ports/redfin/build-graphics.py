@@ -332,6 +332,8 @@ def main():
                 metal_sources += [ROOT/'ports/redfin'/name for name in
                                   ('metal_queued_userland.py','metal-queued.h','metal-queued-check.inc','metal-queued-resource-check.inc','metal-frontend-profile.h')]
                 metal_sources += [ROOT/'ports/redfin/metal-ubo-extents-check.inc']
+                metal_sources += [ROOT/'ports/redfin'/name for name in
+                                  ('metal-scheduling.h','metal-scheduling-check.inc')]
                 pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)
