@@ -1,5 +1,22 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V69 applied once; corrected V63 combined hardware cycle starting — 2026-10-26
+
+Code6ed25b7; native pair4447fa9d.., UIpadding-contract-v1, reused run9/source5be3287/
+kernelc363bc80.. and shader cache496301fc.. . Fresh V69 actual clean1399190,
+empty journal; complete target preimages, retained CNIDs/extents/owners, native
+readonly fsck and signatures PASS. Apply ONCE262144bytes,0new/freed blocks;
+complete device file readback, clean root and verified Fastboot PASS. V69 is
+STALE, never reuse. Next fresh V70/imageV64; next epoch unknown until collection.
+
+V63 imagee3a577e2.. complete preflight PASS. Exact boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x8a230a34954764e8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Request animate-checked under fresh nonce8a230a34954764e8 requires explicit
+actual checker EXIT0 and the real GPU job result before animation. All native
+correctness cases ON; captures and Phone/Photos automatic launches OFF. One
+combined temporary cycle follows; actual result/performance pending. Broad
+goal remains active, smooth60/90FPS and other platform requirements unfinished.
+
 ## REDFIN corrected native checker/measurement gate built; V63 preflight PASS — 2026-10-26
 
 Complete related checker block: expected output guards use only the probe's
