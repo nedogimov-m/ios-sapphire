@@ -40,8 +40,10 @@ refuse before running. Physical UI brightness and complete controls remain
 unfinished. The complete cold-output FIFO/first-reader correction now passes
 124combined and final11affected checks plus the exact native GPU TU: a shared
 finite cold predecessor allowance, followed by ordinary2s waits, preserves
-actual caller deadlines and ownership. New kernel CI28/one V105 observation
-is next; userspace graphics/UI are retained. V104 returns clean1768532/Fastboot,
+actual caller deadlines and ownership. CI28's omitted-patch artifact is
+rejected before device use; the actual CI builder now shares the canonical
+inventory and corrected CI29/one V105 observation is next. Userspace graphics/
+UI are retained. V104 returns clean1768532/Fastboot,
 one server/no panic; V107 is stale/never reuse.
 V99 stays the preserved measured performance baseline.
 The preferred upstream GLES bridge now composes the GUI while native Metal

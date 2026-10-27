@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected actual builder1e4b4dc in CI29; no device changes — 2026-10-27
+
+Canonical build inventory fix committed1e4b4dc938403a09c1a93356d8b7d151001af404;
+actual staging/order/missing-overlay contracts PASS, native FIFO/first-reader
+implementation8c422d8 unchanged. Dispatched owned Actions40448042380/run29
+for that exact1e4b4dc:
+https://github.com/nedogimov-m/ios-sapphire/actions/runs/40448042380 .
+Watcher session57932 / research/redfin-cold-output-v1/watch-kernel-ci29.py
+verifies only this terminal artifact, requires CI27's entire unchanged patch
+map PLUS native-cold-output-waits.patch and all cold ABI markers, then prepares
+V105. It never stages/applies/boots automatically. CI28 is REJECTED and must
+never be used; its failed acceptance evidence stays private.
+
+Fresh V108 read1768532 stays preserved in unmounted offline recovery, no
+stage/apply/iOS boot. The existing verified header/preimages gate will be used;
+no redundant read or Mesa/Metal/UI/compiler rebuild. Last actual kernel is
+CI27/883286e/kernel4f99141c.., last V104 full arguments/results remain below.
+Next one combined V105 after corrected native artifact proof. Broader GOAL
+active, no physical brightness/controls/FPS or other new success inferred.
+
 ## REDFIN CI28 rejected before device use; canonical CI inventory corrected — 2026-10-27
 
 CI28 Actions40446572438/source8c422d8 is TERMINAL SUCCESS, but its downloaded
