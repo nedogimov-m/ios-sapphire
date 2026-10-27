@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CI27 terminal/native CB ABI verified; one V101 integration starts — 2026-10-27
+
+Actions40432973023/run27/source883286e TERMINAL SUCCESS. Complete current
+patch map, XNU/KDK/source identity, retained graphics/input and new native
+CoreBrightness dictionary/typed-transport markers PASS. Actual kernel
+4f99141c5753af890e1b10c30aadc9fa6463f91ca7c6dcda2fcaf513ff06cfde.
+Full V101 payload/ADT/live FDT/private identity/keychain/RTC/firmware/source/
+loader/native GPU ABI and installed20H392 CoreBrightness body audit PASS.
+No Mesa/Metal/compiler/UI rebuild: native035131/Mesa1a4ad42c../Metal17d0f01f../
+cache496301fc../UI da1f3982../refresh4a02d6e1.. retained exactly.
+
+Fresh V104 remains bound to clean1730084 before stage/apply. ONE complete
+V101 GPU/private pixel/panel/native Metal/public UIKit brightness/off/wake/
+restoration/input-readiness/finite FPS capture now starts after the existing
+preimage/backups/fsck/readback gate. Automatic Phone/Photos opens and captures
+remain OFF. No corrected public brightness or performance success inferred
+before its terminal evidence. V103 remains STALE/never reuse. V101 image
+e3244402715073b6aa7e450db310bf338e474fe73f17eec0143425a94688d207
+nonce848822ca8a1500e9. Exact boot arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x848822ca8a1500e9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+All wider GOAL items remain active; physical key actions/ALS/full suspend and
+other human-dependent observations are still deferred as requested.
+
 ## REDFIN actual CB contract883286e in CI27; fresh V104 read complete — 2026-10-27
 
 Complete native backlight fix committed883286e53b637a2f71d48918132c2152ac720405,
