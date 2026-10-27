@@ -56,10 +56,12 @@ inventory omitted the new native overlay;287entries and no cold ABI markers.
 It was never accepted/staged/booted. Duplicate inventory is now removed; the
 actual CI staging loop consumes the canonical preparer list, with executable
 order/missing-overlay checks PASS. Native8c422d8 block stays unchanged. Corrected
-builder1e4b4dc is running in CI29 Actions40448042380. Watcher57932 requires
-old+new exact map/cold ABI, prepares V105 and never boots. Fresh V108 read
-remains1768532, offline recovery idle; no stage/apply/iOS boot. Userspace
-GLES/Metal/UI/compiler remain retained. CI28 is forbidden.
+CI29 Actions40448042380/run29/source1e4b4dc is TERMINAL SUCCESS and accepted:
+complete288entry map=CI27's unchanged287+new overlay, all cold/retained ABI,
+actual kernel11d60b4d.. and fresh V105 image79fb2ec9../nonce2b3f4ef972a3cb39
+full preflight PASS. Watcher57932 terminal exit0, never boots. Fresh V108 read
+1768532 is preserved for stage/apply ONCE/ONE combined V105. Userspace GLES/
+Metal/UI/compiler retained; CI28 forbidden. Corrected hardware result pending.
 New hardware result remains pending. V99 is the preserved measured baseline.
 
 Kernel4f99141c../Mesa1a4ad42c../Metal17d0f01f../native035131/cache496301fc.. stay

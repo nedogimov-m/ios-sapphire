@@ -1,5 +1,39 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CI29 accepted with actual cold ABI; fresh V105 ready for one combined run — 2026-10-27
+
+Actions40448042380/run29/source1e4b4dc938403a09c1a93356d8b7d151001af404
+TERMINAL SUCCESS and accepted complete source/artifact proof. Actual288entry
+patch map equals retained CI27's entire unchanged287 PLUS
+native-cold-output-waits.patch; exact builder/XNU/KDK identities and all native
+cold/retained GPU/display/input markers PASS. CI28 stays REJECTED/never use.
+Accepted kernel11d60b4d3fc2839d65b084e06a5f5cc1204f364cceb5cf4e8e4ca45e27896a48,
+research/redfin-gpu/kernel-native-cold-output-ci-v1. Complete actual native
+TU/source/host/FIFO proofs are recorded above. No Mesa/Metal/compiler/UI build.
+
+Fresh V105 image79fb2ec90e03ea795518a6f9bcd99da417b77591cd2dd7f492fc4eef0cf42eeb,
+nonce2b3f4ef972a3cb39 passes complete Image/payload/ADT/FDT/private identity/
+material/RTC/firmware/loader/source/kernel/native UI/graphics ABI preflight.
+Retained UI5a501aac../refresh6e9f8c83../native035131/Mesa1a4ad42c../
+Metal17d0f01f../cache496301fc.. are source-exact. Watcher57932 TERMINAL exit0;
+no watcher controls the phone. Fresh V108 READ at clean1768532 is reused
+without redundant capture. Next stage/apply ONCE with complete live preimages/
+readback/readonly fsck, then ONE V105 combined GPU/brightness/off/wake/input-
+readiness/independent finite FPS run. No Phone/Photos opens/frame capture.
+No actual corrected brightness or performance success before terminal data;
+all wider GOAL items active. Proposed V105 arguments (last actual V104 below):
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x2b3f4ef972a3cb39 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
+Additional READ ONLY private analysis: native saved preferences contain3known
+records,2names are visible in V104 passive scan, but no native set20association
+request is observed.2records have NoAssociationWithNewMac true. Native set383
+is Apple's actual20H392 Apple80211SetProperty wrapper (IO80211 UUIDf6acf84e..),
+not a named standalone MAC request;111such unsupported requests are observed.
+Neither their causal role nor availability of real Keychain passwords is proved.
+Aggregates only saved, no identities/passwords printed or preferences modified.
+Wi-Fi needs a complete native-property/autojoin/MAC/credential block after the
+current corrected graphics/controls result, not an assumed password diagnosis.
+
 ## REDFIN corrected actual builder1e4b4dc in CI29; no device changes — 2026-10-27
 
 Canonical build inventory fix committed1e4b4dc938403a09c1a93356d8b7d151001af404;
