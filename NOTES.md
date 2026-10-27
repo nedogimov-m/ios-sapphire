@@ -1,5 +1,28 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN actual CB contract883286e in CI27; fresh V104 read complete — 2026-10-27
+
+Complete native backlight fix committed883286e53b637a2f71d48918132c2152ac720405,
+94combined actual-helper/installed ABI/other contracts PASS, all3exact native
+TUs PASS. No Mesa/Metal/compiler/UI rebuild; native controls-v1 UI da1f3982..
+remains source-exact. Dispatched owned Actions40432973023/run27, exact883286e:
+https://github.com/nedogimov-m/ios-sapphire/actions/runs/40432973023 .
+Current native build IN_PROGRESS (started01:30:57UTC); watcher session96353
+research/redfin-controls-v1/watch-kernel-ci27.py waits for that exact terminal
+source/artifact, verifies every patch/ABI marker and prepares only new V101.
+No device boot follows automatically from the watcher itself.
+
+Fresh V104 readonly capture session40021 TERMINAL exit0: actual clean1730084,
+current targets and native empty journal saved. Device verified rooted
+unmounted recovery idle; NO V104 stage/apply/iOS boot. Do not reread an unchanged
+live snapshot merely because CI waits. Next one full V101 native GPU/public
+brightness/off/wake/restoration/key-readiness/ordinary FPS capture after actual
+CI27 proof. V103 APPLIED/STALE/never reuse. V100 partial hardware/failure/
+regression evidence is recorded immediately below; last actual kernel remains
+CI26/22c5f154.., imagefc3cf312.., nonce44fbca45099fc66c and complete arguments
+in its preflight entry. All wider objectives remain active; no public
+brightness/smoothness or physical button-action success inferred yet.
+
 ## REDFIN V100 controls partial proof/regression; complete native CB contract fixed — 2026-10-27
 
 Source28dedaa/CI26 Actions40429125860/sourcecc100af, kernel22c5f154..,

@@ -43,10 +43,12 @@ regresses to0.199780FPS. Do not call controls or sustained GPU performance done.
 Actual20H392 CoreBrightness requires IODisplayParameters/brightness/min/max/
 value before creating its brightness module. The complete missing metadata/
 raw+nits request/actual-value publication and separate native-backlight fix
-now passes94combined tests plus all3exact native TUs; corrected CI27 and
-ONE V101 integrated test are next. Reuse UI controls-v1/native035131 and all
+now passes94combined tests plus all3exact native TUs. Exact883286e builds
+in Actions40432973023/run27; watcher96353 prepares V101 after terminal
+source/artifact/native ABI verification. ONE complete V101 integration is next. Reuse UI controls-v1/native035131 and all
 existing Mesa/Metal/compiler artifacts; no repeated userland build is needed.
-V103 is APPLIED/STale/never reuse. Next fresh V104 must bind actual1730084.
+V103 is APPLIED/STALE/never reuse. Fresh V104 READ ONLY is complete at
+actual1730084, empty journal/current preimages; no stage/apply/boot yet.
 Phone/Photos auto opens remain OFF. Physical key actions, actual brightness,
 lock/wake input, inset persistence, real-ALS auto brightness and full suspend
 remain unverified/open. Exact builds/args/results are in NOTES.md. All wider
