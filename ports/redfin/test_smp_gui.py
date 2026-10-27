@@ -202,6 +202,7 @@ class GUILoaderTests(unittest.TestCase):
             'int tree(const void *p,unsigned n){return adt_valid_smp_mode(p,n,1);}\n'
             'int tree2(const void *p,unsigned n){return adt_valid_smp_mode(p,n,2);}\n'
             'int tree3(const void *p,unsigned n){return adt_valid_smp_mode(p,n,3);}\n'
+            'int sensors(const void *p,unsigned n){unsigned v=0;return adt_valid_smp_mode_sensors(p,n,3,&v)?(int)v:-1;}\n'
             'int md0tree(const void *p,unsigned n){return adt_valid_smp(p,n);}\n')
         # fdt.c supplies only the real loader's link dependencies.
         for name, shim, gui, probe, count in (('gui', 1, 1, 0, 8), ('md0', 1, 0, 1, 8),
@@ -213,6 +214,7 @@ class GUILoaderTests(unittest.TestCase):
                                  ('-DREDFIN_LOADER_TEST', str(HERE / 'fdt.c')))
             lib.command.argtypes = [C.c_char_p]
             lib.tree.argtypes = lib.tree2.argtypes = lib.tree3.argtypes = lib.md0tree.argtypes = [C.c_void_p, C.c_uint]
+            lib.sensors.argtypes = [C.c_void_p,C.c_uint]
             cls.libs[name] = lib
         sys.path.insert(0, str(HERE.parents[1] / 'tools'))
         import adt
@@ -284,6 +286,47 @@ class GUILoaderTests(unittest.TestCase):
         for i in range(len(VALUES)):
             values=list(VALUES);values[i]^=1;raw=make(values)
             self.assertEqual(lib.tree3(raw,len(raw)),0,i)
+
+    def test_native_controls_require_exact_paired_display_keys_and_power_in_gui3(self):
+        from ports.redfin.controls import KEY_VALUES,DISPLAY_VALUES,DISPLAY_PROPERTY
+        from ports.redfin.platform_power import VALUES as POWER
+        def make(keys=KEY_VALUES,panel=DISPLAY_VALUES,power=True,duplicate=False,children=(),sensors=False):
+            tree=self.gui_tree()
+            tree.children += [self.mk.node(name,[]) for name in (
+                'redfin-wifi','redfin-wifi-native','redfin-wifi-power','redfin-wifi-start','redfin-wifi-glink',
+                'redfin-wifi-wlfw','redfin-wifi-wlan','redfin-wifi-snoc','redfin-rmtfs','redfin-wifi-dma',
+                'redfin-wifi-assets','redfin-wifi-fw','redfin-gpu','redfin-gpu-power','redfin-gmu',
+                'redfin-gpu-smmu','redfin-gpu-command')]
+            if power:tree.children.append(self.mk.node('redfin-power',[('native-contract',self.mk.u32(*POWER))]))
+            if keys is not None:
+                leaf=self.mk.node('redfin-controls',[('keys-contract',self.mk.u32(*keys))],list(children))
+                tree.children += [leaf]*(2 if duplicate else 1)
+            if panel is not None:
+                display=next(c for p in tree.children if p.name=='arm-io' for c in p.children if c.name=='disp0')
+                display.props.append((DISPLAY_PROPERTY,0,self.mk.u32(*panel)))
+            if sensors:
+                from ports.redfin.sensor_assets import CONTRACT
+                tree.children.append(self.mk.node('redfin-sensors',[
+                    ('source-path',b'/redfin/firmware/native-sensors.bundle\0'),('bundle-bytes',self.mk.u64(21630640)),
+                    ('bundle-sha256',bytes(range(32))),('live-fdt-verified',self.mk.u32(1)),
+                    ('source-contract',self.mk.u32(*CONTRACT)),
+                    ('hardware-reg',self.mk.u64(0x89200000,0x2800000,0x80900000,0x200000,0x1f40000,0x20000,0x408000,0x1000))]))
+            return self.adt.serialize(tree)
+        lib=self.libs['gui'];raw=make()
+        self.assertEqual(lib.tree3(raw,len(raw)),1)
+        self.assertEqual(lib.sensors(raw,len(raw)),0)
+        for older in (lib.tree,lib.tree2,lib.md0tree):self.assertEqual(older(raw,len(raw)),0)
+        raw=make(sensors=True);self.assertEqual(lib.tree3(raw,len(raw)),1)
+        self.assertEqual(lib.sensors(raw,len(raw)),1)
+        for key in ('keys','panel'):
+            original=KEY_VALUES if key=='keys' else DISPLAY_VALUES
+            for index in range(len(original)):
+                bad=list(original);bad[index]^=1;raw=make(**{key:bad})
+                self.assertEqual(lib.tree3(raw,len(raw)),0,(key,index))
+        for kwargs in ({'keys':None},{'panel':None},{'power':False},{'duplicate':True},
+                       {'keys':KEY_VALUES[:-1]},{'panel':DISPLAY_VALUES+(0,)},
+                       {'children':[self.mk.node('unexpected',[])]}):
+            raw=make(**kwargs);self.assertEqual(lib.tree3(raw,len(raw)),0,kwargs)
 
     def test_native_sensor_source_is_typed_bounded_and_gui3_only(self):
         from sensor_assets import CONTRACT

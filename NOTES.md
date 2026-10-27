@@ -1,5 +1,32 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CI26 verified; exact typed control shim and V100 preflight PASS — 2026-10-27
+
+Actions40429125860/run26/sourcecc100af TERMINAL SUCCESS; complete patch map,
+XNU/KDK/source identity and retained/new native controls markers verified.
+Actual kernel22c5f154c3dd4beb7947991b9e9377ef8f540791d68c5492700e6dbd8f71d944,
+18778216bytes. Build474.411s/native compile401.109s. No new Mesa/Metal/compiler/
+UI build. First V100 host preflight correctly refuses the new controls ADT:
+its strict shim whitelist had no typed panel-controls or33rd root leaf.
+No phone boot occurred. That rejected image is saved separately and unused.
+
+Finished shim integration admits only the exact GUI3/PMIC/display contracts,
+requires paired keys/panel/native-power, rejects missing/malformed/duplicate/
+unknown/child nodes and old GUI modes, and widens only the root bitmap to64bits.
+The sensor-present result stays one exact bit.92combined contracts PASS,
+including all earlier80 plus real frozen/current loader and new typed inputs.
+Rebuilt V100 standalone shim only; retained exact CI26 kernel. Full actual
+payload/FDT/ADT/private inputs/firmware/source/native ABI preflight now PASS.
+UI da1f3982../refresh4a02d6e1.., native035131/Mesa1a4ad42c../Metal17d0f01f../
+cache496301fc.. unchanged. Fresh V103 at1717443 still un-applied; no root writes.
+
+Prepared V100 image fc3cf312216894ec98757178586e6a143044628e135ba10d22fb98f10dd4c183
+nonce44fbca45099fc66c. Next ONE full native GPU/controls/UI run; automatic Phone/
+Photos opens OFF. Complete exact boot arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x44fbca45099fc66c redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Native key presses, real-ALS auto brightness, full suspend and all other
+wider goal items remain unproved/open. No new physical success inferred.
+
 ## REDFIN corrected cc100af in CI26; fresh V103 and Wi-Fi observations saved — 2026-10-27
 
 Complete controls implementation8740ac2 plus independent short-header fix

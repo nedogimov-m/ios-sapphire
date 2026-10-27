@@ -1,5 +1,17 @@
 # HackiOS upstream review — 2026-10-22
 
+## Exact Redfin controls ADT is now admitted by its standalone shim — 2026-10-27
+
+Own Redfin adaptation; preferred pins unchanged. Native CI26/sourcecc100af
+kernel22c5f154.. verifies completely. Its added root control leaf and display
+property also need the standalone loader's existing strict GUI3 admission.
+Admit exact source-bound key/panel contracts only as a paired native-power
+feature, use64bits for33root leaves and preserve the sensor-present one-bit
+result. Do not weaken CPU/RAM/display/PMIC bounds or old GUI/md0 profiles.
+92combined tests and the complete actual V100 loader/image/FDT/native ABI
+preflight pass. No new kernel/userland/compiler build was needed for the
+standalone-shim fix; actual physical controls behavior remains pending.
+
 ## Preferred source pointers refreshed while corrected controls build runs — 2026-10-27
 
 Public API main pointers remain kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3

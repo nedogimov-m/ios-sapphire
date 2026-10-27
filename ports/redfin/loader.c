@@ -476,7 +476,8 @@ static int smp_key_well_formed(const volatile unsigned char *p)
 }
 
 /* GUI-only leaves. A GUI tree is never admitted by the md0 command profile. */
-enum { RF_GUI_DISPLAY = 8, RF_GUI_TOUCH, RF_GUI_UFS, RF_GUI_FBCON, RF_GUI_POWER, RF_GUI_SENSOR };
+enum { RF_GUI_DISPLAY = 8, RF_GUI_TOUCH, RF_GUI_UFS, RF_GUI_FBCON, RF_GUI_POWER,
+    RF_GUI_SENSOR, RF_GUI_CONTROLS };
 static int gui_sensor_property(const volatile unsigned char *key,
     const volatile unsigned char *value,uint32_t len,unsigned *seen)
 {
@@ -556,7 +557,19 @@ static int gui_property(unsigned kind, const volatile unsigned char *key,
             if (len != sizeof(panel)) return 0;
             for (unsigned j = 0; j < sizeof(panel)/sizeof(panel[0]); ++j)
                 if (word(value + 4*j, 0) != panel[j]) return 0;
+        } else if (kind == RF_GUI_DISPLAY && smp_key(key, "redfin,panel-controls")) {
+            static const uint32_t controls[] = {1,0x0af00000,0x0ae94000,1080,2340,4,1023,8,500};
+            bit = 1U << 12;
+            if (len != sizeof(controls)) return 0;
+            for (unsigned j = 0; j < sizeof(controls)/sizeof(controls[0]); ++j)
+                if (word(value + 4*j, 0) != controls[j]) return 0;
         } else return 0;
+    } else if (kind == RF_GUI_CONTROLS) {
+        static const uint32_t keys[] = {1,0x0c440000,0x0c40a000,0x0e600000,0,0x008,0x4c4,0x0810,0xc410,15};
+        if (!smp_key(key, "keys-contract") || len != sizeof(keys)) return 0;
+        for (unsigned j = 0; j < sizeof(keys)/sizeof(keys[0]); ++j)
+            if (word(value + 4*j, 0) != keys[j]) return 0;
+        bit = 1;
     } else if (kind == RF_GUI_UFS) {
         if (!smp_key(key, "reg") || len != 16 || quad(value) != 0x01d84000ULL || quad(value + 8) != 0x3000) return 0;
         bit = 1;
@@ -595,7 +608,7 @@ static int adt_valid_smp_mode_sensors(const volatile unsigned char *b, uint64_t 
         "redfin-wifi-glink", "redfin-wifi-wlfw", "redfin-wifi-wlan", "redfin-wifi-snoc",
         "redfin-rmtfs", "redfin-wifi-dma", "redfin-wifi-assets", "redfin-wifi-fw",
         "redfin-gpu", "redfin-gpu-power", "redfin-gmu", "redfin-gpu-smmu", "redfin-gpu-command",
-        "redfin-power", "redfin-sensors"
+        "redfin-power", "redfin-sensors", "redfin-controls"
     };
     static const char cpu_u32[][24] = {
         "reg", "cpu-id", "cluster-id", "cluster-type", "die-cluster-id",
@@ -604,7 +617,9 @@ static int adt_valid_smp_mode_sensors(const volatile unsigned char *b, uint64_t 
     };
     static const unsigned char cpu_compatible[] = "qcom,kryo475\0qcom,kryo470\0ARM,v8";
     uint32_t pending[32], kinds[32], handles[8] = {0};
-    unsigned depth = 0, cpus = 0, root_seen = 0, chosen_children = 0, arm_seen = 0;
+    unsigned depth = 0, cpus = 0, chosen_children = 0, arm_seen = 0;
+    uint64_t root_seen = 0;
+    unsigned display_controls = 0;
     uint64_t off = 0;
     pending[0] = 1; kinds[0] = 0;
     for (;;) {
@@ -618,8 +633,10 @@ static int adt_valid_smp_mode_sensors(const volatile unsigned char *b, uint64_t 
                         (root_seen & ((1U << 30) - 1)) == (1U << 30) - 1 :
                         root_seen == (1U << (gui == 2 ? 25 : 13)) - 1)) &&
                     arm_seen == (gui ? 3U : 1U) &&
-                    (chosen_children & 1) && chosen_children <= 3;
-                if(valid&&sensor_present)*sensor_present=root_seen>>31;
+                    (chosen_children & 1) && chosen_children <= 3 &&
+                    (display_controls ? ((root_seen & (1ULL << 32)) && (root_seen & (1ULL << 30))) :
+                        !(root_seen & (1ULL << 32)));
+                if(valid&&sensor_present)*sensor_present=(unsigned)((root_seen>>31)&1);
                 return valid;
             }
             depth--;
@@ -645,15 +662,16 @@ static int adt_valid_smp_mode_sensors(const volatile unsigned char *b, uint64_t 
                     kind = ROOT;
                 } else if (depth == 1 && kinds[depth] == ROOT) {
                     unsigned n = 0;
-                    unsigned count = gui == 3 ? 32 : gui == 2 ? 25 : gui ? 13 : 10;
+                    unsigned count = gui == 3 ? 33 : gui == 2 ? 25 : gui ? 13 : 10;
                     for (; n < count; n++)
                         if (smp_string(value, len, root_names[n])) break;
-                    if (n == count || (root_seen & (1U << n))) return 0;
-                    root_seen |= 1U << n;
+                    if (n == count || (root_seen & (1ULL << n))) return 0;
+                    root_seen |= 1ULL << n;
                     kind = n == 0 ? CHOSEN : n == 1 ? CPUS : n == 2 ? ARMIO : LEAF;
                     if (gui && n >= 10 && n < 13) kind = n == 10 ? RF_GUI_TOUCH : n == 11 ? RF_GUI_UFS : RF_GUI_FBCON;
                     if (gui == 3 && n == 30) kind = RF_GUI_POWER;
                     if (gui == 3 && n == 31) kind = RF_GUI_SENSOR;
+                    if (gui == 3 && n == 32) kind = RF_GUI_CONTROLS;
                 } else if (depth == 2 && kinds[depth] == CPUS) {
                     char name[5] = {'c', 'p', 'u', (char)('0' + cpus), 0};
                     if (cpus >= REDFIN_SMP_CPUS || !smp_string(value, len, name)) return 0;
@@ -724,10 +742,13 @@ static int adt_valid_smp_mode_sensors(const volatile unsigned char *b, uint64_t 
             off += padded;
         }
         if ((kind == CPU && seen != 0xffff) || (kind == CPUS && seen != 7) || (kind == CHOSEN && seen != 3)) return 0;
-        if ((kind == RF_GUI_DISPLAY && seen != 0x7ff && !(gui == 3 && seen == 0xfff)) || (kind == RF_GUI_TOUCH && seen != 127) ||
+        if ((kind == RF_GUI_DISPLAY && seen != 0x7ff &&
+                !(gui == 3 && (seen == 0xfff || seen == 0x17ff || seen == 0x1fff))) || (kind == RF_GUI_TOUCH && seen != 127) ||
             (kind == RF_GUI_UFS && seen != 1) || (kind == RF_GUI_FBCON && seen != 0x87)) return 0;
         if (kind == RF_GUI_POWER && seen != 1 && seen != 3) return 0;
         if(kind==RF_GUI_SENSOR&&seen!=63)return 0;
+        if(kind==RF_GUI_CONTROLS&&seen!=1)return 0;
+        if(kind==RF_GUI_DISPLAY)display_controls=(seen>>12)&1;
         if (kind == CPU) cpus++;
         depth++; pending[depth] = children; kinds[depth] = kind;
     }
