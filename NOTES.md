@@ -1,5 +1,37 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V99 physical output/native contracts PASS; finite61.032FPS — 2026-10-27
+
+Sourcee90b110/start00b7e4d, Actions40422287650/run24, kernel398b6b7a..;
+UI e155cb49../native035131/Mesa1a4ad42c../Metal17d0f01f../cache496301fc..
+unchanged. Cycle72224 TERMINAL exit0; authenticated077ad640e2795543, one
+backboardd62/no crash or panic, clean consistent unmounted HFSX1717443 and
+verified Fastboot. V102 STALE/never reuse; next fresh V103/imageV100.
+
+All four private fused cases/10108800pixels PASS (identity and alpha exact,
+scaled maxima2; all guards/stage untouched). All four actual physical panel
+references PASS:64samples each/mismatches0/obsolete-stage0; actual direct
+output1080frames. Cold wait3689444us completes without uncertainty; normal
+2000ms and physical GPU/fence bounds unchanged. Full independent GMEM/sysmem
+draw/direct/fetch/pixel/CPU-first/tail/frame-budget and full app Metal CHECK
+EXIT0 PASS. GLES1140frames/shared/copy0/errors0, real bound2 admission and
+nonblocking publication. Touch error0/contact0: no new manual input proof.
+
+The finite checked system-window animation now has a VALID actual counter
+interval:611GPU/completed frames in10.011138physical seconds=61.0320225FPS,
+902callbacks/90Hz, second samples58.005..62.012, native checks complete,
+idle restored. No universal/sustained90FPS claim. Output sampled median
+4380us (submit/wait4098us); full measured scope partitions pass. Private
+presentation/compositor/direct-output/budget evidence is in the V99 log folder.
+
+Native UIKit installs four hooks on _UIStatusBarStringView without a crash;
+visible clock/lock/rotation observations are absent, so inset completion stays
+unproved. Phone/Photos auto opens/captures remain OFF. Exact V99 builds/image/
+boot args are in the start entry immediately below. Connected controls/
+brightness implementation has begun in new unwired policy headers; no tests
+or new mini-task boot for them. Preserve V99 while finishing that whole block;
+all other remaining user objectives stay active.
+
 ## REDFIN CI24 verified; fresh V102 applied; combined V99 starts — 2026-10-27
 
 Previous goal turn made concrete progress (b6e1a1e/e90b110 and V96/V97 evidence),

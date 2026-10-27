@@ -6,6 +6,17 @@ Primary stable upstream sources, selected by the user:
 
 Current Redfin GUI composition and panel scaling/packing run on Adreno620.
 `redfinfb=1` publishes the framebuffer interface used by that GPU display path.
+Latest V99 (kernel Actions40422287650/run24/sourcee90b110) passes complete
+independent native GMEM/sysmem and app Metal contracts, all four full private
+output cases and four exact physical-panel references. Actual fused GPU output
+exceeds1080frames. Its finite system-window animation completes611GPU frames
+in10.011138physical seconds:61.032FPS, with58.005..62.012FPS second samples,
+90Hz callbacks, zero contacts and one stable backboardd. This proves working
+physical output and this workload's measured rate; sustained60/90FPS throughout
+interactive use remains unfinished. The cold native output checks now have a
+separate finite startup wait, preserving the ordinary frame deadline. Phone/
+Photos automatic launches remain off. Current next work is physical buttons,
+native display brightness/wake and the other remaining items in GOAL.md.
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including
 native Metal/IOSurface pixels and actual kernel publication without a GPU wait

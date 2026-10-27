@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## V99 full native/actual output and finite61.032FPS proof — 2026-10-27
+
+Exact corrected kernel Actions40422287650/run24/sourcee90b110 and unchanged
+native035131/Mesa1a4ad42c../app Metal17d0f01f../cache496301fc../UI e155cb49..
+pass the complete integration. All four private cases/10108800pixels retain
+exact identity/opacity and scaledRGB<=2, with no guards/intermediate writes.
+Four actual panel references compare64samples each exactly; actual direct
+output reaches1080frames. Full independent GMEM/sysmem/direct/fetch/budget
+and app Metal contracts pass; one server/no GL error/panic, clean root1717443.
+The cold wait completes in3689444us without uncertainty; ordinary2000ms and
+all hardware fence deadlines remain. Finite611GPU/10.011138s=61.032FPS,
+58.005..62.012per-second at90Hz callbacks. This is measured system output
+for that workload, not proof of universal smooth60/90FPS. Current baseline
+is preserved while the connected native controls/brightness work proceeds.
+
 ## Output initialization and steady-frame deadlines have separate scopes — 2026-10-27
 
 Own Redfin integration correction; retain the reviewed native GPU/physical
