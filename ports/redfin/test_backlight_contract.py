@@ -90,5 +90,14 @@ int main(){
         self.assertEqual(proof['ignore_IOMFB_property'],'uint32 CFData')
         self.assertFalse(proof['physical_calibration_claimed'])
 
+    def test_system_brightness_API_bypasses_the_real_UIKit_scene_requirement(self):
+        from ports.redfin.graphics_abi import Cache,DEFAULT_CACHE
+        if not DEFAULT_CACHE.is_file():self.skipTest('actual native20H392 cache required')
+        with Cache() as cache:proof=brightness_abi.derive_system(cache)
+        self.assertTrue(proof['UIKit_setter_requires_application_scene'])
+        self.assertTrue(proof['scene_independent'])
+        self.assertEqual(proof['set_signature'],'void(float)')
+        self.assertEqual(proof['get_signature'],'float(void)')
+
 
 if __name__=='__main__':unittest.main()

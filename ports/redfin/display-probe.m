@@ -69,8 +69,11 @@ static unsigned request_mode(uint64_t nonce)
 static BOOL fullscreen_window(UIWindow *window)
 {
     CGSize wanted=UIScreen.mainScreen.bounds.size,size=window.bounds.size;
+    Class dimming=objc_getClass("_UISoftwareDimmingWindow");
+    if(dimming&&[window isKindOfClass:dimming])return NO;
     return window&&!window.hidden&&window.alpha>=0.99&&window.screen==UIScreen.mainScreen&&
-        size.width>=wanted.width*0.9&&size.height>=wanted.height*0.9;
+        size.width>=wanted.width*0.9&&size.height>=wanted.height*0.9&&
+        (window.layer.sublayers.count||window.layer.contents);
 }
 static UIWindow *animation_host(UIWindow *fallback)
 {
@@ -295,6 +298,10 @@ static void probe_measure(UIWindow *native_host,uint64_t nonce,unsigned mode,BOO
             parent=animation_host(parent);
             if(!parent){probe_log(nonce,"refused no existing visible fullscreen animation host");(void)probe_idle_release();return;}
         }
+        probe_log(nonce,"host class=%s key=%u level=%.3f sublayers=%lu contents=%u root-controller=%s scene=%u width=%.3f height=%.3f",
+            class_getName(parent.class),parent.isKeyWindow,(double)parent.windowLevel,(unsigned long)parent.layer.sublayers.count,
+            parent.layer.contents!=nil,parent.rootViewController?class_getName(parent.rootViewController.class):"none",
+            parent.windowScene!=nil,parent.bounds.size.width,parent.bounds.size.height);
         io_service_t service=IOServiceGetMatchingService(0,IOServiceMatching("AppleCLCD"));
         io_connect_t client=0;
         kern_return_t opened=service ? IOServiceOpen(service,mach_task_self(),0,&client) : KERN_FAILURE;

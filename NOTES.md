@@ -1,5 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V101 terminal; scene-independent brightness and real-content workload ready — 2026-10-27
+
+V101/CI27 Actions40432973023/run27/source883286e is TERMINAL exit0:
+authenticated848822ca8a1500e9, one backboardd/no panic, clean unmounted HFSX
+1739626 and verified Fastboot. Full independent GMEM/sysmem/GLES/app Metal,
+four private output cases and four exact physical-panel references PASS.
+Actual ordinary direct output has only4frames, not a throughput success.
+Three key inputs remain ready/armed with15000+total reads/errors0; no physical
+presses. Initial DBV409/off/on+restore DCS commands complete, uncertainty0.
+Public UIKit low/high never reaches actual DBV (result6/restored1); finite
+animation remains2GPU frames/10.011262s=0.199775FPS. V104 is APPLIED/STALE,
+never reuse. V99's finite61.032FPS remains the preserved performance baseline.
+
+Actual20H392 UIDevice -_setBacklightLevel: writes the most-active application's
+UIWindowScene settings. SpringBoard's UIScreen setter therefore does not prove
+the system regulator was invoked; a nil application scene has not been logged.
+An empty/native software-dimming window can also invalidate the intended
+animation workload. These are test-route defects; the low observed counter
+rate remains recorded, but its GPU/backlight cause is not established.
+
+Finished UI observation now calls the UUID/body-audited native BKS implicit
+system transaction (void(float)) and current getter (float(void)), requires
+actual applied DBV and bounded off/wake/level restoration, and fails closed on
+unavailable/invalid functions. Workload excludes native software dimmers and
+empty windows, logging the selected content host. No native Apple API is
+patched, no ordinary product brightness hook or graphics policy is changed.
+90combined executable contracts PASS in9.635s, including real observer
+failure/restoration/native ABI and content-host selection. Fresh actual20H392
+UI80745948../unchanged refresh4a02d6e1.. builds/signs/import-audits PASS.
+Existing kernel/Mesa/Metal/compiler artifacts retained, no redundant builds.
+
+Fresh V102 imagea9c384fd05ff543433d53ea2183afd8f455aa77d353257dfdd1568cf3919995d
+nonce9e8c5eaed377ea15 passes complete image/loader/ADT/FDT/private inputs/
+firmware/source/native ABI preflight with unchanged CI27 kernel4f99141c...;
+missing copied build metadata was corrected before successful preflight,
+without a device operation. Fresh V105 READ binds1739626; stage/apply and ONE
+combined native GPU/system-brightness/visibility/restoration/input-readiness/
+finite FPS run are next. No Phone/Photos auto opens or frame captures.
+Exact V102 boot arguments (last actual V101 arguments are in the entry below):
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x9e8c5eaed377ea15 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+Physical presses/full suspend/ALS and every other wider GOAL item stay open.
+
 ## REDFIN CI27 terminal/native CB ABI verified; one V101 integration starts — 2026-10-27
 
 Actions40432973023/run27/source883286e TERMINAL SUCCESS. Complete current

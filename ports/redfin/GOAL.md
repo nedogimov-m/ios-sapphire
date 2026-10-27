@@ -31,28 +31,28 @@ full native GPU/app Metal/private output/four physical references PASS,
 611GPU frames/10.011138s =61.032FPS at90Hz callbacks, one stable backboardd.
 This proves that finite workload, not universal smooth60/90FPS.
 
-The complete buttons/native panel-controls block is committed8740ac2/cc100af
-with typed standalone shim28dedaa. CI26 Actions40429125860/kernel22c5f154..
-passes complete source/native ABI validation. V100 is terminal: no panic,
-one server, clean1730084/Fastboot; full GPU/native Metal and all4panel checks
-pass. PON/GPIO5 actual types/status and3key inputs are ready/armed,15000+reads
-with zero errors, no physical presses. Initial DCS DBV409/off/on+restore
-commands complete. Public UIKit brightness still fails, and ordinary output
-regresses to0.199780FPS. Do not call controls or sustained GPU performance done.
+Native buttons/panel-controls are committed8740ac2/cc100af/28dedaa;
+actual CoreBrightness metadata is883286e, built successfully in Actions
+40432973023/run27 (kernel4f99141c..). V101 is TERMINAL exit0, no panic,
+one server, clean1739626/Fastboot. Full native GPU/Metal/private pixels/four
+panel references PASS; key readiness/15000+reads/errors0 and initial DCS
+DBV/off/on+restore pass, with no physical presses. UIKit low/high still fail
+(result6/restored1); finite output is2GPU frames/10.011262s=0.199775FPS.
 
-Actual20H392 CoreBrightness requires IODisplayParameters/brightness/min/max/
-value before creating its brightness module. The complete missing metadata/
-raw+nits request/actual-value publication and separate native-backlight fix
-now passes94combined tests plus all3exact native TUs. Exact883286e builds
-in Actions40432973023/run27; watcher96353 prepares V101 after terminal
-source/artifact/native ABI verification. ONE complete V101 integration is next. Reuse UI controls-v1/native035131 and all
-existing Mesa/Metal/compiler artifacts; no repeated userland build is needed.
-V103 is APPLIED/STALE/never reuse. Fresh V104 READ ONLY is complete at
-actual1730084, empty journal/current preimages; no stage/apply/boot yet.
-Phone/Photos auto opens remain OFF. Physical key actions, actual brightness,
+The actual UIKit setter requires an application scene; an empty/software-dimming
+host can also spoil the intended workload. Neither was logged in
+V101, so the low counter rate is not conclusively attributed to GPU failure.
+The complete observer correction now uses audited scene-independent native
+BKS transactions and a visible nonempty content host.90combined executable
+contracts and actual20H392 signed UI80745948../refresh4a02d6e1.. PASS.
+No Mesa/Metal/compiler/kernel rebuild. Fresh V102 passes complete preflight
+with the same CI27 kernel; ONE combined native GPU/system brightness/off/
+wake/restoration/key-readiness/FPS run is next. V104 APPLIED/STALE, never reuse;
+fresh V105 must bind1739626 and preserve all preimages/readback/fsck gates.
+Phone/Photos auto opens remain OFF. Physical key actions, brightness from UI,
 lock/wake input, inset persistence, real-ALS auto brightness and full suspend
-remain unverified/open. Exact builds/args/results are in NOTES.md. All wider
-objective items above remain active.
+remain unverified/open. Exact builds/args/results are in NOTES.md. Every wider
+objective above remains active.
 
 ## Constraints and private state
 

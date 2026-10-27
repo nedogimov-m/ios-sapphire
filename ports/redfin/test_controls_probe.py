@@ -1,4 +1,4 @@
-"""Run the actual UIKit controls observer on the native Objective-C runtime.
+"""Run the actual system controls observer on the native Objective-C runtime.
 
 Replace only screen/IOKit/time primitives; prove outcome labels, restoration
 and finite failure behavior without touching a real display or credentials.
@@ -55,6 +55,11 @@ static int fake_close(int fd){assert(fd==77);return 0;}
  if(panel_on){applied_nits=nits;dbv=(unsigned)((nits*1023+(500ULL<<15))/(500ULL<<16));if(dbv<4)dbv=4;}
 }
 @end
+bool redfin_brightness_system_ready(void){return issue!=5;}
+float redfin_brightness_system_get(void){return issue==10&&ns>1000000000?NAN:(float)UIScreen.mainScreen.brightness;}
+bool redfin_brightness_system_set(float value){
+ if((issue==8&&value<0.3)||(issue==9&&value>0.7))return false;
+ UIScreen.mainScreen.brightness=value;return true;}
 static int sysctlbyname(const char *name,void *out,size_t *bytes,void *input,size_t input_bytes){
  (void)input;(void)input_bytes;if(*bytes!=sizeof(unsigned))return 1;
  unsigned value=strstr(name,"samples")?(unsigned)(ns/10000000):strstr(name,"errors")?0:strstr(name,"consumer")?1:7;
@@ -109,6 +114,8 @@ int main(int argc,char **argv){@autoreleasepool{
   if(issue==4){assert(!restored);assert([transcript containsString:@"wake-resumes-output=0"]);}
   if(issue==5||issue==6){assert(restored);assert([transcript containsString:@"unchanged=1"]);}
   if(issue==7){assert([transcript containsString:@"display-off-stops-output=0 wake-resumes-output=0"]);}
+  if(issue==8||issue==9){assert(restored);assert([transcript containsString:@"result=8 restored=1"]);}
+  if(issue==10){assert(!restored);assert([transcript containsString:@"result=8 restored=0"]);}
  }
  if(restored){assert(panel_on);assert(fabs(UIScreen.mainScreen.brightness-0.5)<0.001);}
  assert(ns<30000000000ULL);
@@ -128,7 +135,7 @@ class ControlsProbeTests(unittest.TestCase):
             compiled=subprocess.run(['xcrun','clang','-fobjc-arc','-fblocks','-O2','-Wall','-Wextra','-Werror',
                 '-I'+str(HERE),'-framework','Foundation',str(source),'-o',str(root/'probe')],capture_output=True,text=True)
             self.assertEqual(compiled.returncode,0,compiled.stderr)
-            for issue in range(8):
+            for issue in range(11):
                 result=subprocess.run([str(root/'probe'),str(issue)],capture_output=True,text=True,timeout=5)
                 self.assertEqual(result.returncode,0,(issue,result.stderr))
 

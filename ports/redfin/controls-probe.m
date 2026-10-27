@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* Explicit one-boot native UIKit -> CoreBrightness -> DSI/wake observation.
+/* Explicit one-boot native system brightness -> CoreBrightness -> DSI/wake observation.
  * Restores the user's brightness and display state on every changed path.
  * Actual physical key presses remain distinct from input-path readiness. */
 #import <UIKit/UIKit.h>
@@ -14,6 +14,7 @@
 #include "gui-profile.h"
 #include "display-statistics.h"
 #include "controls-policy.h"
+#include "brightness-system.h"
 
 static double control_seconds(void)
 {
@@ -82,12 +83,12 @@ static RedfinControlsProbe *control_active;
     NSDictionary *properties=control_properties(self.service);
     uint64_t sequence=0,on=0;
     if(control_uint(properties,@"RedfinControlSequence",&sequence))self.cursor=sequence;
-    self.restoreNeedsCommit=fabs(UIScreen.mainScreen.brightness-self.savedBrightness)>=0.01||
+    self.restoreNeedsCommit=fabs(redfin_brightness_system_get()-self.savedBrightness)>=0.01||
         !control_uint(properties,@"RedfinDisplayOn",&on)||!on;
     self.phase=5;self.phaseBegan=control_seconds()/self.clockRatio;
-    UIScreen.mainScreen.brightness=self.savedBrightness;
+    if(!redfin_brightness_system_set((float)self.savedBrightness)&&!self.error)self.error=8;
     if(![self power:YES]&&!self.error)self.error=8;
-    control_log(self.nonce,"restore-start reason=%u public-brightness=%.5f",self.error,self.savedBrightness);
+    control_log(self.nonce,"restore-start reason=%u native-brightness=%.5f",self.error,self.savedBrightness);
 }
 - (void)finish:(BOOL)restored
 {
@@ -102,7 +103,7 @@ static RedfinControlsProbe *control_active;
     BOOL brightness=self.lowDBV&&self.highDBV>self.lowDBV;
     unsigned result=self.error?self.error:!restored?9:!keys?10:
         !(brightness&&self.offProven&&self.wakeProven)?12:0;
-    control_log(self.nonce,"result=%u restored=%u UIKit-CoreBrightness-physical-DBV=%u low=%u high=%u display-off-stops-output=%u wake-resumes-output=%u physical-key-input-ready=%u key-samples=%u key-errors=%u physical-key-presses-tested=0",
+    control_log(self.nonce,"result=%u restored=%u native-system-physical-DBV=%u low=%u high=%u display-off-stops-output=%u wake-resumes-output=%u physical-key-input-ready=%u key-samples=%u key-errors=%u physical-key-presses-tested=0",
         result,restored,brightness,self.lowDBV,self.highDBV,self.offProven,self.wakeProven,keys,samples,errors);
     if(self.client)IOServiceClose(self.client);if(self.service)IOObjectRelease(self.service);
     self.client=0;self.service=0;
@@ -123,16 +124,16 @@ static RedfinControlsProbe *control_active;
     BOOL brightnessApplied=state&&control_uint(properties,@"RedfinAppliedNits",&applied_nits)&&
         control_uint(properties,@"IOMFBBrightnessLevel",&requested_nits)&&applied_nits==requested_nits&&
         rf_panel_nits_to_dbv(applied_nits,&expected)&&expected==level;
-    double brightness=UIScreen.mainScreen.brightness;
-    if(self.phase!=5&&(now-self.began>20||!properties||uncertain)) {
-        [self restore:uncertain?7:6];
+    double brightness=redfin_brightness_system_get();
+    if(self.phase!=5&&(now-self.began>20||!properties||uncertain||!isfinite(brightness))) {
+        [self restore:uncertain?7:!isfinite(brightness)?8:6];
     } else if(self.phase==1&&brightnessApplied&&on&&sequence>self.cursor&&fabs(brightness-self.lowBrightness)<0.01) {
         self.lowDBV=(unsigned)level;self.cursor=sequence;self.phase=2;self.phaseBegan=now;
-        UIScreen.mainScreen.brightness=self.highBrightness;
-        control_log(self.nonce,"low UIKit=%.5f applied-DBV=%u sequence=%llu",brightness,self.lowDBV,(unsigned long long)sequence);
+        control_log(self.nonce,"low system=%.5f applied-DBV=%u sequence=%llu",brightness,self.lowDBV,(unsigned long long)sequence);
+        if(!redfin_brightness_system_set((float)self.highBrightness))[self restore:8];
     } else if(self.phase==2&&brightnessApplied&&on&&sequence>self.cursor&&level>self.lowDBV&&fabs(brightness-self.highBrightness)<0.01) {
         self.highDBV=(unsigned)level;self.cursor=sequence;self.phase=3;self.phaseBegan=now;
-        control_log(self.nonce,"high UIKit=%.5f applied-DBV=%u sequence=%llu",brightness,self.highDBV,(unsigned long long)sequence);
+        control_log(self.nonce,"high system=%.5f applied-DBV=%u sequence=%llu",brightness,self.highDBV,(unsigned long long)sequence);
         if(![self power:NO])[self restore:4];
     } else if(self.phase==3&&state&&!on&&sequence>self.cursor&&now-self.phaseBegan>=0.25) {
         struct redfin_display_statistics_v2 snapshot={0};
@@ -172,7 +173,7 @@ void redfin_controls_probe_run(uint64_t nonce,void (^completion)(BOOL,BOOL))
     probe.service=IOServiceGetMatchingService(0,IOServiceMatching("AppleCLCD"));
     NSDictionary *properties=probe.service?control_properties(probe.service):nil;
     uint64_t abi=0,on=0,sequence=0;
-    BOOL supported=properties&&control_uint(properties,@"RedfinDisplayControlABI",&abi)&&abi==1&&
+    BOOL supported=redfin_brightness_system_ready()&&properties&&control_uint(properties,@"RedfinDisplayControlABI",&abi)&&abi==1&&
         control_uint(properties,@"RedfinDisplayOn",&on)&&on==1&&control_uint(properties,@"RedfinControlSequence",&sequence);
     io_connect_t client=0;
     if(!supported||IOServiceOpen(probe.service,mach_task_self(),0,&client)!=KERN_SUCCESS) {
@@ -183,7 +184,7 @@ void redfin_controls_probe_run(uint64_t nonce,void (^completion)(BOOL,BOOL))
     struct redfin_display_statistics_v2 initial={0};mach_timebase_info_data_t scale={0};mach_timebase_info(&scale);
     BOOL statistics=[probe statistics:&initial];
     probe.clockRatio=statistics&&scale.denom?(double)initial.counter_hz*scale.numer/scale.denom/1e9:0;
-    probe.savedBrightness=UIScreen.mainScreen.brightness;
+    probe.savedBrightness=redfin_brightness_system_get();
     if(!isfinite(probe.savedBrightness)||probe.savedBrightness<0||probe.savedBrightness>1||
         !isfinite(probe.clockRatio)||probe.clockRatio<0.25||probe.clockRatio>4) {
         control_log(nonce,"refused native-brightness-or-statistics result=11 restored=1 unchanged=1");
@@ -197,7 +198,8 @@ void redfin_controls_probe_run(uint64_t nonce,void (^completion)(BOOL,BOOL))
     probe.initialKeySamples=samples;probe.initialKeyErrors=errors;
     probe.cursor=sequence;probe.began=probe.phaseBegan=control_seconds()/probe.clockRatio;probe.phase=1;
     control_active=probe;
-    control_log(nonce,"start native-ABI=1 public-UIKit=1 saved=%.5f low=%.5f high=%.5f bounded-seconds=24",
+    control_log(nonce,"start native-ABI=1 system-BKS=1 scene-independent=1 saved=%.5f low=%.5f high=%.5f bounded-seconds=24",
         probe.savedBrightness,probe.lowBrightness,probe.highBrightness);
-    UIScreen.mainScreen.brightness=probe.lowBrightness;[probe poll];
+    if(!redfin_brightness_system_set((float)probe.lowBrightness))[probe restore:8];
+    [probe poll];
 }

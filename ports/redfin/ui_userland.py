@@ -58,19 +58,23 @@ def build(out,cache_path=None):
         quartz_uuid=quartz.uuid
         from ports.redfin.cadence_abi import derive as derive_cadence
         cadence=derive_cadence(cache)
+        from ports.redfin.brightness_abi import derive_system as derive_system_brightness
+        system_brightness=derive_system_brightness(cache)
         foundation=cache.image('/System/Library/Frameworks/Foundation.framework/Foundation')
         bundle_methods=foundation.objc_methods('NSBundle')
         if bundle_methods.get('-objectForInfoDictionaryKey:',{}).get('types')!='@24@0:8@16':
             raise ValueError('native main-bundle public info getter ABI differs')
         foundation_uuid=foundation.uuid
     define=','.join('0x'+uuid[i:i+2] for i in range(0,32,2))
+    bks_define=','.join('0x'+system_brightness['uuid'][i:i+2] for i in range(0,32,2))
     sdk=subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()
     library=out/'libredfin-ui.dylib'
     command=['xcrun','--sdk','iphoneos','clang','-arch','arm64','-isysroot',sdk,
         '-miphoneos-version-min=16.0','-O2','-fblocks','-fobjc-arc','-Wall','-Wextra','-Werror',
         '-Wno-deprecated-declarations','-dynamiclib','-install_name',LIBRARY,
-        '-DREDFIN_UIKIT_UUID_BYTES='+define,'-I',str(HERE),str(HERE/'statusbar-cutout.m'),str(HERE/'native-diagnostics.m'),str(HERE/'native-tcc-probe.m'),
-        str(HERE/'display-probe.m'),str(HERE/'controls-probe.m'),'-framework','UIKit','-framework','Foundation',
+        '-DREDFIN_UIKIT_UUID_BYTES='+define,'-DREDFIN_BKS_UUID_BYTES='+bks_define,
+        '-I',str(HERE),str(HERE/'statusbar-cutout.m'),str(HERE/'native-diagnostics.m'),str(HERE/'native-tcc-probe.m'),
+        str(HERE/'display-probe.m'),str(HERE/'controls-probe.m'),str(HERE/'brightness-system.m'),'-framework','UIKit','-framework','Foundation',
         '-framework','CoreGraphics','-framework','QuartzCore','-framework','IOKit','-o',str(library)]
     with (out/'build.log').open('wb') as log:
         subprocess.run(command,check=True,stdout=log,stderr=log)
@@ -102,12 +106,15 @@ def build(out,cache_path=None):
     report.update(probe_opt_in_only=True,probe_uses_native_completed_counts=True,probe_statistics_version=2,
         controls_probe_opt_in_only=True,controls_probe_restores_brightness_and_display=True,
         controls_probe_physical_presses_tested=False,
+        controls_probe_system_brightness_abi=system_brightness,
+        controls_probe_uses_UIScreen_setter=False,probe_requires_nonempty_window=True,
         probe_checks_exit_version=1,
         native_cadence_abi=cadence,native_display_period_getters_preserved=True,
         high_refresh_main_bundle_opt_in=True,foundation_uuid=foundation_uuid,
         probe_request_path='/redfin/display-probe-request',
         source_sha256={name:hashlib.sha256((HERE/name).read_bytes()).hexdigest() for name in
             ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m','controls-probe.m','controls-policy.h',
+             'brightness-system.h','brightness-system.m','brightness_abi.py',
              'display-refresh.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
              'statusbar-geometry.h','graphics-exec-scope.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')

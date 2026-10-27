@@ -1,5 +1,27 @@
 # HackiOS upstream review — 2026-10-22
 
+## Scene-independent system brightness and finite workload correction — 2026-10-27
+
+Preferred reviewed pins remain kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,
+button code c84b4634277a70beac73921029b1fb6afc2530af, and active userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772. Retain their GLES/app Metal paths.
+Own20H392 audit identifies UIKit UIDevice -_setBacklightLevel: as an active
+application-scene settings update, not an unconditional system transaction.
+Use native BackBoardServices UUIDa9d6b8ce7863381fb1ab1055a11412d5 exports
+BKSDisplayBrightnessSetWithImplicitTransaction void(float) and
+BKSDisplayBrightnessGetCurrent float(void) for the explicit one-boot observer.
+Exact installed bodies and runtime UUID are checked, without API replacement.
+Actual DBV completion/restoration stays mandatory. Exclude native software
+dimming/empty windows from the finite workload; report the chosen content host.
+
+V101/CI27 retains complete native GPU/Metal/private pixels/panel references,
+but UIKit brightness still fails and the observed counter rate is0.199775FPS.
+Scene availability and selected host were not logged, so no GPU/backlight
+causality is inferred. New90combined executable contracts and signed native
+UI80745948.. PASS. Reuse exact CI27/883286e/kernel4f99141c../Mesa/Metal; one
+V102 combined hardware run remains. Physical buttons/full suspend/ALS remain
+unproved; V99's finite61.032FPS is the preserved measured baseline.
+
 ## Native20H392 CoreBrightness backlight dictionary and transport — 2026-10-27
 
 Preferred sources remain kernel88513176../reviewedc84b4634 and active userland
