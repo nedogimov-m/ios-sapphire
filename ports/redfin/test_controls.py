@@ -143,7 +143,10 @@ class PanelControlsTests(unittest.TestCase):
     def test_visibility_commands_use_the_short_DCS_FIFO_and_no_DMA_memory(self):
         for on in (0,1):
             self.assertEqual(self.lib.run(0,0,on),1)
-            self.assertEqual(self.metrics(12,13),(0x80000500|(0x29 if on else 0x28),0))
+            # Independent native DSI header byte order: data0,data1,type,last.
+            packet=self.lib.metric(12).to_bytes(4,'little')
+            self.assertEqual(packet,bytes((0x29 if on else 0x28,0,0x05,0x80)))
+            self.assertEqual(self.lib.metric(13),0)
         self.assertEqual(self.lib.run(0,0,2),0);self.assertEqual(self.lib.metric(0),0)
 
     def test_off_clocks_busy_engine_and_stale_done_never_submit(self):

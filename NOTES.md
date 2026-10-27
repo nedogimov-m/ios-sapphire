@@ -1,5 +1,23 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN DSI visibility packet byte order corrected before any device run — 2026-10-27
+
+Base8740ac2 complete controls block passes80combined checks and all3native
+TUs, but independent review of actual inherited setPanelOn and Google's
+DSI packet-header rotation identifies a wrong short-header datatype lane.
+Correct bytes are command / 00 / datatype05 / last80: display-on80050029,
+not80000529. Normal long0x51 brightness framing is unchanged. Tests now
+compare independent wire-order bytes rather than repeating the packed literal.
+Full80combined contracts and all3exact native TUs pass again (8.053s host).
+UI controls-v1/Mesa/Metal/compiler artifacts remain exact; no UI rebuild.
+
+CI25 Actions40428245189/source8740ac2 was dispatched before this source
+correction; its kernel must NOT be booted. Old image watcher is stopped;
+no V100 image or iOS boot/root apply was made. Dispatch the corrected source
+as CI26, bind the same still-fresh readonly V103 at clean1717443, then one
+V100 full GPU/controls/UI run. No physical controls success claimed. Last
+actual iOS kernel/args remain V99/CI24/e90b110 with exact args recorded below.
+
 ## REDFIN complete native buttons/brightness block; combined host checks PASS — 2026-10-27
 
 Finished connected PON/GPIO5 -> existing PMIC worker -> native HID input and

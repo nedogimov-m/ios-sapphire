@@ -41,7 +41,8 @@ static inline bool rf_panel_control(const struct redfin_panel_io *io,bool bright
         words[0]=0xc0390003u; /* long DCS packet: three payload bytes */
         words[1]=0xff000051u|((value>>8)<<8)|((value&255u)<<16);bytes=8;
     } else {
-        words[0]=0x80000500u|(value?0x29u:0x28u);words[1]=0;bytes=4;
+        /* Header bytes are command, parameter0, DCS datatype05, last80. */
+        words[0]=0x80050000u|(value?0x29u:0x28u);words[1]=0;bytes=4;
     }
     rp_write(io,RP_DSI,0x17c,words[0]);rp_write(io,RP_DSI,0x17c,words[1]);
     uint32_t selected=(dma&~((3u<<30)|(1u<<29)|(1u<<24)))|(1u<<28)|(1u<<26);

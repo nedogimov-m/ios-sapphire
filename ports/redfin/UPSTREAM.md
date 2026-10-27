@@ -1,5 +1,16 @@
 # HackiOS upstream review — 2026-10-22
 
+## DSI short visibility header independently cross-checked — 2026-10-27
+
+Actual inherited AppleCLCD::setPanelOn uses bytes command/00/05/80, matching
+Google display-driversca74909c dsi_ctrl.c packet-header rotation. The new
+FIFO visibility path now encodes80050028/80050029; the initial800005xx
+literal placed datatype05 in the parameter lane. Fixed before any device
+boot of this controls block; tests assert independent byte order. Full80
+contracts/three native TUs pass; existing long0x51 bytes remain unchanged.
+CI25 source8740ac2 is superseded and must not be used as controls hardware
+proof; corrected CI26 and the single combined device run remain pending.
+
 ## Native Redfin physical-controls/brightness integration — 2026-10-27
 
 Preferred kernel main88513176b1e96ecf0b764cd62c6f4e6ac71345e3 and reviewed
