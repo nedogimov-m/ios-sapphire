@@ -1,5 +1,18 @@
 # HackiOS upstream review — 2026-10-22
 
+## Preferred source pointers refreshed while corrected controls build runs — 2026-10-27
+
+Public API main pointers remain kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3
+and userland2573c4a8d80ed143e534d16b5a386efa5b06ccbb (relocation notice).
+Keep reviewed c84b4634 button code and active906425b75e02b4f99eb5d7bb1ef7c9583472d772
+GLES/Metal sources; no new upstream delta or shader rebuild is required.
+Native MobileWiFi's real preference field is 'List of known networks', not
+'KnownNetworks'; a fresh readonly Redfin snapshot has3entries. This is
+configuration persistence, not proof of actual password lookup/autojoin.
+Corrected controls sourcecc100af is in Actions40429125860/run26; hardware
+results remain pending. Account activation certificates remain separate
+from compatibility model fields, as already documented by the preferred port.
+
 ## DSI short visibility header independently cross-checked — 2026-10-27
 
 Actual inherited AppleCLCD::setPanelOn uses bytes command/00/05/80, matching

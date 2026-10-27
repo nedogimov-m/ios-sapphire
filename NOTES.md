@@ -1,5 +1,38 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN corrected cc100af in CI26; fresh V103 and Wi-Fi observations saved — 2026-10-27
+
+Complete controls implementation8740ac2 plus independent short-header fix
+cc100affad3f0637b79619f841121d748e6e8ab4:80combined contracts and all3exact
+native TUs PASS, native UI da1f3982../refresh4a02d6e1.. actual20H392 PASS.
+Pushed to owned redfin-ci and dispatched Actions40429125860/run26 at exact
+cc100af: current state IN_PROGRESS, native build step started00:53:52UTC.
+https://github.com/nedogimov-m/ios-sapphire/actions/runs/40429125860 .
+CI25/source8740ac2 is superseded and must not be booted. Current watcher
+session86306 / research/redfin-controls-v1/watch-kernel-ci.py binds only CI26;
+then verifies the complete artifact/source/ABI and prepares only fresh V100.
+No redundant Mesa/Metal/compiler/UI rebuild; no new physical test yet.
+
+Fresh V103 readonly snapshot TERMINAL exit0: actual clean1717443, current
+file preimages/native empty journal saved; rooted recovery remains verified
+unmounted/idle. No stage/apply/iOS boot. Reuse this epoch only while its live
+header/preimages still match. V102 stays STALE/never reuse. V100 request will
+be controls-checked, with complete native GPU jobs first and automatic Phone/
+Photos launches OFF. Last actual V99/CI24/e90b110/kernel398b6b7a../nonce
+077ad640e2795543 and exact boot args remain in the V99 start entry below.
+
+Additional bounded READ ONLY Wi-Fi preferences observe3remembered networks
+in the actual native 'List of known networks', with unchanged generation
+1717443. Names/passwords/addresses are not printed; raw preferences stay in
+ignored research/redfin-wifi-native/preferences-v103, mode0600. V99 proves
+synthetic MobileWiFi credential persistence across reboot (existing1/exact1),
+but radio readiness takes36.910s from worker start and no IPv4/autojoin is
+observed. Three stored records have JOIN_EXTENDED_STATUS=-3902; its meaning
+is not inferred as a password failure. Real credential lookup/autojoin and
+startup latency remain open. Preferred main pointers rechecked unchanged:
+kernel88513176../userland2573c4a8.. relocation; active906425b7.. sources reused.
+All wider GOAL items stay active; no device-buttons/brightness proof claimed.
+
 ## REDFIN DSI visibility packet byte order corrected before any device run — 2026-10-27
 
 Base8740ac2 complete controls block passes80combined checks and all3native

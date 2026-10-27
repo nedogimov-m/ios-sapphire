@@ -47,6 +47,8 @@ Reuse native `035131` and existing Mesa/Metal/compiler artifacts. Last clean
 root generation is `1717443`; applied V102 is stale and must never be reused.
 Next fresh root update is V103; next kernel image is V100 / corrected CI26. CI25 source8740ac2 is
 superseded (short visibility datatype byte corrected before any device boot).
+Corrected `cc100af` is building in Actions `40429125860` / run26;
+watcher session86306 prepares V100 only after terminal artifact verification.
 Run full native GPU checks, opt-in UIKit brightness/off/wake/restoration,
 input-path readiness and ordinary animation together. Phone/Photos automatic
 launches remain off. Physical button presses, visible inset lock/rotation
