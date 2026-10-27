@@ -1,5 +1,25 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CI28 compiling exact8c422d8; fresh V108 read terminal — 2026-10-27
+
+Complete cold-output dependency block committed8c422d8246466db98eef7ccd646288446b3731fb,
+124combined contracts and final11affected phase checks/native GPU TU PASS.
+Owned Actions40446572438/run28 dispatched for that exact source:
+https://github.com/nedogimov-m/ios-sapphire/actions/runs/40446572438 . Native build started03:53:05UTC; compiler cache restore
+succeeds. Watcher session44448 / research/redfin-cold-output-v1/watch-kernel-ci28.py
+binds only this source/terminal artifact, verifies the entire patch map against
+retained CI27 and prepares fresh V105 only; it never boots the phone.
+
+Fresh V108 read session62082 TERMINAL exit0: clean consistent unmounted
+HFSX1768532/current targets/native empty journal saved; verified offline recovery
+idle, no stage/apply/iOS boot. Reuse this read epoch while live preimages/header
+remain exact; do not reread merely to wait for CI. V107 APPLIED/STALE/never reuse.
+UI5a501aac../refresh6e9f8c83../Mesa/Metal/native/compiler/cache stay retained.
+Next one combined V105 after actual CI28 proof and full preimage/readback/fsck
+gates; no Phone/Photos automatic opens. Last actual V104 and exact arguments
+remain in its terminal entry below. No new hardware or performance success;
+all broader GOAL requirements remain active.
+
 ## REDFIN complete cold-output dependency/first-reader correction ready — 2026-10-27
 
 After terminal V104/d47cadc, queue chronology shows sysmem gpu-render client

@@ -51,8 +51,10 @@ result. Key paths ready/armed7,15004samples/errors0, no physical presses.
 Complete native first-reader/client-fence/output correction is implemented:
 one actual FIFO cold sequence and immutable10s deadline, then ordinary2s work,
 within original explicit caller bounds.124combined contracts and final11affected
-checks/native GPU TU PASS. New kernel CI28 required; userspace graphics/UI stay
-retained. One V105 after fresh V108 at1768532, no current device operation.
+checks/native GPU TU PASS. Exact8c422d8 is building in CI28 Actions40446572438; compiler cache restored.
+Watcher44448 verifies only that terminal source/artifact and prepares V105,
+never boots. Fresh V108 read TERMINAL at1768532, offline recovery idle; no stage/
+apply/iOS boot and no other device operation. Userspace graphics/UI stay retained.
 New hardware result remains pending. V99 is the preserved measured baseline.
 
 Kernel4f99141c../Mesa1a4ad42c../Metal17d0f01f../native035131/cache496301fc.. stay
