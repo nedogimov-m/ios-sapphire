@@ -99,5 +99,15 @@ int main(){
         self.assertEqual(proof['set_signature'],'void(float)')
         self.assertEqual(proof['get_signature'],'float(void)')
 
+    def test_complete_native_backlight_and_owned_idle_assertion_ABI(self):
+        from ports.redfin.graphics_abi import Cache,DEFAULT_CACHE
+        from ports.redfin.system_display_abi import derive
+        if not DEFAULT_CACHE.is_file():self.skipTest('actual native20H392 cache required')
+        with Cache() as cache:proof=derive(cache)
+        self.assertFalse(proof['synchronous_IOMFB_brightness_supported'])
+        self.assertFalse(proof['hardware_success_claimed'])
+        self.assertEqual(proof['reviewed']['CBDisplayModuleiOS__start']['types'],'v16@0:8')
+        self.assertEqual(proof['reviewed']['CBDisplayContaineriOS__setupInternalModules']['types'],'B16@0:8')
+
 
 if __name__=='__main__':unittest.main()

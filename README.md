@@ -26,8 +26,10 @@ an application scene and the workload may select an empty/dimming window;
 the corrected native system transaction and visible-content observer now pass
 90combined checks and native UI build. V102 still observes no applied low/high
 brightness and cannot prove restoration, so its FPS workload correctly refuses.
-The complete native CoreBrightness request path is the next blocker; the cause
-of earlier low rates and complete physical controls remain unproved.
+The complete native backlight-selection/system-idle correction now passes
+93combined executable contracts and actual14method/four-image ABI/build checks.
+One V103 integration with the same CI27 kernel is next; hardware brightness,
+the cause of earlier low rates and complete physical controls remain unproved.
 V99 stays the preserved measured performance baseline.
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including

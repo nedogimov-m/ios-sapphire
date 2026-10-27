@@ -20,8 +20,6 @@ METHODS={
     'UIView': {'-setFrame:':'v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16',
         '-setBounds:':'v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16',
         '-setCenter:':'v32@0:8{CGPoint=dd}16','-layoutSubviews':'v16@0:8'},
-    'UIApplication': {'-isIdleTimerDisabled':'B16@0:8',
-        '-setIdleTimerDisabled:':'v20@0:8B16'},
     '_UIStatusBar': {'-layoutSubviews':'v16@0:8',
         '-setAvoidanceFrame:':'v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16',
         '-avoidanceFrame':'{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8',
@@ -60,6 +58,8 @@ def build(out,cache_path=None):
         cadence=derive_cadence(cache)
         from ports.redfin.brightness_abi import derive_system as derive_system_brightness
         system_brightness=derive_system_brightness(cache)
+        from ports.redfin.system_display_abi import derive as derive_system_display
+        system_display=derive_system_display(cache)
         foundation=cache.image('/System/Library/Frameworks/Foundation.framework/Foundation')
         bundle_methods=foundation.objc_methods('NSBundle')
         if bundle_methods.get('-objectForInfoDictionaryKey:',{}).get('types')!='@24@0:8@16':
@@ -67,14 +67,20 @@ def build(out,cache_path=None):
         foundation_uuid=foundation.uuid
     define=','.join('0x'+uuid[i:i+2] for i in range(0,32,2))
     bks_define=','.join('0x'+system_brightness['uuid'][i:i+2] for i in range(0,32,2))
+    def native_define(name):
+        value=system_display['reviewed'][name]['uuid']
+        return ','.join('0x'+value[i:i+2] for i in range(0,32,2))
     sdk=subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()
     library=out/'libredfin-ui.dylib'
     command=['xcrun','--sdk','iphoneos','clang','-arch','arm64','-isysroot',sdk,
         '-miphoneos-version-min=16.0','-O2','-fblocks','-fobjc-arc','-Wall','-Wextra','-Werror',
         '-Wno-deprecated-declarations','-dynamiclib','-install_name',LIBRARY,
         '-DREDFIN_UIKIT_UUID_BYTES='+define,'-DREDFIN_BKS_UUID_BYTES='+bks_define,
+        '-DREDFIN_SB_UUID_BYTES='+native_define('SBIdleTimerGlobalCoordinator__sharedInstanceIfExists'),
+        '-DREDFIN_BB_UUID_BYTES='+native_define('BSSimpleAssertion__invalidate'),
         '-I',str(HERE),str(HERE/'statusbar-cutout.m'),str(HERE/'native-diagnostics.m'),str(HERE/'native-tcc-probe.m'),
-        str(HERE/'display-probe.m'),str(HERE/'controls-probe.m'),str(HERE/'brightness-system.m'),'-framework','UIKit','-framework','Foundation',
+        str(HERE/'display-probe.m'),str(HERE/'controls-probe.m'),str(HERE/'brightness-system.m'),str(HERE/'idle-system.m'),
+        '-framework','UIKit','-framework','Foundation',
         '-framework','CoreGraphics','-framework','QuartzCore','-framework','IOKit','-o',str(library)]
     with (out/'build.log').open('wb') as log:
         subprocess.run(command,check=True,stdout=log,stderr=log)
@@ -89,7 +95,8 @@ def build(out,cache_path=None):
             '-Wno-deprecated-declarations','-dynamiclib','-install_name',REFRESH_LIBRARY,
             '-DREDFIN_UIKIT_UUID_BYTES='+define,'-DREDFIN_QUARTZ_UUID_BYTES='+quartz_define,
             '-DREDFIN_FOUNDATION_UUID_BYTES='+foundation_define,
-            '-I',str(HERE),str(HERE/'display-refresh.m'),'-framework','Foundation',
+            '-DREDFIN_CB_UUID_BYTES='+native_define('BLControl__findBacklight'),
+            '-I',str(HERE),str(HERE/'display-refresh.m'),str(HERE/'backlight-system.m'),'-framework','Foundation',
             '-framework','QuartzCore','-framework','IOKit','-o',str(refresh)]
         subprocess.run(command,check=True,stdout=log,stderr=log)
         subprocess.run(['codesign','--force','--sign','-','--identifier','com.redfin.refresh','--timestamp=none',str(refresh)],
@@ -108,6 +115,8 @@ def build(out,cache_path=None):
         controls_probe_physical_presses_tested=False,
         controls_probe_system_brightness_abi=system_brightness,
         controls_probe_uses_UIScreen_setter=False,probe_requires_nonempty_window=True,
+        native_system_display_abi=system_display,probe_owns_native_SpringBoard_idle_assertion=True,
+        native_backlight_route='separate AppleARMBacklight; synchronous IOMFB unsupported',
         probe_checks_exit_version=1,
         native_cadence_abi=cadence,native_display_period_getters_preserved=True,
         high_refresh_main_bundle_opt_in=True,foundation_uuid=foundation_uuid,
@@ -115,6 +124,7 @@ def build(out,cache_path=None):
         source_sha256={name:hashlib.sha256((HERE/name).read_bytes()).hexdigest() for name in
             ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m','controls-probe.m','controls-policy.h',
              'brightness-system.h','brightness-system.m','brightness_abi.py',
+             'native-image-uuid.h','idle-system.h','idle-system.m','backlight-system.m','system_display_abi.py',
              'display-refresh.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
              'statusbar-geometry.h','graphics-exec-scope.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')

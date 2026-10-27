@@ -52,8 +52,10 @@ static BOOL control_sysctl(const char *name,unsigned *value)
 @property(nonatomic) io_connect_t client;
 @property(nonatomic) uint64_t nonce,cursor,offFrames;
 @property(nonatomic) unsigned phase,error,lowDBV,highDBV,initialKeySamples,initialKeyErrors;
+@property(nonatomic) unsigned loggedPhase;
 @property(nonatomic) double savedBrightness,lowBrightness,highBrightness,began,phaseBegan,offSampleAt;
 @property(nonatomic) double clockRatio;
+@property(nonatomic) double loggedAt;
 @property(nonatomic) BOOL finished,offProven,wakeProven,restoreNeedsCommit;
 @property(nonatomic,copy) void (^completion)(BOOL,BOOL);
 - (void)poll;
@@ -125,6 +127,12 @@ static RedfinControlsProbe *control_active;
         control_uint(properties,@"IOMFBBrightnessLevel",&requested_nits)&&applied_nits==requested_nits&&
         rf_panel_nits_to_dbv(applied_nits,&expected)&&expected==level;
     double brightness=redfin_brightness_system_get();
+    if(self.loggedPhase!=self.phase||now-self.loggedAt>=1) {
+        self.loggedPhase=self.phase;self.loggedAt=now;
+        control_log(self.nonce,"state phase=%u system=%.5f valid=%u applied=%u on=%llu sequence=%llu DBV=%llu requested-nits16=%llu applied-nits16=%llu uncertain=%llu",
+            self.phase,brightness,valid,brightnessApplied,(unsigned long long)on,(unsigned long long)sequence,
+            (unsigned long long)level,(unsigned long long)requested_nits,(unsigned long long)applied_nits,(unsigned long long)uncertain);
+    }
     if(self.phase!=5&&(now-self.began>20||!properties||uncertain||!isfinite(brightness))) {
         [self restore:uncertain?7:!isfinite(brightness)?8:6];
     } else if(self.phase==1&&brightnessApplied&&on&&sequence>self.cursor&&fabs(brightness-self.lowBrightness)<0.01) {

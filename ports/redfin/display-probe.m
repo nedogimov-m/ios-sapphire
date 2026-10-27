@@ -17,6 +17,7 @@
 #include "gui-profile.h"
 #include "display-statistics.h"
 #include "display-benchmark.h"
+#include "idle-system.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 extern void redfin_controls_probe_run(uint64_t,void (^)(BOOL,BOOL));
@@ -50,7 +51,7 @@ extern void redfin_controls_probe_run(uint64_t,void (^)(BOOL,BOOL));
 @end
 
 static RedfinDisplayProbe *active_probe;
-static BOOL probe_ended,idle_guard_active,idle_guard_changed;
+static BOOL probe_ended,idle_guard_active;
 static NSString *const animation_key=@"com.redfin.presentation.measure";
 static kern_return_t last_sample_status;
 static size_t last_sample_bytes;
@@ -95,25 +96,21 @@ static void probe_log(uint64_t nonce,const char *format,...)
     int fd=open("/private/var/mobile/Library/Logs/redfin-ui.log",O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW,0600);
     if (fd>=0) {(void)write(fd,line,bytes);close(fd);}
 }
-/* Borrow only this process's public idle request, for this exact one-boot
- * observation. All success/refusal paths and an independent finite deadline
- * release our request. No lock/unlock/passcode policy is changed. */
+/* SpringBoard's public app idle request can lack an application scene. Borrow
+ * one owned native system assertion instead, with the same finite deadline.
+ * Other clients and the system's lock/unlock/passcode policy are preserved. */
 static BOOL probe_idle_release(void)
 {
-    BOOL restored=YES;
-    if(idle_guard_active&&idle_guard_changed) {
-        UIApplication.sharedApplication.idleTimerDisabled=NO;
-        restored=!UIApplication.sharedApplication.idleTimerDisabled;
-    }
-    idle_guard_active=NO;idle_guard_changed=NO;probe_ended=YES;return restored;
+    BOOL restored=redfin_idle_system_end();
+    if(restored)idle_guard_active=NO;
+    probe_ended=YES;return restored;
 }
-static void probe_idle_begin(uint64_t nonce)
+static BOOL probe_idle_begin(uint64_t nonce)
 {
-    if(idle_guard_active)return;
-    idle_guard_changed=!UIApplication.sharedApplication.idleTimerDisabled;
+    if(idle_guard_active)return YES;
+    if(!redfin_idle_system_begin(nonce))return NO;
     idle_guard_active=YES;
-    if(idle_guard_changed)UIApplication.sharedApplication.idleTimerDisabled=YES;
-    probe_log(nonce,"finite-idle-guard borrowed=%u maximum-seconds=%u",idle_guard_changed,
+    probe_log(nonce,"finite-idle-guard borrowed=1 native-SpringBoard=1 maximum-seconds=%u",
         RF_DISPLAY_PROBE_IDLE_LIMIT_SECONDS);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)RF_DISPLAY_PROBE_IDLE_LIMIT_SECONDS*NSEC_PER_SEC),
         dispatch_get_main_queue(),^{
@@ -125,6 +122,7 @@ static void probe_idle_begin(uint64_t nonce)
                 probe_log(nonce,"refused bounded-idle-deadline idle-restored=%u",restored);
             }
         });
+    return YES;
 }
 static BOOL sample_attempts(io_connect_t client,uint64_t nonce,struct redfin_display_statistics_v2 *out,unsigned attempts)
 {
@@ -367,6 +365,25 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
     probe_measure(native_host,nonce,checked?RF_DISPLAY_PROBE_ANIMATE:requested,checked,NO,NO);
 }
 
+static void probe_schedule_with_idle(UIWindow *host,uint64_t nonce,unsigned mode,unsigned waits)
+{
+    if(probe_ended)return;
+    if(!probe_idle_begin(nonce)) {
+        if(waits) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+                probe_schedule_with_idle(host,nonce,mode,waits-1);
+            });
+        } else {
+            BOOL released=probe_idle_release();
+            probe_log(nonce,"refused native-system-idle-assertion-unavailable idle-restored=%u",released);
+        }
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,40*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        probe_begin(host,nonce,mode,60);
+    });
+}
+
 void redfin_display_probe_schedule(UIWindow *host,uint64_t nonce)
 {
     static BOOL scheduled;
@@ -374,9 +391,5 @@ void redfin_display_probe_schedule(UIWindow *host,uint64_t nonce)
         strcmp(NSProcessInfo.processInfo.processName.UTF8String,"SpringBoard")) return;
     scheduled=YES;
     unsigned mode=request_mode(nonce);if(mode==RF_DISPLAY_PROBE_NONE)return;
-    probe_idle_begin(nonce);
-    UIWindow *native_host=host;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,40*NSEC_PER_SEC),dispatch_get_main_queue(),^{
-        probe_begin(native_host,nonce,mode,60);
-    });
+    probe_schedule_with_idle(host,nonce,mode,50);
 }

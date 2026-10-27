@@ -1,5 +1,53 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native backlight selection and owned system idle assertion ready — 2026-10-27
+
+After terminal V102/b1c7c5c, reviewed the complete actual20H392 BLControl ->
+CADisplay/CAWindowServerDisplay -> CBDisplayContaineriOS -> CBDisplayModuleiOS
+and native BKS request paths. Sync selection depends on WindowServer brightness
+availability; Redfin implements a separate AppleARMBacklight/DSI backend, not
+Apple's complete synchronous IOMFB brightness transport. Its previous selected
+route was not logged; this remains an integration correction awaiting hardware,
+not a proved explanation of V102 or earlier0.2FPS samples.
+
+The complete adapter now reports the unsupported synchronous capability only
+for the integrated Redfin display, behind exact native backlight metadata and
+native Quartz/CoreBrightness UUID/type guards. Other display types retain their
+original getter. Native module selection/start/setup methods continue unchanged
+through bounded startup observation. No synthetic brightness result, compositor
+change, native period override, Apple binary/cache patch or kernel change.
+Actual CBDisplayModuleiOS.start is VOID, whereas container setup/start return
+BOOL; all signatures and full reviewed method spans are audited.
+
+The finite observer now acquires its own BSSimpleAssertion from SpringBoard's
+existing SBIdleTimerGlobalCoordinator, on main only, with the existing150s
+independent deadline and bounded5s initial readiness. It invalidates only that
+unique boot-bound token, preserves other clients and refuses a measurement if
+native idle admission fails. Public UIApplication idle requests are no longer
+used. Bounded controls-state records retain actual BKS/nits/DBV/sequence/on/
+restoration state. No manual button/ALS/full-suspend proof is inferred.
+
+93combined executable contracts PASS, with the two new actual-runtime tests
+also checking external-display preservation, refusal before any hooks, original
+failure results, main-thread/ownership/repeated cleanup and refusal cleanup.
+New fixtures initially collided with host BaseBoard and inherited IOKit names;
+namespace/boundary fixes and an actually asynchronous background-thread test
+pass without changing production source after its successful UI build.
+Actual14method/four-image UUID/body ABI, signed native UI and imports PASS.
+UI1c41abd8../refresh521af6d6..; no Mesa/Metal/compiler/kernel rebuild. Reuse
+CI27 Actions40432973023/run27/source883286e/kernel4f99141c.. and native035131/
+Mesa1a4ad42c../Metal17d0f01f../cache496301fc.. unchanged.
+
+Fresh V103 imagec27e6d1fce2d87ed69e86ada6abab877964ce5e9ad30ef749bdca35893268199
+nonce61914f1e2bd56eb9 passes complete image/loader/ADT/FDT/private inputs/
+firmware/kernel/source/native UI ABI preflight. Fresh V106 READ binds1748928;
+ONE combined GPU/native brightness/off/wake/restoration/key-readiness/content
+host/FPS run follows preimage/readback/readonly fsck gates. V105 STALE/never
+reuse. No automatic Phone/Photos opens or frame capture. V99 finite61.032FPS
+remains the preserved measured baseline; all wider GOAL items remain active.
+Exact proposed V103 boot args (last actual V102 args are recorded below):
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x61914f1e2bd56eb9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V102 terminal: native BKS still has no applied brightness; FPS correctly refused — 2026-10-27
 
 Source90941b8, unchanged CI27 Actions40432973023/run27/source883286e,

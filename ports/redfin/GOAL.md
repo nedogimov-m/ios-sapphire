@@ -49,9 +49,13 @@ No Mesa/Metal/compiler/kernel rebuild. V102 is TERMINAL exit0, one server/no
 panic, clean1748928/Fastboot; native GPU/Metal/private pixels/four panel
 references PASS. Native BKS low still never reaches hardware; result6/restored0,
 low0/high0. The finite FPS workload correctly refuses after unproved restoration,
-so no new FPS exists. Earlier low-rate causality remains open. Next block audits
-and fixes the complete native CoreBrightness/backboardd path before one combined
-test. V105 APPLIED/STALE, never reuse; next fresh V106 must bind1748928.
+so no new FPS exists. Earlier low-rate causality remains open. The complete next block now corrects native standalone backlight selection
+and owns one finite native SpringBoard idle assertion, with bounded actual
+state/module observation.93combined executable contracts, four-image/14method
+native ABI and signed UI1c41abd8../refresh521af6d6.. PASS. Same CI27 kernel/
+Mesa/Metal/compiler retained. Fresh V103 complete preflight PASS; ONE combined
+GPU/brightness/off/wake/restoration/input-readiness/content/FPS run is next.
+V105 APPLIED/STALE, never reuse; fresh V106 must bind1748928.
 Phone/Photos auto opens remain OFF. Physical key actions, brightness from UI,
 lock/wake input, inset persistence, real-ALS auto brightness and full suspend
 remain unverified/open. Exact builds/args/results are in NOTES.md. Every wider

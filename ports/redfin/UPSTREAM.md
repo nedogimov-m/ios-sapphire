@@ -1,5 +1,29 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native standalone backlight admission and SpringBoard idle ownership — 2026-10-27
+
+Preferred pins retained: kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,
+reviewed buttons c84b4634277a70beac73921029b1fb6afc2530af, active userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772. Keep their proved GLES/app Metal
+implementation; no graphics/kernel/compiler rebuild for this connected block.
+
+Own actual20H392 four-image/14method UUID/type/body audit covers CoreBrightness
+6c709250../Quartz9e40b2eb../SpringBoard22034aba../BaseBoard809da722... Native
+BLControl can select synchronous IOMFB brightness from WindowServer capability.
+Redfin's native standalone AppleARMBacklight requires a separate route: report
+unsupported synchronous brightness only for the integrated display behind the
+exact native driver contract, preserve other displays and continue native module
+selection/setup/start unchanged with bounded observation. V102's actual selected
+route was not recorded; no cause or hardware success is claimed before V103.
+
+SpringBoard's normal app idle request is not the system idle coordinator's own
+assertion. The one-boot observer now borrows one unique BSSimpleAssertion from
+the existing coordinator, invalidates only that token and retains a finite150s
+deadline. No global/passcode/lock policy replacement.93combined executable
+contracts and signed actual-ABI UI1c41abd8../refresh521af6d6.. PASS; same CI27/
+883286e/kernel4f99141c.., one V103 integration next. Real UI brightness, physical
+buttons/ALS/full suspend and sustained interactive smoothness remain open.
+
 ## V102 native transaction still does not reach the panel — 2026-10-27
 
 Own UI90941b8/80745948.. with unchanged preferred pins and CI27/883286e.
