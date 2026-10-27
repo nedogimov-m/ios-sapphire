@@ -34,7 +34,7 @@ typedef NS_ENUM(NSInteger,UISceneActivationState){UISceneActivationStateUnattach
 - (CGRect)convertRect:(CGRect)rect toLayer:(CALayer *)layer;
 @end
 @interface CAContext:NSObject
-@property(nonatomic) uint32_t contextId;
+@property(nonatomic) uint32_t contextId,displayId,commitId;
 @end
 @interface UIView:NSObject
 @property(nonatomic,weak) UIWindow *window;
@@ -114,6 +114,8 @@ int main(){@autoreleasepool{
  assert(!redfin_display_content_layer(empty)&&!redfin_display_content_layer(dimmer));
  assert(redfin_display_content_window(empty)==w&&redfin_display_content_layer(w)==target);
  assert(redfin_display_content_context(w,target)==31&&!redfin_display_content_context(w,w.layer));
+ struct redfin_content_state state={0};w.layer.ownedContext.displayId=4;w.layer.ownedContext.commitId=9;
+ assert(redfin_display_content_snapshot(w,target,&state)&&state.context==31&&state.display==4&&state.commit==9);
  assert(empty.isKeyWindow&&!w.isKeyWindow&&w.alpha==1&&w.layer.sublayers[0]==target);
  w.hidden=YES;assert(!redfin_display_content_window(empty));w.hidden=NO;
  w.nativeVisible=NO;assert(!redfin_display_content_layer(w));w.nativeVisible=YES;

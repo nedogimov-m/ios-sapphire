@@ -182,8 +182,12 @@ static void probe_native_periods(uint64_t nonce,CADisplayLink *link)
     uint32_t context=redfin_display_content_context(window,layer);
     if(!context||!content_animation(layer,animation_key,self.clockRatio,RF_DISPLAY_PROBE_ANIMATION_SECONDS))return NO;
     self.animatedLayer=layer;self.originalTransform=layer.transform;
+    struct redfin_content_state state={0};
+    BOOL snapshot=redfin_display_content_snapshot(window,layer,&state);
     probe_log(self.nonce,"content-attached window=%s layer=%s context=%u root-container=0 model-unchanged=1 native-local-time=1",
         class_getName(window.class),class_getName(layer.class),context);
+    probe_log(self.nonce,"content-transaction phase=attached valid=%u context=%u display=%u commit=%u read-only=1",
+        snapshot,state.context,state.display,state.commit);
     return YES;
 }
 - (void)tick:(CADisplayLink *)link
@@ -235,6 +239,10 @@ static void probe_native_periods(uint64_t nonce,CADisplayLink *link)
         struct redfin_display_statistics_v2 start={0};
         if (!sample(self.framebuffer,self.nonce,&start)) {self.finishReason="initial-counters";[self finish:YES];return;}
         self.first=start;self.lastNative=start;self.began=now;self.last=now;
+        struct redfin_content_state state={0};
+        BOOL observed=redfin_display_content_snapshot(self.window,self.animatedLayer,&state);
+        probe_log(self.nonce,"content-transaction phase=measure-start valid=%u context=%u display=%u commit=%u read-only=1",
+            observed,state.context,state.display,state.commit);
         probe_log(self.nonce,"measure-start warmup-seconds=%u ticks=%llu completed-presents=%llu gpu-presents=%llu",
             RF_DISPLAY_PROBE_WARMUP_SECONDS,(unsigned long long)start.ticks,(unsigned long long)start.presents,(unsigned long long)start.gpu_presents);
     } else if (self.began) {
@@ -266,6 +274,10 @@ static void probe_native_periods(uint64_t nonce,CADisplayLink *link)
     BOOL attached=redfin_display_content_context(self.window,self.animatedLayer)!=0;
     BOOL preserved=self.animatedLayer&&CATransform3DEqualToTransform(self.originalTransform,self.animatedLayer.transform);
     BOOL moving=self.motionSamples>=3&&self.motionMaximum-self.motionMinimum>=0.1;
+    struct redfin_content_state context_state={0};
+    BOOL context_observed=redfin_display_content_snapshot(self.window,self.animatedLayer,&context_state);
+    probe_log(self.nonce,"content-transaction phase=finish valid=%u context=%u display=%u commit=%u read-only=1",
+        context_observed,context_state.context,context_state.display,context_state.commit);
     [self.animatedLayer removeAnimationForKey:animation_key];self.animatedLayer=nil;
     struct redfin_display_statistics_v2 final={0};
     BOOL valid=self.began && sample(self.framebuffer,self.nonce,&final) && final.ticks>self.first.ticks &&

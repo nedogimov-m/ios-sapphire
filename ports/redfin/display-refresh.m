@@ -20,6 +20,7 @@
 #include "graphics-exec-scope.h"
 #include "display-mode.h"
 extern void redfin_backlight_system_install(const char *);
+extern void redfin_server_admission_install(const char *);
 
 static double (*ui_period)(id,SEL);
 static NSInteger (*ui_maximum)(id,SEL),(*ui_private_maximum)(id,SEL);
@@ -210,6 +211,7 @@ __attribute__((constructor)) static void redfin_refresh_install(void)
         !redfin_ui_fullscreen(args,(unsigned)bytes)) return;
     const char *nonce=strstr(args,"redfinbootid=0x");if (!nonce || strlen(nonce+15)<16) return;
     memcpy(boot_nonce,nonce+15,16);
+    redfin_server_admission_install(boot_nonce);
     redfin_backlight_system_install(boot_nonce);
     refresh_policy_active=true;
     static const unsigned char quartz[16]={REDFIN_QUARTZ_UUID_BYTES},uikit[16]={REDFIN_UIKIT_UUID_BYTES};

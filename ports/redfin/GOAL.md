@@ -26,6 +26,20 @@ Completed bring-up is a preserved baseline; only remaining work is listed.
 
 ## Current handoff
 
+Complete persistent WLAN identity and native server/client admission block
+passes94combined checks, actual complete WLAN/Topaz native TUs and signed
+20H392 UIe82ff2b8../refresh2f570766.. build/import audit. Private station file
+is persistent-local, never printed/regenerated; host/loader/kernel16byte ABI
+selects it before vdev/ifnet/controller publication, preserving serial/wrapping/
+RTC material and old diagnostic profiles. New production kernel ABI required.
+Native23method server observer is one-boot/finite/read-only with original
+callback arguments/results preserved; client context display/commit snapshots
+are included. No forced rendering or changed model/state. No new graphics build.
+Next exact-source CI30 must prove all CI29 overlays+the station identity overlay
+(expected289), then ONE combined V108 after fresh V111/1797295 and complete
+reversible preimages/readback/readonly fsck. No new device/CI operation or
+Wi-Fi/autojoin/FPS proof yet. All11requirements remain active.
+
 V107 afterbefea2e is TERMINAL exit0, authenticated5e0963b86b5c97c8,
 one backboardd62/no panic or GPU fault, clean unmounted HFSX1797295 and
 verified Fastboot. No live device/CI operation. V110 APPLIED/STALE, never reuse;

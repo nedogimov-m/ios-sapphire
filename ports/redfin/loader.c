@@ -4,6 +4,7 @@
 #include "watchdog.h"
 #include <stddef.h>
 #include "gui-profile.h"
+#include "wifi-identity.h"
 
 #if XNU_PAYLOAD_SIZE
 #define PAGE 0x4000ULL
@@ -619,7 +620,7 @@ static int adt_valid_smp_mode_sensors(const volatile unsigned char *b, uint64_t 
     uint32_t pending[32], kinds[32], handles[8] = {0};
     unsigned depth = 0, cpus = 0, chosen_children = 0, arm_seen = 0;
     uint64_t root_seen = 0;
-    unsigned display_controls = 0;
+    unsigned display_controls = 0, wifi_identity_seen = 0;
     uint64_t off = 0;
     pending[0] = 1; kinds[0] = 0;
     for (;;) {
@@ -733,6 +734,8 @@ static int adt_valid_smp_mode_sensors(const volatile unsigned char *b, uint64_t 
                     else return 0;
                     if (len != 4 || word(value, 0) != expected || (seen & bit)) return 0;
                     seen |= bit;
+                } else if(kind==CHOSEN&&smp_key(key,RF_WIFI_IDENTITY_PROPERTY)) {
+                    if(gui!=3||wifi_identity_seen++||!rf_wifi_identity_decode(value,len,0))return 0;
                 } else if (kind == CHOSEN && (smp_key(key, "dram-base") || smp_key(key, "dram-size"))) {
                     unsigned bit = smp_key(key, "dram-base") ? 1 : 2;
                     if (len != 8 || quad(value) != (bit == 1 ? 0x180000000ULL : 0x80000000ULL) || (seen & bit)) return 0;

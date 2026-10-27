@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Persistent native station identity and exact CA server observation — 2026-10-27
+
+Preferred reviewed kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,
+buttonsc84b4634277a70beac73921029b1fb6afc2530af and active userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain unchanged. The inherited
+RedwoodWLAN/Topaz native radio ABI is adapted with an optional validated private
+16byte persistent station identity, selected before vdev/ifnet/controller
+publication. Explicit invalid material refuses; old diagnostic profiles remain
+compatible. This replaces per-boot randomness in production, without changing
+factory storage, serial, wrapping keys, credentials or other partitions.
+Inspected factory sources contain no usable address; persistent-local is honest
+provenance, never a fabricated factory address. Actual two complete native TUs
+and canonical staging/94combined checks PASS; expected CI30 map=CI29+one overlay.
+No device/autojoin completion proof before the new kernel actually runs.
+
+Actual20H392 Quartz9e40b2eb.. admission observers share a23method type/prefix
+inventory, forward eight native callbacks without changing arguments/results,
+and sample state/real retirement/context commit IDs only for a finite explicit
+one-boot request. No forced rendering, native state override or guessed ivars.
+Signed UIe82ff2b8../refresh2f570766.. actual ABI PASS, existing graphics/cache
+retained. V107 sparse physical output remains; server admission is not yet
+observed on the phone. All wider goals remain active.
+
 ## V107 client content motion confirmed; ordinary physical composition still sparse — 2026-10-27
 
 Preferred kernel88513176../buttonsc84b4634../active userland906425b7.. unchanged.

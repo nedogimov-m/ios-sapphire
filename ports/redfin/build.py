@@ -56,6 +56,7 @@ def main():
     p.add_argument('--apple-adt', type=Path, help='D22AP product identity and development policy for Apple userspace')
     p.add_argument('--device-identity', type=Path, help='private physical Redfin serial; does not provide Apple activation certificates')
     p.add_argument('--keychain-material', type=Path, help='private persistent software keywrap material; GUI3 only, consumed before userspace')
+    p.add_argument('--wifi-identity', type=Path, help='private persistent Redfin station address; GUI3 and native station-identity ABI required')
     p.add_argument('--platform-power', action='store_true', help='native Redfin QG/ADC5/SMB5, thermal/OSM and retained-RTC support; GUI3 only')
     p.add_argument('--rtc-anchor', type=Path, help='private retained-RTC/UTC epoch mapping captured in verified recovery; requires --platform-power')
     p.add_argument('--memory-base', type=lambda x: int(x, 0))
@@ -409,6 +410,17 @@ def main():
             private_keychain = keychain_material.load(a.keychain_material)
         except (OSError, ValueError, TypeError):
             p.error('private Redfin keychain material is invalid or unreadable')
+    private_wifi_identity = None
+    if a.wifi_identity:
+        if not a.gpu_gui or not a.apple_adt or not a.kernel:
+            p.error('--wifi-identity requires --gpu-gui/--apple-adt/--kernel')
+        import wifi_identity
+        try:
+            private_wifi_identity=wifi_identity.load(a.wifi_identity)
+        except (OSError,ValueError,TypeError):
+            p.error('private persistent Wi-Fi identity is invalid or unreadable')
+        if b'RedfinWiFiStationIdentityABI' not in a.kernel.read_bytes():
+            p.error('--wifi-identity requires the actual native station-identity kernel ABI')
     private_rtc = None
     if a.platform_power or a.rtc_anchor:
         if not a.platform_power or not a.gpu_gui or not a.apple_adt:
@@ -469,6 +481,8 @@ def main():
             mkadt.apple_userspace_identity(tree, a.apple_adt.read_bytes(), private_identity)
         if private_keychain is not None:
             keychain_material.apply(tree, private_keychain)
+        if private_wifi_identity is not None:
+            wifi_identity.apply(tree,private_wifi_identity)
         platform_power_proof = None
         controls_proof = None
         gpu_dvfs_proof = None
@@ -857,6 +871,8 @@ def main():
         manifest['device_identity'] = device_identity.report(a.device_identity, private_identity)
     if private_keychain is not None:
         manifest['keychain_material'] = keychain_material.report(a.keychain_material, private_keychain)
+    if private_wifi_identity is not None:
+        manifest['wifi_identity']=wifi_identity.report(a.wifi_identity,private_wifi_identity)
     if a.platform_power:
         manifest['platform_power'] = platform_power_proof
         manifest['gpu_dvfs'] = gpu_dvfs_proof

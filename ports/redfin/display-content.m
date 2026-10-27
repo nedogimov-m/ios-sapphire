@@ -24,6 +24,8 @@ static BOOL content_methods_ready(void)
         {"UIWindow","allWindowsIncludingInternalWindows:onlyVisibleWindows:forScreen:","@32@0:8B16B20@24",YES,YES},
         {"CALayer","context","@16@0:8",NO,NO},
         {"CAContext","contextId","I16@0:8",NO,NO},
+        {"CAContext","displayId","I16@0:8",NO,NO},
+        {"CAContext","commitId","I16@0:8",NO,NO},
     };
     for(unsigned i=0;i<sizeof(methods)/sizeof(methods[0]);++i) {
         Class cls=objc_getClass(methods[i].cls);
@@ -67,6 +69,18 @@ uint32_t redfin_display_content_context(UIWindow *window,CALayer *layer)
     uint32_t wanted=((uint32_t (*)(id,SEL))objc_msgSend)(window,sel_registerName("_contextId"));
     uint32_t actual=((uint32_t (*)(id,SEL))objc_msgSend)(context,sel_registerName("contextId"));
     return wanted&&wanted==actual?wanted:0;
+}
+
+bool redfin_display_content_snapshot(UIWindow *window,CALayer *layer,struct redfin_content_state *state)
+{
+    uint32_t context=redfin_display_content_context(window,layer);
+    if(!state||!context)return false;
+    id native=((id (*)(id,SEL))objc_msgSend)(layer,sel_registerName("context"));
+    if(!native)native=((id (*)(id,SEL))objc_msgSend)(window.layer,sel_registerName("context"));
+    struct redfin_content_state observed={context,
+        ((uint32_t (*)(id,SEL))objc_msgSend)(native,sel_registerName("displayId")),
+        ((uint32_t (*)(id,SEL))objc_msgSend)(native,sel_registerName("commitId"))};
+    *state=observed;return true;
 }
 
 static BOOL content_intersects(CALayer *layer,CALayer *root)

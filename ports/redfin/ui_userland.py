@@ -37,7 +37,7 @@ REFRESH_METHODS['CADisplayLink']={'-maximumRefreshRate':'d16@0:8'}
 CONTENT_METHODS={
     'UIWindow':{'-_hasContext':'B16@0:8','-_contextId':'I16@0:8','-_isVisible':'B16@0:8',
         '+allWindowsIncludingInternalWindows:onlyVisibleWindows:forScreen:':'@32@0:8B16B20@24'},
-    'CALayer':{'-context':'@16@0:8'},'CAContext':{'-contextId':'I16@0:8'},
+    'CALayer':{'-context':'@16@0:8'},'CAContext':{'-contextId':'I16@0:8','-displayId':'I16@0:8','-commitId':'I16@0:8'},
 }
 
 
@@ -69,6 +69,8 @@ def build(out,cache_path=None):
         system_brightness=derive_system_brightness(cache)
         from ports.redfin.system_display_abi import derive as derive_system_display
         system_display=derive_system_display(cache)
+        from ports.redfin.server_admission_abi import derive as derive_server_admission
+        server_admission=derive_server_admission(cache)
         foundation=cache.image('/System/Library/Frameworks/Foundation.framework/Foundation')
         bundle_methods=foundation.objc_methods('NSBundle')
         if bundle_methods.get('-objectForInfoDictionaryKey:',{}).get('types')!='@24@0:8@16':
@@ -109,9 +111,9 @@ def build(out,cache_path=None):
             '-DREDFIN_CB_UUID_BYTES='+native_define('BLControl__findBacklight'),
             '-DREDFIN_BKD_UUID_BYTES='+','.join('0x'+system_display['backboard']['uuid'][i:i+2] for i in range(0,32,2)),
             '-DREDFIN_IOKIT_UUID_BYTES='+','.join('0x'+system_display['iokit_properties']['uuid'][i:i+2] for i in range(0,32,2)),
-            '-I',str(HERE),str(HERE/'display-refresh.m'),str(HERE/'backlight-system.m'),str(HERE/'backlight-failures.m'),
+            '-I',str(HERE),str(HERE/'display-refresh.m'),str(HERE/'server-admission.m'),str(HERE/'backlight-system.m'),str(HERE/'backlight-failures.m'),
             '-framework','Foundation',
-            '-framework','QuartzCore','-framework','IOKit','-o',str(refresh)]
+            '-framework','QuartzCore','-framework','CoreGraphics','-framework','IOKit','-o',str(refresh)]
         subprocess.run(command,check=True,stdout=log,stderr=log)
         subprocess.run(['codesign','--force','--sign','-','--identifier','com.redfin.refresh','--timestamp=none',str(refresh)],
             check=True,stdout=log,stderr=log)
@@ -132,6 +134,8 @@ def build(out,cache_path=None):
         probe_content_methods=CONTENT_METHODS,probe_requires_visible_attached_content=True,
         probe_samples_native_presentation_motion=True,probe_content_model_preserved=True,
         native_system_display_abi=system_display,probe_owns_native_SpringBoard_idle_assertion=True,
+        native_server_admission_abi=server_admission,server_observer_nonce_bound=True,
+        server_observer_forwards_original_calls=True,server_observer_forces_render=False,
         native_backlight_route='separate AppleARMBacklight; synchronous IOMFB unsupported',
         controls_probe_restoration_accepts_original_physical_state=True,controls_probe_composes_during_power_checks=True,
         native_backlight_error_formats_opt_in_only=True,native_backlight_encoded_log_arguments_preserved=True,
@@ -146,7 +150,8 @@ def build(out,cache_path=None):
              'native-image-uuid.h','idle-system.h','idle-system.m','backlight-system.m','system_display_abi.py',
              'backlight-failures.m',
              'backlight-manual.h',
-             'display-refresh.m','display-content.h','display-content.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
+             'display-refresh.m','server-admission.m','server-admission-methods.def','server_admission_abi.py',
+             'display-content.h','display-content.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
              'statusbar-geometry.h','graphics-exec-scope.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')
     (out/'refresh-log-initial').write_bytes(b'REDFIN verified physical refresh adaptation; native periods are seconds.\n')

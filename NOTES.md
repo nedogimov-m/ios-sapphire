@@ -1,5 +1,67 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete persistent WLAN identity and native server-admission observation ready — 2026-10-27
+
+After7b73a46/V107, implement the confirmed per-boot random station identity
+problem together with source-bound native server/context observation. A private
+owner-only host file supplies one persistent local unicast MAC to the loader,
+actual native radio before vdev/ifnet creation, and matching IOKit controller.
+Serial/keychain wrapping/RTC material are unchanged. No factory MAC was found
+in the inspected live FDT properties/common files of the EXISTING readonly
+persist backup; the new identity is explicitly persistent-local, not claimed
+factory-derived. It is created once under backup/redfin/ios-wifi-identity.json,
+never regenerated/printed. Its16byte/version1/source/address/reserved contract
+is checked by host, real standalone loader and kernel. Kernel consumes/removes
+the private chosen property and caches only its station identity on the serial
+radio owner. Invalid supplied identity refuses radio startup; old diagnostic
+profiles without it retain their former firmware/random path. New production
+images require the actual RedfinWiFiStationIdentityABI marker. No partition,
+modem/persist/EFS or existing identity/credentials file has been changed.
+
+Native server observation is nonce/file/process/UID gated, finite150s/1Hz, with
+one23method UIKit-independent Quartz9e40b2eb.. inventory, types and reviewed
+48byte prefixes. Eight callbacks forward EXACT original arguments/results and
+record only counters/timing; no update/render/state setter is invoked by the
+observer. It samples native enabled/disablesUpdates/compositing/needsUpdate/
+flipbook/frame timing, callback presence, native hit-context IDs and real
+physical retirement counters on a private serial queue. Client content records
+now include native context display/commit IDs at attach/measurement/finish.
+No new scene/window/surface or guessed ivar offsets; original model and every
+native correctness/failed-context ownership gate remain. Ordinary boot without
+this exact checked request installs no observer. Detailed data stays private.
+
+94combined native forwarding/ABI/content/control/backlight/display/WLAN/radio/
+Keychain/canonical CI inventory contracts PASS in18.178s. Actual complete final
+RedfinWLAN.cpp AND TopazModem.cpp TUs compile with real CI/native flags, exit0.
+Actual signed20H392 UI/build/import ABI PASS:
+UIe82ff2b8fafb0fcb233e389de53b5555585548bb22e06cd59dd9536b943d8a4d,
+refresh2f570766eca3aa9f39376e66913f17288c28528c6cca31d967229047e33c83f8.
+First combined integration caught missing gui-profile header, unavailable
+private gIODTPlane declaration and new-file-mode/diff-boundary details. All
+corrected before CI/device use; supported absolute registry path and full
+final native compilation now pass. No Mesa/Metal/compiler/shader/cache rebuild.
+
+Canonical inventory appends native-wifi-station-identity.patch after the entire
+accepted CI29 map (expected289total); the actual CI staging-loop contract covers
+old cold-output and the new final overlay. A fresh exact-source CI30 is required
+next, with complete old+new patch map and actual station ABI proof. Retain
+accepted CI29/Actions40448042380/run29/source1e4b4dc/kernel11d60b4d.. and native
+248e974a../Metal5141bd25../cache496301fc.. as the last hardware baseline until
+then. Preferred reviewed kernel88513176../buttonsc84b4634../active userland
+906425b7.. unchanged. V107 is the last actual boot: full native graphics/controls
+PASS, client motion40samples/1.777points, physical2frames/10.011198s, no GPU
+bottleneck or continuous server visibility proved. No new Wi-Fi/Keychain/
+autojoin/startup/FPS completion claim.
+
+Phone remains verified Fastboot, clean1797295; no live CI/device operation at
+this checkpoint. V110 STALE/never reuse; next fresh V111 binds1797295, imageV108.
+After accepted CI30 and complete loader/private-input preflight: fresh reversible
+root read/stage/apply/readback/readonly fsck and ONE combined V108 full native
+GPU/brightness/off/wake/server/client/output/WLAN identity/autojoin observation.
+Phone/Photos auto opens and frame captures stay OFF. All11GOAL requirements
+remain active; exact last actual V107 arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x5e0963b86b5c97c8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V107 terminal: attached client content moves; physical GUI remains2frames — 2026-10-27
 
 Complete visible-content blockbefea2e, retained accepted CI29

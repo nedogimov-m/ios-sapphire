@@ -1,0 +1,147 @@
+diff --git a/iokit/Kernel/arm/RedfinWLAN.cpp b/iokit/Kernel/arm/RedfinWLAN.cpp
+--- a/iokit/Kernel/arm/RedfinWLAN.cpp
++++ b/iokit/Kernel/arm/RedfinWLAN.cpp
+@@ -37,6 +37,8 @@
+ #include <libkern/c++/OSNumber.h>
+ 
+ extern "C" void RedfinWLANStart(const char * interface, const uint8_t * address);
++#include "RedfinWiFiIdentity.h"
++#include "RedfinWiFiIdentity.inc"
+ 
+ class IO80211Controller : public IOService
+ {
+@@ -207,6 +209,11 @@
+ 		IOLog("RedfinWLAN: cannot create the services\n");
+ 		return;
+ 	}
++	controller->setProperty("RedfinWiFiStationIdentityABI",1ULL,32);
++	controller->setProperty("RedfinPersistentStationAddress",redfin_station_identity_source>0&&
++	    !memcmp(address,redfin_station_identity,sizeof(redfin_station_identity)));
++	controller->setProperty("RedfinStationIdentitySource",redfin_station_identity_source>0?
++	    (unsigned long long)redfin_station_identity_source:0ULL,32);
+ 	if ((mac = OSData::withBytes(address, 6)) != NULL) {
+ 		controller->setProperty("IOMACAddress", mac);
+ 		mac->release();
+diff --git a/iokit/Kernel/arm/TopazModem.cpp b/iokit/Kernel/arm/TopazModem.cpp
+--- a/iokit/Kernel/arm/TopazModem.cpp
++++ b/iokit/Kernel/arm/TopazModem.cpp
+@@ -5637,6 +5637,7 @@
+ };
+ #define NFREQ ((uint32_t)(sizeof(scan_freqs) / sizeof(scan_freqs[0])))
+ static uint8_t our_mac[6] = { 0x02, 0x54, 0x4F, 0x50, 0x41, 0x5A };   /* locally administered */
++#include "RedfinWiFiStationAddress.inc"
+ struct bss {
+ 	uint8_t bssid[6]; char ssid[33]; uint8_t chan; int8_t rssi; uint16_t seen;
+ 	uint8_t raw_ssid[32], raw_ssid_len; uint16_t freq, bintval, capab, ie_len; uint32_t last_ms; uint8_t ie[768];
+@@ -7355,13 +7356,7 @@
+ 		    wmi_mac[2], wmi_mac[3], wmi_mac[4], wmi_mac[5]);
+ 		if (wmi_ready) {
+ 			if (rf_radio_bus.context && !rf_radio_mac_selected) {
+-				if (redfin_wifi_mac_usable(wmi_mac)) memcpy(our_mac,wmi_mac,6);
+-				else {
+-					/* Native ath10k also supplies a local address when firmware
+-					 * has no usable MAC. Keep one address throughout this boot. */
+-					read_random(our_mac,6); our_mac[0]=(our_mac[0]&0xfcu)|2u;
+-					LOG("wmi: using one per-boot locally administered station address");
+-				}
++				if(!redfin_radio_select_station(our_mac,wmi_mac))break;
+ 				rf_radio_mac_selected = true;
+ 			}
+ 			htt_start();                        /* the host rx ring first, then the scan */
+diff --git a/iokit/Kernel/arm/RedfinWiFiIdentity.h b/iokit/Kernel/arm/RedfinWiFiIdentity.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinWiFiIdentity.h
+@@ -0,0 +1,23 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef REDFIN_WIFI_IDENTITY_H
++#define REDFIN_WIFI_IDENTITY_H
++#include <stdint.h>
++#include <stddef.h>
++#define RF_WIFI_IDENTITY_PROPERTY "redfin-wifi-identity"
++#define RF_WIFI_IDENTITY_BYTES 16u
++enum {RF_WIFI_IDENTITY_FACTORY=1,RF_WIFI_IDENTITY_LOCAL=2};
++
++/* A local address is generated once by the private host identity provider,
++ * never from a boot nonce or by the radio's per-boot random fallback. */
++static inline unsigned rf_wifi_identity_decode(const volatile unsigned char *data,size_t bytes,
++    unsigned char address[6])
++{
++    if(!data||bytes!=RF_WIFI_IDENTITY_BYTES||data[0]!=1||data[1]||data[2]||data[3]||
++       (data[4]!=RF_WIFI_IDENTITY_FACTORY&&data[4]!=RF_WIFI_IDENTITY_LOCAL)||
++       data[5]||data[6]||data[7]||data[14]||data[15]||(data[8]&1))return 0;
++    unsigned any=0;for(unsigned i=8;i<14;++i)any|=data[i];
++    if(!any||(data[4]==RF_WIFI_IDENTITY_LOCAL&&!(data[8]&2)))return 0;
++    if(address)for(unsigned i=0;i<6;++i)address[i]=data[8+i];
++    return data[4];
++}
++#endif
+diff --git a/iokit/Kernel/arm/RedfinWiFiIdentity.inc b/iokit/Kernel/arm/RedfinWiFiIdentity.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinWiFiIdentity.inc
+@@ -0,0 +1,36 @@
++/* SPDX-License-Identifier: MIT */
++/* The serialized native radio owner selects its identity once, before vdev
++ * creation and before publishing en0. The same owner publishes WLAN afterward.
++ * No network names, credentials or address bytes are logged. */
++static unsigned char redfin_station_identity[6];
++static int redfin_station_identity_source;
++static bool redfin_station_identity_attempted;
++
++extern "C" int RedfinWiFiCopyStationAddress(uint8_t address[6]);
++extern "C" int RedfinWiFiCopyStationAddress(uint8_t address[6])
++{
++    if(!address)return -1;
++    if(!redfin_station_identity_attempted) {
++        redfin_station_identity_attempted=true;
++        IORegistryEntry *chosen=IORegistryEntry::fromPath("IODeviceTree:/chosen");
++        OSData *data=chosen?OSDynamicCast(OSData,chosen->getProperty(RF_WIFI_IDENTITY_PROPERTY)):NULL;
++        if(data) {
++            data->retain();
++            unsigned source=rf_wifi_identity_decode((const volatile unsigned char *)data->getBytesNoCopy(),
++                data->getLength(),redfin_station_identity);
++            chosen->removeProperty(RF_WIFI_IDENTITY_PROPERTY);
++            bool removed=chosen->getProperty(RF_WIFI_IDENTITY_PROPERTY)==NULL;
++            redfin_station_identity_source=source&&removed?(int)source:-1;
++            data->release();
++        } else if(chosen&&chosen->getProperty(RF_WIFI_IDENTITY_PROPERTY)) {
++            chosen->removeProperty(RF_WIFI_IDENTITY_PROPERTY);redfin_station_identity_source=-1;
++        }
++        if(chosen)chosen->release();
++        IOLog("REDFIN WIFI STATION IDENTITY: supplied=%u accepted=%u source=%u no-address-logged=1\n",
++            redfin_station_identity_source!=0,redfin_station_identity_source>0,
++            redfin_station_identity_source>0?(unsigned)redfin_station_identity_source:0);
++    }
++    if(redfin_station_identity_source>0)
++        memcpy(address,redfin_station_identity,sizeof(redfin_station_identity));
++    return redfin_station_identity_source;
++}
+diff --git a/iokit/Kernel/arm/RedfinWiFiStationAddress.inc b/iokit/Kernel/arm/RedfinWiFiStationAddress.inc
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/RedfinWiFiStationAddress.inc
+@@ -0,0 +1,23 @@
++/* SPDX-License-Identifier: MIT */
++extern "C" int RedfinWiFiCopyStationAddress(uint8_t address[6]);
++static bool redfin_radio_select_station(uint8_t address[6],const uint8_t firmware[6])
++{
++    int source=RedfinWiFiCopyStationAddress(address);
++    if(source<0) {
++        rf_radio_error=EINVAL;
++        LOG("wmi: invalid supplied persistent station identity; native start refused");
++        return false;
++    }
++    if(source>0) {
++        LOG("wmi: persistent station identity selected source=%u",(unsigned)source);
++        return true;
++    }
++    /* Older diagnostic profiles without the new private contract retain
++     * their original behavior. Production images supply the stable identity. */
++    if(redfin_wifi_mac_usable(firmware))memcpy(address,firmware,6);
++    else {
++        read_random(address,6);address[0]=(address[0]&0xfcu)|2u;
++        LOG("wmi: using one per-boot locally administered station address");
++    }
++    return true;
++}

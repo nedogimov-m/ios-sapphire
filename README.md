@@ -6,6 +6,13 @@ Primary stable upstream sources, selected by the user:
 
 Current Redfin GUI composition and panel scaling/packing run on Adreno620.
 `redfinfb=1` publishes the framebuffer interface used by that GPU display path.
+The complete persistent WLAN identity/native CA server observation block passes
+94combined checks, actual WLAN/radio native TUs and signed20H392 UI ABI/build.
+One private local station address is selected before vdev/ifnet/controller
+publication; serial/wrapping/RTC material are preserved. Native server callbacks
+forward unchanged, with bounded state/client-commit/physical-frame observation.
+A new exact-source CI30 kernel and one V108 combined run are required; no new
+Wi-Fi/autojoin/FPS result is claimed. Graphics/compiler/cache stay retained.
 V107/CI29 passes both COMPLETE independent native GMEM/sysmem GLES modes,
 whole native app Metal and four private physical-panel references. Actual BKS
 low/high brightness, off/output pause, wake/output resume and original level

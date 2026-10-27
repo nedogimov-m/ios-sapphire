@@ -10,9 +10,10 @@ builder=importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
 
 
 class KernelOverlayInventoryTests(unittest.TestCase):
-    def test_real_CI_staging_receives_the_final_cold_output_overlay_in_order(self):
+    def test_real_CI_staging_receives_cold_output_and_station_identity_in_order(self):
         names=builder.extension_patch_names()
-        self.assertEqual(names[-3:],('native-output-direct.patch','native-controls.patch','native-cold-output-waits.patch'))
+        self.assertEqual(names[-4:],('native-output-direct.patch','native-controls.patch',
+                                    'native-cold-output-waits.patch','native-wifi-station-identity.patch'))
         self.assertEqual(len(names),len(set(names)))
         # Exercise the production staging loop in isolation. No downloads,
         # remote builds, KDK setup or device access are needed for this check.
@@ -30,7 +31,7 @@ class KernelOverlayInventoryTests(unittest.TestCase):
                     'shutil':Copier,'overlays':overlays})
         self.assertEqual([x[0] for x in staged],list(names))
         self.assertEqual([p.name for p in overlays],list(names))
-        self.assertEqual(staged[-1][1],'z'*(20+len(names))+'-redfin-native-cold-output-waits.patch')
+        self.assertEqual(staged[-1][1],'z'*(20+len(names))+'-redfin-native-wifi-station-identity.patch')
 
     def test_missing_canonical_source_refuses_before_any_kernel_build(self):
         real=Path.is_file
