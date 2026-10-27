@@ -96,7 +96,10 @@ def build(out,cache_path=None):
             '-DREDFIN_UIKIT_UUID_BYTES='+define,'-DREDFIN_QUARTZ_UUID_BYTES='+quartz_define,
             '-DREDFIN_FOUNDATION_UUID_BYTES='+foundation_define,
             '-DREDFIN_CB_UUID_BYTES='+native_define('BLControl__findBacklight'),
-            '-I',str(HERE),str(HERE/'display-refresh.m'),str(HERE/'backlight-system.m'),'-framework','Foundation',
+            '-DREDFIN_BKD_UUID_BYTES='+','.join('0x'+system_display['backboard']['uuid'][i:i+2] for i in range(0,32,2)),
+            '-DREDFIN_IOKIT_UUID_BYTES='+','.join('0x'+system_display['iokit_properties']['uuid'][i:i+2] for i in range(0,32,2)),
+            '-I',str(HERE),str(HERE/'display-refresh.m'),str(HERE/'backlight-system.m'),str(HERE/'backlight-failures.m'),
+            '-framework','Foundation',
             '-framework','QuartzCore','-framework','IOKit','-o',str(refresh)]
         subprocess.run(command,check=True,stdout=log,stderr=log)
         subprocess.run(['codesign','--force','--sign','-','--identifier','com.redfin.refresh','--timestamp=none',str(refresh)],
@@ -117,6 +120,9 @@ def build(out,cache_path=None):
         controls_probe_uses_UIScreen_setter=False,probe_requires_nonempty_window=True,
         native_system_display_abi=system_display,probe_owns_native_SpringBoard_idle_assertion=True,
         native_backlight_route='separate AppleARMBacklight; synchronous IOMFB unsupported',
+        controls_probe_restoration_accepts_original_physical_state=True,controls_probe_composes_during_power_checks=True,
+        native_backlight_error_formats_opt_in_only=True,native_backlight_encoded_log_arguments_preserved=True,
+        native_manual_backlight_fallback=True,native_manual_backlight_preserves_BKS_state_and_preferences=True,
         probe_checks_exit_version=1,
         native_cadence_abi=cadence,native_display_period_getters_preserved=True,
         high_refresh_main_bundle_opt_in=True,foundation_uuid=foundation_uuid,
@@ -125,6 +131,8 @@ def build(out,cache_path=None):
             ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m','controls-probe.m','controls-policy.h',
              'brightness-system.h','brightness-system.m','brightness_abi.py',
              'native-image-uuid.h','idle-system.h','idle-system.m','backlight-system.m','system_display_abi.py',
+             'backlight-failures.m',
+             'backlight-manual.h',
              'display-refresh.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
              'statusbar-geometry.h','graphics-exec-scope.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')

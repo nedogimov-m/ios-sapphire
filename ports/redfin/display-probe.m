@@ -20,7 +20,7 @@
 #include "idle-system.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
-extern void redfin_controls_probe_run(uint64_t,void (^)(BOOL,BOOL));
+extern void redfin_controls_probe_run(uint64_t,void (^)(BOOL,double),void (^)(BOOL,BOOL));
 
 @interface RedfinDisplayProbe : NSObject
 {
@@ -353,7 +353,22 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
             requested!=RF_DISPLAY_PROBE_CONTROLS_CHECKED,requested==RF_DISPLAY_PROBE_CONTROLS_CHECKED);
     }
     if(requested==RF_DISPLAY_PROBE_CONTROLS_CHECKED) {
-        redfin_controls_probe_run(nonce,^(BOOL restored,BOOL passed){
+        UIWindow *host=animation_host(native_host);
+        NSString *key=[NSString stringWithFormat:@"com.redfin.controls.observe.%016llx",(unsigned long long)nonce];
+        CALayer *layer=host.layer;
+        if(!host||[layer animationForKey:key]) {
+            BOOL released=probe_idle_release();
+            probe_log(nonce,"refused no owned controls animation host idle-restored=%u",released);return;
+        }
+        redfin_controls_probe_run(nonce,^(BOOL start,double ratio){
+            if(start) {
+                CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"sublayerTransform.translation.x"];
+                animation.fromValue=@0;animation.toValue=@2;animation.duration=0.25*ratio;
+                animation.autoreverses=YES;animation.additive=YES;animation.repeatDuration=28*ratio;
+                animation.removedOnCompletion=YES;[layer addAnimation:animation forKey:key];
+            } else [layer removeAnimationForKey:key];
+            probe_log(nonce,"controls-workload active=%u class=%s finite-seconds=28 model-unchanged=1",start,class_getName(host.class));
+        },^(BOOL restored,BOOL passed){
             if(!restored) {
                 BOOL idle=probe_idle_release();
                 probe_log(nonce,"refused display-controls-restoration-failed idle-restored=%u",idle);return;

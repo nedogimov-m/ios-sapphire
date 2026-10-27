@@ -4,6 +4,10 @@ Only metadata and hashes are retained. Native Apple images stay private;
 this audit neither fabricates brightness capability nor claims hardware success.
 """
 import hashlib
+import struct
+
+CONTAINER_IVARS={'_displayService':('I',4),'_display':('@"CADisplay"',8),
+    '_brtCtl':('@"<CBBrightnessProxy>"',8),'_displayControlModule':('@"<CBContainerModuleProtocol>"',8)}
 
 REVIEWED = {'BSSimpleAssertion__isValid': {'library': '/System/Library/PrivateFrameworks/BaseBoard.framework/BaseBoard',
                                 'uuid': '809da722a9b53acfa0e7e41632331f2b',
@@ -104,6 +108,64 @@ REVIEWED = {'BSSimpleAssertion__isValid': {'library': '/System/Library/PrivateFr
                                'bytes': 20,
                                'sha256': '9fb52d6e9000768d5b39d1635bc0c286393e4b598343de875bd166905a593a2c'}}
 
+REVIEWED['CADisplay__isExternal'] = {'library': '/System/Library/Frameworks/QuartzCore.framework/QuartzCore',
+ 'uuid': '9e40b2eb260c3af1ae45a1a551a8c1b9',
+ 'cls': 'CADisplay',
+ 'selector': '-isExternal',
+ 'types': 'B16@0:8',
+ 'bytes': 64,
+ 'sha256': '5f3a6f11936c7a3355d81453ccb16b619e38b7dcd43c4421a9dcf2c3daaeb212'}
+
+
+BACKBOARD_UUID = '70b72340737a39738b474e9970f4ecb9'
+BACKBOARD_METHODS = {'-setBrightnessLevel:reason:options:': {'types': 'v36@0:8f16@20Q28',
+                                         'rva': 494428,
+                                         'bytes': 860,
+                                         'sha256': '52ef544e9702adac671b38bf03e89ef9d188dab19bbc32de5cd45fd56fcf1f2a'},
+ '-isBrightnessLevelControlAvailable': {'types': 'B16@0:8',
+                                        'rva': 495380,
+                                        'bytes': 92,
+                                        'sha256': '80037a2352ee78a9c41f45058348277b44d6ef6044533a0f580a09e0f9e1b297'}}
+
+IOKIT_PROPERTIES = {
+    'library':'/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit',
+    'uuid':'bcae5dd845f9387792cb44190c3bad70',
+    'export':'_IORegistryEntrySetCFProperties',
+    'signature':'kern_return_t(io_registry_entry_t,CFTypeRef)',
+    'bytes':148,
+    'sha256':'e9e04c0978ec5ccccb172f31a23d35b02ecd12fb7f434072d5ff847cc2ff9829',
+}
+
+
+def derive_backboard():
+    from ports.redfin.graphics_abi import ROOT
+    path=ROOT/'research/ipsw-redfin/extracted/mounts/os/usr/libexec/backboardd'
+    raw=path.read_bytes()
+    if len(raw)>8*1024*1024 or struct.unpack_from('<II',raw)!=(0xfeedfacf,0x100000c):
+        raise ValueError('bounded native arm64 backboardd required')
+    count,size=struct.unpack_from('<II',raw,16)
+    if not 0<count<256 or not 0<size<len(raw)-32:raise ValueError('invalid native backboardd commands')
+    at=32;segments=[];uuid=None
+    for _ in range(count):
+        command,length=struct.unpack_from('<II',raw,at)
+        if length<8 or at+length>32+size:raise ValueError('truncated native backboardd commands')
+        if command==27:uuid=raw[at+8:at+24].hex()
+        if command==25:
+            va,_,offset,filesize=struct.unpack_from('<QQQQ',raw,at+24)
+            segments.append((va,offset,filesize))
+        at+=length
+    if uuid!=BACKBOARD_UUID:raise ValueError('unreviewed native backboardd UUID')
+    for name,method in BACKBOARD_METHODS.items():
+        address=0x100000000+method['rva']
+        matches=[(offset+address-va,method['bytes']) for va,offset,filesize in segments
+            if va<=address and address+method['bytes']<=va+filesize]
+        if len(matches)!=1:raise ValueError('unmapped native backboardd method: '+name)
+        offset,length=matches[0]
+        if hashlib.sha256(raw[offset:offset+length]).hexdigest()!=method['sha256']:
+            raise ValueError('native backboardd brightness ABI changed: '+name)
+    return dict(uuid=uuid,methods=BACKBOARD_METHODS,source_sha256=hashlib.sha256(raw).hexdigest(),
+        original_native_handling_preserved=True,manual_backlight_only=True,auto_ALS_claimed=False)
+
 
 def derive(cache):
     for name,record in REVIEWED.items():
@@ -116,7 +178,27 @@ def derive(cache):
         raw=cache.read(image.base+method['rva'],record['bytes'])
         if hashlib.sha256(raw).hexdigest()!=record['sha256']:
             raise ValueError('native display method body changed: '+name)
-    return dict(version=1,reviewed=REVIEWED,
+    iokit=cache.image(IOKIT_PROPERTIES['library'])
+    if iokit.uuid!=IOKIT_PROPERTIES['uuid']:raise ValueError('unreviewed native IOKit UUID')
+    exports,_=iokit.exports()
+    setter=exports.get(IOKIT_PROPERTIES['export'])
+    if not setter or hashlib.sha256(cache.read(setter,IOKIT_PROPERTIES['bytes'])).hexdigest()!=IOKIT_PROPERTIES['sha256']:
+        raise ValueError('native registry dictionary setter ABI changed')
+    image=cache.image('/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness')
+    start,size=image.sections['__objc_classlist'];found=None
+    for at in range(start,start+size,8):
+        cls=cache.pointer(at);ro=cache.pointer(cls+32)&~7
+        if cache.string(cache.pointer(ro+24))!='CBDisplayContaineriOS':continue
+        ivars=cache.pointer(ro+48);stride,count=struct.unpack('<II',cache.read(ivars,8))
+        if stride!=32 or count>128:raise ValueError('unreviewed native container ivar layout')
+        found={}
+        for index in range(count):
+            entry=ivars+8+index*stride;name=cache.string(cache.pointer(entry+8))
+            if name in CONTAINER_IVARS:
+                found[name]=(cache.string(cache.pointer(entry+16)),struct.unpack('<I',cache.read(entry+28,4))[0])
+        break
+    if found!=CONTAINER_IVARS:raise ValueError('native typed container observation fields changed')
+    return dict(version=1,reviewed=REVIEWED,backboard=derive_backboard(),iokit_properties=IOKIT_PROPERTIES,
         backlight_transport='native CoreBrightness AppleARMBacklight',
         synchronous_IOMFB_brightness_supported=False,
         integrated_display_only=True,other_displays_preserved=True,

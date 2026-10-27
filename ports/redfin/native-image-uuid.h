@@ -7,12 +7,9 @@
 #include <stdint.h>
 #include <string.h>
 
-static inline bool redfin_native_image_uuid(const void *function,const uint8_t expected[16])
+static inline bool redfin_native_header_uuid(const struct mach_header_64 *header,const uint8_t expected[16])
 {
-    Dl_info info={0};
-    if(!function||!expected||!dladdr(function,&info)||!info.dli_fbase)return false;
-    const struct mach_header_64 *header=info.dli_fbase;
-    if(header->magic!=MH_MAGIC_64||header->ncmds>4096||header->sizeofcmds>1048576)return false;
+    if(!header||!expected||header->magic!=MH_MAGIC_64||header->ncmds>4096||header->sizeofcmds>1048576)return false;
     const unsigned char *at=(const unsigned char *)(header+1),*end=at+header->sizeofcmds;
     for(unsigned i=0;i<header->ncmds;++i) {
         if((size_t)(end-at)<sizeof(struct load_command))return false;
@@ -23,5 +20,10 @@ static inline bool redfin_native_image_uuid(const void *function,const uint8_t e
         at+=command->cmdsize;
     }
     return false;
+}
+static inline bool redfin_native_image_uuid(const void *function,const uint8_t expected[16])
+{
+    Dl_info info={0};
+    return function&&dladdr(function,&info)&&info.dli_fbase&&redfin_native_header_uuid(info.dli_fbase,expected);
 }
 #endif

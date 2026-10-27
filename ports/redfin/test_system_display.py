@@ -19,7 +19,7 @@ COMMON=r'''
 #include <dlfcn.h>
 static unsigned issue;
 static bool redfin_native_image_uuid(const void *function,const uint8_t expected[16]) {
- return function&&expected&&issue!=2&&!(issue==6&&expected[0]==2);
+ return function&&expected&&issue!=2&&!(issue==6&&expected[0]==2)&&!(issue==9&&expected[0]==6);
 }
 static Class redfin_test_getClass(const char *name) {
  NSString *qualified=[@"RedfinTest" stringByAppendingString:[NSString stringWithUTF8String:name]];
@@ -29,6 +29,8 @@ static Class redfin_test_getClass(const char *name) {
 #define BSSimpleAssertion RedfinTestBSSimpleAssertion
 #define SBIdleTimerGlobalCoordinator RedfinTestSBIdleTimerGlobalCoordinator
 #define CAWindowServerDisplay RedfinTestCAWindowServerDisplay
+#define CADisplay RedfinTestCADisplay
+#define BKDisplayBrightnessController RedfinTestBKDisplayBrightnessController
 #define BLControl RedfinTestBLControl
 #define CBDisplayContaineriOS RedfinTestCBDisplayContaineriOS
 #define CBDisplayModuleiOS RedfinTestCBDisplayModuleiOS
@@ -38,22 +40,35 @@ BACKLIGHT=r'''
 #include <unistd.h>
 #include <stdarg.h>
 static unsigned calls;
+static unsigned manual_writes,native_sets;static uint32_t manual_level;static BOOL core_available;
+static float native_level;static id native_reason;static NSUInteger native_options;
 static const char *fake_getprogname(void){return issue==5?"ordinary-app":"backboardd";}
 #define getprogname fake_getprogname
 static int fake_open(const char *path,int flags,...){(void)path;(void)flags;return -1;}
 #define open fake_open
 #define REDFIN_QUARTZ_UUID_BYTES 1
 #define REDFIN_CB_UUID_BYTES 2
-typedef unsigned io_service_t;typedef int kern_return_t;
+#define REDFIN_BKD_UUID_BYTES 5
+#define REDFIN_IOKIT_UUID_BYTES 6
+typedef unsigned io_service_t,io_registry_entry_t;typedef int kern_return_t;
 #define KERN_SUCCESS 0
 #define KERN_FAILURE 5
 #define IOServiceMatching redfin_test_IOServiceMatching
 #define IOServiceGetMatchingService redfin_test_IOServiceGetMatchingService
 #define IOObjectRelease redfin_test_IOObjectRelease
 #define IORegistryEntryCreateCFProperties redfin_test_IORegistryEntryCreateCFProperties
+#define IOObjectConformsTo redfin_test_IOObjectConformsTo
 static void *IOServiceMatching(const char *name){assert(!strcmp(name,"AppleARMBacklight"));return NULL;}
 static io_service_t IOServiceGetMatchingService(unsigned master,void *match){(void)master;(void)match;return 1;}
 static int IOObjectRelease(io_service_t service){assert(service==1);return 0;}
+static int IOObjectConformsTo(io_service_t service,const char *name){(void)service;(void)name;return 1;}
+static int fake_set_properties(io_registry_entry_t service,CFTypeRef properties){
+ assert(service==1&&CFGetTypeID(properties)==CFDictionaryGetTypeID()&&CFDictionaryGetCount(properties)==1);
+ CFTypeRef value=CFDictionaryGetValue(properties,CFSTR("brightness"));
+ assert(value&&CFGetTypeID(value)==CFNumberGetTypeID());
+ int raw=0;assert(CFNumberGetValue(value,kCFNumberIntType,&raw)&&raw>=4&&raw<=1023);
+ manual_level=(uint32_t)raw;++manual_writes;return 0;
+}
 static int IORegistryEntryCreateCFProperties(io_service_t service,CFMutableDictionaryRef *values,CFAllocatorRef allocator,unsigned options){
  (void)allocator;(void)options;assert(service==1);uint32_t separate=1;
  NSDictionary *p=@{@"ignore-IOMFB":issue==4?(id)@YES:(id)[NSData dataWithBytes:&separate length:4],
@@ -63,6 +78,36 @@ static int IORegistryEntryCreateCFProperties(io_service_t service,CFMutableDicti
 }
 static void *fake_dlopen(const char *path,int mode){(void)path;(void)mode;return (void *)1;}
 #define dlopen fake_dlopen
+static void *fake_dlsym(void *handle,const char *name){
+ assert(handle==RTLD_DEFAULT&&!strcmp(name,"IORegistryEntrySetCFProperties"));
+ return issue==8?NULL:(void *)fake_set_properties;
+}
+#define dlsym fake_dlsym
+/* Only translate the test class namespace; keep real runtime ivar offsets,
+ * object reads and every other native type check. */
+static const char *test_ivar_type(Ivar ivar){
+ const char *type=ivar_getTypeEncoding(ivar);
+ return !strcmp(type,"@\"RedfinTestCADisplay\"")?"@\"CADisplay\"":type;
+}
+#define ivar_getTypeEncoding test_ivar_type
+static void redfin_backlight_failures_prepare(const char *nonce){(void)nonce;}
+@interface CADisplay:NSObject
+@property(nonatomic) BOOL external;
+- (BOOL)isExternal;
+@end
+@implementation CADisplay
+- (BOOL)isExternal{return self.external;}
+@end
+@interface BKDisplayBrightnessController:NSObject
+- (void)setBrightnessLevel:(float)level reason:(id)reason options:(NSUInteger)options;
+- (BOOL)isBrightnessLevelControlAvailable;
+@end
+@implementation BKDisplayBrightnessController
+- (void)setBrightnessLevel:(float)level reason:(id)reason options:(NSUInteger)options{
+ ++native_sets;native_level=level;native_reason=reason;native_options=options;
+}
+- (BOOL)isBrightnessLevelControlAvailable{return core_available;}
+@end
 @interface CAWindowServerDisplay:NSObject
 @property(nonatomic) NSInteger displayType;
 - (BOOL)brightnessAvailable;
@@ -80,13 +125,25 @@ static void *fake_dlopen(const char *path,int mode){(void)path;(void)mode;return
 - (BOOL)findDisplays{return issue!=7;}
 - (BOOL)findBacklight{return issue!=7;}
 @end
-@interface CBDisplayContaineriOS:NSObject
+@protocol CBBrightnessProxy
+@end
+@protocol CBContainerModuleProtocol
+@end
+@interface CBDisplayContaineriOS:NSObject {
+@public
+ unsigned _displayService;
+ CADisplay *_display;
+ id<CBBrightnessProxy> _brtCtl;
+ id<CBContainerModuleProtocol> _displayControlModule;
+}
+@property(nonatomic) BOOL setupFails;
 - (BOOL)start;
 - (BOOL)setupInternalModules;
 @end
 @implementation CBDisplayContaineriOS
+- (instancetype)init{if((self=[super init]))_setupFails=issue==7;return self;}
 - (BOOL)start{return issue!=7;}
-- (BOOL)setupInternalModules{return issue!=7;}
+- (BOOL)setupInternalModules{return !self.setupFails;}
 @end
 @interface CBDisplayModuleiOS:NSObject
 #ifdef REDFIN_TEST_BAD_TYPE
@@ -121,6 +178,35 @@ int main(int argc,char **argv){@autoreleasepool{
  assert([control findDisplays]==(issue!=7));assert([control findBacklight]==(issue!=7));
  assert([container start]==(issue!=7));assert([container setupInternalModules]==(issue!=7));
  [[CBDisplayModuleiOS new] start];assert(calls==1);
+ BKDisplayBrightnessController *brightness=[BKDisplayBrightnessController new];id reason=[NSObject new];
+ [brightness setBrightnessLevel:0.15f reason:reason options:2];assert(native_sets==1&&!manual_writes);
+ if(installed){
+  CADisplay *panel=[CADisplay new];container->_displayService=1;container->_display=panel;
+  container.setupFails=YES;panel.external=YES;
+  assert(![container setupInternalModules]&&![brightness isBrightnessLevelControlAvailable]);
+  panel.external=NO;container->_brtCtl=(id)[NSObject new];
+  assert(![container setupInternalModules]&&![brightness isBrightnessLevelControlAvailable]);
+  container->_brtCtl=nil;container->_displayControlModule=(id)[NSObject new];
+  assert(![container setupInternalModules]&&![brightness isBrightnessLevelControlAvailable]);
+  container->_displayControlModule=nil;container.setupFails=NO;
+  assert([container setupInternalModules]&&![brightness isBrightnessLevelControlAvailable]);
+  container.setupFails=YES;
+  assert(![container setupInternalModules]&&[brightness isBrightnessLevelControlAvailable]);
+  for(unsigned raw=0;raw<5;++raw){
+   float level=(float[]){0,0.15f,0.5f,0.75f,1}[raw];
+   [brightness setBrightnessLevel:level reason:reason options:7];
+   uint32_t expected=0;assert(redfin_manual_backlight_level(level,&expected));
+   assert(manual_writes==raw+1&&manual_level==expected&&native_level==level&&native_reason==reason&&native_options==7);
+  }
+  unsigned before=manual_writes;
+  [brightness setBrightnessLevel:0.25f reason:reason options:1];assert(manual_writes==before&&native_options==1);
+  [brightness setBrightnessLevel:NAN reason:reason options:2];assert(manual_writes==before&&isnan(native_level));
+  [brightness setBrightnessLevel:-0.25f reason:reason options:2];assert(manual_writes==before&&native_level==-0.25f);
+  core_available=YES;[brightness setBrightnessLevel:0.5f reason:reason options:2];assert(manual_writes==before);
+  core_available=NO;container.setupFails=NO;
+  assert([container setupInternalModules]&&![brightness isBrightnessLevelControlAvailable]);
+  [brightness setBrightnessLevel:0.5f reason:reason options:2];assert(manual_writes==before);
+ }
  redfin_backlight_system_install("12345678abcdef01");
  assert([integrated brightnessAvailable]==!installed&&[external brightnessAvailable]);
 }return 0;}
@@ -196,7 +282,7 @@ class SystemDisplayTests(unittest.TestCase):
                 self.assertEqual(run.returncode,0,(issue,run.stderr))
 
     def test_only_bound_integrated_backlight_selects_legacy_without_changing_native_results(self):
-        self.run_actual('backlight-system.m',BACKLIGHT,BACKLIGHT_END,range(8))
+        self.run_actual('backlight-system.m',BACKLIGHT,BACKLIGHT_END,range(10))
         self.run_actual('backlight-system.m',BACKLIGHT,BACKLIGHT_END,[0],['-DREDFIN_TEST_BAD_TYPE'])
 
     def test_idle_assertion_owns_only_its_token_and_releases_on_refusal_or_completion(self):

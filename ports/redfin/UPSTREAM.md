@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete manual native backlight and bounded physical observation — 2026-10-27
+
+Preferred reviewed kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,
+buttonc84b4634277a70beac73921029b1fb6afc2530af and active userland
+906425b75e02b4f99eb5d7bb1ef7c9583472d772 remain unchanged. Retain their
+proved graphics and CI27/883286e; no compiler/kernel/graphics rebuild.
+Own actual20H392 adaptation now audits typed native container observation,
+CADisplay.isExternal, exact backboardd brightness setter/capability and IOKit
+UUIDbcae5dd8../IORegistryEntrySetCFProperties dictionary export/body. Only a
+failed integrated native setup without proxy/module admits the manual DBV
+backend; original native state/preferences/notifications run first. Working
+native brightness and other displays retain their paths. No Apple binary/cache
+patch, invented native setup success, ALS/HDR/HBM or photometric calibration.
+
+Restore proof distinguishes unchanged original physical state from a new
+saved-level commit; a power-only/wrong-level ACK cannot pass. A finite owned
+content animation exercises real output across off/wake before independent
+FPS. Native CB error formats are explicit-boot-only and bounded; complete
+original logging calls and private encoded arguments are preserved.94combined
+executable contracts and signed actual native UI5a501aac../refresh6e9f8c83..
+PASS. V104/V107 combined hardware observation is next; no device result or
+performance improvement is inferred. V103 terminal evidence remains below.
+
 ## V103 observes native CB setup refusal and a logical/physical restoration distinction — 2026-10-27
 
 Own6a8399b/CI27, preferred reviewed pins unchanged. V103 proves the corrected

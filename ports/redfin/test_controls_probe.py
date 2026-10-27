@@ -24,7 +24,7 @@ typedef unsigned io_service_t,io_connect_t;typedef int kern_return_t;
 typedef struct {unsigned numer,denom;} mach_timebase_info_data_t;
 #define KERN_SUCCESS 0
 static uint64_t ns=1000000000,sequence=1,nits=250ULL<<16,applied_nits=250ULL<<16,presents=10;
-static unsigned dbv=512,issue;static BOOL panel_on=YES;
+static unsigned dbv=512,issue;static BOOL panel_on=YES,composition_active,ever_off;
 static NSMutableString *transcript;static void (^scheduled)(void);
 static uint64_t fake_mach_absolute_time(void){return ns;}
 static int fake_mach_timebase_info(mach_timebase_info_data_t *scale){scale->numer=scale->denom=1;return 0;}
@@ -50,6 +50,7 @@ static int fake_close(int fd){assert(fd==77);return 0;}
 + (UIScreen *)mainScreen {static UIScreen *screen;if(!screen){screen=[UIScreen new];screen->_brightness=0.5;}return screen;}
 - (void)setBrightness:(double)value { _brightness=value;
  if(issue==7&&value<0.3)return;
+ if(issue==11&&value==0.5){++sequence;return;}
  uint64_t next=(uint64_t)llround(value*500*65536);
  if(next!=nits){nits=next;++sequence;}
  if(panel_on){applied_nits=nits;dbv=(unsigned)((nits*1023+(500ULL<<15))/(500ULL<<16));if(dbv<4)dbv=4;}
@@ -80,9 +81,10 @@ static int IOServiceOpen(io_service_t service,unsigned task,unsigned type,io_con
 static int IOObjectRelease(io_service_t service){(void)service;return 0;}
 static int IOServiceClose(io_connect_t client){(void)client;return 0;}
 static int IORegistryEntryCreateCFProperties(io_service_t service,CFMutableDictionaryRef *values,CFAllocatorRef allocator,unsigned options){
- (void)service;(void)allocator;(void)options;if(panel_on||issue==3)++presents;
+ (void)service;(void)allocator;(void)options;
+ if(composition_active&&issue!=13&&!(issue==14&&ever_off)&&(panel_on||issue==3))++presents;
  NSDictionary *p=@{@"RedfinDisplayControlABI":@(issue==5?0:1),@"RedfinDisplayOn":@(panel_on),
- @"RedfinControlSequence":@(sequence),@"RedfinAppliedDBV":@(dbv),@"RedfinControlUncertain":@NO,
+ @"RedfinControlSequence":@(sequence),@"RedfinAppliedDBV":@(dbv),@"RedfinControlUncertain":@(issue==12&&ns>1000000000),
  @"RedfinAppliedNits":@(applied_nits),@"IOMFBBrightnessLevel":@(nits)};
  *values=(CFMutableDictionaryRef)CFBridgingRetain(p);return 0;}
 static int IOConnectCallMethod(io_connect_t client,unsigned selector,const uint64_t *in,unsigned in_count,
@@ -94,6 +96,7 @@ static int IOConnectCallScalarMethod(io_connect_t client,unsigned selector,const
  (void)client;(void)out;(void)out_count;assert(selector==12&&count==1);
  if((issue==2&&!*value)||(issue==4&&*value))return 1;
  if(panel_on!=(*value!=0)){panel_on=*value!=0;++sequence;}
+ if(!panel_on)ever_off=YES;
  if(panel_on){applied_nits=nits;dbv=(unsigned)((nits*1023+(500ULL<<15))/(500ULL<<16));if(dbv<4)dbv=4;}
  return 0;}
 '''
@@ -101,8 +104,11 @@ static int IOConnectCallScalarMethod(io_connect_t client,unsigned selector,const
 SUFFIX=r'''
 int main(int argc,char **argv){@autoreleasepool{
  assert(argc==2);issue=(unsigned)atoi(argv[1]);transcript=[NSMutableString new];
- __block BOOL called=NO,restored=NO,passed=NO;
- redfin_controls_probe_run(0x12345678abcdef01,^(BOOL r,BOOL p){assert(!called);called=YES;restored=r;passed=p;});
+ __block BOOL called=NO,restored=NO,passed=NO,workload=NO;__block unsigned starts=0,stops=0;
+ redfin_controls_probe_run(0x12345678abcdef01,^(BOOL start,double ratio){assert(ratio==1);
+  if(start){assert(!workload&&!starts);workload=YES;composition_active=YES;++starts;}
+  else{assert(workload&&starts==1&&!stops);workload=NO;composition_active=NO;++stops;}
+ },^(BOOL r,BOOL p){assert(!called&&!workload);called=YES;restored=r;passed=p;});
  for(unsigned i=0;scheduled&&i<400;++i){void (^block)(void)=scheduled;scheduled=nil;block();}
  assert(called);assert(!scheduled);assert(!control_active);
  if(issue==0){assert(restored&&passed);assert([transcript containsString:@"result=0 restored=1"]);
@@ -113,10 +119,16 @@ int main(int argc,char **argv){@autoreleasepool{
   if(issue==3){assert(restored);assert([transcript containsString:@"result=5 restored=1"]);}
   if(issue==4){assert(!restored);assert([transcript containsString:@"wake-resumes-output=0"]);}
   if(issue==5||issue==6){assert(restored);assert([transcript containsString:@"unchanged=1"]);}
-  if(issue==7){assert([transcript containsString:@"display-off-stops-output=0 wake-resumes-output=0"]);}
+  if(issue==7){assert(restored);assert([transcript containsString:@"display-off-stops-output=0 wake-resumes-output=0"]);
+   assert([transcript containsString:@"restore-proven original-physical-state=1 new-native-commit=0"]);}
   if(issue==8||issue==9){assert(restored);assert([transcript containsString:@"result=8 restored=1"]);}
   if(issue==10){assert(!restored);assert([transcript containsString:@"result=8 restored=0"]);}
+  if(issue==11){assert(!restored);assert([transcript containsString:@"result=9 restored=0"]);}
+  if(issue==12){assert(!restored);assert([transcript containsString:@"result=7 restored=0"]);}
+  if(issue==13){assert(restored&&!ever_off);assert([transcript containsString:@"result=6 restored=1"]);}
+  if(issue==14){assert(restored&&ever_off);assert([transcript containsString:@"display-off-stops-output=1 wake-resumes-output=0"]);}
  }
+ if(issue==5||issue==6)assert(!starts&&!stops);else assert(starts==1&&stops==1);
  if(restored){assert(panel_on);assert(fabs(UIScreen.mainScreen.brightness-0.5)<0.001);}
  assert(ns<30000000000ULL);
 }return 0;}
@@ -135,7 +147,7 @@ class ControlsProbeTests(unittest.TestCase):
             compiled=subprocess.run(['xcrun','clang','-fobjc-arc','-fblocks','-O2','-Wall','-Wextra','-Werror',
                 '-I'+str(HERE),'-framework','Foundation',str(source),'-o',str(root/'probe')],capture_output=True,text=True)
             self.assertEqual(compiled.returncode,0,compiled.stderr)
-            for issue in range(11):
+            for issue in range(15):
                 result=subprocess.run([str(root/'probe'),str(issue)],capture_output=True,text=True,timeout=5)
                 self.assertEqual(result.returncode,0,(issue,result.stderr))
 

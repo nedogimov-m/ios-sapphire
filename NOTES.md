@@ -1,5 +1,51 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete manual native backlight/workload/restoration block ready — 2026-10-27
+
+After terminal V103/f919191, completed the connected manual brightness and
+controls-observation block. Preserve the preferred kernel88513176../reviewed
+buttonc84b4634../active userland906425b7.. pins, all graphics, CI27 and firmware.
+The actual20H392 native container fields are read through typed ObjC runtime
+ivars only. A real failed integrated-display setup, with neither native proxy
+nor display module, admits the manual backend; a working native backend or
+external display retains original behavior. Original backboardd setter runs
+first, preserving BKS logical state/preferences/notifications. Only the audited
+driver-request option and valid normal level submit the complete brightness
+property dictionary through the real UUID/body-audited native IOKit export.
+The kernel's existing async/coalesced owner remains the only DSI writer.
+No ALS/HDR/HBM or calibrated luminance claim.
+
+The finite observer now accepts an unchanged complete original physical state
+or an actual new saved-level DBV commit, requires0.3s stable restoration, and
+refuses a power-only or wrong-level acknowledgement. One owned28s content-layer
+animation provides real progressing output for the off/wake checks, is removed
+on all changed exits, and precedes an independent ordinary FPS workload.
+Explicit controls-checked boots may record at most32native CoreBrightness
+error format strings; original complete log calls/encoded buffers remain
+untouched, no arguments/private values are decoded.
+
+94combined executable contracts PASS in11.17s. Coverage includes real ObjC
+admission/revocation, invalid/uncommitted requests, preserved original calls,
+missing/wrong-UUID registry exports,15restoration/output failure/success cases,
+and unchanged original log buffers. Signed native UI5a501aac../refresh6e9f8c83..
+and15native cache methods/two executable methods/registry export/types/bodies/
+imports PASS. Earlier manual-v1 partial failed build is never installed;
+manual-v2 is the complete current artifact. No kernel/Mesa/Metal/compiler build.
+CI27 Actions40432973023/run27/source883286e53b637a2f71d48918132c2152ac720405,
+kernel4f99141c5753af890e1b10c30aadc9fa6463f91ca7c6dcda2fcaf513ff06cfde.
+
+Fresh V104 image4cad36ba3c633eacc53bd2d0e11aa38c44af86ea4f65e871cad5302660d6eae4
+noncee32c36653ed2e87b passes complete retained-kernel/loader/ADT/FDT/private
+identity/material/firmware/source/native UI ABI preflight. New V107 must bind
+last observed clean HFSX1758944. V106 APPLIED/STALE, never reuse. ONE combined
+hardware run follows fresh preimages/readback/readonly fsck; no Phone/Photos
+automatic opens. This is implementation/host proof only; actual physical
+brightness, button actions/ALS/full suspend and new throughput are pending.
+Last actual V103 remains one server/no panic/clean1758944/Fastboot with no FPS;
+V99's measured finite61.032FPS remains preserved. All wider GOAL items active.
+Exact proposed V104 arguments (last actual V103 arguments in entry below):
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xe32c36653ed2e87b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V103 terminal: native route/idle proven, CB module setup returns false — 2026-10-27
 
 Source6a8399b, unchanged CI27 Actions40432973023/run27/source883286e,

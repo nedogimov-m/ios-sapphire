@@ -29,10 +29,13 @@ brightness and cannot prove restoration, so its FPS workload correctly refuses.
 The complete native backlight-selection/system-idle correction now passes
 93combined executable contracts and actual14method/four-image ABI/build checks.
 V103 proves the native route and owned idle guard, but CoreBrightness module
-setup returns false. Logical brightness changes while physical DBV stays409;
-the observer also incorrectly requires a new sequence for unchanged original
-physical state and refuses FPS. Those admission/restoration blockers are next;
-physical UI brightness and complete controls remain unproved.
+setup returns false; physical DBV stays409 and no new FPS exists. The complete
+manual-native-backlight/restoration/live-controls-workload correction now passes
+94combined executable contracts and signed actual20H392 ABI/build checks.
+It preserves native settings, uses the existing async DSI owner and refuses
+wrong-level restoration. One combined V104/V107 hardware observation is next;
+physical UI brightness, actual button actions/ALS and complete controls remain
+unproved. Kernel and graphics/compiler artifacts stay retained.
 V99 stays the preserved measured performance baseline.
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including

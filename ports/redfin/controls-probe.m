@@ -15,6 +15,7 @@
 #include "display-statistics.h"
 #include "controls-policy.h"
 #include "brightness-system.h"
+#include "backlight-manual.h"
 
 static double control_seconds(void)
 {
@@ -51,12 +52,15 @@ static BOOL control_sysctl(const char *name,unsigned *value)
 @property(nonatomic) io_service_t service;
 @property(nonatomic) io_connect_t client;
 @property(nonatomic) uint64_t nonce,cursor,offFrames;
-@property(nonatomic) unsigned phase,error,lowDBV,highDBV,initialKeySamples,initialKeyErrors;
+@property(nonatomic) uint64_t originalNits,originalDBV,initialFrames;
+@property(nonatomic) unsigned phase,error,lowDBV,highDBV,restoredDBV,initialKeySamples,initialKeyErrors;
 @property(nonatomic) unsigned loggedPhase;
 @property(nonatomic) double savedBrightness,lowBrightness,highBrightness,began,phaseBegan,offSampleAt;
 @property(nonatomic) double clockRatio;
 @property(nonatomic) double loggedAt;
-@property(nonatomic) BOOL finished,offProven,wakeProven,restoreNeedsCommit;
+@property(nonatomic) double restorationStableAt;
+@property(nonatomic) BOOL finished,offProven,wakeProven;
+@property(nonatomic,copy) void (^workload)(BOOL,double);
 @property(nonatomic,copy) void (^completion)(BOOL,BOOL);
 - (void)poll;
 - (void)restore:(unsigned)error;
@@ -83,10 +87,8 @@ static RedfinControlsProbe *control_active;
     if(self.phase==5||self.finished)return;
     if(!self.error)self.error=error;
     NSDictionary *properties=control_properties(self.service);
-    uint64_t sequence=0,on=0;
+    uint64_t sequence=0;
     if(control_uint(properties,@"RedfinControlSequence",&sequence))self.cursor=sequence;
-    self.restoreNeedsCommit=fabs(redfin_brightness_system_get()-self.savedBrightness)>=0.01||
-        !control_uint(properties,@"RedfinDisplayOn",&on)||!on;
     self.phase=5;self.phaseBegan=control_seconds()/self.clockRatio;
     if(!redfin_brightness_system_set((float)self.savedBrightness)&&!self.error)self.error=8;
     if(![self power:YES]&&!self.error)self.error=8;
@@ -109,6 +111,8 @@ static RedfinControlsProbe *control_active;
         result,restored,brightness,self.lowDBV,self.highDBV,self.offProven,self.wakeProven,keys,samples,errors);
     if(self.client)IOServiceClose(self.client);if(self.service)IOObjectRelease(self.service);
     self.client=0;self.service=0;
+    void (^workload)(BOOL,double)=self.workload;self.workload=nil;
+    if(workload)workload(NO,self.clockRatio);
     void (^completion)(BOOL,BOOL)=self.completion;self.completion=nil;control_active=nil;
     if(completion)completion(restored,result==0);
 }
@@ -140,9 +144,13 @@ static RedfinControlsProbe *control_active;
         control_log(self.nonce,"low system=%.5f applied-DBV=%u sequence=%llu",brightness,self.lowDBV,(unsigned long long)sequence);
         if(!redfin_brightness_system_set((float)self.highBrightness))[self restore:8];
     } else if(self.phase==2&&brightnessApplied&&on&&sequence>self.cursor&&level>self.lowDBV&&fabs(brightness-self.highBrightness)<0.01) {
-        self.highDBV=(unsigned)level;self.cursor=sequence;self.phase=3;self.phaseBegan=now;
-        control_log(self.nonce,"high system=%.5f applied-DBV=%u sequence=%llu",brightness,self.highDBV,(unsigned long long)sequence);
-        if(![self power:NO])[self restore:4];
+        struct redfin_display_statistics_v2 snapshot={0};
+        if([self statistics:&snapshot]&&snapshot.presents>self.initialFrames) {
+            self.highDBV=(unsigned)level;self.cursor=sequence;self.phase=3;self.phaseBegan=now;
+            control_log(self.nonce,"high system=%.5f applied-DBV=%u sequence=%llu active-presents=%llu",brightness,self.highDBV,
+                (unsigned long long)sequence,(unsigned long long)snapshot.presents);
+            if(![self power:NO])[self restore:4];
+        }
     } else if(self.phase==3&&state&&!on&&sequence>self.cursor&&now-self.phaseBegan>=0.25) {
         struct redfin_display_statistics_v2 snapshot={0};
         if([self statistics:&snapshot]) {
@@ -166,15 +174,29 @@ static RedfinControlsProbe *control_active;
             [self restore:0];
         }
     } else if(self.phase==5) {
-        if(brightnessApplied&&on&&sequence>=self.cursor+(self.restoreNeedsCommit?1:0)&&
-            fabs(brightness-self.savedBrightness)<0.01) {[self finish:YES];return;}
+        BOOL original=brightnessApplied&&on&&level==self.originalDBV&&applied_nits==self.originalNits&&
+            sequence>=self.cursor;
+        /* A power-only acknowledgement or a late high-level request is not
+         * proof of restoring the user's level. The native manual adapter's
+         * new DBV must match the saved logical request, or the complete
+         * original physical state must still be present. */
+        BOOL committed=brightnessApplied&&on&&sequence>self.cursor&&level==self.restoredDBV;
+        BOOL restored=(original||committed)&&fabs(brightness-self.savedBrightness)<0.01;
+        if(restored) {
+            if(!self.restorationStableAt)self.restorationStableAt=now;
+            if(now-self.restorationStableAt>=0.3) {
+                control_log(self.nonce,"restore-proven original-physical-state=%u new-native-commit=%u stable-seconds=%.3f",
+                    original,committed,now-self.restorationStableAt);
+                [self finish:YES];return;
+            }
+        } else self.restorationStableAt=0;
         if(now-self.phaseBegan>4){[self finish:NO];return;}
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{[self poll];});
 }
 @end
 
-void redfin_controls_probe_run(uint64_t nonce,void (^completion)(BOOL,BOOL))
+void redfin_controls_probe_run(uint64_t nonce,void (^workload)(BOOL,double),void (^completion)(BOOL,BOOL))
 {
     if(control_active||!NSThread.isMainThread||!nonce){if(completion)completion(NO,NO);return;}
     RedfinControlsProbe *probe=[RedfinControlsProbe new];probe.nonce=nonce;probe.completion=completion;
@@ -193,8 +215,14 @@ void redfin_controls_probe_run(uint64_t nonce,void (^completion)(BOOL,BOOL))
     BOOL statistics=[probe statistics:&initial];
     probe.clockRatio=statistics&&scale.denom?(double)initial.counter_hz*scale.numer/scale.denom/1e9:0;
     probe.savedBrightness=redfin_brightness_system_get();
+    uint64_t originalNits=0,requestedNits=0,originalDBV=0,uncertain=1;uint32_t expectedDBV=0;
+    BOOL originalPhysical=control_uint(properties,@"RedfinAppliedNits",&originalNits)&&
+        control_uint(properties,@"IOMFBBrightnessLevel",&requestedNits)&&originalNits==requestedNits&&
+        control_uint(properties,@"RedfinAppliedDBV",&originalDBV)&&
+        control_uint(properties,@"RedfinControlUncertain",&uncertain)&&!uncertain&&
+        rf_panel_nits_to_dbv(originalNits,&expectedDBV)&&expectedDBV==originalDBV;
     if(!isfinite(probe.savedBrightness)||probe.savedBrightness<0||probe.savedBrightness>1||
-        !isfinite(probe.clockRatio)||probe.clockRatio<0.25||probe.clockRatio>4) {
+        !originalPhysical||!isfinite(probe.clockRatio)||probe.clockRatio<0.25||probe.clockRatio>4) {
         control_log(nonce,"refused native-brightness-or-statistics result=11 restored=1 unchanged=1");
         IOServiceClose(client);IOObjectRelease(probe.service);if(completion)completion(YES,NO);return;
     }
@@ -204,8 +232,13 @@ void redfin_controls_probe_run(uint64_t nonce,void (^completion)(BOOL,BOOL))
     (void)control_sysctl("kern.redfin_controls.keys_samples",&samples);
     (void)control_sysctl("kern.redfin_controls.keys_errors",&errors);
     probe.initialKeySamples=samples;probe.initialKeyErrors=errors;
+    probe.originalNits=originalNits;probe.originalDBV=originalDBV;probe.initialFrames=initial.presents;
+    uint32_t restoredDBV=0;(void)redfin_manual_backlight_level((float)probe.savedBrightness,&restoredDBV);
+    probe.restoredDBV=restoredDBV;
+    probe.workload=workload;
     probe.cursor=sequence;probe.began=probe.phaseBegan=control_seconds()/probe.clockRatio;probe.phase=1;
     control_active=probe;
+    if(workload)workload(YES,probe.clockRatio);
     control_log(nonce,"start native-ABI=1 system-BKS=1 scene-independent=1 saved=%.5f low=%.5f high=%.5f bounded-seconds=24",
         probe.savedBrightness,probe.lowBrightness,probe.highBrightness);
     if(!redfin_brightness_system_set((float)probe.lowBrightness))[probe restore:8];
