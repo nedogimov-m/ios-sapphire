@@ -22,6 +22,8 @@
 #include <arm/memory_types.h>
 #include "RedfinPowerPolicy.h"
 #include "RedfinPowerConversion.h"
+static void redfin_keys_poll(void);
+static void redfin_keys_pause(unsigned);
 
 extern "C" vm_offset_t ml_io_map_unmappable(vm_offset_t,vm_size_t,unsigned int);
 namespace {
@@ -138,7 +140,7 @@ static int power_adc(unsigned channel,uint16_t *out)
         if ((error=power_byte(P_ADC,0x3108,&status)) || (error=power_byte(P_ADC,0x3109,&sequence))) return error;
         busy_seen|=(status&2)!=0;
         if ((status&3)==1 && (busy_seen || ((sequence^before)&0x70))) {completed=true;break;}
-        IOSleep(1);
+        redfin_keys_pause(1);
     }
     if (!completed) {power_spmi_ok=false;return ETIMEDOUT;}
     uint8_t raw[2]={};error=power_read(P_ADC,0x3150,raw,2);
@@ -450,6 +452,8 @@ static void power_gpu_publish(bool measured)
     __atomic_store_n(&power_gpu_sampled,fresh?now:0,__ATOMIC_RELAXED);
     __atomic_fetch_add(&power_gpu_sequence,1,__ATOMIC_RELEASE);
 }
+#include "RedfinButtons.inc"
+
 static void redfin_power_worker(void *parameter,wait_result_t result __unused)
 {
     IORegistryEntry *node=(IORegistryEntry *)parameter;
@@ -497,7 +501,7 @@ static void redfin_power_worker(void *parameter,wait_result_t result __unused)
             IOLog("REDFIN THERMAL CRITICAL: actual threshold exceeded; requesting native clean shutdown\n");
             (void)reboot_kernel(0,NULL);break;
         }
-        IOSleep(250);
+        redfin_keys_pause(250);
     }
 }
 extern "C" void RedfinPowerStart(void)

@@ -19,6 +19,7 @@
 #include "display-benchmark.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
+extern void redfin_controls_probe_run(uint64_t,void (^)(BOOL,BOOL));
 
 @interface RedfinDisplayProbe : NSObject
 {
@@ -36,6 +37,7 @@
 @property(nonatomic) unsigned callbacks,under12,under18,under35;
 @property(nonatomic) BOOL finished;
 @property(nonatomic) BOOL checksCompleted;
+@property(nonatomic) BOOL controlsRequested,controlsCompleted;
 @property(nonatomic) const char *finishReason;
 @property(nonatomic) unsigned mode,samples,missed;
 @property(nonatomic) double minimumFPS,maximumFPS;
@@ -245,12 +247,13 @@ static void probe_native_periods(uint64_t nonce,CADisplayLink *link)
     BOOL idle_restored=probe_idle_release();
     const char *reason=timedOut?(self.finishReason?self.finishReason:"unspecified-abort"):
         valid?"complete":"final-counters";
-    probe_log(self.nonce,"result passive=%u animation=%s stats-valid=%u timed-out=%u panel-hz=%u seconds=%.6f completed-presents=%llu gpu-presents=%llu observed-present-fps=%.3f callbacks=%u callback-fps=%.3f under12=%u under18=%u under35=%u max-interval-ms=%.3f sample-count=%u sample-missed=%u minimum-present-fps=%.3f maximum-present-fps=%.3f hardware-counter-hz=%llu mach-to-physical-ratio=%.9f native-checks-completed=%u finish-reason=%s idle-restored=%u",
+    probe_log(self.nonce,"result passive=%u animation=%s stats-valid=%u timed-out=%u panel-hz=%u seconds=%.6f completed-presents=%llu gpu-presents=%llu observed-present-fps=%.3f callbacks=%u callback-fps=%.3f under12=%u under18=%u under35=%u max-interval-ms=%.3f sample-count=%u sample-missed=%u minimum-present-fps=%.3f maximum-present-fps=%.3f hardware-counter-hz=%llu mach-to-physical-ratio=%.9f native-checks-completed=%u finish-reason=%s idle-restored=%u controls-requested=%u controls-completed=%u",
         self.mode==RF_DISPLAY_PROBE_PASSIVE,self.mode==RF_DISPLAY_PROBE_ANIMATE?"system-window-subpixel":"none",
         valid,timedOut,valid ? final.panel_hz : 0,seconds,(unsigned long long)presents,(unsigned long long)gpu,
         seconds>0 ? presents/seconds : 0,self.callbacks,elapsed>0 ? (self.callbacks-1)/elapsed : 0,
         self.under12,self.under18,self.under35,self.maximum*1000,self.samples,self.missed,self.minimumFPS,self.maximumFPS,
-        (unsigned long long)(valid?final.counter_hz:0),self.clockRatio,self.checksCompleted,reason,idle_restored);
+        (unsigned long long)(valid?final.counter_hz:0),self.clockRatio,self.checksCompleted,reason,idle_restored,
+        self.controlsRequested,self.controlsCompleted);
     if (self.framebuffer) IOServiceClose(self.framebuffer);
     self.framebuffer=0;self.window=nil;self.fallbackWindow=nil;self.candidateWindow=nil;
     active_probe=nil;
@@ -282,23 +285,10 @@ static unsigned probe_checks(uint64_t nonce)
     unsigned result=redfin_display_probe_checks(metal,m,gpu,g,nonce);
     free(metal);free(gpu);return result;
 }
-static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,unsigned waits)
+static void probe_measure(UIWindow *native_host,uint64_t nonce,unsigned mode,BOOL checks_completed,
+    BOOL controls_requested,BOOL controls_completed)
 {
     if(probe_ended)return;
-    BOOL checks_completed=NO;unsigned mode=requested;
-    if(requested==RF_DISPLAY_PROBE_CHECKED) {
-        unsigned state=probe_checks(nonce);
-        if(!state&&waits) {
-            if(waits==60)probe_log(nonce,"waiting-for-current-native-checks bounded-seconds=60");
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{
-                probe_begin(native_host,nonce,requested,waits-1);
-            });
-            return;
-        }
-        if(state!=1){probe_log(nonce,"refused current-native-checks state=%u remaining=%u",state,waits);(void)probe_idle_release();return;}
-        checks_completed=YES;mode=RF_DISPLAY_PROBE_ANIMATE;
-        probe_log(nonce,"current-native-checks-complete ordinary-animation-measurement-starts=1");
-    }
         UIWindow *parent=native_host;
         if (!parent || parent.screen!=UIScreen.mainScreen) {(void)probe_idle_release();probe_log(nonce,"refused no native main-screen host");return;}
         if(mode==RF_DISPLAY_PROBE_ANIMATE) {
@@ -326,6 +316,7 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
         }
         probe.clockRatio=ratio;
         probe.window=parent;probe.fallbackWindow=native_host;probe.mode=mode;probe.checksCompleted=checks_completed;active_probe=probe;
+        probe.controlsRequested=controls_requested;probe.controlsCompleted=controls_completed;
         CADisplayLink *link=[CADisplayLink displayLinkWithTarget:probe selector:@selector(tick:)];
         link.preferredFrameRateRange=CAFrameRateRangeMake(start.panel_hz,start.panel_hz,start.panel_hz);
         probe_native_periods(nonce,link);
@@ -337,6 +328,36 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(RF_DISPLAY_PROBE_DEADLINE_SECONDS*ratio*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
             RedfinDisplayProbe *held=weak;if(held&&!held.finished){held.finishReason="wall-clock-deadline";[held finish:YES];}
         });
+}
+
+static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,unsigned waits)
+{
+    if(probe_ended)return;
+    BOOL checked=requested==RF_DISPLAY_PROBE_CHECKED||requested==RF_DISPLAY_PROBE_CONTROLS_CHECKED;
+    if(checked) {
+        unsigned state=probe_checks(nonce);
+        if(!state&&waits) {
+            if(waits==60)probe_log(nonce,"waiting-for-current-native-checks bounded-seconds=60");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{
+                probe_begin(native_host,nonce,requested,waits-1);
+            });
+            return;
+        }
+        if(state!=1){probe_log(nonce,"refused current-native-checks state=%u remaining=%u",state,waits);(void)probe_idle_release();return;}
+        probe_log(nonce,"current-native-checks-complete ordinary-animation-measurement-starts=%u controls-required=%u",
+            requested!=RF_DISPLAY_PROBE_CONTROLS_CHECKED,requested==RF_DISPLAY_PROBE_CONTROLS_CHECKED);
+    }
+    if(requested==RF_DISPLAY_PROBE_CONTROLS_CHECKED) {
+        redfin_controls_probe_run(nonce,^(BOOL restored,BOOL passed){
+            if(!restored) {
+                BOOL idle=probe_idle_release();
+                probe_log(nonce,"refused display-controls-restoration-failed idle-restored=%u",idle);return;
+            }
+            probe_measure(native_host,nonce,RF_DISPLAY_PROBE_ANIMATE,YES,YES,passed);
+        });
+        return;
+    }
+    probe_measure(native_host,nonce,checked?RF_DISPLAY_PROBE_ANIMATE:requested,checked,NO,NO);
 }
 
 void redfin_display_probe_schedule(UIWindow *host,uint64_t nonce)

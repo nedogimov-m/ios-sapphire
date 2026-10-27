@@ -45,6 +45,8 @@ static void IOSleep(unsigned n){
  sleeps+=n;
  if(adc_busy && scenario!=31){adc_busy=false;pmic[P_ADC][8]=1;pmic[P_ADC][9]^=0x20;}
 }
+/* The separate physical-input tests cover this shared worker hook. */
+static void redfin_keys_pause(unsigned n){IOSleep(n);}
 static uint32_t power_rd(vm_offset_t base,unsigned offset){
  if(base==0x0c440000){if(!offset)return 0x50000000;return offset>=0x900 && offset<0x1100?maps[(offset-0x900)/4]:0;}
  if(base==0x0c40a000)return offset>=0x700 && offset<0xf00?owners[(offset-0x700)/4]:0;

@@ -7,7 +7,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #define REDFIN_DISPLAY_PROBE_REQUEST "/redfin/display-probe-request"
-enum {RF_DISPLAY_PROBE_NONE,RF_DISPLAY_PROBE_PASSIVE,RF_DISPLAY_PROBE_ANIMATE,RF_DISPLAY_PROBE_CHECKED};
+enum {RF_DISPLAY_PROBE_NONE,RF_DISPLAY_PROBE_PASSIVE,RF_DISPLAY_PROBE_ANIMATE,
+    RF_DISPLAY_PROBE_CHECKED,RF_DISPLAY_PROBE_CONTROLS_CHECKED};
 #define RF_DISPLAY_PROBE_WARMUP_SECONDS 8u
 #define RF_DISPLAY_PROBE_MEASURE_SECONDS 10u
 #define RF_DISPLAY_PROBE_ANIMATION_SECONDS 40u
@@ -49,9 +50,9 @@ static inline unsigned redfin_display_probe_window(struct redfin_display_window_
 static inline unsigned redfin_display_probe_request(const char *data,size_t bytes,uint64_t nonce)
 {
     static const char prefix[]="redfin-probe-v1:";
-    static const char *const suffix[]={":passive\n",":animate\n",":animate-checked\n"};
+    static const char *const suffix[]={":passive\n",":animate\n",":animate-checked\n",":controls-checked\n"};
     const size_t head=sizeof(prefix)-1;
-    if(!data||!nonce||bytes<head+16+9||bytes>head+16+17||memcmp(data,prefix,head))return RF_DISPLAY_PROBE_NONE;
+    if(!data||!nonce||bytes<head+16+9||bytes>head+16+18||memcmp(data,prefix,head))return RF_DISPLAY_PROBE_NONE;
     uint64_t found=0;
     for(unsigned i=0;i<16;++i) {
         unsigned c=(unsigned char)data[head+i],digit;
@@ -61,7 +62,7 @@ static inline unsigned redfin_display_probe_request(const char *data,size_t byte
         found=(found<<4)|digit;
     }
     if(found!=nonce)return RF_DISPLAY_PROBE_NONE;
-    for(unsigned i=0;i<3;++i) {
+    for(unsigned i=0;i<sizeof(suffix)/sizeof(suffix[0]);++i) {
         size_t tail=strlen(suffix[i]);
         if(bytes==head+16+tail&&!memcmp(data+head+16,suffix[i],tail))return i+1;
     }

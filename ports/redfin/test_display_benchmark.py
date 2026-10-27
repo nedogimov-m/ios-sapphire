@@ -55,11 +55,15 @@ unsigned parse(const char *data,size_t bytes,uint64_t nonce){return redfin_displ
             passive=b'redfin-probe-v1:12345678abcdef01:passive\n'
             animate=b'redfin-probe-v1:12345678abcdef01:animate\n'
             checked=b'redfin-probe-v1:12345678abcdef01:animate-checked\n'
+            controls=b'redfin-probe-v1:12345678abcdef01:controls-checked\n'
             self.assertEqual(library.parse(passive,len(passive),nonce),1)
             self.assertEqual(library.parse(animate,len(animate),nonce),2)
             self.assertEqual(library.parse(checked,len(checked),nonce),3)
+            self.assertEqual(library.parse(controls,len(controls),nonce),4)
             for value in (b'',animate[:-1],animate+b'\0',animate+b'\n',animate.replace(b'abcdef',b'ABCDEF'),
                           animate.replace(b'animate',b'forever'),animate.replace(b':123',b':\x00123')):
+                self.assertEqual(library.parse(value,len(value),nonce),0)
+            for value in (controls[:-1],controls+b'\n',controls.replace(b'checked',b'forever')):
                 self.assertEqual(library.parse(value,len(value),nonce),0)
             self.assertEqual(library.parse(animate,len(animate),0),0)
             self.assertEqual(library.parse(animate,len(animate),nonce+1),0)

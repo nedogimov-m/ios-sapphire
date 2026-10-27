@@ -1,5 +1,26 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native Redfin physical-controls/brightness integration — 2026-10-27
+
+Preferred kernel main88513176b1e96ecf0b764cd62c6f4e6ac71345e3 and reviewed
+button sourcec84b4634277a70beac73921029b1fb6afc2530af remain the input model.
+Adapt ownership/release-before-arming/debounce to the actual Redfin FDT and
+Google500b3a2059c1eec0fec08ec56add06320ea901a8 PON RT_STS bits0/1; volume-up
+is PM8150L GPIO5 active-low, not the preferred POCO registers. Reuse native
+HID consumer services and the single existing power/SPMI observer owner.
+
+Reuse the already reviewed Google S6E3HC2/display-driversca74909c DSI2.4
+embedded FIFO route for normal DCS0x51 DBV4..1023 (high-byte offset8), plus
+visibility0x28/0x29. No memory DMA address/scanout/PLL/GPIO changes. Real fresh
+completion is required; uncertain requests quarantine the controller owner.
+Existing AppleARMBacklight class is reused. Own 20H392 public UIScreen ABI
+connects the opt-in combined observation; requested/applied values remain
+separate, and every modified path attempts bounded restoration. 80 combined
+host/native-runtime tests, three exact native TUs and full actual20H392 UI
+build/import/signature checks pass. Physical key presses/DBV/wake behavior
+still require device evidence; this is not full suspend, HBM or real-ALS
+support. Existing preferred GLES/Metal/Mesa/compiler pins remain unchanged.
+
 ## V99 full native/actual output and finite61.032FPS proof — 2026-10-27
 
 Exact corrected kernel Actions40422287650/run24/sourcee90b110 and unchanged

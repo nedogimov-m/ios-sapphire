@@ -26,30 +26,32 @@ Completed bring-up is a preserved baseline; only remaining work is listed.
 
 ## Current handoff
 
-V96 independently proves full native GMEM/sysmem and actual scoped sysmem
-GLES/app Metal. Source `b6e1a1e` adds late clock-frame correction and the paired
-two-mode FPS gate. CI23 (Actions `40417409066`, source `5fedeae`) / V97 passes
-all private output cases and the first actual physical reference; its cold
-initialization takes 2.654 seconds and exceeds the old 2-second caller wait,
-latching uncertain output. GLES continues offscreen; no V97 FPS is valid.
+V99 / Actions `40422287650` / run24 / source `e90b110` is terminal PASS:
+full independent GMEM/sysmem/GLES/app Metal, all four private output cases,
+four exact physical-panel references and 1080 actual GPU presentations.
+Its finite system-window animation measures 611 GPU frames / 10.011138 s =
+61.032 FPS (58.005–62.012 per-second samples), at 90 Hz callbacks with one
+stable backboardd. This proves that workload, not universal smooth 60/90 FPS.
+The cold output readiness fix is the preserved working baseline.
 
-The complete startup fix publishes readiness after successful checks/mapping,
-allows 10 seconds only before readiness and keeps the ordinary 2-second limit.
-All 28 affected contracts and the complete native GPU TU pass. Exact fix is
-`e90b110`; Actions `40422287650` / run24 is in progress. Host watcher session
-`56150` downloads/verifies that exact build and prepares only V99. Reuse
-native `035131`, all existing GPU/compiler artifacts and UI layout-v2.
+The complete connected physical-controls/brightness implementation is now
+ready for CI and one integrated device run. It uses Redfin PON/GPIO5 inputs
+through the existing PMIC worker and native HID, and source-bound DSI FIFO
+brightness/visibility through AppleARMBacklight. Debounce/consumer replacement,
+coalesced brightness, deferred off-screen updates and uncertain FIFO failures
+are covered. 80 combined tests and all three exact final native translation
+units pass; the new UI bundle passes actual 20H392 imports/signatures. This
+is host/build evidence, not physical button/brightness/suspend success.
 
-Last clean root generation is `1707842`; fresh V102 readonly snapshot is now
-complete and the device is verified unmounted recovery idle. No V102 stage/
-apply/boot yet. V101 is stale and must never be reused. Prepared V98 contains
-the old CI23 kernel and stays unused; corrected image is V99. After actual
-CI24/V99 proof, stage/apply V102 once and run the complete integration.
+Reuse native `035131` and existing Mesa/Metal/compiler artifacts. Last clean
+root generation is `1717443`; applied V102 is stale and must never be reused.
+Next fresh root update is V103; next kernel image is V100 / expected CI25.
+Run full native GPU checks, opt-in UIKit brightness/off/wake/restoration,
+input-path readiness and ordinary animation together. Phone/Photos automatic
+launches remain off. Physical button presses, visible inset lock/rotation
+persistence, full suspend and real-ALS auto brightness remain unverified/open.
 Exact builds, boot arguments and evidence are in [NOTES.md](../../NOTES.md).
-Phone/Photos automatic launches stay off. The clock hooks are installed on
-the real UIKit class; physical lock/rotation persistence remains unproved.
-Power/volume and brightness source/hardware review is ready for the next block;
-its implementation and the full wider goal remain open.
+All wider objective items above remain active.
 
 ## Constraints and private state
 

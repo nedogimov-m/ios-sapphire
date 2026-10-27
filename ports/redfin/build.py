@@ -470,6 +470,7 @@ def main():
         if private_keychain is not None:
             keychain_material.apply(tree, private_keychain)
         platform_power_proof = None
+        controls_proof = None
         gpu_dvfs_proof = None
         if a.platform_power:
             platform_power_proof=platform_power.apply(tree,a.dtb.read_bytes(),private_rtc)
@@ -640,6 +641,9 @@ def main():
                 if a.display_hz==90:
                     import panel_mode
                     panel_mode.add_contract(tree,nodes)
+                if a.platform_power:
+                    from ports.redfin import controls
+                    controls_proof=controls.apply(tree,a.dtb.read_bytes())
         if a.userspace_waits:
             chosen = next(child for child in tree.children if child.name == 'chosen')
             chosen.props.append(('redfin-user-waits', 0, mkadt.u32(1)))
@@ -856,6 +860,7 @@ def main():
     if a.platform_power:
         manifest['platform_power'] = platform_power_proof
         manifest['gpu_dvfs'] = gpu_dvfs_proof
+        manifest['native_controls'] = controls_proof
     if a.display_hz is not None:
         manifest['display_hz'] = a.display_hz
     if a.display_fit:

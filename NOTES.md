@@ -1,5 +1,41 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native buttons/brightness block; combined host checks PASS — 2026-10-27
+
+Finished connected PON/GPIO5 -> existing PMIC worker -> native HID input and
+UIKit/CoreBrightness -> AppleARMBacklight/IOMFB -> bounded DSI FIFO controls.
+Exact live FDT binds Redfin SID0 PON / SID4 GPIO5 and S6E3HC2 DBV4..1023;
+no PMIC key-configuration writes, framebuffer DMA remapping or GPU/compiler
+change. Stable release before arming, 15ms debounce, consumer-epoch/read-error
+cancellation and real edge labels retain native iOS hold/combination behavior.
+ADC/worker sleeps service keys without introducing a second PMIC owner.
+Coalesced brightness/wake jobs distinguish requested/actually applied values;
+display off preserves GPU pixels and defers level changes, on restores them.
+Uncertain completion quarantines commands rather than resetting a live FIFO.
+Visibility control is not full SoC suspend/deep panel sleep or HBM support.
+
+80 combined executable contracts PASS: actual key policy/SPMI lease reads,
+short/long FIFO packet bytes/completion/failure/restoration, actual coalesced
+native worker, native-runtime UIKit observer failure/restoration paths, live
+FDT refusal, affected power/thermal/GPU/presenter/clock/input contracts. Exact
+ordered patch reconstruction agrees with all owned control sources. Full
+SweetFramebuffer/SweetHID/SweetBattery TUs compile with actual saved native CI
+flags/KDK headers. Native UI controls-v1 builds/signs/audits all52actual20H392
+libraries; UI da1f3982../refresh4a02d6e1.., public UIScreen brightness ABI
+verified. Existing native035131/Mesa1a4ad42c../Metal17d0f01f../cache496301fc..
+unchanged. Private checks/build evidence: research/redfin-controls-v1/ and
+research/redfin-ui-controls-v1/. No new physical success is inferred.
+
+Next CI25 kernel + one V100 integration: complete native GPU checks first,
+then public brightness low/high, actual DBV, display-off output pause, wake
+output resumption, restoration, input readiness and finite GPU FPS. Physical
+key presses and real-ALS auto brightness remain human/hardware-dependent
+verification or unfinished integration. Keep full wider GOAL active; Phone/
+Photos auto launches OFF. No new phone boot/root write in this milestone.
+Last actual kernel/boot remains V99 Actions40422287650/run24/sourcee90b110,
+kernel398b6b7a.., nonce077ad640e2795543; exact arguments in V99 start entry.
+Clean root1717443; applied V102 STALE/never reuse. Next fresh V103/imageV100.
+
 ## REDFIN V99 physical output/native contracts PASS; finite61.032FPS — 2026-10-27
 
 Sourcee90b110/start00b7e4d, Actions40422287650/run24, kernel398b6b7a..;

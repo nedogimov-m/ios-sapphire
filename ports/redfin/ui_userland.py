@@ -16,6 +16,7 @@ REFRESH_LOG='/private/var/mobile/Library/Logs/redfin-refresh.log'
 LOG='/private/var/mobile/Library/Logs/redfin-ui.log'
 UIKIT='/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore'
 METHODS={
+    'UIScreen': {'-brightness':'d16@0:8','-setBrightness:':'v24@0:8d16'},
     'UIView': {'-setFrame:':'v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16',
         '-setBounds:':'v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16',
         '-setCenter:':'v32@0:8{CGPoint=dd}16','-layoutSubviews':'v16@0:8'},
@@ -69,7 +70,7 @@ def build(out,cache_path=None):
         '-miphoneos-version-min=16.0','-O2','-fblocks','-fobjc-arc','-Wall','-Wextra','-Werror',
         '-Wno-deprecated-declarations','-dynamiclib','-install_name',LIBRARY,
         '-DREDFIN_UIKIT_UUID_BYTES='+define,'-I',str(HERE),str(HERE/'statusbar-cutout.m'),str(HERE/'native-diagnostics.m'),str(HERE/'native-tcc-probe.m'),
-        str(HERE/'display-probe.m'),'-framework','UIKit','-framework','Foundation',
+        str(HERE/'display-probe.m'),str(HERE/'controls-probe.m'),'-framework','UIKit','-framework','Foundation',
         '-framework','CoreGraphics','-framework','QuartzCore','-framework','IOKit','-o',str(library)]
     with (out/'build.log').open('wb') as log:
         subprocess.run(command,check=True,stdout=log,stderr=log)
@@ -99,12 +100,14 @@ def build(out,cache_path=None):
         refresh_sha256=hashlib.sha256(refresh.read_bytes()).hexdigest(),
         sha256=hashlib.sha256(library.read_bytes()).hexdigest(),full_panel=True,physical_refresh_claimed=False)
     report.update(probe_opt_in_only=True,probe_uses_native_completed_counts=True,probe_statistics_version=2,
+        controls_probe_opt_in_only=True,controls_probe_restores_brightness_and_display=True,
+        controls_probe_physical_presses_tested=False,
         probe_checks_exit_version=1,
         native_cadence_abi=cadence,native_display_period_getters_preserved=True,
         high_refresh_main_bundle_opt_in=True,foundation_uuid=foundation_uuid,
         probe_request_path='/redfin/display-probe-request',
         source_sha256={name:hashlib.sha256((HERE/name).read_bytes()).hexdigest() for name in
-            ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m',
+            ('statusbar-cutout.m','native-diagnostics.m','native-tcc-probe.m','display-probe.m','controls-probe.m','controls-policy.h',
              'display-refresh.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
              'statusbar-geometry.h','graphics-exec-scope.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')
