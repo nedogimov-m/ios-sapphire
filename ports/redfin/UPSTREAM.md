@@ -1,5 +1,16 @@
 # HackiOS upstream review — 2026-10-22
 
+## V102 native transaction still does not reach the panel — 2026-10-27
+
+Own UI90941b8/80745948.. with unchanged preferred pins and CI27/883286e.
+V102 retains complete native GPU/Metal/private pixel/four panel-reference
+correctness, but BKS low/high have no applied DBV (result6/restored0). The
+measurement therefore refuses to run; no new FPS or selected host exists.
+Matching logs prove backboardd finds AppleARMBacklight by backlight-control.
+Its complete module/admission/request path needs audit, not another guessed
+public setter. Clean1748928/Fastboot, no panic, one server. Preserve V99's
+finite61.032FPS baseline; all broader integration remains open.
+
 ## Scene-independent system brightness and finite workload correction — 2026-10-27
 
 Preferred reviewed pins remain kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,

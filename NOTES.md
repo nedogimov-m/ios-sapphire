@@ -1,5 +1,36 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V102 terminal: native BKS still has no applied brightness; FPS correctly refused — 2026-10-27
+
+Source90941b8, unchanged CI27 Actions40432973023/run27/source883286e,
+kernel4f99141c../UI80745948../refresh4a02d6e1..; no graphics/compiler/kernel
+rebuild. Fresh V105 applies ONCE:34changed/1new/zero freed blocks, full
+preimages/readback/signatures/readonly fsck PASS. V105 is now STALE/never
+reuse. V102 TERMINAL exit0, authenticated9e8c5eaed377ea15, one backboardd62,
+no panic; clean consistent unmounted HFSX1748928 and verified Fastboot.
+Next fresh root epoch is V106 at1748928; no stage/read/boot is currently live.
+
+Full independent GMEM/sysmem/GLES/app Metal and all four private cases PASS;
+four actual panel references match64samples each exactly. Actual ordinary
+output has only4frames; do not count it as complete throughput proof. Three
+key inputs remain ready/armed with no read errors, no physical presses.
+The audited native BKS observer starts and issues low, but no native backlight
+request/applied low/high DBV is observed. Result6/restored0, low0/high0;
+restoration is unproved, not a claim that the physical level changed. Initial
+DBV409 and other native off/on+restore transactions succeed without uncertainty.
+The finite animation correctly refuses after failed controls restoration:
+NO FPS result and no selected-host observation. Earlier0.2FPS samples remain
+recorded; no GPU/scene/backlight cause is proved. V99 finite61.032FPS baseline
+is preserved. Phone/Photos automatic opens and frame captures remain OFF.
+
+Next connected block: complete actual20H392 CoreBrightness/backboardd/display
+admission and request-path audit, fix the whole identified native integration
+and bounded observation together, then combined checks/ONE hardware run.
+No additional mini-task boot. Private evidence: logs/redfin/gui-platform-v102/
+and research/redfin-controls-v1/. All physical controls, real ALS/full suspend,
+ordinary smoothness and wider GOAL items remain open. Exact actual boot args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x9e8c5eaed377ea15 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V101 terminal; scene-independent brightness and real-content workload ready — 2026-10-27
 
 V101/CI27 Actions40432973023/run27/source883286e is TERMINAL exit0:

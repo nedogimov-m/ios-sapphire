@@ -45,10 +45,13 @@ V101, so the low counter rate is not conclusively attributed to GPU failure.
 The complete observer correction now uses audited scene-independent native
 BKS transactions and a visible nonempty content host.90combined executable
 contracts and actual20H392 signed UI80745948../refresh4a02d6e1.. PASS.
-No Mesa/Metal/compiler/kernel rebuild. Fresh V102 passes complete preflight
-with the same CI27 kernel; ONE combined native GPU/system brightness/off/
-wake/restoration/key-readiness/FPS run is next. V104 APPLIED/STALE, never reuse;
-fresh V105 must bind1739626 and preserve all preimages/readback/fsck gates.
+No Mesa/Metal/compiler/kernel rebuild. V102 is TERMINAL exit0, one server/no
+panic, clean1748928/Fastboot; native GPU/Metal/private pixels/four panel
+references PASS. Native BKS low still never reaches hardware; result6/restored0,
+low0/high0. The finite FPS workload correctly refuses after unproved restoration,
+so no new FPS exists. Earlier low-rate causality remains open. Next block audits
+and fixes the complete native CoreBrightness/backboardd path before one combined
+test. V105 APPLIED/STALE, never reuse; next fresh V106 must bind1748928.
 Phone/Photos auto opens remain OFF. Physical key actions, brightness from UI,
 lock/wake input, inset persistence, real-ALS auto brightness and full suspend
 remain unverified/open. Exact builds/args/results are in NOTES.md. Every wider
