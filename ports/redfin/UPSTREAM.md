@@ -1,5 +1,22 @@
 # HackiOS upstream review — 2026-10-22
 
+## Complete cold-output FIFO dependency waits for native first readers — 2026-10-27
+
+Preferred kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3, reviewed buttons
+c84b4634277a70beac73921029b1fb6afc2530af and active userland906425b75e02b4f99eb5d7bb1ef7c9583472d772
+are unchanged. Retain the proved userspace GLES/app Metal/UI binaries. Own
+actual retained FIFO now publishes a unique cold-output sequence/deadline;
+dependent first readers and post-admission client fences budget that real
+predecessor separately from ordinary2s work, within original caller deadlines.
+No source release, seed-as-completion shortcut, hardware-register change or
+skipped native check. Immutable10s cold deadline is shared with output waiters;
+spurious wakes/later consumers cannot extend it. RedfinColdOutputWaitABI1
+is internal, retaining the existing userspace ABI.124combined checks and final
+11affected actual-helper/overlay contracts plus exact native GPU TU PASS.
+V104's4.318753s logical-fence completion behind4.930231s output motivates the
+correction; new device success awaits CI28/one V105. CI27 and V99 baseline
+remain preserved, V107 STALE/next fresh V108 at1768532. No wider completion.
+
 ## V104 actual manual driver write and independent sysmem first-reader refusal — 2026-10-27
 
 Own9cf6dca with retained preferred pins/CI27. Main pointers rechecked unchanged:

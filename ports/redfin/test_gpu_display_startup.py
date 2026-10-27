@@ -39,7 +39,7 @@ static bool gd_map(gd_buffer *,Memory *,uint8_t *,SweetSurface *,uint64_t,bool,b
 static void IOLog(const char *,...){}
 '''+initialize+r'''
 struct IOLock{bool held;};
-struct gd_queued_present{IOLock *lock;unsigned references;bool done;int result;};
+struct gd_queued_present{IOLock *lock;unsigned references;bool done;int result;uint64_t cold_deadline;};
 typedef unsigned IOReturn;
 enum{kIOReturnSuccess=0,THREAD_ABORTSAFE=0,THREAD_AWAKENED=0,THREAD_TIMED_OUT=1,THREAD_INTERRUPTED=2};
 static uint64_t now,completion,expected_deadline;static unsigned spurious,sleeps,interrupted,releases;
@@ -48,6 +48,7 @@ static void IOLockUnlock(IOLock *lock){assert(lock->held);lock->held=false;}
 static void IOLockWakeup(IOLock *lock,void *,bool){assert(lock->held);}
 static uint64_t gpuNow(){return now;}
 static uint64_t gpuQueueAbsolute(uint64_t value){return value;}
+static uint64_t gpuQueueOrdinaryDeadline(uint64_t value){return value+RF_GQ_WAIT_NS;}
 static void gd_queued_release(gd_queued_present *p){assert(p->references);--p->references;++releases;}
 '''+complete+r'''
 static int IOLockSleepDeadline(IOLock *lock,void *event,uint64_t deadline,unsigned mode){
@@ -60,7 +61,7 @@ static int IOLockSleepDeadline(IOLock *lock,void *event,uint64_t deadline,unsign
   IOLockUnlock(lock);p->result=1;__atomic_store_n(&gd.startup_ready,true,__ATOMIC_RELEASE);
   gd_queued_complete(p,kIOReturnSuccess);IOLockLock(lock);return THREAD_AWAKENED;
  }
- now=deadline;return THREAD_TIMED_OUT;
+ if(deadline>now)now=deadline;return THREAD_TIMED_OUT;
 }
 '''+wait+r'''
 int main(){
@@ -71,16 +72,18 @@ int main(){
   assert(gd.attempted&&gd.startup_ready==(fault==0));
  }
  gd={};assert(!gd_initialize(nullptr)&&!gd.startup_ready);
- for(unsigned test=0;test<7;++test){
+ for(unsigned test=0;test<9;++test){
   gd={};now=1000;sleeps=releases=interrupted=0;spurious=test==2?4:0;
   gd.startup_ready=test==1||test==3||test==6;
   expected_deadline=now+(gd.startup_ready?RF_GQ_WAIT_NS:UINT64_C(10000000000));
   completion=now+(test==1?100000000:2654000000);
   if(test==4)completion=expected_deadline+1;
   if(test==5)interrupted=1;
-  IOLock lock={};gd_queued_present p={&lock,2,false,-1};
+  IOLock lock={};gd_queued_present p={&lock,2,false,-1,gd.startup_ready?0:expected_deadline};
+  if(test==7){now+=UINT64_C(4000000000);completion=now+UINT64_C(2654000000);}
+  if(test==8){now=expected_deadline+1;completion=now+1;}
   if(test==6){p.done=true;p.result=1;--p.references;}
-  bool success=test==0||test==1||test==2||test==6;
+  bool success=test==0||test==1||test==2||test==6||test==7;
   assert(gd_queued_wait(&p)==(success?1:-1));
   assert(gd.uncertain==!success&&!lock.held);
   assert(sleeps==(test==6?0u:test==2?5u:1u));

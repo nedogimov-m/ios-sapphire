@@ -29,6 +29,7 @@ static struct {
     uint64_t cpu_calls,cpu_waits,cpu_read_calls,cpu_wait_ns;
     uint64_t surface_calls,surface_waits,surface_query_ns,surface_wait_ns;
     uint64_t issued,retired,first_failed,executed;
+    uint64_t cold_output_sequence,cold_output_deadline;
     bool stopping;
 } gGPUQueue;
 static uint64_t gpuQueueAbsolute(uint64_t ns)
@@ -37,15 +38,19 @@ static uint64_t gpuQueueAbsolute(uint64_t ns)
 static IOReturn gpuQueueReserve(uint64_t bytes)
 {
     if(!gGPUQueue.lock)return kIOReturnNotReady;
-    uint64_t end=gpuQueueAbsolute(gpuNow()+RF_GQ_WAIT_NS);
     IOLockLock(gGPUQueue.lock);
+    uint64_t target=gGPUQueue.issued,end=0;
+    bool cold=gpuQueueColdOutputPendingLocked(target);
+    IOReturn deadline=gpuQueueWaitDeadlineLocked(target,NULL,&end);
+    if(deadline!=kIOReturnSuccess){IOLockUnlock(gGPUQueue.lock);return deadline;}
     IOReturn result=kIOReturnSuccess;
     for(;;) {
         if(gGPUQueue.stopping||!redfin_gpu_ready()){result=kIOReturnNotReady;break;}
         int error=rf_gq_reserve(&gGPUQueue.budget,bytes);
         if(!error)break;
         if(error!=EAGAIN){result=gpuError(error);break;}
-        int waited=IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.budget,end,THREAD_ABORTSAFE);
+        gpuQueueAfterColdOutputLocked(target,NULL,&cold,&end);
+        int waited=IOLockSleepDeadline(gGPUQueue.lock,&gGPUQueue.budget,gpuQueueAbsolute(end),THREAD_ABORTSAFE);
         if(waited==THREAD_TIMED_OUT){result=kIOReturnTimeout;break;}
         if(waited!=THREAD_AWAKENED){result=kIOReturnAborted;break;}
     }
@@ -194,6 +199,7 @@ IOReturn RedwoodGPUUserClient::submit(msm_submit *r,const rf_gw_submit_extension
         job->owner=this;retain();job->nr_bos=r->nr_bos;job->charge=charge;job->accepted=gpuNow();
         job->nr_ranges=nr_ranges;job->typed=typed;
         job->sequence=++gGPUQueue.issued;proc_selfname(job->process,sizeof(job->process));job->pid=proc_selfpid();
+        if(!coldFirstFence&&gpuQueueColdOutputPendingLocked(job->sequence))coldFirstFence=job->fence;
         for(unsigned i=0;i<r->nr_bos;++i){
             gpu_buffer *b=job->bos[i].buffer;++b->pending;b->fence=job->fence;
             if(!nr_ranges&&rf_ga_mark_pages(&gGPUQueue.access,b->pages,b->page_count,job->sequence,job->bos[i].access))
@@ -335,6 +341,24 @@ IOReturn RedwoodGPUUserClient::waitQueued(msm_wait *r)
     uint64_t end=0;if(r->flags||rf_gq_deadline(r->timeout.seconds,r->timeout.nanoseconds,gpuNow(),&end))return kIOReturnBadArgument;
     IOLockLock(clientLock);IOReturn result=kIOReturnSuccess;
     if(r->queue>nextQueue){result=kIOReturnBadArgument;goto done;}
+    /* A logical fence accepted after the one cold output cannot retire before
+     * it. Wait for that exact predecessor with the caller's original absolute
+     * deadline, then apply the ordinary2s cap to this client's own work.
+     * Never hold a client lock while waiting on global queue retirement. */
+    if(coldFirstFence&&r->fence>=coldFirstFence&&rf_gq_status(&queue,r->fence)==EAGAIN) {
+        IOLockLock(gGPUQueue.lock);
+        uint64_t predecessor=gGPUQueue.cold_output_sequence;
+        bool pending=gpuQueueColdOutputPendingLocked(predecessor);
+        IOLockUnlock(clientLock);
+        if(pending)result=gpuQueueWaitTargetLocked(predecessor,&r->timeout,false);
+        IOLockUnlock(gGPUQueue.lock);
+        if(result!=kIOReturnSuccess)return result;
+        IOLockLock(clientLock);
+        coldFirstFence=0; /* The unique predecessor is retired; no future lookup. */
+        if(rf_gq_deadline(r->timeout.seconds,r->timeout.nanoseconds,gpuNow(),&end)) {
+            result=kIOReturnBadArgument;goto done;
+        }
+    }
     for(;;) {
         int status=rf_gq_status(&queue,r->fence);
         if(status!=EAGAIN){result=gpuError(status);break;}
@@ -380,8 +404,19 @@ extern "C" int redfin_gpu_queue_memory_barrier(void *descriptor)
     uint64_t resolved=gpuNow();++gGPUQueue.surface_calls;
     gGPUQueue.surface_query_ns+=resolved-began;if(gGPUQueue.retired<target)++gGPUQueue.surface_waits;
     IOReturn result=gpuQueueWaitTargetLocked(target,NULL,false);
-    gGPUQueue.surface_wait_ns+=gpuNow()-resolved;
-    IOLockUnlock(gGPUQueue.lock);return (int)result;
+    uint64_t waited=gpuNow()-resolved;
+    gGPUQueue.surface_wait_ns+=waited;
+    uint64_t retired=gGPUQueue.retired,cold=gGPUQueue.cold_output_sequence;
+    IOLockUnlock(gGPUQueue.lock);
+    if(result!=kIOReturnSuccess||waited>=UINT64_C(200000000)) {
+        static unsigned reports;
+        if(__atomic_fetch_add(&reports,1,__ATOMIC_RELAXED)<16) {
+            char name[20]={};proc_selfname(name,sizeof(name));
+            IOLog("REDFIN GPU SURFACE WAIT: name=%s pid=%d target=%llu retired=%llu cold=%llu us=%llu result=%x actual-retirement=1\n",
+                name,proc_selfpid(),target,retired,cold,waited/1000,result);
+        }
+    }
+    return (int)result;
 }
 
 extern "C" int redfin_gpu_queue_cpu_barrier(void)

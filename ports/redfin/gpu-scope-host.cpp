@@ -99,9 +99,10 @@ static void redfin_gpu_sync(void *address,uint64_t bytes,bool){assert(!address&&
 static void proc_selfname(char *out,size_t bytes){strncpy(out,"host-fixture",bytes);}
 static int proc_selfpid(){return 123;}
 struct msm_cpu_prep {uint32_t handle,op;msm_timespec timeout;};
+struct msm_wait {uint32_t fence,flags;msm_timespec timeout;uint32_t queue;};
 class RedwoodGPUUserClient {
 public:
- IOLock *clientLock=nullptr;gpu_buffer buffers[3];rf_gq_client queue={};bool closed=false;int references=1;uint32_t nextQueue=0;
+ IOLock *clientLock=nullptr;gpu_buffer buffers[3];rf_gq_client queue={};bool closed=false;int references=1;uint32_t nextQueue=0,coldFirstFence=0;
  gpu_buffer *buffer(unsigned id){return id&&id<=3&&buffers[id-1].pages?&buffers[id-1]:nullptr;}
  void retain(){__atomic_add_fetch(&references,1,__ATOMIC_ACQ_REL);}
  void release(){assert(!hardware_held);assert(__atomic_sub_fetch(&references,1,__ATOMIC_ACQ_REL)>=1);}
@@ -111,6 +112,7 @@ public:
  void retireQueued(gpu_queued_job *,IOReturn);
  IOReturn prepareRange(rf_gw_cpu_range *,bool whole=false);
  IOReturn prepareQueued(msm_cpu_prep *);
+ IOReturn waitQueued(msm_wait *);
 };
 /* ACTUAL_QUEUE_DECLARATIONS_AND_WAIT */
 /* ACTUAL_QUEUE_WORKER */
@@ -292,5 +294,40 @@ extern "C" int typed_submit_contract(){
  first_allowed=true;std::thread worker([]{redfinGpuQueueWorker(nullptr,0);});
  for(;;){IOLockLock(gGPUQueue.lock);bool done=gGPUQueue.retired==1;IOLockUnlock(gGPUQueue.lock);if(done)break;std::this_thread::yield();}
  stop(worker);assert(!client.buffers[0].pending&&client.references==1&&!client.queue.pending);
+ IOLockFree(client.clientLock);teardown();return 0;
+}
+
+extern "C" int cold_dependency_contract(){
+ setup();gd.startup_ready=false;
+ RedwoodGPUUserClient client;client.clientLock=IOLockAlloc();uint32_t page[]={1};
+ client.buffers[0]={page,1,0,4096,1,RF_GR_BASE,3};
+ IOMemoryDescriptor memory={{RF_GW_RAM_BASE},1},panel_memory={{0xa0000000},1};
+ FakeState state,panel_state;SweetSurface source={1,1,&memory,&state},panel={0,1,&panel_memory,&panel_state};
+ surface_table[1]=&source;
+ redfin_display_geometry geometry={};assert(redfin_display_geometry_make(1,1080,2340,1125,2436,&geometry));
+ uint8_t record[0x120]={};unsigned one=1;memcpy(record+0x104,&one,4);memcpy(record+0x54,&one,4);
+ enqueue_user(&client,1,2);std::thread worker([]{redfinGpuQueueWorker(nullptr,0);});
+ int output=-99;std::thread display([&]{output=RedfinGPUPresent(&panel,&geometry,record);});
+ wait_for(display_admitted);
+ IOLockLock(gGPUQueue.lock);
+ uint64_t lease=gGPUQueue.cold_output_deadline;
+ assert(gGPUQueue.cold_output_sequence==2&&lease>gpuNow());
+ IOLockUnlock(gGPUQueue.lock);
+ msm_bo bo={3,1,0};msm_cmd commands[2]={{1,0,0,4,0,0,0},{1,0,4,4,0,0,0}};
+ msm_submit wire={};wire.flags=0x10;wire.nr_bos=1;wire.nr_cmds=2;
+ wire.bos=(uintptr_t)&bo;wire.cmds=(uintptr_t)commands;
+ assert(!client.submit(&wire)&&wire.fence==2&&client.coldFirstFence==2);
+ uint64_t end=gpuNow()+UINT64_C(1000000000);
+ msm_wait wait={2,0,{(int64_t)(end/1000000000),(int64_t)(end%1000000000)},0};
+ unsigned slept=wait_events.load();int waited=-99;
+ std::thread reader([&]{waited=client.waitQueued(&wait);});
+ while(wait_events.load()==slept)std::this_thread::yield();
+ assert(client.clientLock->mutex.try_lock());client.clientLock->mutex.unlock();
+ {std::lock_guard<std::mutex> held(gate_lock);first_allowed=true;}gate_changed.notify_all();
+ wait_for(future_started);display.join();
+ assert(output==1&&gGPUQueue.cold_output_deadline==lease);
+ {std::lock_guard<std::mutex> held(gate_lock);future_allowed=true;}gate_changed.notify_all();
+ reader.join();assert(waited==kIOReturnSuccess);wait_for(third_retired);
+ stop(worker);assert(!client.queue.pending&&client.references==1);
  IOLockFree(client.clientLock);teardown();return 0;
 }

@@ -113,6 +113,7 @@ int run(void) {
         worker=function(queue,'static void gpuPhysicalRetire(')+'\n'+(HERE/'gpu-physical-worker.inc').read_text()
         methods=''.join(function(queue,s) for s in (
             'IOReturn RedwoodGPUUserClient::submit(',
+            'IOReturn RedwoodGPUUserClient::waitQueued(',
             'void RedwoodGPUUserClient::retireQueued(',
             'IOReturn RedwoodGPUUserClient::prepareRange(',
             'IOReturn RedwoodGPUUserClient::prepareQueued(',
@@ -128,6 +129,7 @@ int run(void) {
             self.assertEqual(library.queue_contract(),0)
             self.assertEqual(library.read_only_contract(),0)
             self.assertEqual(library.typed_submit_contract(),0)
+            self.assertEqual(library.cold_dependency_contract(),0)
 
     def test_actual_mesa_merge_preserves_view_refs_and_explicit_whole_backing_use(self):
         # Execute the same final append functions as the real patched Mesa.

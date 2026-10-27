@@ -9,6 +9,7 @@
 #define RF_GQ_MAX_JOBS 16u
 #define RF_GQ_MAX_BYTES (4u<<20)
 #define RF_GQ_WAIT_NS UINT64_C(2000000000)
+#define RF_GQ_COLD_OUTPUT_NS UINT64_C(10000000000)
 struct rf_gq_budget {uint32_t jobs;uint64_t bytes;};
 struct rf_gq_client {uint32_t issued,retired,completed,failed,pending;int first_error;bool closing;};
 static inline int rf_gq_reserve(struct rf_gq_budget *b,uint64_t bytes)

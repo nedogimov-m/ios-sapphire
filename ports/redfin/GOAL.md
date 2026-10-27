@@ -48,8 +48,12 @@ full direct first-reader exits27 (unchanged seed or failed lock not yet
 separated). Approximately2s sampled surface wait is correlated only.
 Correctness gate refuses controls/FPS before they run; no new performance
 result. Key paths ready/armed7,15004samples/errors0, no physical presses.
-Next connected block resolves native surface first-reader/queue ownership and
-phase evidence without weakening checks. V99 remains the preserved baseline.
+Complete native first-reader/client-fence/output correction is implemented:
+one actual FIFO cold sequence and immutable10s deadline, then ordinary2s work,
+within original explicit caller bounds.124combined contracts and final11affected
+checks/native GPU TU PASS. New kernel CI28 required; userspace graphics/UI stay
+retained. One V105 after fresh V108 at1768532, no current device operation.
+New hardware result remains pending. V99 is the preserved measured baseline.
 
 Kernel4f99141c../Mesa1a4ad42c../Metal17d0f01f../native035131/cache496301fc.. stay
 retained unless actual evidence requires changes. Wi-Fi readiness remains

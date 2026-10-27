@@ -37,8 +37,12 @@ wrong-level restoration. V104 now proves a native request and physicalDBV
 409->514, but the independent sysmem checker exits27 on its seed/first-reader
 condition. GMEM/app Metal/four physical references pass; controls/FPS correctly
 refuse before running. Physical UI brightness and complete controls remain
-unfinished; resolve retained-surface first-reader/queue behavior next. V104
-returns clean1768532/Fastboot, one server/no panic; V107 is stale/never reuse.
+unfinished. The complete cold-output FIFO/first-reader correction now passes
+124combined and final11affected checks plus the exact native GPU TU: a shared
+finite cold predecessor allowance, followed by ordinary2s waits, preserves
+actual caller deadlines and ownership. New kernel CI28/one V105 observation
+is next; userspace graphics/UI are retained. V104 returns clean1768532/Fastboot,
+one server/no panic; V107 is stale/never reuse.
 V99 stays the preserved measured performance baseline.
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including

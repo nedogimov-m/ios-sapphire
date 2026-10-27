@@ -122,6 +122,10 @@ int main(void)
                     if later.exists():
                         subprocess.run(['git','apply','--include='+target,str(later)],
                                        cwd=directory,check=True,capture_output=True)
+                later=HERE/'native-cold-output-waits.patch'
+                if '+++ b/'+target+'\n' in later.read_text():
+                    subprocess.run(['git','apply','--include='+target,str(later)],
+                                   cwd=directory,check=True,capture_output=True)
                 self.assertEqual(patched_source(target),(directory/target).read_text(),target)
         for owned, target in (
             ('gpu-precise-pause.inc', 'bsd/dev/redfin_gpu_precise_pause.inc'),

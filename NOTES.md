@@ -1,5 +1,50 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete cold-output dependency/first-reader correction ready — 2026-10-27
+
+After terminal V104/d47cadc, queue chronology shows sysmem gpu-render client
+fence8 eventually completes successfully at4.318753s while the first native
+output initializes/checks for4.930231s. The first-reader default is2s. Together
+with the actual approximately2s surface-wait counter and checker27 this
+identifies a real cold FIFO predecessor that the consumer wait did not budget;
+the old27still conflates its seed/lock branches, so that branch is not invented.
+This block changes the complete actual queue path rather than skipping checks.
+
+One native cold output sequence now publishes one immutable10s absolute
+initialization deadline at actual FIFO admission. Dependent implicit IOSurface/
+queue-capacity waits and fences accepted behind that sequence wait for that
+predecessor, then apply the ordinary2s limit to their own work. Explicit caller
+deadlines and nonblocking/short calls remain binding. Spurious wakes and later
+consumers cannot renew the cold phase. Shared output waiters use that same
+absolute deadline; ordinary later output still uses2s. No early completion,
+retry of unknown GPU work, FIFO bypass, source release or physical-state reset.
+The per-client predecessor marker clears once retired, avoiding a permanent
+extra global lookup on ordinary frame waits. Slow/failed surface waits record
+actual target/retired/cold/result, within the existing native log bound.
+New internal service proof RedfinColdOutputWaitABI1; userspace wire ABI unchanged.
+
+124combined contracts PASS in16.58s. The final stricter10s cold/2s ordinary
+phase transition then passes all11affected FIFO/native overlay/timer/first-reader
+checks in4.82s, plus exact native RedfinGPU.cpp TU under actual CI flags, exit0.
+The deterministic contract reproduces2s failure behind4.93s output, then checks
+real retirement, long/short original deadlines, invalid/nonblocking requests,
+spurious wakes, saturation, failure quarantine and late source ownership.
+One test initially assumed a6s caller deadline covered a6.03s completion;
+its corrected expectations retain and prove the genuine short-deadline failure.
+No GPU pixel/pass result is fabricated and the current checker gate is retained.
+
+Preferred kernel88513176../buttonc84b4634../active userland906425b7.. stay
+reviewed. Last actual CI27 Actions40432973023/run27/source883286e remains
+kernel4f99141c..; a fresh kernel CI28 is required for this whole completed
+native block. Mesa1a4ad42c../Metal17d0f01f../native035131/cache496301fc.. and
+signed UI5a501aac../refresh6e9f8c83.. are source-exact and retained; no rebuild.
+No new device operation. Fresh V108 must bind1768532; V107 APPLIED/STALE,
+never reuse. One combined V105 follows verified CI/source/ABI and preimages/
+readback/readonly fsck. All wider GOAL items active; physical UI brightness/
+buttons/ALS/full suspend and ordinary FPS still need real results.
+Last actual V104 arguments (no new boot yet):
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xe32c36653ed2e87b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V104 terminal: first actual manual DBV; native sysmem readback refuses controls — 2026-10-27
 
 Source9cf6dca, retained CI27 Actions40432973023/run27/source883286e,

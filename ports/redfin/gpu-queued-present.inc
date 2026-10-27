@@ -7,6 +7,7 @@ struct gd_queued_present {
     uint32_t references;
     bool done;
     int result;
+    uint64_t cold_deadline;
     SweetSurface *panel,*sources[RF_GD_LAYERS];
     redfin_display_geometry geometry;
     uint8_t record[0x120];
@@ -43,9 +44,9 @@ static void gd_queued_complete(void *argument,IOReturn status)
     p->done=true;IOLockWakeup(p->lock,&p->done,false);IOLockUnlock(p->lock);
     gd_queued_release(p);
 }
-static IOReturn gpuQueueSubmitKernel(gpu_queued_job *job)
+static IOReturn gpuQueueSubmitKernel(gpu_queued_job *job,uint64_t *cold_deadline)
 {
-    if(!job||job->owner||!job->kernel_execute||!job->kernel_complete||
+    if(!job||!cold_deadline||job->owner||!job->kernel_execute||!job->kernel_complete||
        (job->scope_count&&!job->scope_pages))return kIOReturnBadArgument;
     for(unsigned i=0;i<job->scope_count;++i)
         if(job->scope_pages[i]>=RF_GW_PAGES)return kIOReturnBadArgument;
@@ -54,6 +55,14 @@ static IOReturn gpuQueueSubmitKernel(gpu_queued_job *job)
     if(gGPUQueue.stopping||!redfin_gpu_ready()||gGPUQueue.issued==UINT64_MAX)result=kIOReturnNotReady;
     else {
         job->sequence=++gGPUQueue.issued;job->accepted=gpuNow();
+        if(!gGPUQueue.cold_output_sequence&&!__atomic_load_n(&gd.startup_ready,__ATOMIC_ACQUIRE)) {
+            gGPUQueue.cold_output_sequence=job->sequence;
+            gGPUQueue.cold_output_deadline=job->accepted>UINT64_MAX-RF_GQ_COLD_OUTPUT_NS?
+                UINT64_MAX:job->accepted+RF_GQ_COLD_OUTPUT_NS;
+            IOLog("REDFIN GPU COLD OUTPUT: sequence=%llu maximum-ms=%llu shared-deadline=1 ordinary-ms=%llu\n",
+                job->sequence,RF_GQ_COLD_OUTPUT_NS/1000000,RF_GQ_WAIT_NS/1000000);
+        }
+        *cold_deadline=!__atomic_load_n(&gd.startup_ready,__ATOMIC_ACQUIRE)?gGPUQueue.cold_output_deadline:0;
         if(job->scope_count&&rf_ga_mark_pages(&gGPUQueue.access,job->scope_pages,job->scope_count,job->sequence,RF_GA_READ))
             redfin_gpu_poison("internal presentation dependency metadata changed");
         if(gGPUQueue.tail)gGPUQueue.tail->next=job;else gGPUQueue.head=job;gGPUQueue.tail=job;
@@ -75,9 +84,9 @@ static int gd_queued_wait(gd_queued_present *p)
      * it must not inherit the ordinary two-second frame deadline. An acquire
      * pairs with complete successful initialization, not merely "attempted".
      * Both paths stay finite; spurious wakes never extend either deadline. */
-    bool startup=!__atomic_load_n(&gd.startup_ready,__ATOMIC_ACQUIRE);
-    uint64_t budget=startup?UINT64_C(10000000000):RF_GQ_WAIT_NS;
-    uint64_t began=gpuNow(),deadline=gpuQueueAbsolute(began+budget);
+    bool startup=p->cold_deadline!=0;
+    uint64_t began=gpuNow(),end=startup?p->cold_deadline:gpuQueueOrdinaryDeadline(began);
+    uint64_t budget=end>began?end-began:0,deadline=gpuQueueAbsolute(end);
     IOLockLock(p->lock);
     while(!p->done) {
         int waited=IOLockSleepDeadline(p->lock,&p->done,deadline,THREAD_ABORTSAFE);
@@ -145,7 +154,7 @@ int RedfinGPUPresent(SweetSurface *panel,const redfin_display_geometry *geometry
     job->kernel_execute=gd_queued_execute;job->kernel_complete=gd_queued_complete;job->kernel_argument=p;
     job->scope_pages=p->pages;job->scope_count=p->page_count;
     job->charge=sizeof(*job)+sizeof(*p)+(uint64_t)p->page_capacity*sizeof(*p->pages);
-    IOReturn admitted=gpuQueueSubmitKernel(job);
+    IOReturn admitted=gpuQueueSubmitKernel(job,&p->cold_deadline);
     if(admitted!=kIOReturnSuccess) {
         IODelete(job,gpu_queued_job,1);
         __atomic_store_n(&gd.uncertain,true,__ATOMIC_RELEASE);
