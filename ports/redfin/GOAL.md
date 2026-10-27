@@ -26,50 +26,46 @@ Completed bring-up is a preserved baseline; only remaining work is listed.
 
 ## Current handoff
 
-Complete visible-content workload block passes56combined executable contracts
-and actual20H392 UI3701524c../unchanged refresh6e9f8c83.. ABI/build. Existing
-native internal windows/context identity, attached visible content and real
-presentation-motion/model proof replace any-sublayer root-window admission.
-New label system-content-subpixel is separate from the V99 workload. Raw output
-counts remain even when workload proof refuses. No new graphics/kernel build.
-Fresh V110 READ at1787750 is terminal, unmounted recovery idle, no apply/boot;
-V107 image726d988f../nonce5e0963b86b5c97c8 passes full preflight. ONE combined
-hardware run follows complete reversible stage/apply/readback/readonly fsck.
-No new hardware/FPS result yet. All broader objectives below remain active.
-
-V106 after4a34272 is TERMINAL exit0, authenticated231f94c6e5359d24,
-one backboardd62/no panic or GPU fault, clean unmounted HFSX1787750 and
-verified Fastboot. No live device operation. V109 APPLIED/STALE, never reuse;
-next fresh V110 must bind1787750; next image/cycle V107. CI28 is rejected.
+V107 afterbefea2e is TERMINAL exit0, authenticated5e0963b86b5c97c8,
+one backboardd62/no panic or GPU fault, clean unmounted HFSX1797295 and
+verified Fastboot. No live device/CI operation. V110 APPLIED/STALE, never reuse;
+next fresh V111 must bind1797295; next image/cycle V108. CI28 is rejected.
 Accepted CI29 Actions40448042380/run29/source1e4b4dc/native8c422d8,
 kernel11d60b4d.. retains all288canonical overlays and actual cold ABI.
 
-Native248e974a../Metal5141bd25../cache496301fc.., UI5a501aac../refresh6e9f8c83..
-are installed and source-exact. Both full independent GMEM/sysmem GLES modes,
-whole app Metal and four physical references PASS. Actual original queued
-wait2702438us/coldABI1/errno0 passes; ordinary native2s limits and real short/
-nonblocking callers remain unchanged. The corrected full gate now admits real
-BKS brightness/physical DBV514->157->768->514, off/output pause, wake/resume
-and original level restoration, all PASS. Physical button presses, ALS, reboot
-brightness persistence and full suspend are still unproved. Phone/Photos auto
-opens and frame captures stay OFF; user confirms those apps work.
+Native248e974a../Metal5141bd25../cache496301fc.., UI3701524c../refresh6e9f8c83..
+are installed/source-exact. Both full independent GMEM/sysmem GLES modes,
+whole app Metal and four private physical references PASS. Native manual BKS
+brightness/DSI low/high, off/output pause, wake/output resume and original level
+restoration PASS in V106 and V107. Physical key presses, ALS, reboot brightness
+persistence and full suspend remain open. Phone/Photos auto opens/frame captures
+stay OFF; user confirms those apps work. The Metal cold/default wait fix remains
+proved; no retry or relaxed ordinary2s/real caller deadlines.
 
-The subsequent finite window animation gives only2GPU frames/10.011176s=
-0.199777FPS with90Hz callbacks and zero contacts. This is real output, not proof
-of a continuously submitted visible workload or of a driver throughput limit.
-Next complete block traces scene/layer/display-idle admission and makes actual
-workload/output agree, preserving all native graphics/control checks and
-failure/source ownership. Retain kernel/Metal/GLES/compiler/cache where
-unchanged. V99/CI24/sourcee90b110 finite611frames/10.011138s=61.032FPS remains
-preserved; universal smooth60/90FPS is unfinished.
+New native visible-content/context workload:11native windows; existing key
+SBCoverSheetWindow content has a matching live context,40client presentation
+samples/zero missing,1.777point motion, original model preserved. Yet physical
+output only2GPU frames/10.011198s=0.199776FPS with90Hz callbacks. This does not
+identify a GPU bottleneck or prove continuous render-server visibility. Complete
+ordinary compositor/direct-output aggregate proof still refuses for sparse
+frames. Next complete block traces native CA/render-server context/animation/
+visibility/cadence admission and actual GUI submissions/retirement, including
+idle/control transitions. Do not keep changing hosts without new evidence or
+weaken full native gates. Reuse proved graphics/compiler/cache/kernel where
+unchanged. New content workload differs from V99; its finite611frames/
+10.011138s=61.032FPS baseline remains. Universal smooth60/90FPS unfinished.
 
 Wi-Fi remains open:3known records,2visible names, no native association,
-2NoAssociationWithNewMac flags and unsupported native property383. V99/V104/
-V105 all observe unusable firmware MAC and the explicit per-boot random station
-fallback. Stable station identity is missing; causal autojoin share and actual
-Keychain password availability are unproved. Never change private wrapping
-material or print credentials/addresses. ADSP sensor_process chre_utils fatal
-persists. Every broader objective above remains active; exact build/args/results
+2NoAssociationWithNewMac flags and unsupported generic property383. Firmware
+MAC unusable; per-boot random station fallback observed in V99/V104/V105.
+Stable station identity and causal autojoin/real Keychain credentials remain
+unproved. Readonly actual20H392 IO80211 SetProperty transport now audited:
+UUIDf6acf84e../prefix5b95ad94.., fixed4104bytes/version1/length including NUL/
+4096XML storage of one property entry, CFString key length<80. Resolved actual
+CF serialization calls, no property values/identities/credentials read. Implement
+full property semantics/stable identity/autojoin/startup together; no blind ACKs.
+Never change private wrapping material. ADSP sensor_process chre_utils fatal
+persists. Every wider objective above remains active; exact builds/args/results
 and observations are in NOTES.md.
 
 ## Constraints and private state

@@ -1,5 +1,61 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V107 terminal: attached client content moves; physical GUI remains2frames — 2026-10-27
+
+Complete visible-content blockbefea2e, retained accepted CI29
+Actions40448042380/run29/source1e4b4dc938403a09c1a93356d8b7d151001af404
+(native8c422d8), kernel11d60b4d../native248e974a../Metal5141bd25../cache496301fc...,
+UI3701524c../unchanged refresh6e9f8c83... Fresh V110 stage/apply ONCE passes
+complete backups/readback, signatures and native readonly fsck. V110 is now
+APPLIED/STALE, never reuse. V107 TERMINAL exit0, authenticated5e0963b86b5c97c8,
+one backboardd62/no panic or GPU hardware fault, clean consistent unmounted
+HFSX1797295/verified Fastboot. No live device/CI operation. Next fresh V111 must
+bind1797295; next image/cycle V108. Existing untracked FastRPC files untouched.
+
+Both COMPLETE independent GMEM/sysmem GLES contracts, whole app Metal and all
+four private output/physical-panel reference cases PASS. No slow/failed Metal
+wait observation was emitted in this boot; absence is not a negative ABI proof.
+The same native BKS low/high DBV, display off/output pause, wake/output resume,
+original level restoration and key-path readiness PASS again. Physical presses,
+ALS, reboot brightness persistence and full suspend remain unproved. Phone/
+Photos automatic launches and frame capture stay OFF.
+
+Actual readonly UIKit/Quartz ABI gate succeeds and enumerates11existing native
+windows. An existing CALayer under the key SBCoverSheetWindow has a matching
+live native context; the new workload animates that content, preserving its
+model and other animations.40native client presentation samples/zero missing
+span1.777points during the10.011198s physical interval. All902callbacks remain
+90Hz. Yet physical output STILL completes only2GPU frames=0.199776FPS.
+This is stronger client-side admission/motion evidence, not a proved GPU queue
+or execution bottleneck, nor proof of continuous render-server visibility.
+Ordinary compositor/direct-output aggregate gates still refuse their complete
+proof because the recorded regular frame count is too low; the passing private
+GPU/reference contracts must not be substituted for that missing ordinary proof.
+The V99 finite611frames/10.011138s=61.032FPS baseline stays preserved. The new
+system-content-subpixel workload is distinct; no FPS gain or universal smoothness.
+
+Next complete graphics block must trace native CA/render-server context and
+animation/cadence/visibility admission, alongside actual GUI submissions and
+physical retirement, including display-idle/control transitions. Do not keep
+changing host selection without new evidence, weaken the full gates or retry a
+retired/unknown GPU context. Reuse proved kernel/Metal/GLES/compiler/cache unless
+the observed source path requires a change. All broader GOAL requirements remain
+active; no human action is currently required to continue implementation.
+
+Additional READ ONLY actual20H392 IO80211 audit resolves the SetProperty branch
+islands to CFStringGetLength, CFDictionaryCreate, CFPropertyListCreateData,
+CFDataGetLength and CFDataGetBytes. UUIDf6acf84e.., reviewed896byte prefix
+SHA5b95ad94... Request383/value0 carries a fixed4104byte buffer: uint32version1,
+uint32length (includes NUL), then4096byte storage for one-entry XML property
+list (CF format100). Property name CFString length is<80. No property payload,
+network identifiers or credentials read/logged, and no device/prefs change.
+This is a concrete transport layout for the next full stable-MAC/property/
+autojoin/Keychain/startup block; unsupported properties must not be blindly
+ACKed. Existing zero firmware MAC/per-boot random fallback and saved
+NoAssociationWithNewMac findings remain; causal autojoin/credential proof open.
+Exact actual V107 arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x5e0963b86b5c97c8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete visible-content workload and native context/motion gate ready — 2026-10-27
 
 After55840a7/V106, the old workload admitted a key window with any sublayer,

@@ -1,5 +1,24 @@
 # HackiOS upstream review — 2026-10-22
 
+## V107 client content motion confirmed; ordinary physical composition still sparse — 2026-10-27
+
+Preferred kernel88513176../buttonsc84b4634../active userland906425b7.. unchanged.
+Ownbefea2e/accepted CI29/native248e974a../Metal5141bd25../UI3701524c.. passes
+both full GLES modes, whole native Metal, private physical references and actual
+BKS brightness/off/wake/restoration.11native windows; an existing attached
+content layer produces40client presentation samples/1.777point movement, model
+preserved. Physical output still2frames/10.011198s=0.199776FPS at90Hz callbacks.
+No server-visibility or driver-bottleneck conclusion follows. Next trace native
+CA/render-server admission/visibility/cadence and actual submissions, keeping
+full gates/failed-context ownership and reused graphics artifacts. One server/
+no panic/clean1797295/Fastboot; V110 STALE, next fresh V111/imageV108.
+
+Actual20H392 IO80211 UUIDf6acf84e.. SetProperty prefix5b95ad94.. is additionally
+reviewed read-only: resolved CF dictionary/XML serialization calls, request383,
+fixed4104bytes/version1/length including NUL/4096XML storage, one property entry,
+CFString property name<80. Values/credentials/identities were not read. This
+ABI review does not implement property semantics or prove Wi-Fi autojoin.
+
 ## Existing native content/context and presentation-motion workload — 2026-10-27
 
 Preferred kernel88513176../buttonsc84b4634../active userland906425b7.. unchanged.
