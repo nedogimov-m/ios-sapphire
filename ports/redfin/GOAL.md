@@ -26,36 +26,31 @@ Completed bring-up is a preserved baseline; only remaining work is listed.
 
 ## Current handoff
 
-V99 / Actions `40422287650` / run24 / source `e90b110` is terminal PASS:
-full independent GMEM/sysmem/GLES/app Metal, all four private output cases,
-four exact physical-panel references and 1080 actual GPU presentations.
-Its finite system-window animation measures 611 GPU frames / 10.011138 s =
-61.032 FPS (58.005–62.012 per-second samples), at 90 Hz callbacks with one
-stable backboardd. This proves that workload, not universal smooth 60/90 FPS.
-The cold output readiness fix is the preserved working baseline.
+Preserved performance baseline V99 / Actions40422287650/run24/sourcee90b110:
+full native GPU/app Metal/private output/four physical references PASS,
+611GPU frames/10.011138s =61.032FPS at90Hz callbacks, one stable backboardd.
+This proves that finite workload, not universal smooth60/90FPS.
 
-The complete connected physical-controls/brightness implementation is now
-ready for CI and one integrated device run. It uses Redfin PON/GPIO5 inputs
-through the existing PMIC worker and native HID, and source-bound DSI FIFO
-brightness/visibility through AppleARMBacklight. Debounce/consumer replacement,
-coalesced brightness, deferred off-screen updates and uncertain FIFO failures
-are covered. 80 combined tests and all three exact final native translation
-units pass; the new UI bundle passes actual 20H392 imports/signatures. This
-is host/build evidence, not physical button/brightness/suspend success.
+The complete buttons/native panel-controls block is committed8740ac2/cc100af
+with typed standalone shim28dedaa. CI26 Actions40429125860/kernel22c5f154..
+passes complete source/native ABI validation. V100 is terminal: no panic,
+one server, clean1730084/Fastboot; full GPU/native Metal and all4panel checks
+pass. PON/GPIO5 actual types/status and3key inputs are ready/armed,15000+reads
+with zero errors, no physical presses. Initial DCS DBV409/off/on+restore
+commands complete. Public UIKit brightness still fails, and ordinary output
+regresses to0.199780FPS. Do not call controls or sustained GPU performance done.
 
-Reuse native `035131` and existing Mesa/Metal/compiler artifacts. Last clean
-root generation is `1717443`; applied V102 is stale and must never be reused.
-Next fresh root update is V103; next kernel image is V100 / corrected CI26. CI25 source8740ac2 is
-superseded (short visibility datatype byte corrected before any device boot).
-Corrected `cc100af` is verified in Actions `40429125860` / run26,
-kernel22c5f154... The typed standalone controls shim and complete V100
-preflight pass with92combined tests; one hardware integration is next.
-Run full native GPU checks, opt-in UIKit brightness/off/wake/restoration,
-input-path readiness and ordinary animation together. Phone/Photos automatic
-launches remain off. Physical button presses, visible inset lock/rotation
-persistence, full suspend and real-ALS auto brightness remain unverified/open.
-Exact builds, boot arguments and evidence are in [NOTES.md](../../NOTES.md).
-All wider objective items above remain active.
+Actual20H392 CoreBrightness requires IODisplayParameters/brightness/min/max/
+value before creating its brightness module. The complete missing metadata/
+raw+nits request/actual-value publication and separate native-backlight fix
+now passes94combined tests plus all3exact native TUs; corrected CI27 and
+ONE V101 integrated test are next. Reuse UI controls-v1/native035131 and all
+existing Mesa/Metal/compiler artifacts; no repeated userland build is needed.
+V103 is APPLIED/STale/never reuse. Next fresh V104 must bind actual1730084.
+Phone/Photos auto opens remain OFF. Physical key actions, actual brightness,
+lock/wake input, inset persistence, real-ALS auto brightness and full suspend
+remain unverified/open. Exact builds/args/results are in NOTES.md. All wider
+objective items above remain active.
 
 ## Constraints and private state
 

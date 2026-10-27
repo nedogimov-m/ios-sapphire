@@ -17,6 +17,12 @@ interactive use remains unfinished. The cold native output checks now have a
 separate finite startup wait, preserving the ordinary frame deadline. Phone/
 Photos automatic launches remain off. Current next work is physical buttons,
 native display brightness/wake and the other remaining items in GOAL.md.
+The experimental V100 controls run proves three native key inputs with over
+15000reads/zero errors and completed DCS level/off/on commands, but public
+brightness fails and ordinary output regresses to0.2FPS. Its full native GPU
+contracts still pass. The missing actual20H392 CoreBrightness dictionary is
+now implemented and host-checked; corrected CI27/V101 hardware proof remains.
+V99 stays the preserved measured performance baseline.
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including
 native Metal/IOSurface pixels and actual kernel publication without a GPU wait

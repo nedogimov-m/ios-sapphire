@@ -217,7 +217,8 @@ class DisplayControlWorkerTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp=tempfile.TemporaryDirectory();cls.addClassCleanup(cls.tmp.cleanup);root=Path(cls.tmp.name)
         actual=(HERE/'display-controls.inc').read_text()
-        state=actual[actual.index('struct redfin_display_controls {'):actual.index('static void redfin_control_queue(')]
+        start=actual.index('struct redfin_display_controls {')
+        state=actual[start:actual.index('};',start)+2]
         worker='\n'.join(function(actual,name) for name in (
             'static void redfin_control_queue(', 'IOReturn AppleCLCD::redfinSetBrightness(',
             'IOReturn AppleCLCD::redfinSetDisplayPower(', 'void AppleCLCD::redfinControlsWork('))
@@ -245,6 +246,7 @@ class AppleCLCD {public:redfin_display_controls *fRedfinControls;
  IOReturn redfinSetBrightness(uint64_t);IOReturn redfinSetDisplayPower(bool);
  static void redfinControlsWork(thread_call_param_t,thread_call_param_t);};
 static AppleCLCD fb;
+static bool redfin_backlight_parameters(AppleARMBacklight *backlight,uint32_t level){(void)backlight;(void)level;return true;}
 static bool rf_panel_control(const redfin_panel_io *io,bool brightness,uint32_t value,rf_panel_control_result *r){
  (void)io;assert(packets<64);kind[packets]=brightness;values[packets++]=value;
  if(issue==1){r->submitted=true;r->uncertain=true;return false;}

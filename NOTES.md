@@ -1,5 +1,45 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V100 controls partial proof/regression; complete native CB contract fixed — 2026-10-27
+
+Source28dedaa/CI26 Actions40429125860/sourcecc100af, kernel22c5f154..,
+UI da1f3982../refresh4a02d6e1..; V103 applies ONCE:34changed/2new/zero freed
+blocks,13backed-up ranges/full readback/signatures/readonly fsck PASS. V103
+is now STALE/never reuse. V100 TERMINAL exit0; authenticated44fbca45099fc66c,
+one backboardd62, no panic, clean consistent unmounted HFSX1730084 and verified
+Fastboot. Exact imagefc3cf312../boot args recorded in V100 preflight entry below.
+No automatic Phone/Photos opens. Both full native GMEM/sysmem/GLES/app Metal
+contracts and all four private output cases PASS; four physical-panel references
+match64samples each exactly. This does not establish good ordinary GUI output.
+
+New PON/GPIO5 hardware types/mode/pull are observed and accepted: usable7,
+armed7, consumer epoch2, more15000actual samples/errors0, no physical presses.
+Initial brightness DCS0x51 DBV409, native display-off and on+level restoration
+transactions complete successfully with uncertainty0/errors0. Public UIKit
+low/high never reaches an applied change: observer result6/low0/high0, bounded
+restoration succeeds. No physical button-action or full brightness success.
+Ordinary animation regresses to2GPU presentations/10.011028s=0.199780FPS,
+while callbacks remain90Hz; do not replace V99's61.032FPS baseline with this
+as a successful controls milestone. Direct GPU/native pixel correctness stays.
+
+Actual20H392 CoreBrightness UUID6c7092504a87363088ef325ae48779cb disassembly
+proves DisplayCreateWithID requires IODisplayParameters -> brightness with
+numeric min/max/value; this was absent from the published service. That
+prevents native brightness-module creation; its role in the render regression
+still needs corrected hardware evidence. Native driver nits are16.16. DisplayOpen
+also explicitly supports uint32 CFData ignore-IOMFB, independently of direct
+backlight nits; no guessed UIKit hook or Apple binary/cache edit is introduced.
+
+Complete fix publishes the required real DBV dictionary before registration,
+keeps its value synchronized only after actual completion, accepts stock raw
+brightness and nested IODisplayParameters requests as well as16.16nits, and
+sets the reviewed separate native-backlight transport/normal500nit bound.
+No fabricated electrical calibration/ALS/HBM. Actual metadata/request helper,
+native method-body ABI audit and94combined tests PASS; all3exact native TUs
+PASS with CI flags. Existing UI/Mesa/Metal/compiler/cache artifacts unchanged.
+Next corrected CI27 + ONE complete V101 GPU/CB/controls run. Fresh V104 must
+bind1730084; V103 must never be reused. All wider GOAL items remain active.
+
 ## REDFIN CI26 verified; exact typed control shim and V100 preflight PASS — 2026-10-27
 
 Actions40429125860/run26/sourcecc100af TERMINAL SUCCESS; complete patch map,

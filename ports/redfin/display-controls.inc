@@ -14,6 +14,29 @@ struct redfin_display_controls {
     unsigned commands,errors;
 };
 
+/* Actual20H392 DisplayCreateWithID requires this dictionary before it will
+ * create a brightness module. Standalone max-nits is not a replacement. */
+static bool redfin_backlight_parameters(AppleARMBacklight *backlight,uint32_t level)
+{
+    if(!backlight||level<RF_PANEL_DBV_MIN||level>RF_PANEL_DBV_MAX)return false;
+    OSDictionary *parameters=OSDictionary::withCapacity(1),*brightness=OSDictionary::withCapacity(3);
+    OSNumber *minimum=OSNumber::withNumber(RF_PANEL_DBV_MIN,32),
+        *maximum=OSNumber::withNumber(RF_PANEL_DBV_MAX,32),*value=OSNumber::withNumber(level,32);
+    bool ok=parameters&&brightness&&minimum&&maximum&&value;
+    if(ok)ok=brightness->setObject("min",minimum)&&brightness->setObject("max",maximum)&&
+        brightness->setObject("value",value)&&parameters->setObject("brightness",brightness)&&
+        backlight->setProperty("IODisplayParameters",parameters);
+    OSSafeReleaseNULL(minimum);OSSafeReleaseNULL(maximum);OSSafeReleaseNULL(value);
+    OSSafeReleaseNULL(brightness);OSSafeReleaseNULL(parameters);return ok;
+}
+
+static bool redfin_legacy_brightness_nits(uint64_t level,uint64_t *nits)
+{
+    if(!nits||level>RF_PANEL_DBV_MAX)return false;
+    *nits=(level*((uint64_t)RF_PANEL_NORMAL_NITS<<16)+RF_PANEL_DBV_MAX/2)/RF_PANEL_DBV_MAX;
+    return true;
+}
+
 static void redfin_control_queue(redfin_display_controls *control)
 {
     IOLockLock(control->state_lock);
@@ -54,6 +77,8 @@ bool AppleCLCD::startRedfinControls(IOService *provider)
         ready=control->state_lock&&control->io_lock&&control->work;
     }
     AppleARMBacklight *backlight=ready?OSTypeAlloc(AppleARMBacklight):NULL;
+    uint32_t initial_level=0;
+    (void)rf_panel_nits_to_dbv(UINT64_C(200)<<16,&initial_level);
     if(backlight) {
         ready=backlight->init();
         if(ready) {
@@ -63,7 +88,16 @@ bool AppleCLCD::startRedfinControls(IOService *provider)
             backlight->setProperty("max-nits",(unsigned long long)RF_PANEL_NORMAL_NITS,32);
             backlight->setProperty("min-nits",2ULL,32);
             backlight->setProperty("RedfinDisplayControlABI",1ULL,32);
-            ready=backlight->attach(this);
+            backlight->setProperty("RedfinCoreBrightnessABI",1ULL,32);
+            backlight->setProperty("new-backlight-architecture",true);
+            /* Native20H392 reads this exact uint32 CFData. It leaves normal
+             * nits on the real backlight driver, without a second incomplete
+             * Apple IOMFB brightness/colour-control transport. */
+            uint32_t ignore_iomfb=1;
+            backlight->setProperty("ignore-IOMFB",&ignore_iomfb,sizeof(ignore_iomfb));
+            backlight->setProperty("limit_max_physical_brightness",
+                (unsigned long long)RF_PANEL_NORMAL_NITS<<16,32);
+            ready=redfin_backlight_parameters(backlight,initial_level)&&backlight->attach(this);
         }
     } else ready=false;
     if(!ready) {
@@ -77,15 +111,16 @@ bool AppleCLCD::startRedfinControls(IOService *provider)
     }
     control->backlight=backlight;
     control->desired_on=control->applied_on=true;control->nits=UINT64_C(200)<<16;
-    (void)rf_panel_nits_to_dbv(control->nits,&control->desired_level);control->requested_seq=1;
+    control->desired_level=initial_level;control->requested_seq=1;
     fRedfinControls=control;
     /* This built-in platform service and its existing presenter threads live
      * until reset. Keep the callback's exact owner alive for that lifetime. */
     retain();
     setProperty("RedfinDisplayControlABI",1ULL,32);
+    setProperty("RedfinCoreBrightnessABI",1ULL,32);
     setProperty("IOMFBBrightnessLevel",control->nits,32);
     backlight->registerService();redfin_control_queue(control);
-    IOLog("REDFIN DISPLAY CONTROL: AppleARMBacklight registered normal-max-nits=500 DBV=4..1023 DSI2.4 FIFO=1 DMA-memory=0 asynchronous=1\n");
+    IOLog("REDFIN DISPLAY CONTROL: AppleARMBacklight registered IODisplayParameters=1 native-nits=1 ignore-IOMFB=1 normal-max-nits=500 DBV=4..1023 DSI2.4 FIFO=1 DMA-memory=0 asynchronous=1\n");
     return true;
 }
 
@@ -109,12 +144,28 @@ IOReturn AppleCLCD::redfinBacklightProperties(OSObject *properties)
 {
     OSDictionary *values=OSDynamicCast(OSDictionary,properties);
     if(!values)return kIOReturnBadArgument;
-    OSNumber *number=OSDynamicCast(OSNumber,values->getObject("brightness-nits"));
-    if(!number)return kIOReturnSuccess; /* unchanged native ancillary-key policy */
-    uint64_t nits=number->unsigned64BitValue();
-    if(nits<0x10000)nits<<=16; /* native plain-nit and16.16 callers */
+    OSObject *request=values->getObject("brightness-nits");
+    OSNumber *number=OSDynamicCast(OSNumber,request);
+    uint64_t nits=0;
+    if(request) {
+        if(!number)return kIOReturnBadArgument;
+        nits=number->unsigned64BitValue();
+        if(nits<0x10000)nits<<=16; /* native plain-nit and16.16 callers */
+    } else {
+        /* Native IODisplaySetParameters uses a raw brightness value. Its
+         * units are the published DBV range, never guessed normalized nits. */
+        OSDictionary *parameters=OSDynamicCast(OSDictionary,values->getObject("IODisplayParameters"));
+        request=(parameters?parameters:values)->getObject("brightness");
+        OSDictionary *entry=OSDynamicCast(OSDictionary,request);
+        if(entry)request=entry->getObject("value");
+        if(!request)return kIOReturnSuccess;
+        OSNumber *raw=OSDynamicCast(OSNumber,request);
+        if(!raw||!redfin_legacy_brightness_nits(raw->unsigned64BitValue(),&nits))return kIOReturnBadArgument;
+    }
+    static unsigned reports;
+    if(reports++<12)IOLog("REDFIN BACKLIGHT REQUEST: native-nits=%u requested-nits16=%llu\n",number!=NULL,nits);
     IOReturn result=redfinSetBrightness(nits);
-    if(result==kIOReturnSuccess)fRedfinControls->backlight->setProperty("brightness-nits",number);
+    if(result==kIOReturnSuccess)fRedfinControls->backlight->setProperty("brightness-nits",nits,64);
     return result;
 }
 
@@ -166,6 +217,8 @@ void AppleCLCD::redfinControlsWork(thread_call_param_t parameter,thread_call_par
     fb->setProperty("RedfinDisplayOn",was_on);
     fb->setProperty("RedfinControlUncertain",uncertain);
     if(level_known)fb->setProperty("RedfinAppliedDBV",(unsigned long long)was_level,32);
+    if(ok&&level_known&&control->backlight)
+        (void)redfin_backlight_parameters(control->backlight,was_level);
     fb->setProperty("RedfinAppliedNits",applied_nits,64);
     /* Publish the completed sequence last, after its actual level/state. */
     fb->setProperty("RedfinControlSequence",processed,64);

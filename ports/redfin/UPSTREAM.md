@@ -1,5 +1,28 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native20H392 CoreBrightness backlight dictionary and transport — 2026-10-27
+
+Preferred sources remain kernel88513176../reviewedc84b4634 and active userland
+906425b7... Their retained MiniFramebuffer has no Redfin-specific complete
+AppleARMBacklight integration. Adapt the actual installed CoreBrightness UUID
+6c7092504a87363088ef325ae48779cb, not an iOS16.5 selector/metadata assumption.
+
+Reviewed full DisplayCreateWithID/DisplayOpen/SetBLDriverNitsValue: the first
+requires IODisplayParameters/brightness/min/max/value or destroys the display
+object; separate max-nits/min-nits are insufficient. Nits requests remain16.16.
+ignore-IOMFB is uint32 CFData, gates the redundant IOMFB brightness channel,
+and leaves native backlight writes intact. Publish the real DBV range/current
+value, handle native legacy/nits requests and retain the physical normal limit.
+No Apple code patch, invented electrical calibration, HDR/HBM or ALS claim.
+94combined actual-helper/native-ABI/other contracts and3native TUs PASS; the
+public brightness and performance outcome still requires corrected hardware.
+
+V100 proves all3source-verified key inputs/readiness with15000+reads/errors0,
+and completed native DCS brightness/off/on transactions. Public UIKit did not
+reach the driver; actual GUI animation fell to0.199780FPS. Full independent
+native GPU/Metal/private pixels/four panel references still pass. Preserve
+V99's measured61.032FPS baseline and treat the controls integration as partial.
+
 ## Exact Redfin controls ADT is now admitted by its standalone shim — 2026-10-27
 
 Own Redfin adaptation; preferred pins unchanged. Native CI26/sourcecc100af
