@@ -31,46 +31,40 @@ full native GMEM/sysmem/GLES/app Metal/private output/four panel references
 PASS,611GPU frames/10.011138s=61.032FPS at90Hz callbacks, one server.
 This proves that finite workload, not universal smooth60/90FPS.
 
-Last actual V104/9cf6dca/CI27 Actions40432973023/run27/source883286e is
-TERMINAL exit0, one backboardd/no panic, clean HFSX1768532/verified Fastboot.
-Fresh V107 applied once with full preimages/readback/signatures/readonly fsck;
-V107 is now APPLIED/STALE, never reuse. Next fresh root V108 must bind1768532;
-next image/cycle V105. No live device operation.
+Last actual V105/CI29 Actions40448042380/run29/source1e4b4dc/native8c422d8
+is TERMINAL exit0, one backboardd/no panic, clean HFSX1778229/verified Fastboot.
+Kernel11d60b4d.. has actual288entry old+new patch/cold ABI proof. V108 applied
+ONCE with both preimage/readback ranges/readonly fsck; APPLIED/STALE, never
+reuse. Next fresh V109 must bind1778229; next image/cycle V106. No live device
+operation. CI28 remains REJECTED/forbidden, omitted native patch.
 
-Complete manual native brightness/workload/restoration block passes94combined
-host contracts and signed actual20H392 UI5a501aac../refresh6e9f8c83.. ABI/build.
-Actual native integrated context is observed and failed original setup admits
-the manual driver; rawDBV514/native IOKit0/completed physical409->514 prove the
-first real write. This does not complete physical UI low/high/persistence/ALS.
-GMEM full native GLES/direct/budget, whole app Metal and four private physical
-references PASS. Sysmem's simple shader/IOSurface/publication pass, but its
-full direct first-reader exits27 (unchanged seed or failed lock not yet
-separated). Approximately2s sampled surface wait is correlated only.
-Correctness gate refuses controls/FPS before they run; no new performance
-result. Key paths ready/armed7,15004samples/errors0, no physical presses.
-Complete native first-reader/client-fence/output correction is implemented:
-one actual FIFO cold sequence and immutable10s deadline, then ordinary2s work,
-within original explicit caller bounds.124combined contracts and final11affected
-checks/native GPU TU PASS. CI28 Actions40446572438 TERMINAL success but REJECTED: actual builder's duplicate
-inventory omitted the new native overlay;287entries and no cold ABI markers.
-It was never accepted/staged/booted. Duplicate inventory is now removed; the
-actual CI staging loop consumes the canonical preparer list, with executable
-order/missing-overlay checks PASS. Native8c422d8 block stays unchanged. Corrected
-CI29 Actions40448042380/run29/source1e4b4dc is TERMINAL SUCCESS and accepted:
-complete288entry map=CI27's unchanged287+new overlay, all cold/retained ABI,
-actual kernel11d60b4d.. and fresh V105 image79fb2ec9../nonce2b3f4ef972a3cb39
-full preflight PASS. Watcher57932 terminal exit0, never boots. Fresh V108 read
-1768532 is preserved for stage/apply ONCE/ONE combined V105. Userspace GLES/
-Metal/UI/compiler retained; CI28 forbidden. Corrected hardware result pending.
-New hardware result remains pending. V99 is the preserved measured baseline.
+Both complete independent GMEM/sysmem GLES/direct/publication/budget contracts
+PASS, as do four private output cases/four physical panel references. Actual
+cold sequence355/shared10s deadline completes first output in4.951143s,
+uncertainty0. Whole app Metal exits1: cache-surviving-pipeline completion fails,
+context retires and later same-context cases refuse. Basic and fresh-context
+Metal cases pass separately; this does not complete the full native contract.
+The gate refuses controls/FPS before they start, no new performance result.
+Initial real manual request/DBV409->514 succeeds; full physical UI brightness/
+low/high/off/wake/persistence/ALS remain unproved. Key paths ready/armed7,
+15000+samples/errors0, no physical presses. Phone/Photos auto opens remain OFF.
 
-Kernel4f99141c../Mesa1a4ad42c../Metal17d0f01f../native035131/cache496301fc.. stay
-retained unless actual evidence requires changes. Wi-Fi readiness remains
-36.665s from worker with no real autojoin/IP proof; actual ADSP sensor_process
-chre_utils fatal persists. Phone/Photos automatic opens OFF. Physical UI
-brightness/key actions, lock/wake input, clock inset persistence, real ALS/full
-suspend and every wider objective remain open. Exact builds/args/results and
-observations are in NOTES.md; keep the full goal active.
+Next complete block coordinates AIR/Metal's own2s internal completion timeout
+with CI29's bounded cold predecessor and ordinary2s native work, preserving
+real short/nonblocking caller deadlines and failure/source ownership. V105's
+generic completion error does not prove exact errno/timing. No new kernel
+build indicated. Retain exact compiler/cache/GLES/UI where unchanged; verify
+full native app Metal before controls/FPS, then ONE V106 hardware run after
+fresh V109/preimages/readback/readonly fsck. V99 finite61.032FPS remains the
+preserved performance baseline; no universal smoothness or wider completion.
+
+Retained UI5a501aac../refresh6e9f8c83../native035131/Mesa1a4ad42c../
+Metal17d0f01f../cache496301fc.. are current installed artifacts. Wi-Fi startup/
+real credentials/autojoin still open:3known records,2visible names, no native
+association request,2NoAssociationWithNewMac flags; generic property383 is
+unsupported. Causality and actual password availability unproved. ADSP
+sensor_process chre_utils fatal persists. Every broader objective above remains
+active; exact builds/boot args/results and observations are in NOTES.md.
 
 ## Constraints and private state
 

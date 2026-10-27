@@ -1,5 +1,27 @@
 # HackiOS upstream review — 2026-10-22
 
+## V105 full GLES modes pass; native Metal default wait still omits cold predecessor — 2026-10-27
+
+Preferred reviewed kernel88513176../buttonc84b4634../active userland906425b7..
+pins unchanged. Own accepted CI29/1e4b4dc/native8c422d8 now proves the actual
+cold sequence355/shared deadline,4.951143s successful first output, both full
+independent GMEM/sysmem GLES contracts and four physical references. Whole
+Metal exits1: cache-surviving-pipeline completion fails and its context retires;
+subsequent same-context cases correctly refuse. Some basic and fresh-context
+Metal cases pass, but do not promote them to the whole contract. Native controls/
+FPS correctly never start, initial physical DBV409->514 repeats. One server/
+no panic/clean1778229/Fastboot; V108 STALE, next fresh V109/imageV106.
+
+Actual preferred-derived AIR/Metal still defines its own2s default for both
+sync drains and queued completion, which Mesa passes as an explicit native
+caller deadline. CI29 preserves such real deadlines, so that internal bound
+is incompatible with the observed4.95s cold predecessor. Generic V105 error
+alone does not prove the exact errno/elapsed branch. Next complete adaptation
+coordinates the native default wait, preserving ordinary hardware limits,
+short/nonblocking caller bounds and failed-context ownership. No new kernel
+build indicated; retain compiler/cache/GLES artifacts where unchanged. The
+full goal and V99 performance baseline remain active.
+
 ## CI28 rejected; actual build shares the canonical Redfin overlay inventory — 2026-10-27
 
 Preferred source pins unchanged. CI28 succeeded but omitted the own native

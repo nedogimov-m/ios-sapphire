@@ -1,5 +1,59 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V105 terminal: both complete GLES modes pass; Metal completion refuses controls/FPS — 2026-10-27
+
+Accepted CI29 Actions40448042380/run29/source1e4b4dc (native block8c422d8),
+kernel11d60b4d../retained UI5a501aac../refresh6e9f8c83../Mesa1a4ad42c../
+Metal17d0f01f../cache496301fc... Fresh V108 stage/apply ONCE passes2changed/
+zero new/zero freed blocks, both complete preimage backups/readback, signatures
+and native readonly fsck. V108 is now APPLIED/STALE, never reuse. V105 TERMINAL
+exit0, authenticated2b3f4ef972a3cb39, one backboardd62/no panic, clean consistent
+unmounted HFSX1778229 and verified Fastboot. No live device operation; next
+fresh root V109 must bind1778229; next image/cycle V106.
+
+Actual new cold-output admission is sequence355 with a shared10s deadline;
+its first output completes in4.951143s with uncertainty0. Full independent
+GMEM AND sysmem shader/IOSurface/publication/direct/budget contracts PASS:
+result0/hardware1/draws4. All four private full-output cases and four exact
+physical-panel references PASS. No slow/failed surface-wait record exists in
+this run. This is a successful complete GLES result with the new kernel, not
+a matched timing proof of which earlier27branch failed. Actual ordinary output
+still has4frames only; no sustained throughput success is inferred.
+
+The same-boot whole Metal checker exits1. Its original long-lived context first
+fails at cache-hit-eviction-surviving-pipeline: native completion fails and the
+context is correctly retired. Its subsequent ordering/binding/scheduling/UBO/
+surface-cache/long-physical tests refuse; they are not successful contracts.
+Basic compute/IOSurface/graphics/half/blit/buffer/constants pass; fresh-context
+resource/persistence and queued-resource cases also pass. Whole app Metal is
+NOT passed by this run. No GPU hardware fault or kernel panic is observed.
+The strict native checks gate refuses state2 before the controls observer or
+FPS. Thus no new physical low/high/off/wake/restoration or FPS result exists.
+Initial native manual request514/IOKit0 and actual409->514 complete again,
+as do startup native off/on+level restore; this remains initial-path proof.
+Three key inputs remain ready/armed7 with15000+samples/errors0/no presses.
+Phone/Photos automatic launches and frame captures stay OFF.
+
+Source audit finds a separate userspace RWA_FENCE_TIMEOUT_NS=2000000000 in
+AIR/Metal, used by synchronous drains and queued completion tickets. The
+backend passes this actual short timeout to Mesa/native WaitFence. The new
+kernel intentionally honors explicit caller deadlines, so an internal2s
+Metal deadline still cannot cover a real4.95s cold FIFO predecessor. This is
+a concrete remaining contract mismatch; V105's generic completion error alone
+does not independently identify its exact errno/timing. Do not claim its cause
+proved or retry a retired/unknown context. Next complete block coordinates the
+native Metal internal default wait with CI29's cold/ordinary contract, preserves
+real short/nonblocking application deadlines, ordinary2s hardware bounds and
+failure/source ownership, and adds bounded original completion evidence.
+No new kernel build is indicated by this audit. Keep the existing compiler/
+shader-cache and GLES artifacts wherever unchanged; full native app Metal
+correctness is mandatory before controls/FPS. Finish the entire related block,
+then combined checks/ONE V106 run from fresh V109, never a mini-task boot.
+
+V99's measured finite61.032FPS remains the performance baseline; all wider
+GOAL work remains active. Exact actual V105 boot arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x2b3f4ef972a3cb39 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN CI29 accepted with actual cold ABI; fresh V105 ready for one combined run — 2026-10-27
 
 Actions40448042380/run29/source1e4b4dc938403a09c1a93356d8b7d151001af404

@@ -42,9 +42,12 @@ unfinished. The complete cold-output FIFO/first-reader correction now passes
 finite cold predecessor allowance, followed by ordinary2s waits, preserves
 actual caller deadlines and ownership. CI28's omitted-patch artifact is
 rejected before device use; the actual CI builder now shares the canonical
-inventory and corrected CI29/one V105 observation is next. Userspace graphics/
-UI are retained. V104 returns clean1768532/Fastboot,
-one server/no panic; V107 is stale/never reuse.
+inventory. Accepted CI29/V105 passes both full GLES modes and four physical
+references, but whole Metal exits1 on native completion and retires its context.
+Controls/FPS correctly never start. AIR/Metal's own2s default still omits the
+4.95s cold predecessor; coordinate that complete userspace wait path next,
+retaining ordinary native limits/compiler/cache/GLES where unchanged. V105
+returns clean1778229/Fastboot, one server/no panic; V108 is stale/never reuse.
 V99 stays the preserved measured performance baseline.
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including
