@@ -26,6 +26,17 @@ Completed bring-up is a preserved baseline; only remaining work is listed.
 
 ## Current handoff
 
+Complete visible-content workload block passes56combined executable contracts
+and actual20H392 UI3701524c../unchanged refresh6e9f8c83.. ABI/build. Existing
+native internal windows/context identity, attached visible content and real
+presentation-motion/model proof replace any-sublayer root-window admission.
+New label system-content-subpixel is separate from the V99 workload. Raw output
+counts remain even when workload proof refuses. No new graphics/kernel build.
+Fresh V110 READ at1787750 is terminal, unmounted recovery idle, no apply/boot;
+V107 image726d988f../nonce5e0963b86b5c97c8 passes full preflight. ONE combined
+hardware run follows complete reversible stage/apply/readback/readonly fsck.
+No new hardware/FPS result yet. All broader objectives below remain active.
+
 V106 after4a34272 is TERMINAL exit0, authenticated231f94c6e5359d24,
 one backboardd62/no panic or GPU fault, clean unmounted HFSX1787750 and
 verified Fastboot. No live device operation. V109 APPLIED/STALE, never reuse;

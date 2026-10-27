@@ -60,7 +60,7 @@ static BOOL control_sysctl(const char *name,unsigned *value)
 @property(nonatomic) double loggedAt;
 @property(nonatomic) double restorationStableAt;
 @property(nonatomic) BOOL finished,offProven,wakeProven;
-@property(nonatomic,copy) void (^workload)(BOOL,double);
+@property(nonatomic,copy) BOOL (^workload)(BOOL,double);
 @property(nonatomic,copy) void (^completion)(BOOL,BOOL);
 - (void)poll;
 - (void)restore:(unsigned)error;
@@ -111,8 +111,8 @@ static RedfinControlsProbe *control_active;
         result,restored,brightness,self.lowDBV,self.highDBV,self.offProven,self.wakeProven,keys,samples,errors);
     if(self.client)IOServiceClose(self.client);if(self.service)IOObjectRelease(self.service);
     self.client=0;self.service=0;
-    void (^workload)(BOOL,double)=self.workload;self.workload=nil;
-    if(workload)workload(NO,self.clockRatio);
+    BOOL (^workload)(BOOL,double)=self.workload;self.workload=nil;
+    if(workload)(void)workload(NO,self.clockRatio);
     void (^completion)(BOOL,BOOL)=self.completion;self.completion=nil;control_active=nil;
     if(completion)completion(restored,result==0);
 }
@@ -196,7 +196,7 @@ static RedfinControlsProbe *control_active;
 }
 @end
 
-void redfin_controls_probe_run(uint64_t nonce,void (^workload)(BOOL,double),void (^completion)(BOOL,BOOL))
+void redfin_controls_probe_run(uint64_t nonce,BOOL (^workload)(BOOL,double),void (^completion)(BOOL,BOOL))
 {
     if(control_active||!NSThread.isMainThread||!nonce){if(completion)completion(NO,NO);return;}
     RedfinControlsProbe *probe=[RedfinControlsProbe new];probe.nonce=nonce;probe.completion=completion;
@@ -235,10 +235,13 @@ void redfin_controls_probe_run(uint64_t nonce,void (^workload)(BOOL,double),void
     probe.originalNits=originalNits;probe.originalDBV=originalDBV;probe.initialFrames=initial.presents;
     uint32_t restoredDBV=0;(void)redfin_manual_backlight_level((float)probe.savedBrightness,&restoredDBV);
     probe.restoredDBV=restoredDBV;
+    if(!workload||!workload(YES,probe.clockRatio)) {
+        control_log(nonce,"refused no-visible-content-workload result=13 restored=1 unchanged=1");
+        IOServiceClose(client);IOObjectRelease(probe.service);if(completion)completion(YES,NO);return;
+    }
     probe.workload=workload;
     probe.cursor=sequence;probe.began=probe.phaseBegan=control_seconds()/probe.clockRatio;probe.phase=1;
     control_active=probe;
-    if(workload)workload(YES,probe.clockRatio);
     control_log(nonce,"start native-ABI=1 system-BKS=1 scene-independent=1 saved=%.5f low=%.5f high=%.5f bounded-seconds=24",
         probe.savedBrightness,probe.lowBrightness,probe.highBrightness);
     if(!redfin_brightness_system_set((float)probe.lowBrightness))[probe restore:8];

@@ -1,5 +1,52 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete visible-content workload and native context/motion gate ready — 2026-10-27
+
+After55840a7/V106, the old workload admitted a key window with any sublayer,
+even an empty/paused/detached container, then animated that window's root
+sublayerTransform without observing its actual movement. V106's2frames at90Hz
+therefore do not identify a GPU throughput limit. This connected correction
+selects existing visible content under a real window/context, includes native
+internal windows, rejects dimmers/background scenes, hidden/transparent/clipped
+or paused trees, and follows a replaced content layer even if UIWindow survives.
+It observes viewIfLoaded and existing native context getters; no new view,
+window, scene, layer or surface is created for the workload. Native method types
+and implementation-image UUIDs are checked against actual20H392 UIKit1242978a..
+and Quartz9e40b2eb... Bounded traversal/quarter-second reselection avoid an
+empty-host busy loop; each replacement discards the old measurement interval.
+
+Only the owned finite transform.translation.x animation is attached to an
+existing content layer, with its native local beginTime. Other animations and
+the model transform are preserved. Same admission feeds controls and FPS;
+failed initial workload admission makes no brightness or power change. The
+native gate still requires both full independent GLES modes and whole Metal.
+Physical output counters remain separate from sampled native presentation
+motion, context attachment and unchanged model state. The new result label
+system-content-subpixel is not a matched V99 workload; raw counters are always
+kept, while missing motion/context/model proof cannot claim measured throughput.
+No GPU fence retry, relaxed correctness test or panel-clock override.
+
+56combined visible-host/animation/control-restoration/native display/backlight/
+idle/status-bar contracts PASS in7.455s. All16existing+new real control scenarios
+include missing workload -> unchanged state. The first fixture used CALayer/
+CAContext names already loaded by macOS CoreGraphics; renamed only those test
+classes and mapped the fixture's runtime lookup. Actual implementation remained
+unchanged. Signed actual arm64/20H392 UI build/import audit PASS:
+UI3701524c63c8549c8b0f98b4d26b746db7f6260e133b51797e0e3e8f99263135, refresh6e9f8c836a22a171b7c0cb8908851eef66df6c61b8da6908551089ad66822b75.
+Refresh is byte-identical to the installed artifact. Metal/GLES/compiler/shaders/
+cache/native kernel are retained; no graphics or kernel rebuild.
+
+Fresh V110 READ terminal from clean unmounted1787750, recovery idle with current
+preimages/native empty journal; NO stage/apply/iOS boot yet. V109 remains STALE.
+V107 image726d988f920a3a285543e90dc1b08c76a19eb0722392aacf282bb864c5681147 passes full payload/
+loader/ADT/FDT/firmware/private material/RTC/CI29/native UI+graphics preflight.
+One V107 combined full graphics/brightness/off/wake/keys-readiness/content-motion/
+physical FPS cycle follows complete reversible stage/apply/readback/readonly fsck.
+Phone/Photos auto opens and frame captures remain OFF. Last actual V106 results
+and arguments remain below; no new hardware/FPS success yet. All wider GOAL work
+active. Proposed V107 arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x5e0963b86b5c97c8 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V106 terminal: full Metal and native brightness/off/wake pass; finite FPS remains0.2 — 2026-10-27
 
 Complete block4a34272, retained accepted CI29 Actions40448042380/run29/

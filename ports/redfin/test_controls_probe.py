@@ -105,9 +105,11 @@ SUFFIX=r'''
 int main(int argc,char **argv){@autoreleasepool{
  assert(argc==2);issue=(unsigned)atoi(argv[1]);transcript=[NSMutableString new];
  __block BOOL called=NO,restored=NO,passed=NO,workload=NO;__block unsigned starts=0,stops=0;
- redfin_controls_probe_run(0x12345678abcdef01,^(BOOL start,double ratio){assert(ratio==1);
+ redfin_controls_probe_run(0x12345678abcdef01,^BOOL(BOOL start,double ratio){assert(ratio==1);
+  if(start&&issue==15)return NO;
   if(start){assert(!workload&&!starts);workload=YES;composition_active=YES;++starts;}
   else{assert(workload&&starts==1&&!stops);workload=NO;composition_active=NO;++stops;}
+  return YES;
  },^(BOOL r,BOOL p){assert(!called&&!workload);called=YES;restored=r;passed=p;});
  for(unsigned i=0;scheduled&&i<400;++i){void (^block)(void)=scheduled;scheduled=nil;block();}
  assert(called);assert(!scheduled);assert(!control_active);
@@ -127,8 +129,9 @@ int main(int argc,char **argv){@autoreleasepool{
   if(issue==12){assert(!restored);assert([transcript containsString:@"result=7 restored=0"]);}
   if(issue==13){assert(restored&&!ever_off);assert([transcript containsString:@"result=6 restored=1"]);}
   if(issue==14){assert(restored&&ever_off);assert([transcript containsString:@"display-off-stops-output=1 wake-resumes-output=0"]);}
+  if(issue==15){assert(restored&&!ever_off);assert([transcript containsString:@"refused no-visible-content-workload result=13 restored=1 unchanged=1"]);}
  }
- if(issue==5||issue==6)assert(!starts&&!stops);else assert(starts==1&&stops==1);
+ if(issue==5||issue==6||issue==15)assert(!starts&&!stops);else assert(starts==1&&stops==1);
  if(restored){assert(panel_on);assert(fabs(UIScreen.mainScreen.brightness-0.5)<0.001);}
  assert(ns<30000000000ULL);
 }return 0;}
@@ -147,7 +150,7 @@ class ControlsProbeTests(unittest.TestCase):
             compiled=subprocess.run(['xcrun','clang','-fobjc-arc','-fblocks','-O2','-Wall','-Wextra','-Werror',
                 '-I'+str(HERE),'-framework','Foundation',str(source),'-o',str(root/'probe')],capture_output=True,text=True)
             self.assertEqual(compiled.returncode,0,compiled.stderr)
-            for issue in range(15):
+            for issue in range(16):
                 result=subprocess.run([str(root/'probe'),str(issue)],capture_output=True,text=True,timeout=5)
                 self.assertEqual(result.returncode,0,(issue,result.stderr))
 

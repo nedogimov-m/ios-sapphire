@@ -6,6 +6,12 @@ Primary stable upstream sources, selected by the user:
 
 Current Redfin GUI composition and panel scaling/packing run on Adreno620.
 `redfinfb=1` publishes the framebuffer interface used by that GPU display path.
+The complete visible-content workload correction now passes56combined checks
+and actual20H392 UI ABI/build. It selects existing attached content/context,
+keeps the model/other animations, follows content replacement and samples native
+presentation motion separately from physical frames. Fresh V110/1787750 and
+V107 are prepared for one combined run; no new hardware/FPS result yet. Kernel,
+Metal/GLES/compiler/cache and the refresh/backlight binary stay retained.
 V106/CI29 now passes both COMPLETE independent native GMEM/sysmem GLES modes,
 whole app Metal and all four exact physical-panel references. Its original
 queued completion takes2.702438s under the attested cold ABI; ordinary native

@@ -34,6 +34,11 @@ REFRESH_METHODS={'UIScreen':{'-maximumFramesPerSecond':'q16@0:8',
     'CADisplay':{'+mainDisplay':'@16@0:8','-refreshRate':'d16@0:8','-hardwareRefreshRate':'d16@0:8','-heartbeatRate':'d16@0:8'}}
 REFRESH_METHODS['CADisplay']['-minimumFrameDuration']='q16@0:8'
 REFRESH_METHODS['CADisplayLink']={'-maximumRefreshRate':'d16@0:8'}
+CONTENT_METHODS={
+    'UIWindow':{'-_hasContext':'B16@0:8','-_contextId':'I16@0:8','-_isVisible':'B16@0:8',
+        '+allWindowsIncludingInternalWindows:onlyVisibleWindows:forScreen:':'@32@0:8B16B20@24'},
+    'CALayer':{'-context':'@16@0:8'},'CAContext':{'-contextId':'I16@0:8'},
+}
 
 
 def build(out,cache_path=None):
@@ -54,6 +59,10 @@ def build(out,cache_path=None):
             if any(key not in actual or actual[key]['types']!=types for key,types in wanted.items()):
                 raise ValueError('native display-period ABI differs: '+name)
         quartz_uuid=quartz.uuid
+        for name,wanted in CONTENT_METHODS.items():
+            actual=(image if name=='UIWindow' else quartz).objc_methods(name,selectors=wanted)
+            if any(key not in actual or actual[key]['types']!=types for key,types in wanted.items()):
+                raise ValueError('native visible content/context ABI differs: '+name)
         from ports.redfin.cadence_abi import derive as derive_cadence
         cadence=derive_cadence(cache)
         from ports.redfin.brightness_abi import derive_system as derive_system_brightness
@@ -66,6 +75,7 @@ def build(out,cache_path=None):
             raise ValueError('native main-bundle public info getter ABI differs')
         foundation_uuid=foundation.uuid
     define=','.join('0x'+uuid[i:i+2] for i in range(0,32,2))
+    quartz_define=','.join('0x'+quartz_uuid[i:i+2] for i in range(0,32,2))
     bks_define=','.join('0x'+system_brightness['uuid'][i:i+2] for i in range(0,32,2))
     def native_define(name):
         value=system_display['reviewed'][name]['uuid']
@@ -76,10 +86,11 @@ def build(out,cache_path=None):
         '-miphoneos-version-min=16.0','-O2','-fblocks','-fobjc-arc','-Wall','-Wextra','-Werror',
         '-Wno-deprecated-declarations','-dynamiclib','-install_name',LIBRARY,
         '-DREDFIN_UIKIT_UUID_BYTES='+define,'-DREDFIN_BKS_UUID_BYTES='+bks_define,
+        '-DREDFIN_QUARTZ_UUID_BYTES='+quartz_define,
         '-DREDFIN_SB_UUID_BYTES='+native_define('SBIdleTimerGlobalCoordinator__sharedInstanceIfExists'),
         '-DREDFIN_BB_UUID_BYTES='+native_define('BSSimpleAssertion__invalidate'),
         '-I',str(HERE),str(HERE/'statusbar-cutout.m'),str(HERE/'native-diagnostics.m'),str(HERE/'native-tcc-probe.m'),
-        str(HERE/'display-probe.m'),str(HERE/'controls-probe.m'),str(HERE/'brightness-system.m'),str(HERE/'idle-system.m'),
+        str(HERE/'display-probe.m'),str(HERE/'display-content.m'),str(HERE/'controls-probe.m'),str(HERE/'brightness-system.m'),str(HERE/'idle-system.m'),
         '-framework','UIKit','-framework','Foundation',
         '-framework','CoreGraphics','-framework','QuartzCore','-framework','IOKit','-o',str(library)]
     with (out/'build.log').open('wb') as log:
@@ -118,6 +129,8 @@ def build(out,cache_path=None):
         controls_probe_physical_presses_tested=False,
         controls_probe_system_brightness_abi=system_brightness,
         controls_probe_uses_UIScreen_setter=False,probe_requires_nonempty_window=True,
+        probe_content_methods=CONTENT_METHODS,probe_requires_visible_attached_content=True,
+        probe_samples_native_presentation_motion=True,probe_content_model_preserved=True,
         native_system_display_abi=system_display,probe_owns_native_SpringBoard_idle_assertion=True,
         native_backlight_route='separate AppleARMBacklight; synchronous IOMFB unsupported',
         controls_probe_restoration_accepts_original_physical_state=True,controls_probe_composes_during_power_checks=True,
@@ -133,7 +146,7 @@ def build(out,cache_path=None):
              'native-image-uuid.h','idle-system.h','idle-system.m','backlight-system.m','system_display_abi.py',
              'backlight-failures.m',
              'backlight-manual.h',
-             'display-refresh.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
+             'display-refresh.m','display-content.h','display-content.m','display-benchmark.h','display-statistics.h','display-mode.h','cadence_abi.py','gui-profile.h',
              'statusbar-geometry.h','graphics-exec-scope.h')})
     (out/'log-initial').write_bytes(b'REDFIN native status-bar adapter; per-boot geometry follows.\n')
     (out/'refresh-log-initial').write_bytes(b'REDFIN verified physical refresh adaptation; native periods are seconds.\n')

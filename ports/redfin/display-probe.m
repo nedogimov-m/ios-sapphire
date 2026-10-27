@@ -17,10 +17,11 @@
 #include "gui-profile.h"
 #include "display-statistics.h"
 #include "display-benchmark.h"
+#include "display-content.h"
 #include "idle-system.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
-extern void redfin_controls_probe_run(uint64_t,void (^)(BOOL,double),void (^)(BOOL,BOOL));
+extern void redfin_controls_probe_run(uint64_t,BOOL (^)(BOOL,double),void (^)(BOOL,BOOL));
 
 @interface RedfinDisplayProbe : NSObject
 {
@@ -29,6 +30,10 @@ extern void redfin_controls_probe_run(uint64_t,void (^)(BOOL,double),void (^)(BO
 @property(nonatomic,strong) UIWindow *window;
 @property(nonatomic,strong) UIWindow *fallbackWindow;
 @property(nonatomic,strong) UIWindow *candidateWindow;
+@property(nonatomic,strong) CALayer *candidateLayer;
+@property(nonatomic) double candidateAt,motionAt,motionMinimum,motionMaximum;
+@property(nonatomic) unsigned motionSamples,motionMissing;
+@property(nonatomic) CATransform3D originalTransform;
 @property(nonatomic,strong) CADisplayLink *link;
 @property(nonatomic) io_connect_t framebuffer;
 @property(nonatomic) uint64_t nonce;
@@ -46,7 +51,7 @@ extern void redfin_controls_probe_run(uint64_t,void (^)(BOOL,double),void (^)(BO
 @property(nonatomic,strong) CALayer *animatedLayer;
 - (void)tick:(CADisplayLink *)link;
 - (void)finish:(BOOL)timedOut;
-- (void)attachWindow:(UIWindow *)window;
+- (BOOL)attachWindow:(UIWindow *)window layer:(CALayer *)layer;
 - (void)resetMeasurement;
 @end
 
@@ -67,22 +72,9 @@ static unsigned request_mode(uint64_t nonce)
     close(fd);
     return bytes>0?redfin_display_probe_request(request,(size_t)bytes,nonce):RF_DISPLAY_PROBE_NONE;
 }
-static BOOL fullscreen_window(UIWindow *window)
-{
-    CGSize wanted=UIScreen.mainScreen.bounds.size,size=window.bounds.size;
-    Class dimming=objc_getClass("_UISoftwareDimmingWindow");
-    if(dimming&&[window isKindOfClass:dimming])return NO;
-    return window&&!window.hidden&&window.alpha>=0.99&&window.screen==UIScreen.mainScreen&&
-        size.width>=wanted.width*0.9&&size.height>=wanted.height*0.9&&
-        (window.layer.sublayers.count||window.layer.contents);
-}
 static UIWindow *animation_host(UIWindow *fallback)
 {
-    for(UIWindow *window in UIApplication.sharedApplication.windows)
-        if(fullscreen_window(window)&&window.isKeyWindow)return window;
-    for(UIWindow *window in UIApplication.sharedApplication.windows.reverseObjectEnumerator)
-        if(fullscreen_window(window)&&window.windowLevel<=UIWindowLevelStatusBar)return window;
-    return fullscreen_window(fallback)?fallback:nil;
+    return redfin_display_content_window(fallback);
 }
 static void probe_log(uint64_t nonce,const char *format,...)
 {
@@ -95,6 +87,16 @@ static void probe_log(uint64_t nonce,const char *format,...)
     size_t bytes=strnlen(line,sizeof(line)-2);line[bytes++]='\n';
     int fd=open("/private/var/mobile/Library/Logs/redfin-ui.log",O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW,0600);
     if (fd>=0) {(void)write(fd,line,bytes);close(fd);}
+}
+static BOOL content_animation(CALayer *layer,NSString *key,double ratio,double seconds)
+{
+    if(!layer||[layer animationForKey:key]||!isfinite(ratio)||ratio<=0)return NO;
+    CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"transform.translation.x"];
+    animation.fromValue=@0;animation.toValue=@2;animation.duration=0.25*ratio;
+    animation.beginTime=[layer convertTime:CACurrentMediaTime() fromLayer:nil];
+    animation.autoreverses=YES;animation.additive=YES;animation.repeatDuration=seconds*ratio;
+    animation.removedOnCompletion=YES;[layer addAnimation:animation forKey:key];
+    return [layer animationForKey:key]!=nil;
 }
 /* SpringBoard's public app idle request can lack an application scene. Borrow
  * one owned native system assertion instead, with the same finite deadline.
@@ -169,39 +171,64 @@ static void probe_native_periods(uint64_t nonce,CADisplayLink *link)
     self.samples=0;self.missed=0;self.minimumFPS=0;self.maximumFPS=0;
     self.first=(struct redfin_display_statistics_v2){0};
     self.lastNative=(struct redfin_display_statistics_v2){0};
+    self.motionAt=0;self.motionSamples=0;self.motionMissing=0;
+    self.motionMinimum=0;self.motionMaximum=0;
 }
-- (void)attachWindow:(UIWindow *)window
+- (BOOL)attachWindow:(UIWindow *)window layer:(CALayer *)layer
 {
     [self.animatedLayer removeAnimationForKey:animation_key];self.animatedLayer=nil;
     self.window=window;
-    if(self.mode!=RF_DISPLAY_PROBE_ANIMATE||!window)return;
-    CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"sublayerTransform.translation.x"];
-    animation.fromValue=@0;animation.toValue=@2;animation.duration=0.25*self.clockRatio;
-    animation.autoreverses=YES;animation.additive=YES;animation.repeatDuration=RF_DISPLAY_PROBE_ANIMATION_SECONDS*self.clockRatio;
-    animation.removedOnCompletion=YES;
-    self.animatedLayer=window.layer;[self.animatedLayer addAnimation:animation forKey:animation_key];
+    if(self.mode!=RF_DISPLAY_PROBE_ANIMATE||!window)return YES;
+    uint32_t context=redfin_display_content_context(window,layer);
+    if(!context||!content_animation(layer,animation_key,self.clockRatio,RF_DISPLAY_PROBE_ANIMATION_SECONDS))return NO;
+    self.animatedLayer=layer;self.originalTransform=layer.transform;
+    probe_log(self.nonce,"content-attached window=%s layer=%s context=%u root-container=0 model-unchanged=1 native-local-time=1",
+        class_getName(window.class),class_getName(layer.class),context);
+    return YES;
 }
 - (void)tick:(CADisplayLink *)link
 {
     if (self.finished) return;
     double now=link.timestamp;
     if(self.mode==RF_DISPLAY_PROBE_ANIMATE) {
-        UIWindow *candidate=animation_host(self.fallbackWindow);
-        self.candidateWindow=candidate; /* Hold identity stable across callbacks. */
+        if(!self.candidateAt||now-self.candidateAt>=0.25*self.clockRatio||
+           (self.candidateLayer&&!redfin_display_content_context(self.candidateWindow,self.candidateLayer))) {
+            self.candidateWindow=animation_host(self.fallbackWindow);
+            self.candidateLayer=redfin_display_content_layer(self.candidateWindow);
+            self.candidateAt=now;
+        }
+        UIWindow *candidate=self.candidateWindow;
+        CALayer *target=self.candidateLayer;
+        /* A replaced content tree discards the interval even when its UIWindow
+         * survives. Keep both identities alive across the same finite gate. */
+        uintptr_t identity=(uintptr_t)(__bridge void *)target;
+        if(self.animatedLayer==target&&self.window!=candidate)identity=0;
         bool reset=false;
-        unsigned state=redfin_display_probe_window(&_hostState,(uintptr_t)(__bridge void *)candidate,
+        unsigned state=redfin_display_probe_window(&_hostState,identity,
             now/self.clockRatio,&reset);
         if(reset) {
             BOOL discarded=self.began!=0;
-            [self attachWindow:nil];[self resetMeasurement];
+            (void)[self attachWindow:nil layer:nil];[self resetMeasurement];
             probe_log(self.nonce,"window-transition restart=%u discarded-measurement=%u",_hostState.restarts,discarded);
         }
         if(state==RF_DISPLAY_WINDOW_REFUSED) {self.finishReason="window-churn";[self finish:YES];return;}
         if(state==RF_DISPLAY_WINDOW_PENDING)return;
         if(state==RF_DISPLAY_WINDOW_READY) {
-            [self attachWindow:candidate];self.origin=now;
+            if(![self attachWindow:candidate layer:target]) {self.finishReason="content-animation-admission";[self finish:YES];return;}
+            self.origin=now;
             probe_log(self.nonce,"window-stable seconds=%u restarts=%u fresh-warmup=1",RF_DISPLAY_PROBE_WINDOW_STABLE_SECONDS,_hostState.restarts);
         }
+    }
+    if(self.began&&self.mode==RF_DISPLAY_PROBE_ANIMATE&&
+       (!self.motionAt||now-self.motionAt>=0.25*self.clockRatio)) {
+        self.motionAt=now;
+        CALayer *presentation=self.animatedLayer.presentationLayer;
+        double x=presentation?presentation.transform.m41:NAN;
+        if(presentation&&isfinite(x)&&[self.animatedLayer animationForKey:animation_key]) {
+            if(!self.motionSamples)self.motionMinimum=self.motionMaximum=x;
+            self.motionMinimum=fmin(self.motionMinimum,x);self.motionMaximum=fmax(self.motionMaximum,x);
+            ++self.motionSamples;
+        } else ++self.motionMissing;
     }
     if (!self.origin) self.origin=now;
     if (!self.began && now-self.origin>=RF_DISPLAY_PROBE_WARMUP_SECONDS*self.clockRatio) {
@@ -236,6 +263,9 @@ static void probe_native_periods(uint64_t nonce,CADisplayLink *link)
 {
     if (self.finished) return;
     self.finished=YES;[self.link invalidate];self.link=nil;
+    BOOL attached=redfin_display_content_context(self.window,self.animatedLayer)!=0;
+    BOOL preserved=self.animatedLayer&&CATransform3DEqualToTransform(self.originalTransform,self.animatedLayer.transform);
+    BOOL moving=self.motionSamples>=3&&self.motionMaximum-self.motionMinimum>=0.1;
     [self.animatedLayer removeAnimationForKey:animation_key];self.animatedLayer=nil;
     struct redfin_display_statistics_v2 final={0};
     BOOL valid=self.began && sample(self.framebuffer,self.nonce,&final) && final.ticks>self.first.ticks &&
@@ -248,15 +278,16 @@ static void probe_native_periods(uint64_t nonce,CADisplayLink *link)
     BOOL idle_restored=probe_idle_release();
     const char *reason=timedOut?(self.finishReason?self.finishReason:"unspecified-abort"):
         valid?"complete":"final-counters";
-    probe_log(self.nonce,"result passive=%u animation=%s stats-valid=%u timed-out=%u panel-hz=%u seconds=%.6f completed-presents=%llu gpu-presents=%llu observed-present-fps=%.3f callbacks=%u callback-fps=%.3f under12=%u under18=%u under35=%u max-interval-ms=%.3f sample-count=%u sample-missed=%u minimum-present-fps=%.3f maximum-present-fps=%.3f hardware-counter-hz=%llu mach-to-physical-ratio=%.9f native-checks-completed=%u finish-reason=%s idle-restored=%u controls-requested=%u controls-completed=%u",
-        self.mode==RF_DISPLAY_PROBE_PASSIVE,self.mode==RF_DISPLAY_PROBE_ANIMATE?"system-window-subpixel":"none",
+    probe_log(self.nonce,"result passive=%u animation=%s stats-valid=%u timed-out=%u panel-hz=%u seconds=%.6f completed-presents=%llu gpu-presents=%llu observed-present-fps=%.3f callbacks=%u callback-fps=%.3f under12=%u under18=%u under35=%u max-interval-ms=%.3f sample-count=%u sample-missed=%u minimum-present-fps=%.3f maximum-present-fps=%.3f hardware-counter-hz=%llu mach-to-physical-ratio=%.9f native-checks-completed=%u finish-reason=%s idle-restored=%u controls-requested=%u controls-completed=%u context-attached=%u model-preserved=%u workload-motion-proved=%u motion-samples=%u motion-missing=%u motion-range=%.3f",
+        self.mode==RF_DISPLAY_PROBE_PASSIVE,self.mode==RF_DISPLAY_PROBE_ANIMATE?"system-content-subpixel":"none",
         valid,timedOut,valid ? final.panel_hz : 0,seconds,(unsigned long long)presents,(unsigned long long)gpu,
         seconds>0 ? presents/seconds : 0,self.callbacks,elapsed>0 ? (self.callbacks-1)/elapsed : 0,
         self.under12,self.under18,self.under35,self.maximum*1000,self.samples,self.missed,self.minimumFPS,self.maximumFPS,
         (unsigned long long)(valid?final.counter_hz:0),self.clockRatio,self.checksCompleted,reason,idle_restored,
-        self.controlsRequested,self.controlsCompleted);
+        self.controlsRequested,self.controlsCompleted,attached,preserved,moving,
+        self.motionSamples,self.motionMissing,self.motionMaximum-self.motionMinimum);
     if (self.framebuffer) IOServiceClose(self.framebuffer);
-    self.framebuffer=0;self.window=nil;self.fallbackWindow=nil;self.candidateWindow=nil;
+    self.framebuffer=0;self.window=nil;self.fallbackWindow=nil;self.candidateWindow=nil;self.candidateLayer=nil;
     active_probe=nil;
 }
 @end
@@ -327,7 +358,7 @@ static void probe_measure(UIWindow *native_host,uint64_t nonce,unsigned mode,BOO
         probe_native_periods(nonce,link);
         probe.link=link;[link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
         probe_log(nonce,"start passive=%u animation=%s seconds=%u panel-hz=%u begin-presents=%llu begin-gpu=%llu",
-            mode==RF_DISPLAY_PROBE_PASSIVE,mode==RF_DISPLAY_PROBE_ANIMATE?"system-window-subpixel":"none",
+            mode==RF_DISPLAY_PROBE_PASSIVE,mode==RF_DISPLAY_PROBE_ANIMATE?"system-content-subpixel":"none",
             RF_DISPLAY_PROBE_MEASURE_SECONDS,start.panel_hz,(unsigned long long)start.presents,(unsigned long long)start.gpu_presents);
         __weak RedfinDisplayProbe *weak=probe;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(RF_DISPLAY_PROBE_DEADLINE_SECONDS*ratio*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
@@ -352,22 +383,21 @@ static void probe_begin(UIWindow *native_host,uint64_t nonce,unsigned requested,
         probe_log(nonce,"current-native-checks-complete ordinary-animation-measurement-starts=%u controls-required=%u",
             requested!=RF_DISPLAY_PROBE_CONTROLS_CHECKED,requested==RF_DISPLAY_PROBE_CONTROLS_CHECKED);
     }
+    redfin_display_content_trace(nonce,probe_log);
     if(requested==RF_DISPLAY_PROBE_CONTROLS_CHECKED) {
         UIWindow *host=animation_host(native_host);
         NSString *key=[NSString stringWithFormat:@"com.redfin.controls.observe.%016llx",(unsigned long long)nonce];
-        CALayer *layer=host.layer;
+        CALayer *layer=redfin_display_content_layer(host);
         if(!host||[layer animationForKey:key]) {
             BOOL released=probe_idle_release();
             probe_log(nonce,"refused no owned controls animation host idle-restored=%u",released);return;
         }
-        redfin_controls_probe_run(nonce,^(BOOL start,double ratio){
+        redfin_controls_probe_run(nonce,^BOOL(BOOL start,double ratio){
             if(start) {
-                CABasicAnimation *animation=[CABasicAnimation animationWithKeyPath:@"sublayerTransform.translation.x"];
-                animation.fromValue=@0;animation.toValue=@2;animation.duration=0.25*ratio;
-                animation.autoreverses=YES;animation.additive=YES;animation.repeatDuration=28*ratio;
-                animation.removedOnCompletion=YES;[layer addAnimation:animation forKey:key];
+                if(!redfin_display_content_context(host,layer)||!content_animation(layer,key,ratio,28))return NO;
             } else [layer removeAnimationForKey:key];
-            probe_log(nonce,"controls-workload active=%u class=%s finite-seconds=28 model-unchanged=1",start,class_getName(host.class));
+            probe_log(nonce,"controls-workload active=%u class=%s layer=%s finite-seconds=28 model-unchanged=1 root-container=0",start,class_getName(host.class),class_getName(layer.class));
+            return YES;
         },^(BOOL restored,BOOL passed){
             if(!restored) {
                 BOOL idle=probe_idle_release();

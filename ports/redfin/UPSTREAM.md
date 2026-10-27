@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## Existing native content/context and presentation-motion workload — 2026-10-27
+
+Preferred kernel88513176../buttonsc84b4634../active userland906425b7.. unchanged.
+Own visible-workload correction uses actual20H392 UIKit1242978a../Quartz9e40b2eb..
+getter/enumerator method signatures and image UUIDs. Native internal windows,
+real context identity and an attached visible raster subtree replace the old
+any-sublayer/window-root admission. A finite content-layer animation preserves
+the model and other animation keys; replacement resets the interval. No new
+window/context/surface or change to native shader/compiler/driver clocks.
+Presentation motion and physical output are independently recorded.56combined
+checks and signed actual UI3701524c../unchanged refresh6e9f8c83.. PASS. Retain
+CI29 and native248e974a../Metal5141bd25../cache496301fc... Fresh V110 READ at
+1787750/imageV107 ready; one combined run pending, no hardware/FPS claim yet.
+V106 full Metal/manual brightness/off/wake success and all wider GOAL remain.
+
 ## V106 whole native Metal and actual manual backlight/off/wake pass — 2026-10-27
 
 Reviewed preferred kernel88513176../buttonsc84b4634../active userland906425b7..
