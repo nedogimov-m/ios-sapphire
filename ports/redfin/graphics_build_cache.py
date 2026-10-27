@@ -20,7 +20,8 @@ TRANSPORT_INPUTS=frozenset('ports/redfin/'+name for name in (
     'mesa-resource-access.patch','mesa-access-submit.inc',
     'metal-frontend-profile.patch','metal-frontend-profile.h','metal-frontend-profile.inc',
     'metal-constant-snapshot.patch','metal-constant-snapshot.h','metal-constant-snapshot.inc',
-    'metal-ubo-extents.patch','metal-ubo-extents.h','metal-ubo-extents.inc'))
+    'metal-ubo-extents.patch','metal-ubo-extents.h','metal-ubo-extents.inc',
+    'metal-native-waits.patch','metal-native-waits.inc','metal-queued.inc'))
 TRANSPORT_PATCH_TARGETS=frozenset((
     'src/freedreno/drm/freedreno_bo.c','src/freedreno/drm/freedreno_priv.h',
     'src/freedreno/drm/freedreno_ringbuffer.h','src/freedreno/drm/freedreno_ringbuffer_sp.h',
@@ -30,6 +31,9 @@ TRANSPORT_PATCH_TARGETS=frozenset((
     'src/gallium/drivers/freedreno/freedreno_resource.h',
     'src/gallium/drivers/freedreno/freedreno_batch.c'))
 RUNTIME_PATCH_TARGETS={
+    # Internal completion deadlines/observations only; queued ownership and
+    # AIR/NIR translation, shaders and persistent cache formats stay intact.
+    'ports/redfin/metal-native-waits.patch':frozenset(('src/compiler/air/air_metal.c',)),
     'ports/redfin/mesa-gles-direct.patch':frozenset((
         'src/gallium/frontends/osmesa/osmesa.c','src/gallium/drivers/freedreno/freedreno_fence.c',
         'src/redwood-drm/redwood_drm.c','src/redwood-drm/xf86drm.h',

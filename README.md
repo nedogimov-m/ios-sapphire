@@ -6,49 +6,24 @@ Primary stable upstream sources, selected by the user:
 
 Current Redfin GUI composition and panel scaling/packing run on Adreno620.
 `redfinfb=1` publishes the framebuffer interface used by that GPU display path.
-Latest V99 (kernel Actions40422287650/run24/sourcee90b110) passes complete
-independent native GMEM/sysmem and app Metal contracts, all four full private
-output cases and four exact physical-panel references. Actual fused GPU output
-exceeds1080frames. Its finite system-window animation completes611GPU frames
-in10.011138physical seconds:61.032FPS, with58.005..62.012FPS second samples,
-90Hz callbacks, zero contacts and one stable backboardd. This proves working
-physical output and this workload's measured rate; sustained60/90FPS throughout
-interactive use remains unfinished. The cold native output checks now have a
-separate finite startup wait, preserving the ordinary frame deadline. Phone/
-Photos automatic launches remain off. Current next work is physical buttons,
-native display brightness/wake and the other remaining items in GOAL.md.
-The experimental V100/V101 controls runs prove three native key inputs with
-15000+reads/zero errors and completed DCS level/off/on commands. Actual20H392
-CoreBrightness metadata is now present in CI27, but the UIKit brightness
-observation still fails and the finite workload records0.2FPS. Its full native
-GPU contracts and four physical-panel references pass. The UIKit setter needs
-an application scene and the workload may select an empty/dimming window;
-the corrected native system transaction and visible-content observer now pass
-90combined checks and native UI build. V102 still observes no applied low/high
-brightness and cannot prove restoration, so its FPS workload correctly refuses.
-The complete native backlight-selection/system-idle correction now passes
-93combined executable contracts and actual14method/four-image ABI/build checks.
-V103 proves the native route and owned idle guard, but CoreBrightness module
-setup returns false; physical DBV stays409 and no new FPS exists. The complete
-manual-native-backlight/restoration/live-controls-workload correction now passes
-94combined executable contracts and signed actual20H392 ABI/build checks.
-It preserves native settings, uses the existing async DSI owner and refuses
-wrong-level restoration. V104 now proves a native request and physicalDBV
-409->514, but the independent sysmem checker exits27 on its seed/first-reader
-condition. GMEM/app Metal/four physical references pass; controls/FPS correctly
-refuse before running. Physical UI brightness and complete controls remain
-unfinished. The complete cold-output FIFO/first-reader correction now passes
-124combined and final11affected checks plus the exact native GPU TU: a shared
-finite cold predecessor allowance, followed by ordinary2s waits, preserves
-actual caller deadlines and ownership. CI28's omitted-patch artifact is
-rejected before device use; the actual CI builder now shares the canonical
-inventory. Accepted CI29/V105 passes both full GLES modes and four physical
-references, but whole Metal exits1 on native completion and retires its context.
-Controls/FPS correctly never start. AIR/Metal's own2s default still omits the
-4.95s cold predecessor; coordinate that complete userspace wait path next,
-retaining ordinary native limits/compiler/cache/GLES where unchanged. V105
-returns clean1778229/Fastboot, one server/no panic; V108 is stale/never reuse.
-V99 stays the preserved measured performance baseline.
+The complete native Metal wait correction now passes65combined contracts and
+signed actual20H392 ABI/build checks. Both sync and queued drains admit the
+existing kernel's separate cold predecessor only with FD620+native ABI proof;
+ordinary hardware work stays bounded at2s and failed contexts remain retired.
+A verified runtime-only relink retains exact GLES/compiler/shaders/full checker/
+cache and avoids a kernel build. V106/one combined hardware run is prepared
+from fresh V109 clean1778229; no new hardware/FPS result is claimed yet.
+Last V105/CI29 passes both complete independent GLES modes and all four physical
+panel references; whole Metal completion fails and controls/FPS correctly refuse.
+Its actual first output takes4.951143s. Accepted kernel Actions40448042380/run29/
+source1e4b4dc has all288canonical overlays; rejected CI28 must never be used.
+V99/CI24 remains the measured performance baseline:611GPU frames in
+10.011138physical seconds=61.032FPS,90Hz callbacks, one server. This proves
+that finite workload; sustained interactive60/90FPS remains unfinished.
+Full physical UI brightness/off/wake/persistence, buttons and the other remaining
+items are in GOAL.md. Last V105 repeats actual DBV409->514 and key input readiness,
+but gated low/high/off/wake/FPS and physical key actions are still unproved.
+
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including
 native Metal/IOSurface pixels and actual kernel publication without a GPU wait

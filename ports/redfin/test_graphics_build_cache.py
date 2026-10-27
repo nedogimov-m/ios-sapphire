@@ -70,7 +70,8 @@ class GraphicsBuildReuseTests(unittest.TestCase):
             self.inputs[index].write_bytes(original)
 
     def test_reviewed_runtime_observation_preserves_cache_but_cannot_patch_the_compiler(self):
-        for name in ('metal-frontend-profile.patch','metal-ubo-extents.patch','metal-constant-snapshot.patch'):
+        for name in ('metal-frontend-profile.patch','metal-ubo-extents.patch','metal-constant-snapshot.patch',
+                     'metal-native-waits.patch'):
             overlay=self.root/'ports/redfin'/name
             overlay.write_bytes(Path(__file__).with_name(name).read_bytes())
             proof=self.reuse(self.inputs+[overlay])

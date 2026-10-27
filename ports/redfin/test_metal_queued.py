@@ -60,7 +60,18 @@ int main(void) {
         patch=(HERE/'native-queued-submission.patch').read_text()
         for owned,native in [('include/redfin_gpu_queue.h','RedfinGPUQueue.h'),
                              ('gpu-queued-submission.inc','RedfinGPUQueue.inc')]:
-            self.assertEqual((HERE/owned).read_text(),added_file(patch,'iokit/Kernel/arm/'+native))
+            actual=added_file(patch,'iokit/Kernel/arm/'+native)
+            if native=='RedfinGPUQueue.h':
+                # The canonical later overlay adds the cold allowance to the
+                # same header; compare the final compiled header, not its base.
+                with tempfile.TemporaryDirectory() as directory:
+                    path=Path(directory)/'iokit/Kernel/arm'/native;path.parent.mkdir(parents=True)
+                    path.write_text(actual)
+                    applied=subprocess.run(['git','apply','--include=iokit/Kernel/arm/'+native,
+                        str(HERE/'native-cold-output-waits.patch')],cwd=directory,capture_output=True)
+                    self.assertEqual(applied.returncode,0,applied.stderr.decode(errors='replace'))
+                    actual=path.read_text()
+            self.assertEqual((HERE/owned).read_text(),actual)
 
     def test_published_fence_wait_never_touches_the_mutable_encoder_flush_path(self):
         name='src/freedreno/drm/freedreno_pipe.c'
@@ -106,6 +117,7 @@ int main(void) {
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include "metal-queued.h"
@@ -141,12 +153,12 @@ struct rwa_device {
  struct pipe_context *pipe;struct pipe_screen *screen;struct redfin_metal_command_scope command_scope;
  struct rwa_buffer *all_buffers;struct rwa_texture *buffer_textures;
  uint64_t ordering[REDFIN_METAL_ORDERING_WORDS],issued_epoch,encoding_epoch,completed_epoch,gpu_memory_epoch;
- bool gpu_memory_pending,queued_closing,queued_failed;unsigned queued_owners,ubo_offset_align;
+ bool gpu_memory_pending,queued_closing,queued_failed,software,native_cold_wait;unsigned queued_owners,ubo_offset_align;
  struct rwa_redfin_completion *queued_tickets;
 };
 static unsigned destroyed,drains,resolve_error,allocation_failure;
 static struct pipe_fence_handle *next_fence;
-static void say(char *why,size_t n,const char *text){if(why&&n)snprintf(why,n,"%s",text);}
+static void say(char *why,size_t n,const char *text,...){va_list args;va_start(args,text);if(why&&n)vsnprintf(why,n,text,args);va_end(args);}
 static int command_scope_finish(void *context,char *why,size_t n){(void)context;(void)why;(void)n;++drains;return 0;}
 static bool rwa_redfin_buffers_share(const struct rwa_buffer *a,const struct rwa_buffer *b){return a==b;}
 static int rwa_redfin_queued_drain(struct rwa_device *,char *,size_t);
@@ -161,6 +173,7 @@ static void u_upload_data(void *u,unsigned a,unsigned b,unsigned c,const void *d
 static void u_upload_unmap(void *u){(void)u;}
 /* Helpers unrelated to tickets remain compiled, but are not a CPU/GPU model. */
 #pragma clang diagnostic ignored "-Wunused-function"
+#include "metal-native-waits.inc"
 #include "metal-ordering.inc"
 static int rwa_commands_end(struct rwa_device *d,char *why,size_t n) {
  int error=rwa_redfin_cpu_drain(d,why,n);d->command_scope.active=false;d->encoding_epoch=0;return error;
@@ -234,7 +247,7 @@ int main(void) {
  assert(rwa_redfin_commands_submit(&oom,&one,why,sizeof(why))<0&&!one&&!oom.command_scope.active&&drains==1);
  return 0;
 }
-''',{'util/u_upload_mgr.h':''})
+''',{'util/u_upload_mgr.h':'','util/os_time.h':'static int64_t os_time_get_nano(void){return 0;}\n'})
 
     def test_native_deadline_uses_the_same_mach_uptime_domain_as_kernel(self):
         name='src/freedreno/drm/msm/msm_priv.h'

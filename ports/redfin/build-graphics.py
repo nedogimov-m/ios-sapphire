@@ -47,6 +47,8 @@ def main():
                    help='reuse exact verified native artifacts and change only startup-check policy; no build or setup')
     p.add_argument('--reuse-compiler-cache',type=Path,
                    help='retain a verified prior shader-cache identity only when compiler and shader/serialization inputs match')
+    p.add_argument('--reuse-native-runtime',type=Path,
+                   help='relink only the reviewed Metal wait runtime and pairing; retain verified GLES/compiler/shader artifacts')
     a=p.parse_args();work=a.work_dir.resolve()
     if a.policy_only:
         result=startup_policy(work,a.startup_checks=='on')
@@ -75,16 +77,17 @@ def main():
             ranlib=run(['xcrun','--find','ranlib'],capture=True)
             if not (sdk/'System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h').is_file():
                 raise ValueError('selected iOS SDK lacks IOKit userspace headers')
-            venv=work/'venv'
-            if not (venv/'bin/meson').is_file():
-                run([sys.executable,'-m','venv',venv])
-                run([venv/'bin/python3','-m','pip','install','meson==1.9.1','Mako==1.3.10','packaging==25.0','PyYAML==6.0.3'])
-            env['PATH']=str(venv/'bin')+':'+env['PATH']
-            archive=work/('mesa-'+VERSION+'.tar.xz')
-            if not archive.exists():
-                run(['curl','--fail','--location','--retry','3','--output',archive,
-                     'https://archive.mesa3d.org/mesa-'+VERSION+'.tar.xz'])
-            if hashlib.sha256(archive.read_bytes()).hexdigest()!=SHA256:raise ValueError('Mesa archive SHA256 mismatch')
+            if not a.reuse_native_runtime:
+                venv=work/'venv'
+                if not (venv/'bin/meson').is_file():
+                    run([sys.executable,'-m','venv',venv])
+                    run([venv/'bin/python3','-m','pip','install','meson==1.9.1','Mako==1.3.10','packaging==25.0','PyYAML==6.0.3'])
+                env['PATH']=str(venv/'bin')+':'+env['PATH']
+                archive=work/('mesa-'+VERSION+'.tar.xz')
+                if not archive.exists():
+                    run(['curl','--fail','--location','--retry','3','--output',archive,
+                         'https://archive.mesa3d.org/mesa-'+VERSION+'.tar.xz'])
+                if hashlib.sha256(archive.read_bytes()).hexdigest()!=SHA256:raise ValueError('Mesa archive SHA256 mismatch')
             inputs=[upstream/'tools/mesa'/name for name in PATCHES]
             patch_count=len(inputs)
             if a.metal:
@@ -138,6 +141,7 @@ def main():
                            ('mesa-gles-direct.patch','include/redfin_gpu_surface.h','gles-direct.inc',
                             'gles-fence-surfaces.inc','mesa-surface-producer.inc')]
                 inputs += [ROOT/'ports/redfin/gles-resource-producer.inc']
+                inputs += [ROOT/'ports/redfin/metal-native-waits.patch',ROOT/'ports/redfin/metal-native-waits.inc']
             compiler_identity=json.dumps(dict(mesa=VERSION,archive=SHA256,
                 target='arm64-apple-ios16.0',buildtype='release',ndebug=True,
                 shader_cache='enabled/32M/redfin-v1',
@@ -147,6 +151,16 @@ def main():
                 sort_keys=True,separators=(',',':')).encode()
             fingerprint=hashlib.sha256(compiler_identity+b''.join(x.read_bytes() for x in inputs)).hexdigest()
             cache_proof=compiler_cache(ROOT,inputs,json.loads(compiler_identity),fingerprint,a.reuse_compiler_cache)
+            if a.reuse_native_runtime:
+                if not a.metal or not a.reuse_compiler_cache or a.reuse_compiler_cache.resolve()!=a.reuse_native_runtime.resolve():
+                    raise ValueError('native wait reuse requires paired Metal and the same verified compiler-cache baseline')
+                from ports.redfin.graphics_native_runtime import build_runtime
+                result=build_runtime(ROOT,upstream,work,a.reuse_native_runtime.resolve(),a.cache,
+                    inputs,fingerprint,cache_proof,clang,sdk,a.startup_checks=='on',run)
+                result['log']=str(log_path)
+                (work/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                print('built reviewed native wait runtime: '+str(log_path))
+                return 0
             source=work/('mesa-'+VERSION)
             stamp=source/'.redfin-graphics'
             if source.exists() and (not stamp.exists() or stamp.read_text().strip()!=fingerprint):
@@ -267,6 +281,8 @@ def main():
                         shutil.copy2(ROOT/'ports/redfin'/('metal-constant-snapshot.'+suffix),
                                      source/'src/compiler/air'/('redfin_metal_constant_snapshot.'+suffix))
                     run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-constant-snapshot.patch'],source)
+                    shutil.copy2(ROOT/'ports/redfin/metal-native-waits.inc',source/'src/compiler/air/redfin_metal_native_waits.inc')
+                    run(['patch','--batch','--forward','-p1','-i',ROOT/'ports/redfin/metal-native-waits.patch'],source)
                 stamp.write_text(fingerprint+'\n')
             if (source/'src/util/redfin_mesa_cache_build.h').read_text()!=\
                     '#define REDFIN_MESA_CACHE_BUILD_ID '+json.dumps(cache_proof['cache_id'])+'\n':
@@ -349,31 +365,8 @@ def main():
             if a.metal:
                 from ports.redfin.metal_userland import prepare as prepare_metal
                 # ABI identity binds both libraries to all compiler/driver inputs.
-                metal_sources=[upstream/'userland/src'/name for name in
-                               ('redwoodmetal.m','redwooddrawable.m','redwood_drawable.h')]
-                metal_sources += [ROOT/'ports/redfin'/name for name in
-                                  ('metal_userland.py','metal_raster_userland.py','metal_resource_userland.py','metal_blit_userland.py','metal_buffer_userland.py','metal_completion_userland.py','metal_buffer_texture_userland.py','metal-buffer-view-object.inc','metal-resource-completion.inc','metal-buffer-object.inc','iosurface-abi.h','metal-blit-encoder.inc','metal-raster.h','metal-guard.m','metal-check.m','metal-raster-check.inc','metal-vertex-check.inc','metal-blit-check.inc','metal-buffer-check.inc','metal-buffer-texture-check.inc','metal-alpha-check.inc','metal-check.metal')]
-                metal_sources += [ROOT/'ports/redfin'/name for name in ('metal_function_constants_userland.py','metal-function-constants-object.inc','metal-function-constants.h','metal-function-constants-check.inc')]
-                metal_sources += [ROOT/'ports/redfin'/name for name in ('metal-resource-check.c','metal-resource-check.ll')]
-                metal_sources += [ROOT/'ports/redfin/graphics-memory-report.h']
-                metal_sources += [ROOT/'ports/redfin/metal-half-check.inc']
-                metal_sources += [ROOT/'ports/redfin'/name for name in
-                                  ('metal-translation-cache.h','metal-cache-check.inc')]
-                metal_sources += [ROOT/'ports/redfin'/name for name in
-                                  ('metal-ordering.h','metal-ordering-check.inc')]
-                metal_sources += [ROOT/'ports/redfin'/name for name in
-                                  ('metal-bindings.h','metal-bindings-check.inc')]
-                metal_sources += [ROOT/'ports/redfin'/name for name in
-                                  ('metal_queued_userland.py','metal-queued.h','metal-queued-check.inc','metal-queued-resource-check.inc','metal-frontend-profile.h')]
-                metal_sources += [ROOT/'ports/redfin/metal-ubo-extents-check.inc']
-                metal_sources += [ROOT/'ports/redfin/metal-physical-check.inc']
-                metal_sources += [ROOT/'ports/redfin/metal-surface-cache-check.inc']
-                metal_sources += [ROOT/'ports/redfin/compositor-policy.h',ROOT/'ports/redfin/gui-profile.h']
-                metal_sources += [ROOT/'ports/redfin/surface-padding.h',ROOT/'ports/redfin/surface-padding-check.inc']
-                metal_sources += [ROOT/'ports/redfin/retained-memory.h']
-                metal_sources += [ROOT/'ports/redfin'/name for name in
-                                  ('metal-scheduling.h','metal-scheduling-check.inc')]
-                pairing=hashlib.sha256(fingerprint.encode()+b''.join(p.read_bytes() for p in metal_sources)).hexdigest()
+                from ports.redfin.graphics_build_inputs import metal_pairing,metal_plugin_command
+                pairing=metal_pairing(ROOT,upstream,fingerprint)
                 metal=work/'metal'
                 result['metal_abi']=prepare_metal(upstream,metal,a.cache,pairing)
                 # Compile the same contract marker into the AIR library itself.
@@ -394,11 +387,7 @@ def main():
                 plugin=bundle/'System/Library/Extensions/RedfinMetal.bundle'
                 plugin.mkdir(parents=True,exist_ok=True)
                 binary=plugin/'RedfinMetal'
-                run([*c,'-bundle','-O2','-fno-omit-frame-pointer','-Wno-deprecated-declarations',
-                    '-Werror=incompatible-pointer-types','-Werror=incompatible-function-pointer-types',
-                    '-I'+str(metal),'-I'+str(ROOT/'ports/redfin'),metal/'redwoodmetal.m',metal/'redwooddrawable.m',
-                    ROOT/'ports/redfin/metal-guard.m','-framework','Foundation',
-                    '-framework','CoreFoundation','-framework','IOKit','-framework','Metal','-framework','IOSurface','-lobjc','-o',binary])
+                run(metal_plugin_command(ROOT,clang,sdk,metal,binary))
                 (plugin/'Info.plist').write_bytes(plistlib.dumps(dict(
                     CFBundleIdentifier='com.redfin.metal',CFBundleName='RedfinMetal',
                     CFBundleExecutable='RedfinMetal',CFBundlePackageType='BNDL',

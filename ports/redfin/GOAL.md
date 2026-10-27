@@ -26,6 +26,18 @@ Completed bring-up is a preserved baseline; only remaining work is listed.
 
 ## Current handoff
 
+Complete native Metal cold-wait block now passes65combined executable checks
+and actual signed20H392 ABI/build. Fresh native248e974a../Metal5141bd25..
+reuses exact GLES/compiler/shaders/checker/cache; only AIR runtime/pairing and
+plugin rebuilt. Sync+queued internal waits attest FD620/native cold ABI before
+allowing the kernel's separate cold predecessor. Ordinary native2s bounds,
+short/nonblocking callers and failed-context/source ownership stay intact.
+Original timing/errno observations are bounded; no retry. No new kernel build.
+Fresh V109 READ at1778229 is terminal, unmounted recovery idle, no apply/boot.
+V106 image44501918../nonce231f94c6e5359d24 passes full preflight and awaits ONE
+combined GPU/brightness/off/wake/keys-readiness/FPS run after complete reversible
+stage/apply/readback/readonly fsck. No new hardware/performance proof yet.
+
 Preserved V99 / CI24 Actions40422287650/run24/sourcee90b110 baseline:
 full native GMEM/sysmem/GLES/app Metal/private output/four panel references
 PASS,611GPU frames/10.011138s=61.032FPS at90Hz callbacks, one server.
@@ -49,14 +61,10 @@ Initial real manual request/DBV409->514 succeeds; full physical UI brightness/
 low/high/off/wake/persistence/ALS remain unproved. Key paths ready/armed7,
 15000+samples/errors0, no physical presses. Phone/Photos auto opens remain OFF.
 
-Next complete block coordinates AIR/Metal's own2s internal completion timeout
-with CI29's bounded cold predecessor and ordinary2s native work, preserving
-real short/nonblocking caller deadlines and failure/source ownership. V105's
-generic completion error does not prove exact errno/timing. No new kernel
-build indicated. Retain exact compiler/cache/GLES/UI where unchanged; verify
-full native app Metal before controls/FPS, then ONE V106 hardware run after
-fresh V109/preimages/readback/readonly fsck. V99 finite61.032FPS remains the
-preserved performance baseline; no universal smoothness or wider completion.
+The complete coordinated wait block described above is ready for V106. V105's
+generic completion error does not prove exact errno/timing. Full native app
+Metal correctness remains mandatory before controls/FPS. V99 finite61.032FPS
+remains the preserved baseline; no universal smoothness or wider completion.
 
 Retained UI5a501aac../refresh6e9f8c83../native035131/Mesa1a4ad42c../
 Metal17d0f01f../cache496301fc.. are current installed artifacts. Wi-Fi startup/

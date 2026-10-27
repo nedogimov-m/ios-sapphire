@@ -9,6 +9,7 @@ struct rwa_redfin_completion {
    struct pipe_fence_handle *fence;
    pthread_mutex_t mutex;
    uint64_t epoch;
+   struct redfin_metal_wait_result observation;
    bool waited,retired,gpu_work;
    int error;
 };
@@ -18,14 +19,18 @@ int rwa_redfin_completion_wait(struct rwa_redfin_completion *ticket,char *why,si
    if(!ticket){say(why,bytes,"missing Metal completion ticket");return -1;}
    pthread_mutex_lock(&ticket->mutex);
    if(!ticket->waited) {
-      bool done=!ticket->fence||ticket->device->screen->fence_finish(
-         ticket->device->screen,NULL,ticket->fence,RWA_FENCE_TIMEOUT_NS);
+      bool done=!ticket->fence||rwa_redfin_fence_wait(ticket->device,ticket->fence,
+         "queued",&ticket->observation);
       ticket->error=done?0:-1;ticket->waited=true;
       if(!done)__atomic_store_n(&ticket->device->queued_failed,true,__ATOMIC_RELEASE);
    }
    int error=ticket->error;
    pthread_mutex_unlock(&ticket->mutex);
-   if(error)say(why,bytes,"Metal GPU completion failed; native context is retired");
+   if(error)say(why,bytes,"Metal GPU completion failed; native context is retired "
+      "(waited=%u budget-ns=%llu elapsed-ns=%llu errno=%d)",
+      (unsigned)ticket->observation.attempted,
+      (unsigned long long)ticket->observation.budget_ns,
+      (unsigned long long)ticket->observation.elapsed_ns,ticket->observation.error);
    return error;
 }
 

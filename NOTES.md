@@ -1,5 +1,54 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN complete native Metal cold wait block and verified runtime reuse ready — 2026-10-27
+
+After4d1f303, both synchronous AIR drains and queued completion tickets use the
+same finite internal wait policy. Only actual nonsoftware FD620 with the native
+RedfinColdOutputWaitABI=1 property gets the cold10s+ordinary2s envelope; software,
+other GPUs and unattested kernels retain2s. Accepted CI29 still owns the unique
+immutable cold predecessor deadline and caps ordinary work at2s. Actual short/
+nonblocking caller requests below this internal Metal API remain binding.
+There is no fence/context retry, early retirement, shader fallback or failure
+reset. Sync failures now retire the context too. Ticket mutex/result memoization
+and resource ownership remain intact. Original wait budget/elapsed/errno are
+captured before logging; false-without-errno stays unknown. At most8slow-success
+and1original-failure observations per process, without logging private material.
+
+65combined Metal/resource/lifetime/queue/cold/native scope/cache/reuse checks PASS
+in9.274s. Actual signed arm64/20H392 bundle/import ABI PASS. Initial combined
+checks found the older base-header fixture missing its later cold overlay and a
+/private/var path-normalization issue in command redirection; both corrected.
+First native preparation stopped on an obsolete check.air entry in the old
+prepare-directory inventory; explicit reviewed generated-source/unused-output
+separation corrects it. No failed build or incomplete preflight touched iOS.
+The fresh native runtime-only builder bypasses downloads/venv/Meson, clones
+immutable baseline sources, recompiles AIR runtime+pairing and the Metal plugin,
+and hashes every reused native archive before/after. Shared canonical pairing/
+plugin recipes prevent a duplicate build inventory. It refuses any input delta
+outside this complete three-file wait block. Original full checker, shaders,
+GLES and disk cache stay byte-identical; no kernel/compiler rebuild.
+
+New native work research/redfin-metal-cold-wait-v2, build20261027-094523:
+Mesa input248e974a1d542043c36807d63cb935ef026e1cd9df561d2169827d2ed67ee38e,
+Metal pairing5141bd256475c881d693c734a2a9013521e4c7b417f196b3695c31315f2f7800,
+AIR binary513d33039be856f18749be65c19d5a0f459bf637ae91f315724a2d4c6339ae70.
+Retain cache496301fc.., UI5a501aac../refresh6e9f8c83.. and accepted CI29
+Actions40448042380/run29/source1e4b4dc938403a09c1a93356d8b7d151001af404
+(native8c422d8), kernel11d60b4d3fc2839d65b084e06a5f5cc1204f364cceb5cf4e8e4ca45e27896a48.
+Preferred kernel88513176../buttonsc84b4634../active userland906425b7.. unchanged.
+
+Fresh V109 READ terminal: clean unmounted1778229/current complete target
+preimages/native empty journal, recovery idle, NO stage/apply/iOS boot yet.
+V108 remains APPLIED/STALE/never reuse. Fresh V106 image
+44501918717d86eeb15786f6f08ae065f6cb3a2c19cee8bc642cd216c431be07 passes complete real loader/
+ADT/FDT/payload/firmware/private identity/RTC/native kernel/UI/graphics ABI proof.
+One V106 combined full GPU/brightness/off/wake/keys-readiness/finite FPS cycle
+follows verified V109 stage/apply/readback/readonly fsck. Phone/Photos automatic
+opens and frame captures stay OFF. No new hardware/performance result exists;
+V99 finite61.032FPS remains the baseline and all wider GOAL requirements active.
+Proposed V106 args (last actual V105 remains in its terminal entry below):
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x231f94c6e5359d24 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN V105 terminal: both complete GLES modes pass; Metal completion refuses controls/FPS — 2026-10-27
 
 Accepted CI29 Actions40448042380/run29/source1e4b4dc (native block8c422d8),

@@ -1,5 +1,22 @@
 # HackiOS upstream review — 2026-10-22
 
+## Native AIR/Metal default waits coordinated with Redfin cold ABI — 2026-10-27
+
+Reviewed preferred pins remain kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,
+buttonsc84b4634277a70beac73921029b1fb6afc2530af and active userland906425b75e02b4f99eb5d7bb1ef7c9583472d772.
+The preferred-derived AIR runtime's own2s timeout was separate from CI29's
+cold FIFO policy. The complete Redfin adaptation coordinates sync and queued
+internal waits only for actual FD620+RedfinColdOutputWaitABI1; that kernel
+retains its shared10s predecessor, ordinary2s work and real caller bounds.
+No shader/NIR/AIR translation, serialized cache or GLES change. Actual original
+result/errno/timing is bounded and failed contexts remain retired, never retried.
+65combined executable checks and signed actual20H392 imports PASS. A strict
+runtime-only build reuses immutable compiler/GLES/shaders/full checker/cache,
+with one canonical pairing/plugin recipe and complete archive/source proof.
+Native248e974a../Metal5141bd25.. await one V106 from fresh V109/1778229;
+CI29 retained, no hardware/FPS success yet. V105 failure cause is still not
+independently proved by its old generic error; whole native checks remain gated.
+
 ## V105 full GLES modes pass; native Metal default wait still omits cold predecessor — 2026-10-27
 
 Preferred reviewed kernel88513176../buttonc84b4634../active userland906425b7..

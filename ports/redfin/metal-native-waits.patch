@@ -1,0 +1,67 @@
+--- a/src/compiler/air/air_metal.c
++++ b/src/compiler/air/air_metal.c
+@@ -63,9 +63,9 @@
+ #include "util/u_sampler.h"
+ #include "util/u_debug.h"
+ 
+-/* Two seconds, the same wait air_run uses, and for the same reason: a dispatch nobody
+- * waited for is not a result, and on this GPU one timeout wedges the core for the rest
+- * of the boot, so every later dispatch would be vacuous too (docs/air.md section 5).
++/* Ordinary work remains bounded by two seconds. Native Redfin kernels that
++ * attest the cold-output contract budget their one FIFO predecessor separately.
++ * A failed completion still retires its original context; never retry it.
+  */
+ #define RWA_FENCE_TIMEOUT_NS 2000000000ull
+ 
+@@ -127,6 +127,7 @@
+     * wrong (rwa_texture_from_surface).
+     */
+    bool software;
++   bool native_cold_wait;
+    struct redfin_metal_command_scope command_scope;
+    struct rwa_buffer *all_buffers;
+    uint64_t ordering[REDFIN_METAL_ORDERING_WORDS];
+@@ -518,6 +519,7 @@
+ 
+ static void redfin_air_cache_finish(struct redfin_air_translation_cache *cache);
+ #include "redfin_metal_stage_cache.inc"
++#include "redfin_metal_native_waits.inc"
+ 
+ struct rwa_device *
+ rwa_device_open(char *why, size_t why_size)
+@@ -626,6 +628,8 @@
+           device->screen->get_name(device->screen));
+       goto fail;
+    }
++
++   rwa_redfin_native_wait_init(device);
+ 
+    /* The two numbers Metal requires of every pipeline and its own base class answers
+     * with nothing (docs/metal.md 10.8). They are properties of the screen, asked once.
+@@ -3293,19 +3297,15 @@
+    if(publication>0&&!required) {
+       device->screen->fence_reference(device->screen,&fence,NULL);return 0;
+    }
+-   bool done = !publication && device->screen->fence_finish(device->screen, NULL, fence,
+-                                            RWA_FENCE_TIMEOUT_NS);
++   struct redfin_metal_wait_result observation={0};
++   bool done = !publication && rwa_redfin_fence_wait(device,fence,"sync",&observation);
+    device->screen->fence_reference(device->screen, &fence, NULL);
+    if (!done) {
+-      say(why, why_size, "the GPU did not finish the %s within two seconds. Anything in "
+-                         "the buffers is what was put there, not what the shader "
+-                         "computed. The likeliest reason is the shader's input: a "
+-                         "kernel whose buffers carry counts, indices or sentinels, "
+-                         "given values it was never written for, loops on a condition "
+-                         "that never comes -- both kernels measured this way turned out "
+-                         "to be exactly that (docs/air.md section 5). And one timeout "
+-                         "wedges this GPU for the rest of the boot, so every later "
+-                         "dispatch in it is vacuous too", what);
++      __atomic_store_n(&device->queued_failed,true,__ATOMIC_RELEASE);
++      say(why,why_size,"Metal %s completion failed; native context is retired "
++         "(publication=%d waited=%u budget-ns=%llu elapsed-ns=%llu errno=%d)",what,publication,
++         (unsigned)observation.attempted,(unsigned long long)observation.budget_ns,
++         (unsigned long long)observation.elapsed_ns,observation.error);
+       return -1;
+    }
+    rwa_redfin_ordering_completed(device);
