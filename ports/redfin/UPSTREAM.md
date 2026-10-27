@@ -1,5 +1,17 @@
 # HackiOS upstream review — 2026-10-22
 
+## V103 observes native CB setup refusal and a logical/physical restoration distinction — 2026-10-27
+
+Own6a8399b/CI27, preferred reviewed pins unchanged. V103 proves the corrected
+native route is installed and selected (four sync0 decisions), container-start1,
+but module-setup0 and no VOID display-module start. The finite SpringBoard
+idle token is observed and released. BKS low and restoration update logically;
+physical200nits/DBV409 stays unchanged. A new-sequence requirement then falsely
+prevents proof of restoring that unchanged original physical state. No new
+FPS exists; full native GPU/Metal/private/panel correctness passes. Clean
+1758944/Fastboot, one server/no panic. Fix the observer distinction and capture
+the actual native initialization failure before the next combined integration.
+
 ## Native standalone backlight admission and SpringBoard idle ownership — 2026-10-27
 
 Preferred pins retained: kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,

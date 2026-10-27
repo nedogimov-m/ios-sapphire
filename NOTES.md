@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V103 terminal: native route/idle proven, CB module setup returns false — 2026-10-27
+
+Source6a8399b, unchanged CI27 Actions40432973023/run27/source883286e,
+kernel4f99141c../UI1c41abd8../refresh521af6d6... Fresh V106 stage/apply ONCE
+passes complete preimages/readback/signatures/readonly fsck. V106 is now STALE,
+never reuse. V103 TERMINAL exit0, authenticated61914f1e2bd56eb9, one server/
+no panic, clean consistent unmounted HFSX1758944 and verified Fastboot.
+No live device operation. Next fresh root V107 must bind1758944.
+
+Full independent native GMEM/sysmem/GLES/app Metal/private pixels/four exact
+panel references PASS. Ordinary system output remains only4frames. Native
+backlight adapter is actually installed; four native sync decisions return0,
+find-displays returns1 and container-start returns1. Actual native module
+setup returns0 and the VOID display-module start is never called. This
+localizes failed admission; it does not prove which inner initializer failed.
+Native SpringBoard idle assertion is observed and released; other-client
+assertion ownership remains preserved by the tested implementation.
+
+BKS really changes0.50000 ->0.15000 and back0.50000; every recorded physical
+state stays on1/sequence3/DBV409/requested=applied200nits/uncertainty0. No native
+backlight write arrives. Result6/restored0 therefore reflects the observer's
+requirement for a fresh sequence after a logical change, even when physical
+state never changed. It is not evidence that the physical level failed to
+return. No FPS is produced because that strict restoration gate refuses.
+Keys remain ready/errors0; no physical presses. No Phone/Photos auto opens.
+
+Next connected block: correct restoration proof for unchanged original
+physical state, keep finite real composition active during off/wake, and
+capture the original CoreBrightness initialization failure/context without
+altering its result. Finish related integration changes before combined
+checks and ONE hardware run. No cause of earlier0.2FPS or universal performance
+success inferred; V99 finite61.032FPS remains the preserved baseline. Wider
+GOAL items remain open. Exact actual V103 boot arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x61914f1e2bd56eb9 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete native backlight selection and owned system idle assertion ready — 2026-10-27
 
 After terminal V102/b1c7c5c, reviewed the complete actual20H392 BLControl ->

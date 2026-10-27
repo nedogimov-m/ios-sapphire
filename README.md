@@ -28,8 +28,11 @@ the corrected native system transaction and visible-content observer now pass
 brightness and cannot prove restoration, so its FPS workload correctly refuses.
 The complete native backlight-selection/system-idle correction now passes
 93combined executable contracts and actual14method/four-image ABI/build checks.
-One V103 integration with the same CI27 kernel is next; hardware brightness,
-the cause of earlier low rates and complete physical controls remain unproved.
+V103 proves the native route and owned idle guard, but CoreBrightness module
+setup returns false. Logical brightness changes while physical DBV stays409;
+the observer also incorrectly requires a new sequence for unchanged original
+physical state and refuses FPS. Those admission/restoration blockers are next;
+physical UI brightness and complete controls remain unproved.
 V99 stays the preserved measured performance baseline.
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including
