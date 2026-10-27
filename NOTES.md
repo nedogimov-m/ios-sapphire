@@ -1,5 +1,44 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V104 terminal: first actual manual DBV; native sysmem readback refuses controls — 2026-10-27
+
+Source9cf6dca, retained CI27 Actions40432973023/run27/source883286e,
+kernel4f99141c../UI5a501aac../refresh6e9f8c83... Fresh V107 stage/apply ONCE
+passes49changed/5new/zero freed blocks,15backed-up/readback ranges, complete
+signatures and native readonly fsck. V107 is now APPLIED/STALE, never reuse.
+V104 TERMINAL exit0, authenticatede32c36653ed2e87b, one backboardd62/no panic,
+clean consistent unmounted HFSX1768532 and verified Fastboot. No live device
+operation. Next fresh root V108 must bind1768532; next image/cycle V105.
+
+Native adapter and typed integrated CADisplay/AppleARMBacklight context are
+observed: service-present1/conforms1/display1/proxy0/module0. Original native
+module setup still returns0. Manual backend now actually issues rawDBV514,
+IOKit returns0 and the native worker completes409->514, uncertainty0/errors0;
+subsequent off/on+514restore commands also complete. This proves an initial
+real system-path driver write, not the full UI low/high/persistence/ALS task.
+No native CB error formats were captured; none are inferred.
+
+Full GMEM native GLES/pixels/direct+budget checks PASS. Sysmem simple shader/
+IOSurface/publication passes, but its full odd-height direct check exits27:
+the current checker conflates unchanged seed and failed first IOSurfaceLock,
+so the precise cause is not yet distinguished. Native queue surface waits
+include an approximately2s span; that is correlation, not proof of which branch
+failed. App Metal whole explicit exit0 and all four private output/physical
+panel references PASS. Actual ordinary GUI output remains4frames only.
+The checks gate correctly refuses with state2 before the controls observer,
+finite animation or FPS; no full brightness or new FPS result exists. Three
+physical-key paths remain armed/usable7 with15004samples/errors0/no presses.
+No Phone/Photos opens. V99's finite61.032FPS remains the performance baseline.
+
+Next connected block audits actual retained-surface first-reader/queue waits,
+fixes the identified ownership/completion behavior and useful phase evidence
+together, retaining the newly proved manual DBV path. Finish the block before
+combined checks/one hardware run; do not weaken the native correctness gate.
+Wi-Fi station readiness remains36.665s from its worker (no autojoin/IP proof),
+ADSP sensor_process still exits with the actual chre_utils fatal. All wider
+GOAL work remains active. Exact actual V104 arguments:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0xe32c36653ed2e87b redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete manual native backlight/workload/restoration block ready — 2026-10-27
 
 After terminal V103/f919191, completed the connected manual brightness and

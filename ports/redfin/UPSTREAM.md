@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## V104 actual manual driver write and independent sysmem first-reader refusal — 2026-10-27
+
+Own9cf6dca with retained preferred pins/CI27. Main pointers rechecked unchanged:
+kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3; userland2573c4a8d80ed143e534d16b5a386efa5b06ccbb
+is still the relocation notice, active implementation906425b75e02b4f99eb5d7bb1ef7c9583472d772.
+Actual typed integrated context admits the manual backend after original setup0;
+raw514/native IOKit0 and completed physical409->514 prove a real driver request.
+Full low/high/restoration/FPS remain untested because the independent sysmem
+checker exits27 before that gate. GMEM, app Metal and four private physical
+references pass; ordinary output is4frames. The checker conflates unchanged
+seed with first-lock failure; a sampled approximately2s surface wait does not
+resolve that ambiguity. No GPU/backlight causality is inferred. Clean1768532/
+Fastboot, one server/no panic; V107 STALE/never reuse. Next complete block covers
+retained-surface publication/first-reader waits and precise phase evidence.
+
 ## Complete manual native backlight and bounded physical observation — 2026-10-27
 
 Preferred reviewed kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,

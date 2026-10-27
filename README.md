@@ -33,9 +33,12 @@ setup returns false; physical DBV stays409 and no new FPS exists. The complete
 manual-native-backlight/restoration/live-controls-workload correction now passes
 94combined executable contracts and signed actual20H392 ABI/build checks.
 It preserves native settings, uses the existing async DSI owner and refuses
-wrong-level restoration. One combined V104/V107 hardware observation is next;
-physical UI brightness, actual button actions/ALS and complete controls remain
-unproved. Kernel and graphics/compiler artifacts stay retained.
+wrong-level restoration. V104 now proves a native request and physicalDBV
+409->514, but the independent sysmem checker exits27 on its seed/first-reader
+condition. GMEM/app Metal/four physical references pass; controls/FPS correctly
+refuse before running. Physical UI brightness and complete controls remain
+unfinished; resolve retained-surface first-reader/queue behavior next. V104
+returns clean1768532/Fastboot, one server/no panic; V107 is stale/never reuse.
 V99 stays the preserved measured performance baseline.
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including

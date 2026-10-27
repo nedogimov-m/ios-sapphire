@@ -31,30 +31,33 @@ full native GMEM/sysmem/GLES/app Metal/private output/four panel references
 PASS,611GPU frames/10.011138s=61.032FPS at90Hz callbacks, one server.
 This proves that finite workload, not universal smooth60/90FPS.
 
-Last actual V103/f919191/CI27 Actions40432973023/run27/source883286e is
-TERMINAL exit0, one backboardd/no panic, clean HFSX1758944/verified Fastboot.
-Full native GPU/app Metal/private pixels/four panel references PASS. Keys
-ready/armed with15000+reads/errors0, no physical presses. Native CB setup
-returns0; BKS low/restore change logically while physical DBV409 stays unchanged.
-No new FPS. V106 is APPLIED/STALE; never reuse.
+Last actual V104/9cf6dca/CI27 Actions40432973023/run27/source883286e is
+TERMINAL exit0, one backboardd/no panic, clean HFSX1768532/verified Fastboot.
+Fresh V107 applied once with full preimages/readback/signatures/readonly fsck;
+V107 is now APPLIED/STALE, never reuse. Next fresh root V108 must bind1768532;
+next image/cycle V105. No live device operation.
 
-Complete connected manual-native-brightness/workload/restoration/error-observer
-block now passes94combined contracts and signed actual20H392 UI5a501aac../
-refresh6e9f8c83..;15cache methods/two backboardd methods/registry export and
-runtime types/UUIDs/bodies/imports are audited. Restoration requires original
-physical state or actual saved-level DBV, stable0.3s. Finite content composition
-must progress before off and resume after wake. Native manual fallback preserves
-original state/preferences, admits only a failed integrated setup with no
-proxy/module, and uses the kernel's existing async DSI owner. Native CB format
-observation never decodes log buffers. No ALS/HDR/HBM/calibration success.
+Complete manual native brightness/workload/restoration block passes94combined
+host contracts and signed actual20H392 UI5a501aac../refresh6e9f8c83.. ABI/build.
+Actual native integrated context is observed and failed original setup admits
+the manual driver; rawDBV514/native IOKit0/completed physical409->514 prove the
+first real write. This does not complete physical UI low/high/persistence/ALS.
+GMEM full native GLES/direct/budget, whole app Metal and four private physical
+references PASS. Sysmem's simple shader/IOSurface/publication pass, but its
+full direct first-reader exits27 (unchanged seed or failed lock not yet
+separated). Approximately2s sampled surface wait is correlated only.
+Correctness gate refuses controls/FPS before they run; no new performance
+result. Key paths ready/armed7,15004samples/errors0, no physical presses.
+Next connected block resolves native surface first-reader/queue ownership and
+phase evidence without weakening checks. V99 remains the preserved baseline.
 
-Fresh V104 image4cad36ba../noncee32c36653ed2e87b passes full preflight. Next fresh
-root updater V107 must bind1758944; one combined run after preimages/readback/
-readonly fsck. CI27 kernel4f99141c../Mesa1a4ad42c../Metal17d0f01f../native035131/
-cache496301fc.. stay retained. Phone/Photos automatic launches OFF. Physical
-UI brightness/button actions, lock/wake input, clock inset persistence, real
-ALS/full suspend and every wider objective remain open. Exact builds/args/
-results and prior observations are in NOTES.md; keep the full goal active.
+Kernel4f99141c../Mesa1a4ad42c../Metal17d0f01f../native035131/cache496301fc.. stay
+retained unless actual evidence requires changes. Wi-Fi readiness remains
+36.665s from worker with no real autojoin/IP proof; actual ADSP sensor_process
+chre_utils fatal persists. Phone/Photos automatic opens OFF. Physical UI
+brightness/key actions, lock/wake input, clock inset persistence, real ALS/full
+suspend and every wider objective remain open. Exact builds/args/results and
+observations are in NOTES.md; keep the full goal active.
 
 ## Constraints and private state
 
