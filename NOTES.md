@@ -1,5 +1,61 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN V106 terminal: full Metal and native brightness/off/wake pass; finite FPS remains0.2 — 2026-10-27
+
+Complete block4a34272, retained accepted CI29 Actions40448042380/run29/
+source1e4b4dc938403a09c1a93356d8b7d151001af404 (native8c422d8),
+kernel11d60b4d../native248e974a../Metal5141bd25../cache496301fc../
+UI5a501aac../refresh6e9f8c83... Fresh V109 stage/apply ONCE passes complete
+preimage backups/readback, signatures and native readonly fsck; zero new/freed
+blocks. V109 is now APPLIED/STALE, never reuse. V106 TERMINAL exit0,
+authenticated231f94c6e5359d24, one backboardd62/no panic or GPU hardware fault,
+clean consistent unmounted HFSX1787750/verified Fastboot. No live device
+operation. Next fresh root V110 must bind1787750; next image/cycle V107.
+
+Both COMPLETE independent GMEM/sysmem GLES/direct/publication/budget contracts
+PASS, all four private output cases/four exact physical-panel references PASS,
+and WHOLE app Metal now exits0/full-contract1. Original long-lived context
+passes cache-surviving-pipeline, ordering, bindings, scheduling, UBO extents,
+resource lifetimes, all cache modes and bounded long-compute contracts. Actual
+single queued wait attests coldABI1, budget12s and completes in2.702438s with
+errno0; it is not retried. This demonstrates a real completion longer than the
+old internal2s budget with original result evidence. The earlier V105 generic
+failure's exact errno is still not retroactively invented. Kernel ordinary2s
+limits and actual short/nonblocking caller bounds are unchanged.
+
+The full native gate now admits the combined controls test. Real native BKS
+brightness requests produce completed DSI DBV514->157->768->514. Display off
+and actual output pause, wake/output resume, then exact original physical level
+restoration PASS. The finite live controls workload uses SBCoverSheetWindow;
+restore is proved after0.316s. This is a real manual native backlight/system
+transaction result, not an ALS or full suspend proof. Native power/volume paths
+are ready but no physical presses were observed. User slider gestures and
+brightness persistence through another reboot remain unverified.
+
+The subsequent finite ordinary animation actually records ONLY2GPU frames in
+10.011176physical seconds=0.199777FPS, with902callbacks/90Hz and zero contacts.
+The physical counter result is real; this does NOT establish that a continuously
+submitted visible workload ran at that speed or identify a GPU bottleneck.
+Its selected SBCoverSheetWindow has1sublayer/no own contents, though a real
+controller/scene exists. The prior V99 finite611frames/10.011138s=61.032FPS
+remains preserved, not a universal smoothness claim. Next complete block must
+trace actual visible scene/layer admission and display wake/idle ownership,
+retain the full native correctness/control gates, and make the finite workload
+and physical presentations agree. No repeated mini-task boot or failure reset.
+Retain the now-proved kernel/Metal/GLES/compiler/cache where unchanged.
+
+Additional READ ONLY Wi-Fi audit: V99/V104/V105 all observe unusable zero
+firmware MAC and the explicit per-boot random station fallback. Existing source
+therefore generates a different local identity each boot; no physical factory
+or stable persisted station address is proved. Combined with2saved
+NoAssociationWithNewMac flags this is a concrete remaining identity issue,
+but its causal share and actual Keychain credential availability are unproved.
+No network names/addresses/passwords printed or preferences modified. The
+next complete Wi-Fi block must cover stable identity, actual20H392 property383,
+autojoin/credentials and startup. All broader GOAL requirements remain active;
+Phone/Photos automatic opens and frame captures stayed OFF. Exact V106 args:
+`debug=0xc serial=3 cpus=8 keepsyms=1 -noprogress rd=ufsroot0 sweettouch=0 sweetkeys=0 sweetusb=0 sweetcpufreq=0 sweetbattery=0 modem=0 wifi=0 gpu=0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 redfinsmp=1 redfinshim=1 redfinspmi=0 redfinreturn=0 redfingui=3 redfinfit=1 redfinfb=1 sweetfb_noconsole=1 sweetfb_hz=90 redfinshutdown=180 redfintouch=2 redfinrail=1 redfintouchsetup=1 redfinrpmhtouch=1 redfintouchevents=1 redfinufs=3 redfinbootid=0x231f94c6e5359d24 redfinroot=1 ufsroot=userdata ufsrw=1 rootrw=1 sweetlog=0`.
+
 ## REDFIN complete native Metal cold wait block and verified runtime reuse ready — 2026-10-27
 
 After4d1f303, both synchronous AIR drains and queued completion tickets use the

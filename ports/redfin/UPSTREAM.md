@@ -1,5 +1,20 @@
 # HackiOS upstream review — 2026-10-22
 
+## V106 whole native Metal and actual manual backlight/off/wake pass — 2026-10-27
+
+Reviewed preferred kernel88513176../buttonsc84b4634../active userland906425b7..
+remain unchanged. Own4a34272 with accepted CI29/1e4b4dc now passes both full
+independent GLES modes, complete app Metal and four exact physical references.
+One original queued completion really takes2.702438s under attested native
+coldABI1, errno0; ordinary native2s limits remain unchanged. Native BKS/actual
+DBV514->157->768->514, off/output pause, wake/output resume and original physical
+restoration pass after that full gate. No physical key/ALS/full-suspend proof.
+The subsequent window animation produces2frames/10.011176s=0.199777FPS with
+90Hz callbacks. This is observed output, not a proved driver throughput limit;
+actual scene/layer/display-idle admission needs the next complete block. V99's
+finite61.032FPS baseline remains. One server/no panic/clean1787750/Fastboot,
+V109 STALE; next fresh V110/imageV107. All broader GOAL work remains active.
+
 ## Native AIR/Metal default waits coordinated with Redfin cold ABI — 2026-10-27
 
 Reviewed preferred pins remain kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3,

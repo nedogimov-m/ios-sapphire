@@ -6,23 +6,23 @@ Primary stable upstream sources, selected by the user:
 
 Current Redfin GUI composition and panel scaling/packing run on Adreno620.
 `redfinfb=1` publishes the framebuffer interface used by that GPU display path.
-The complete native Metal wait correction now passes65combined contracts and
-signed actual20H392 ABI/build checks. Both sync and queued drains admit the
-existing kernel's separate cold predecessor only with FD620+native ABI proof;
-ordinary hardware work stays bounded at2s and failed contexts remain retired.
-A verified runtime-only relink retains exact GLES/compiler/shaders/full checker/
-cache and avoids a kernel build. V106/one combined hardware run is prepared
-from fresh V109 clean1778229; no new hardware/FPS result is claimed yet.
-Last V105/CI29 passes both complete independent GLES modes and all four physical
-panel references; whole Metal completion fails and controls/FPS correctly refuse.
-Its actual first output takes4.951143s. Accepted kernel Actions40448042380/run29/
-source1e4b4dc has all288canonical overlays; rejected CI28 must never be used.
-V99/CI24 remains the measured performance baseline:611GPU frames in
-10.011138physical seconds=61.032FPS,90Hz callbacks, one server. This proves
-that finite workload; sustained interactive60/90FPS remains unfinished.
-Full physical UI brightness/off/wake/persistence, buttons and the other remaining
-items are in GOAL.md. Last V105 repeats actual DBV409->514 and key input readiness,
-but gated low/high/off/wake/FPS and physical key actions are still unproved.
+V106/CI29 now passes both COMPLETE independent native GMEM/sysmem GLES modes,
+whole app Metal and all four exact physical-panel references. Its original
+queued completion takes2.702438s under the attested cold ABI; ordinary native
+work remains bounded at2s. Actual system brightness DBV514->157->768->514,
+display off/output pause, wake/output resume and exact level restoration pass.
+No physical button actions, real ALS, reboot persistence or full suspend proof.
+The finite subsequent window animation still produces ONLY2GPU frames in
+10.011176physical seconds=0.199777FPS despite90Hz callbacks. This is an actual
+output count, not proof of a continuously submitted workload or a driver limit.
+Next trace visible scene/layer/display-idle admission without weakening the
+full native gates. V99/CI24 preserves the finite611frames/10.011138s=61.032FPS
+baseline; sustained interactive60/90FPS remains unfinished.
+Retain source4a34272/native248e974a../Metal5141bd25../cache496301fc..,
+UI5a501aac../refresh6e9f8c83.. and accepted kernel Actions40448042380/run29/
+source1e4b4dc/all288canonical overlays. Rejected CI28 must never be used.
+V106 returns clean1787750/Fastboot, one server/no panic. V109 is STALE; next
+fresh V110/imageV107. Remaining user requirements stay active in GOAL.md.
 
 The preferred upstream GLES bridge now composes the GUI while native Metal
 remains available to applications. V85 proves both paths in one boot, including

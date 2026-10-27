@@ -26,53 +26,40 @@ Completed bring-up is a preserved baseline; only remaining work is listed.
 
 ## Current handoff
 
-Complete native Metal cold-wait block now passes65combined executable checks
-and actual signed20H392 ABI/build. Fresh native248e974a../Metal5141bd25..
-reuses exact GLES/compiler/shaders/checker/cache; only AIR runtime/pairing and
-plugin rebuilt. Sync+queued internal waits attest FD620/native cold ABI before
-allowing the kernel's separate cold predecessor. Ordinary native2s bounds,
-short/nonblocking callers and failed-context/source ownership stay intact.
-Original timing/errno observations are bounded; no retry. No new kernel build.
-Fresh V109 READ at1778229 is terminal, unmounted recovery idle, no apply/boot.
-V106 image44501918../nonce231f94c6e5359d24 passes full preflight and awaits ONE
-combined GPU/brightness/off/wake/keys-readiness/FPS run after complete reversible
-stage/apply/readback/readonly fsck. No new hardware/performance proof yet.
+V106 after4a34272 is TERMINAL exit0, authenticated231f94c6e5359d24,
+one backboardd62/no panic or GPU fault, clean unmounted HFSX1787750 and
+verified Fastboot. No live device operation. V109 APPLIED/STALE, never reuse;
+next fresh V110 must bind1787750; next image/cycle V107. CI28 is rejected.
+Accepted CI29 Actions40448042380/run29/source1e4b4dc/native8c422d8,
+kernel11d60b4d.. retains all288canonical overlays and actual cold ABI.
 
-Preserved V99 / CI24 Actions40422287650/run24/sourcee90b110 baseline:
-full native GMEM/sysmem/GLES/app Metal/private output/four panel references
-PASS,611GPU frames/10.011138s=61.032FPS at90Hz callbacks, one server.
-This proves that finite workload, not universal smooth60/90FPS.
+Native248e974a../Metal5141bd25../cache496301fc.., UI5a501aac../refresh6e9f8c83..
+are installed and source-exact. Both full independent GMEM/sysmem GLES modes,
+whole app Metal and four physical references PASS. Actual original queued
+wait2702438us/coldABI1/errno0 passes; ordinary native2s limits and real short/
+nonblocking callers remain unchanged. The corrected full gate now admits real
+BKS brightness/physical DBV514->157->768->514, off/output pause, wake/resume
+and original level restoration, all PASS. Physical button presses, ALS, reboot
+brightness persistence and full suspend are still unproved. Phone/Photos auto
+opens and frame captures stay OFF; user confirms those apps work.
 
-Last actual V105/CI29 Actions40448042380/run29/source1e4b4dc/native8c422d8
-is TERMINAL exit0, one backboardd/no panic, clean HFSX1778229/verified Fastboot.
-Kernel11d60b4d.. has actual288entry old+new patch/cold ABI proof. V108 applied
-ONCE with both preimage/readback ranges/readonly fsck; APPLIED/STALE, never
-reuse. Next fresh V109 must bind1778229; next image/cycle V106. No live device
-operation. CI28 remains REJECTED/forbidden, omitted native patch.
+The subsequent finite window animation gives only2GPU frames/10.011176s=
+0.199777FPS with90Hz callbacks and zero contacts. This is real output, not proof
+of a continuously submitted visible workload or of a driver throughput limit.
+Next complete block traces scene/layer/display-idle admission and makes actual
+workload/output agree, preserving all native graphics/control checks and
+failure/source ownership. Retain kernel/Metal/GLES/compiler/cache where
+unchanged. V99/CI24/sourcee90b110 finite611frames/10.011138s=61.032FPS remains
+preserved; universal smooth60/90FPS is unfinished.
 
-Both complete independent GMEM/sysmem GLES/direct/publication/budget contracts
-PASS, as do four private output cases/four physical panel references. Actual
-cold sequence355/shared10s deadline completes first output in4.951143s,
-uncertainty0. Whole app Metal exits1: cache-surviving-pipeline completion fails,
-context retires and later same-context cases refuse. Basic and fresh-context
-Metal cases pass separately; this does not complete the full native contract.
-The gate refuses controls/FPS before they start, no new performance result.
-Initial real manual request/DBV409->514 succeeds; full physical UI brightness/
-low/high/off/wake/persistence/ALS remain unproved. Key paths ready/armed7,
-15000+samples/errors0, no physical presses. Phone/Photos auto opens remain OFF.
-
-The complete coordinated wait block described above is ready for V106. V105's
-generic completion error does not prove exact errno/timing. Full native app
-Metal correctness remains mandatory before controls/FPS. V99 finite61.032FPS
-remains the preserved baseline; no universal smoothness or wider completion.
-
-Retained UI5a501aac../refresh6e9f8c83../native035131/Mesa1a4ad42c../
-Metal17d0f01f../cache496301fc.. are current installed artifacts. Wi-Fi startup/
-real credentials/autojoin still open:3known records,2visible names, no native
-association request,2NoAssociationWithNewMac flags; generic property383 is
-unsupported. Causality and actual password availability unproved. ADSP
-sensor_process chre_utils fatal persists. Every broader objective above remains
-active; exact builds/boot args/results and observations are in NOTES.md.
+Wi-Fi remains open:3known records,2visible names, no native association,
+2NoAssociationWithNewMac flags and unsupported native property383. V99/V104/
+V105 all observe unusable firmware MAC and the explicit per-boot random station
+fallback. Stable station identity is missing; causal autojoin share and actual
+Keychain password availability are unproved. Never change private wrapping
+material or print credentials/addresses. ADSP sensor_process chre_utils fatal
+persists. Every broader objective above remains active; exact build/args/results
+and observations are in NOTES.md.
 
 ## Constraints and private state
 
