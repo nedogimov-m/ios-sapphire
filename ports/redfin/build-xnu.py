@@ -7,6 +7,7 @@ All downloaded sources, extracted KDK files and logs stay in --work-dir.
 """
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -47,6 +48,34 @@ with tempfile.TemporaryDirectory(prefix="redfin-overlay-check-") as name:
 '''
 
 
+def extension_patch_names():
+    """Stage the exact ordered extensions used by native preparation.
+
+    A second hand-maintained list silently omitted a new production overlay.
+    Read the literal inventory without importing/executing the preparer; its
+    hardware/source contract remains the single authority for both paths.
+    """
+    source = ROOT / 'ports/redfin/prepare-xnu.py'
+    inventories = []
+    for node in ast.walk(ast.parse(source.read_text())):
+        if not isinstance(node, ast.Tuple) or not node.elts:
+            continue
+        if not all(isinstance(item, ast.Constant) and isinstance(item.value, str)
+                   for item in node.elts):
+            continue
+        names = tuple(item.value for item in node.elts)
+        if 'trace-gate.patch' in names:
+            inventories.append(names[names.index('trace-gate.patch'):])
+    if len(inventories) != 1:
+        raise ValueError('one canonical native extension inventory required')
+    names = inventories[0]
+    if len(names) < 100 or len(set(names)) != len(names) or any(
+            Path(name).name != name or not name.endswith('.patch') or
+            not (ROOT / 'ports/redfin' / name).is_file() for name in names):
+        raise ValueError('incomplete or unsafe native extension inventory')
+    return names
+
+
 def digest(path):
     value = hashlib.sha256()
     with path.open("rb") as stream:
@@ -82,6 +111,7 @@ def main(argv=None):
     parser.add_argument("--no-install-deps", action="store_true",
                         help="require existing brew jq/gum/cmake/ninja/bash")
     args = parser.parse_args(argv)
+    extension_patch_names()  # Refuse an incomplete inventory before downloads.
     work = args.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=True)
     log_path = work / (time.strftime("build-%Y%m%d-%H%M%S") + ".log")
@@ -213,40 +243,7 @@ def main(argv=None):
                         watchdog_patch, pid1_patch, panic_patch, open_patch, namei_patch, pan_patch,
                         ufs_probe_patch, ufs_read_patch, ufs_sense_patch, ufs_root_patch, ufs_raw_patch,
                         spmi_patch, return_patch, ufs_rw_patch]
-            for rank, name in enumerate(('trace-gate.patch', 'shutdown.patch', 'display.patch',
-                                         'muted-log.patch', 'screen-capture.patch',
-                                         'final-frame.patch', 'quiet-display.patch',
-                                         'userspace-stacks.patch', 'touch.patch',
-                                         'usb-probe.patch', 'gpu-probe.patch', 'wifi-probe.patch',
-                                         'rpmh-probe.patch', 'usb-route.patch', 'touch-spi.patch',
-                                         'touch-setup.patch', 'touch-rail-observe.patch',
-                                         'touch-events.patch', 'touch-rail-ready.patch',
-                                         'rpmh-touch.patch', 'touch-start.patch',
-                                         'touch-spi-diag.patch', 'touch-platform-diag.patch',
-                                         'touch-dfs-diag.patch', 'touch-dfs-disable.patch',
-                                         'touch-rx-irq.patch', 'touch-sensing.patch',
-                                         'usb-owned-route.patch', 'usb-owned-diag.patch',
-                                         'usb-owned-build.patch',
-                                         'usb-gadget.patch', 'usb-start.patch',
-                                         'usb-context-probe.patch', 'usb-bypass-context.patch',
-                                         'usb-enumeration-start.patch', 'usb-bypass-diagnostic.patch',
-                                         'usb-fault-diagnostic.patch',
-                                         'usb-aarch64-context.patch',
-                                         'usb-context-format-status.patch',
-                                         'usb-network-worker.patch', 'usb-log-worker-check.patch',
-                                         'usb-tx-completion.patch', 'usb-network-start.patch',
-                                         'peripheral-start.patch', 'touch-event-start.patch',
-                                         'cpu-probe.patch', 'cpu-probe-start.patch', 'cpu-target.patch',
-                                         'early-return.patch', 'early-return-start.patch',
-                                         'smp-log.patch', 'smp-return.patch', 'smp.patch',
-                                         'early-bootid.patch', 'smp-eight.patch', 'smp-gui.patch',
-                                         'touch-overflow.patch', 'gpu-power.patch', 'display-fit.patch',
-                                         'wifi-aop.patch', 'wifi-native-probe.patch', 'wifi-native-start.patch',
-                                         'gmu-probe.patch', 'gmu-start.patch', 'scm-query.patch',
-                                         'wifi-firmware.patch', 'wifi-fw-source.patch', 'wifi-smp2p.patch',
-                                         'wifi-fw-build.patch', 'wifi-radio.patch', 'wifi-network.patch',
-                                         'wifi-network-build.patch', 'wifi-gui.patch', 'touch-response.patch', 'preinit-progress.patch',
-                                         'userspace-waits.patch', 'gpu-service.patch', 'graphics-eagl.patch', 'graphics-physical.patch', 'graphics-journal.patch', 'graphics-exec.patch', 'graphics-memory.patch', 'graphics-lifecycle.patch', 'touch-reconnect.patch', 'platform-entitlements.patch', 'display-presenter.patch', 'device-identity.patch', 'photos-exec.patch', 'gpu-display.patch', 'userland-platform.patch', 'gui-integration.patch', 'keychain-descriptors.patch', 'platform-power.patch', 'metal-platform.patch', 'platform-readiness.patch', 'native-validated-platform.patch', 'native-observability.patch', 'native-tcc-observation.patch', 'native-session-performance.patch', 'sensor-platform.patch', 'native-sensor-cold.patch', 'native-sandbox.patch', 'native-gpu-dvfs.patch', 'native-sensor-discovery.patch', 'native-failure-capture.patch', 'native-surface-lifecycle.patch', 'native-runtime-queues.patch', 'native-queued-submission.patch', 'native-presentation-observer.patch','native-throughput.patch','native-resource-access.patch','native-cadence.patch','native-display-output.patch','native-surface-padding.patch','native-retained-memory.patch','native-physical-submission.patch','native-surface-cache.patch','native-gpu-latency.patch','native-touch-startup.patch','native-surface-producer.patch','native-output-direct.patch','native-controls.patch'), 21):
+            for rank, name in enumerate(extension_patch_names(), 21):
                 extension = ROOT / 'ports/redfin' / name
                 shutil.copy2(extension, patches / ('z' * rank + '-redfin-' + name))
                 overlays.append(extension)

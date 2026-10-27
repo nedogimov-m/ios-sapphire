@@ -1,5 +1,31 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## REDFIN CI28 rejected before device use; canonical CI inventory corrected — 2026-10-27
+
+CI28 Actions40446572438/source8c422d8 is TERMINAL SUCCESS, but its downloaded
+artifact is REJECTED. Complete actual patch map equals CI27 (287entries) and
+all new cold-output markers are absent. The CI build uses build-xnu.py's second
+extension inventory, while local preparation/overlay tests use prepare-xnu.py;
+only the latter had the new overlay. This is an implementation error in the
+build integration, not a new kernel/device failure. CI28 was NEVER copied to
+the accepted kernel path, staged, applied or booted. Fresh V108 remains the
+same clean1768532 readonly epoch in verified unmounted recovery; no reread.
+
+Removed that duplicate CI inventory. build-xnu.py now reads the preparer's
+single literal ordered extension list without importing/executing it, checks
+safe unique existing paths, and refuses an incomplete inventory before any
+KDK/download/build. Executable tests run the actual CI staging loop against
+that inventory and prove the final native-cold-output-waits.patch is copied
+in order; absence refuses. Both final tests PASS; the combined FIFO/scope/cold
+policy checks also pass. Their first fixture assumed the preparer's tuple
+started at trace-gate; it actually includes earlier explicit overlays too,
+so only that correct extension suffix is selected. Native GPU source remains
+the fully checked8c422d8 implementation; Mesa/Metal/UI/compiler unchanged.
+Next commit/CI29 must include this corrected actual builder and verify old+
+new complete patch map and cold ABI before ONE V105 run. No hardware/performance
+success inferred. Last actual CI27/V104 args/results remain below; V107 stays
+APPLIED/STALE/never reuse. All wider GOAL work remains active.
+
 ## REDFIN CI28 compiling exact8c422d8; fresh V108 read terminal — 2026-10-27
 
 Complete cold-output dependency block committed8c422d8246466db98eef7ccd646288446b3731fb,

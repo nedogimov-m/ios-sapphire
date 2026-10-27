@@ -1,5 +1,16 @@
 # HackiOS upstream review — 2026-10-22
 
+## CI28 rejected; actual build shares the canonical Redfin overlay inventory — 2026-10-27
+
+Preferred source pins unchanged. CI28 succeeded but omitted the own native
+cold-output overlay through build-xnu.py's duplicate extension list; its actual
+287entry map/absent ABI markers correctly reject it before image/device use.
+Both CI and local preparation now share one canonical ordered literal inventory,
+validated before KDK work. Actual CI staging-loop/order/missing-file contracts
+PASS. Native cold-output block and preferred graphics/Metal/UI are unchanged;
+corrected builder CI29/one V105 is next. Fresh clean1768532 read is preserved,
+no stage/apply/boot and no new hardware success.
+
 ## Complete cold-output FIFO dependency waits for native first readers — 2026-10-27
 
 Preferred kernel88513176b1e96ecf0b764cd62c6f4e6ac71345e3, reviewed buttons

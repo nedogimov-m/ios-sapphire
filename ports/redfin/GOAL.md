@@ -51,10 +51,13 @@ result. Key paths ready/armed7,15004samples/errors0, no physical presses.
 Complete native first-reader/client-fence/output correction is implemented:
 one actual FIFO cold sequence and immutable10s deadline, then ordinary2s work,
 within original explicit caller bounds.124combined contracts and final11affected
-checks/native GPU TU PASS. Exact8c422d8 is building in CI28 Actions40446572438; compiler cache restored.
-Watcher44448 verifies only that terminal source/artifact and prepares V105,
-never boots. Fresh V108 read TERMINAL at1768532, offline recovery idle; no stage/
-apply/iOS boot and no other device operation. Userspace graphics/UI stay retained.
+checks/native GPU TU PASS. CI28 Actions40446572438 TERMINAL success but REJECTED: actual builder's duplicate
+inventory omitted the new native overlay;287entries and no cold ABI markers.
+It was never accepted/staged/booted. Duplicate inventory is now removed; the
+actual CI staging loop consumes the canonical preparer list, with executable
+order/missing-overlay checks PASS. Native8c422d8 block stays unchanged. Corrected
+builder CI29 is next. Fresh V108 read remains1768532, offline recovery idle;
+no stage/apply/iOS boot. Userspace graphics/UI/compiler remain retained.
 New hardware result remains pending. V99 is the preserved measured baseline.
 
 Kernel4f99141c../Mesa1a4ad42c../Metal17d0f01f../native035131/cache496301fc.. stay
